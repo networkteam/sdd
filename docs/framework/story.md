@@ -106,7 +106,7 @@ I'd mark confidence as medium since there's conviction about the direction but a
 
 **System**: "Got it — I'll note that Mara has been considering this direction and the customer requests are confirming her instinct. Captured. I've set up access for the project — want to invite Mara and Jun so they can start their own conversations?"
 
-Priya shares access with Mara and Jun. The underlying entries are structured with IDs and references — `s-stg-20260405-084500-j3n`, `d-stg-20260405-090000-f3a` — but everyone interacts through conversation. The graph builds itself.
+Priya shares access with Mara and Jun. The underlying entries are structured with IDs and references — `20260405-084500-s-stg-j3n`, `20260405-090000-d-stg-f3a` — but everyone interacts through conversation. The graph builds itself.
 
 ---
 
@@ -139,7 +139,7 @@ The system researches and comes back with specifics — actual carrier rates wit
 
 Through this back and forth, a picture forms:
 
-> **s-cpt-20260406-211500-r4w**: Shipping economics strongly favor subscription over one-off gifts. A single shipment costs €4.50-5.80 (DHL, 500g package) — viable in a €25+ subscription but painful for a €15 one-off gift. Fresh-roasting to order reduces waste but adds 2-3 days to fulfillment.
+> **20260406-211500-s-cpt-r4w**: Shipping economics strongly favor subscription over one-off gifts. A single shipment costs €4.50-5.80 (DHL, 500g package) — viable in a €25+ subscription but painful for a €15 one-off gift. Fresh-roasting to order reduces waste but adds 2-3 days to fulfillment.
 
 **System**: "I want to flag something. A review of the decision graph found a tension between this research and your existing strategic direction. The strategic decision says the core idea is *sharing discoveries* — sending something to a friend, which is naturally a one-off act. But your research shows the economics strongly favor subscriptions. The thing that makes financial sense and the thing that fits your identity aren't obviously the same. I'd recommend bringing this to the whole team — it's a conceptual question that touches both the business model and the product identity."
 
@@ -157,7 +157,7 @@ Behind the scenes, this is a separate review agent at work — not the same one 
 
 "Yeah, so I've been thinking about exactly that all day. If I were putting together a discovery for the Sidama... when I roast this one, I'm going for that bright berry thing but with enough body that it works as a filter too. And the story — this lot comes from a washing station where..." He narrates the way he'd tell a customer at the counter, hands busy with the cleaning. The system listens and helps him see the structure in what he already knows: origin story, roasting approach, flavor notes, brewing recommendation.
 
-> **s-cpt-20260407-073000-a5x**: A discovery package is four elements: origin story, Jun's roasting intent, tasting notes, and a specific brewing recommendation. Jun can produce these naturally by narrating — the bottleneck isn't creation, it's that each one is specific to the bean and needs his voice.
+> **20260407-073000-s-cpt-a5x**: A discovery package is four elements: origin story, Jun's roasting intent, tasting notes, and a specific brewing recommendation. Jun can produce these naturally by narrating — the bottleneck isn't creation, it's that each one is specific to the bean and needs his voice.
 
 **Priya** opens a session that same evening. The system catches her up — Jun's been in, Mara's started on the business side.
 
@@ -175,37 +175,37 @@ She works through the choices in dialogue with the system — not a long plannin
 
 **Priya**: "Yes. And Stripe for payments — it handles subscriptions natively, and the API is straightforward. For sharing, the simplest thing is a unique link per share. Recipient gets a page with the discovery content and can order a tasting package."
 
-> **d-tac-20260407-143000-t4n**: Web-based, server-rendered pages. No app, no frontend framework. Fast and simple for the current scope. Refs: d-stg-20260405-090000-f3a.
+> **20260407-143000-d-tac-t4n**: Web-based, server-rendered pages. No app, no frontend framework. Fast and simple for the current scope. Refs: 20260405-090000-d-stg-f3a.
 
-> **d-tac-20260407-143500-r6b**: Stripe for subscription billing. Handles recurring payments and supports shipping to different addresses for gift shares. Refs: d-stg-20260405-090000-f3a.
+> **20260407-143500-d-tac-r6b**: Stripe for subscription billing. Handles recurring payments and supports shipping to different addresses for gift shares. Refs: 20260405-090000-d-stg-f3a.
 
-> **d-tac-20260407-144000-w2m**: Share mechanic via unique links. Each subscriber gets a shareable URL per discovery. Recipient sees the discovery page and can order a tasting package. Refs: d-stg-20260405-090000-f3a.
+> **20260407-144000-d-tac-w2m**: Share mechanic via unique links. Each subscriber gets a shareable URL per discovery. Recipient sees the discovery page and can order a tasting package. Refs: 20260405-090000-d-stg-f3a.
 
 **System**: "That's a clear enough scope to build against. Want to start the prototype? I'd suggest: one discovery page with placeholder content standing in for Jun's Sidama, a Stripe checkout for subscriptions, and the share link flow. Minimal, but enough to see if the pieces fit."
 
-> **d-tac-20260407-145000-k8p**: Build a prototype: one discovery page, Stripe subscription checkout, share-via-link flow. Goal is to test feasibility and have something real for the team to react to. Refs: d-tac-20260407-143000-t4n, d-tac-20260407-143500-r6b, d-tac-20260407-144000-w2m.
+> **20260407-145000-d-tac-k8p**: Build a prototype: one discovery page, Stripe subscription checkout, share-via-link flow. Goal is to test feasibility and have something real for the team to react to. Refs: 20260407-143000-d-tac-t4n, 20260407-143500-d-tac-r6b, 20260407-144000-d-tac-w2m.
 
 The prototype decision has sub-decisions at the operational layer — the individual steps to build it:
 
-> **d-ops-20260407-150000-a3n**: Build discovery page with placeholder content standing in for Jun's Sidama. Refs: d-tac-20260407-145000-k8p.
+> **20260407-150000-d-ops-a3n**: Build discovery page with placeholder content standing in for Jun's Sidama. Refs: 20260407-145000-d-tac-k8p.
 
-> **d-ops-20260407-150100-b7q**: Integrate Stripe subscription checkout. Refs: d-tac-20260407-145000-k8p, d-tac-20260407-143500-r6b.
+> **20260407-150100-d-ops-b7q**: Integrate Stripe subscription checkout. Refs: 20260407-145000-d-tac-k8p, 20260407-143500-d-tac-r6b.
 
-> **d-ops-20260407-150200-c4s**: Build share-via-link flow: generate unique link per subscriber, recipient sees discovery page. Refs: d-tac-20260407-145000-k8p, d-tac-20260407-144000-w2m.
+> **20260407-150200-d-ops-c4s**: Build share-via-link flow: generate unique link per subscriber, recipient sees discovery page. Refs: 20260407-145000-d-tac-k8p, 20260407-144000-d-tac-w2m.
 
-> **d-ops-20260407-150300-d9t**: Deploy to staging. Refs: d-tac-20260407-145000-k8p.
+> **20260407-150300-d-ops-d9t**: Deploy to staging. Refs: 20260407-145000-d-tac-k8p.
 
 The implementation agent starts working from the sub-decisions. Each one references the scope decisions — the agent has everything it needs without Priya directing it step by step.
 
 The first step completes without issues:
 
-> **a-ops-20260407-163000-f3v**: Built discovery page. Placeholder content for Jun's four elements (origin story, roasting intent, tasting notes, brewing recommendation), basic layout, responsive. Refs: d-ops-20260407-150000-a3n.
+> **20260407-163000-a-ops-f3v**: Built discovery page. Placeholder content for Jun's four elements (origin story, roasting intent, tasting notes, brewing recommendation), basic layout, responsive. Refs: 20260407-150000-d-ops-a3n.
 
 The second step hits a snag. The implementation can't fulfill the decision as specified — the system stops the build and surfaces the issue:
 
-> **a-ops-20260407-170000-g6w**: Started Stripe integration. Stripe's embedded checkout doesn't support the subscription-with-gift-to-different-address flow described in d-tac-20260407-143500-r6b. Stopped by system — decision cannot be fulfilled as specified. Refs: d-ops-20260407-150100-b7q.
+> **20260407-170000-a-ops-g6w**: Started Stripe integration. Stripe's embedded checkout doesn't support the subscription-with-gift-to-different-address flow described in 20260407-143500-d-tac-r6b. Stopped by system — decision cannot be fulfilled as specified. Refs: 20260407-150100-d-ops-b7q.
 
-> **s-ops-20260407-170500-x3p**: Stripe's embedded checkout can't handle shipping to a different address for gift shares. Stripe's hosted checkout can — but it redirects the customer away from our page. This is a trade-off between integration depth and simplicity. Refs: d-ops-20260407-150100-b7q, d-tac-20260407-143500-r6b.
+> **20260407-170500-s-ops-x3p**: Stripe's embedded checkout can't handle shipping to a different address for gift shares. Stripe's hosted checkout can — but it redirects the customer away from our page. This is a trade-off between integration depth and simplicity. Refs: 20260407-150100-d-ops-b7q, 20260407-143500-d-tac-r6b.
 
 The system surfaces this to Priya:
 
@@ -213,33 +213,33 @@ The system surfaces this to Priya:
 
 Priya doesn't need long to think. It's a prototype — polish comes later.
 
-> **d-ops-20260407-171500-n4q**: Use Stripe hosted checkout for now. The redirect is acceptable for a prototype. Revisit if it becomes a problem with real users. Supersedes: d-ops-20260407-150100-b7q. Refs: s-ops-20260407-170500-x3p.
+> **20260407-171500-d-ops-n4q**: Use Stripe hosted checkout for now. The redirect is acceptable for a prototype. Revisit if it becomes a problem with real users. Supersedes: 20260407-150100-d-ops-b7q. Refs: 20260407-170500-s-ops-x3p.
 
 The system checks downstream: the share link flow referenced the Stripe decision, but it only needs a subscription ID to generate share links — the checkout method doesn't affect it. Downstream steps are unblocked.
 
 The agent continues:
 
-> **a-ops-20260407-174000-g7w**: Integrated Stripe hosted checkout. Subscription flow works, redirects to Stripe then back. Refs: d-ops-20260407-171500-n4q.
+> **20260407-174000-a-ops-g7w**: Integrated Stripe hosted checkout. Subscription flow works, redirects to Stripe then back. Refs: 20260407-171500-d-ops-n4q.
 
-> **a-ops-20260407-183000-h2x**: Built share link flow. Unique URL generated per subscriber per discovery. Recipient sees the discovery page. Refs: d-ops-20260407-150200-c4s.
+> **20260407-183000-a-ops-h2x**: Built share link flow. Unique URL generated per subscriber per discovery. Recipient sees the discovery page. Refs: 20260407-150200-d-ops-c4s.
 
-> **a-ops-20260407-190000-j8y**: Deployed to staging. All pieces running. Refs: d-ops-20260407-150300-d9t.
+> **20260407-190000-a-ops-j8y**: Deployed to staging. All pieces running. Refs: 20260407-150300-d-ops-d9t.
 
 **System**: "Prototype is live on staging. All four steps are done. Want to evaluate? You could check the technical side yourself, but the strategic direction says this should feel personal and story-driven — that's probably worth getting Mara's and Jun's eyes on too."
 
 **Priya**: "Good call. Let me do a technical check first, then let's get the others to look at the product side."
 
-> **d-tac-20260407-191000-e5h**: Evaluate prototype. Technical feasibility check by Priya. Brand and product experience review needed from Mara and Jun. Refs: d-tac-20260407-145000-k8p, d-stg-20260405-090000-f3a.
+> **20260407-191000-d-tac-e5h**: Evaluate prototype. Technical feasibility check by Priya. Brand and product experience review needed from Mara and Jun. Refs: 20260407-145000-d-tac-k8p, 20260405-090000-d-stg-f3a.
 
 Priya clicks through the whole flow — landing page, discovery, checkout, share link, recipient view.
 
 **Priya**: "Technically this works. The pieces fit together, Stripe hosted checkout is fine, the share links generate correctly. But the share recipient page is a dead end — you can see the coffee but there's no way to subscribe or order. That needs solving."
 
-> **a-tac-20260407-193000-n7w**: Priya reviewed the prototype end-to-end. Refs: d-tac-20260407-191000-e5h.
+> **20260407-193000-a-tac-n7w**: Priya reviewed the prototype end-to-end. Refs: 20260407-191000-d-tac-e5h.
 
-> **s-tac-20260407-193500-h8c**: Technically the pieces fit. Complexity is low, no app needed, Stripe hosted checkout works well enough. The foundation is solid. Refs: d-tac-20260407-191000-e5h.
+> **20260407-193500-s-tac-h8c**: Technically the pieces fit. Complexity is low, no app needed, Stripe hosted checkout works well enough. The foundation is solid. Refs: 20260407-191000-d-tac-e5h.
 
-> **s-tac-20260407-194500-v6k**: The share link works but the recipient lands on a dead end — they can see the discovery but can't subscribe or order their own. Refs: d-tac-20260407-191000-e5h.
+> **20260407-194500-s-tac-v6k**: The share link works but the recipient lands on a dead end — they can see the discovery but can't subscribe or order their own. Refs: 20260407-191000-d-tac-e5h.
 
 Since the evaluation decision names Mara and Jun as needed reviewers, the system notifies them through their chat interfaces:
 
@@ -251,17 +251,17 @@ Mara checks it on her phone that evening:
 
 **Mara**: "I see what Priya built. The technology works, okay. But this doesn't feel like us at all. It looks like any generic subscription box site. The placeholder content doesn't help, but even the layout — it's too transactional. Where's the warmth? Where's the story? When you walk into our shop, the first thing you see is Jun's chalkboard with tasting notes. This should feel like that, not like an online checkout."
 
-> **a-cpt-20260407-212500-v8n**: Mara reviewed the prototype from a brand and product experience perspective. Refs: d-tac-20260407-191000-e5h.
+> **20260407-212500-a-cpt-v8n**: Mara reviewed the prototype from a brand and product experience perspective. Refs: 20260407-191000-d-tac-e5h.
 
-> **s-cpt-20260407-213000-q2r**: The prototype feels like a generic webshop, not a personal discovery experience. The layout is too transactional — lacks the warmth and story-first feel that defines Kōgen in person. Placeholder content contributes to this but isn't the only issue — the visual hierarchy prioritizes buying over discovering. Refs: a-cpt-20260407-212500-v8n, d-stg-20260405-090000-f3a.
+> **20260407-213000-s-cpt-q2r**: The prototype feels like a generic webshop, not a personal discovery experience. The layout is too transactional — lacks the warmth and story-first feel that defines Kōgen in person. Placeholder content contributes to this but isn't the only issue — the visual hierarchy prioritizes buying over discovering. Refs: 20260407-212500-a-cpt-v8n, 20260405-090000-d-stg-f3a.
 
 Jun checks the staging link the next morning before the others arrive, while preheating the Probat.
 
 **Jun**: "Okay, I looked at the prototype. The structure actually makes sense to me — origin story at the top, then roasting notes, tasting notes, brewing recommendation. That's exactly how I'd walk someone through a discovery. The problem is the placeholder text. 'Lorem ipsum' where the story should be — of course it feels generic. Put my real Sidama narration in there and I think it'll feel completely different. The bones are right."
 
-> **a-cpt-20260408-064500-t3k**: Jun reviewed the prototype from a content and discovery experience perspective. Refs: d-tac-20260407-191000-e5h.
+> **20260408-064500-a-cpt-t3k**: Jun reviewed the prototype from a content and discovery experience perspective. Refs: 20260407-191000-d-tac-e5h.
 
-> **s-cpt-20260408-065000-w7m**: The page structure matches how Jun naturally presents a discovery — the four content sections are in the right order. The generic feel is primarily a content problem, not a layout problem. Real narrated content should transform the experience. Refs: a-cpt-20260408-064500-t3k, s-cpt-20260407-073000-a5x.
+> **20260408-065000-s-cpt-w7m**: The page structure matches how Jun naturally presents a discovery — the four content sections are in the right order. The generic feel is primarily a content problem, not a layout problem. Real narrated content should transform the experience. Refs: 20260408-064500-a-cpt-t3k, 20260407-073000-s-cpt-a5x.
 
 Now there's a conflict in the graph. Mara's signal says the layout itself is too transactional — the visual hierarchy prioritizes buying over discovering. Jun's signal says the structure is right and the content will fix the feel. They're both looking at the same prototype, both evaluating against the same strategic direction, and reaching different conclusions.
 
@@ -271,7 +271,7 @@ The system surfaces this to all three:
 
 Overnight, a review agent also checks the prototype against existing decisions:
 
-> **s-tac-20260407-220000-m4c**: Review: the share flow decision (d-tac-20260407-144000-w2m) specified "recipient sees discovery page and can order a tasting package." The implementation delivers the first part but not the second — no ordering path for recipients. This is a gap between decision and action. Refs: d-tac-20260407-191000-e5h, d-tac-20260407-144000-w2m, a-ops-20260407-183000-h2x.
+> **20260407-220000-s-tac-m4c**: Review: the share flow decision (20260407-144000-d-tac-w2m) specified "recipient sees discovery page and can order a tasting package." The implementation delivers the first part but not the second — no ordering path for recipients. This is a gap between decision and action. Refs: 20260407-191000-d-tac-e5h, 20260407-144000-d-tac-w2m, 20260407-183000-a-ops-h2x.
 
 None of these signals require anyone to update a plan or reassign a task. They're in the graph — honest, specific, and waiting for the morning.
 
@@ -304,7 +304,7 @@ First, the business model tension — Mara has an idea that's been forming overn
 
 Mara records it:
 
-> **d-cpt-20260408-091200-b2k**: The product is a discovery subscription with sharing built in. Each delivery includes one "share" — a link the subscriber can send to someone, giving them a tasting package of the same discovery. This resolves shipping economics (subscription covers base cost) while preserving the sharing-first identity. Refs: d-stg-20260405-090000-f3a, s-cpt-20260406-211500-r4w.
+> **20260408-091200-d-cpt-b2k**: The product is a discovery subscription with sharing built in. Each delivery includes one "share" — a link the subscriber can send to someone, giving them a tasting package of the same discovery. This resolves shipping economics (subscription covers base cost) while preserving the sharing-first identity. Refs: 20260405-090000-d-stg-f3a, 20260406-211500-s-cpt-r4w.
 
 Then the layout conflict — the conflicting signals from Mara and Jun that the system flagged last night:
 
@@ -324,21 +324,21 @@ Then the layout conflict — the conflicting signals from Mara and Jun that the 
 
 **Jun**: "Let's do it. I'd rather look at two real options than keep talking about it. I already narrated the Sidama the other night — the system has it structured, I just need to clean it up."
 
-> **d-tac-20260408-093000-h6n**: Branch experiment: test two approaches to resolve conflicting layout signals. Branch A: current layout + Jun's real Sidama content. Branch B: story-first layout redesign + Jun's real content. Evaluate both against brand feel and strategic direction. Refs: s-cpt-20260407-213000-q2r, s-cpt-20260408-065000-w7m.
+> **20260408-093000-d-tac-h6n**: Branch experiment: test two approaches to resolve conflicting layout signals. Branch A: current layout + Jun's real Sidama content. Branch B: story-first layout redesign + Jun's real content. Evaluate both against brand feel and strategic direction. Refs: 20260407-213000-s-cpt-q2r, 20260408-065000-s-cpt-w7m.
 
 And the share flow gap:
 
-> **d-tac-20260408-093500-r5f**: Fix the share recipient dead end — add a path for recipients to subscribe or order their own discovery. This is independent of the layout experiment and goes straight into main. Refs: s-tac-20260407-194500-v6k, s-tac-20260407-220000-m4c.
+> **20260408-093500-d-tac-r5f**: Fix the share recipient dead end — add a path for recipients to subscribe or order their own discovery. This is independent of the layout experiment and goes straight into main. Refs: 20260407-194500-s-tac-v6k, 20260407-220000-s-tac-m4c.
 
 Over the next two days, things move in parallel. Jun cleans up his Sidama content:
 
-> **a-cpt-20260408-180000-j2w**: Jun finalized the Sidama discovery content — origin story, roasting intent, tasting notes, and a specific pour-over recommendation. Reviewed and cleaned up from his earlier voice narration. Refs: d-cpt-20260408-091200-b2k, s-cpt-20260407-073000-a5x.
+> **20260408-180000-a-cpt-j2w**: Jun finalized the Sidama discovery content — origin story, roasting intent, tasting notes, and a specific pour-over recommendation. Reviewed and cleaned up from his earlier voice narration. Refs: 20260408-091200-d-cpt-b2k, 20260407-073000-s-cpt-a5x.
 
 Priya's agents build both branches:
 
-> **a-tac-20260409-140000-k4a**: Built Branch A: current layout with Jun's real Sidama content replacing placeholders. Deployed to staging. Refs: d-tac-20260408-093000-h6n, a-cpt-20260408-180000-j2w.
+> **20260409-140000-a-tac-k4a**: Built Branch A: current layout with Jun's real Sidama content replacing placeholders. Deployed to staging. Refs: 20260408-093000-d-tac-h6n, 20260408-180000-a-cpt-j2w.
 
-> **a-tac-20260409-180000-n7b**: Built Branch B: story-first layout redesign — origin story as full-width hero, Jun's narrative in large readable text, tasting notes as a visual section, checkout below the fold. Jun's real content. Deployed to staging. Refs: d-tac-20260408-093000-h6n, a-cpt-20260408-180000-j2w.
+> **20260409-180000-a-tac-n7b**: Built Branch B: story-first layout redesign — origin story as full-width hero, Jun's narrative in large readable text, tasting notes as a visual section, checkout below the fold. Jun's real content. Deployed to staging. Refs: 20260408-093000-d-tac-h6n, 20260408-180000-a-cpt-j2w.
 
 The team looks at them side by side the next morning.
 
@@ -346,11 +346,11 @@ The team looks at them side by side the next morning.
 
 **Mara**: "Agreed. Branch B. It's not even close when you see them next to each other. The layout matters — Jun, you were right that the content transforms it, but I was right that the structure was fighting it."
 
-> **d-cpt-20260410-085000-p8m**: The story-first layout (Branch B) is the direction. Leads with origin story, Jun's narrative prominent, checkout below the fold. This resolves the layout conflict — both real content AND story-first layout are needed. Refs: d-tac-20260408-093000-h6n, a-tac-20260409-140000-k4a, a-tac-20260409-180000-n7b, s-cpt-20260407-213000-q2r, s-cpt-20260408-065000-w7m.
+> **20260410-085000-d-cpt-p8m**: The story-first layout (Branch B) is the direction. Leads with origin story, Jun's narrative prominent, checkout below the fold. This resolves the layout conflict — both real content AND story-first layout are needed. Refs: 20260408-093000-d-tac-h6n, 20260409-140000-a-tac-k4a, 20260409-180000-a-tac-n7b, 20260407-213000-s-cpt-q2r, 20260408-065000-s-cpt-w7m.
 
-> **a-tac-20260409-200000-q3c**: Built subscribe-from-share path on main — recipients can now subscribe or order their own discovery from the share page. Refs: d-tac-20260408-093500-r5f.
+> **20260409-200000-a-tac-q3c**: Built subscribe-from-share path on main — recipients can now subscribe or order their own discovery from the share page. Refs: 20260408-093500-d-tac-r5f.
 
-> **a-tac-20260410-160000-p5r**: Priya merged Branch B into main. Story-first layout combined with the share flow fix already there. Deployed to staging. Refs: d-cpt-20260410-085000-p8m.
+> **20260410-160000-a-tac-p5r**: Priya merged Branch B into main. Story-first layout combined with the share flow fix already there. Deployed to staging. Refs: 20260410-085000-d-cpt-p8m.
 
 **Mara**: "Now I want real people to see this. I have a list of 30 customers who'd try anything we put out. But wait — how does this actually go live? Who decides when it's ready?"
 
@@ -364,11 +364,11 @@ The team looks at them side by side the next morning.
 
 **Priya**: "No. It's your domain. The system knows that from the contracts we've been building up."
 
-> **d-prc-20260410-170000-x2g**: Release process: main branch is live. Content changes (Jun's domain) can merge directly. Functionality changes require Priya's review before merging to main. Feature work happens on branches and merges after evaluation. This keeps changes flowing without blocking each other. Refs: d-cpt-20260410-085000-p8m.
+> **20260410-170000-d-prc-x2g**: Release process: main branch is live. Content changes (Jun's domain) can merge directly. Functionality changes require Priya's review before merging to main. Feature work happens on branches and merges after evaluation. This keeps changes flowing without blocking each other. Refs: 20260410-085000-d-cpt-p8m.
 
 This wasn't planned upfront. It emerged from the question "how does this go live?" — and the answer fell naturally out of the contracts already forming. The release decision references the domain contracts, and the system can now enforce them: content merges flow through if Jun approved, functionality merges require Priya's sign-off.
 
-> **a-stg-20260412-140000-m8k**: Mara sent personal invitations to 28 customers from her list, offering early access to "something new we're trying." Refs: d-cpt-20260408-091200-b2k.
+> **20260412-140000-a-stg-m8k**: Mara sent personal invitations to 28 customers from her list, offering early access to "something new we're trying." Refs: 20260408-091200-d-cpt-b2k.
 
 Five days from "should we do this?" to real customers testing a real product. The graph has 20-some entries — signals, decisions, actions — each small, each linked. Nobody wrote a spec or planned a sprint. The prototype's initial "failure" was the most useful thing that happened.
 
@@ -388,7 +388,7 @@ Jun thinks about it the way he thinks about handing someone a cup at the counter
 
 **Jun**: "The coffee story is always the main thing. That's what you're sharing. But the sender should be able to add a short note — like a handwritten card. 'You have to try this one.' Keep it optional, keep it short."
 
-> **d-cpt-20260411-193000-n6v**: The share experience leads with the full discovery story (origin, notes, brewing recommendation). The sender can optionally add a short personal note — secondary to the coffee story, like a handwritten card. Refs: d-cpt-20260408-091200-b2k.
+> **20260411-193000-d-cpt-n6v**: The share experience leads with the full discovery story (origin, notes, brewing recommendation). The sender can optionally add a short personal note — secondary to the coffee story, like a handwritten card. Refs: 20260408-091200-d-cpt-b2k.
 
 Jun recorded this himself. It's his domain. The implementation agent picks it up and continues.
 
@@ -400,17 +400,17 @@ A few hours later, Mara is working on launch messaging and runs into her own que
 
 She works through it with her agent, modeling different price points:
 
-> **d-cpt-20260411-214000-t6j**: Shipping is included in the subscription price (€29/month covers beans + shipping). No separate shipping line item — it feels like a gift, not an e-commerce transaction. One-off gift shares have a flat €4.50 shipping fee. Refs: d-cpt-20260408-091200-b2k, s-cpt-20260406-211500-r4w.
+> **20260411-214000-d-cpt-t6j**: Shipping is included in the subscription price (€29/month covers beans + shipping). No separate shipping line item — it feels like a gift, not an e-commerce transaction. One-off gift shares have a flat €4.50 shipping fee. Refs: 20260408-091200-d-cpt-b2k, 20260406-211500-s-cpt-r4w.
 
 Nobody assigned Mara this decision. She hit it because she was doing her work and recognized it as hers to make.
 
 Meanwhile, a review agent examining the implementation flags something:
 
-> **s-tac-20260411-161000-f2a**: The customer login flow uses email-based magic links. No password. This is simple but means customers can't manage their subscription without access to their email. Worth a decision.
+> **20260411-161000-s-tac-f2a**: The customer login flow uses email-based magic links. No password. This is simple but means customers can't manage their subscription without access to their email. Worth a decision.
 
 Priya sees it. She could decide this herself — it's tactical, it's her domain:
 
-> **d-tac-20260411-170000-c8w**: Keep magic link login. No passwords. At our scale, email access is a safe assumption. Revisit if customer support signals indicate problems. Refs: s-tac-20260411-161000-f2a.
+> **20260411-170000-d-tac-c8w**: Keep magic link login. No passwords. At our scale, email access is a safe assumption. Revisit if customer support signals indicate problems. Refs: 20260411-161000-s-tac-f2a.
 
 This is how contracts form naturally. Through working, a pattern emerges. And at this point, the system notices it:
 
@@ -422,7 +422,7 @@ This is how contracts form naturally. Through working, a pattern emerges. And at
 
 **Priya**: "That's the point — it's about who *decides*, not who *participates*. Anyone can weigh in. The contract just says who has the final call."
 
-> **d-prc-20260412-090000-y5d**: Domain contracts: Jun has authority over content, curation, and discovery experience. Mara has authority over business model, pricing, and brand. Priya has authority over technical decisions. All participants can contribute signals and participate in dialogue across domains. These contracts define decision authority, not participation boundaries. Refs: d-stg-20260405-090000-f3a.
+> **20260412-090000-d-prc-y5d**: Domain contracts: Jun has authority over content, curation, and discovery experience. Mara has authority over business model, pricing, and brand. Priya has authority over technical decisions. All participants can contribute signals and participate in dialogue across domains. These contracts define decision authority, not participation boundaries. Refs: 20260405-090000-d-stg-f3a.
 
 The contract is now explicit and in the graph — referenceable by the system for routing and review enforcement, and challengeable by anyone through a new signal if circumstances change.
 
@@ -438,17 +438,17 @@ But the interesting signals are the ones nobody anticipated.
 
 Jun talks to customers at the shop:
 
-> **s-ops-20260420-173000-c2j**: Talked to Lena today. She loved the Sidama, drank through it in a week, and wants to order more of the same batch. There's no way to do that — the subscription just sends whatever the next discovery is. She asked "can I just buy more of this one?"
+> **20260420-173000-s-ops-c2j**: Talked to Lena today. She loved the Sidama, drank through it in a week, and wants to order more of the same batch. There's no way to do that — the subscription just sends whatever the next discovery is. She asked "can I just buy more of this one?"
 
-> **s-ops-20260422-114000-n4t**: Marco wants to pause his subscription for a month — he's traveling and still has beans from last time. No pause option exists. He asked if he should just cancel and re-subscribe later.
+> **20260422-114000-s-ops-n4t**: Marco wants to pause his subscription for a month — he's traveling and still has beans from last time. No pause option exists. He asked if he should just cancel and re-subscribe later.
 
 Mara gets a phone call:
 
-> **s-ops-20260421-161000-j7w**: A subscriber (Thomas) switched email providers and can't log in anymore — magic links go to his old address. He called the shop directly to ask for help. Mara had to manually look up his subscription in Stripe.
+> **20260421-161000-s-ops-j7w**: A subscriber (Thomas) switched email providers and can't log in anymore — magic links go to his old address. He called the shop directly to ask for help. Mara had to manually look up his subscription in Stripe.
 
 An analytics review agent, running on its contract to monitor user engagement patterns, surfaces a content signal:
 
-> **s-ops-20260422-090000-k4w**: Jun's tasting notes are the most-viewed section on the discovery page. Average time on page: 3 minutes. The brewing guide gets only 20% of views. Source: analytics review.
+> **20260422-090000-s-ops-k4w**: Jun's tasting notes are the most-viewed section on the discovery page. Average time on page: 3 minutes. The brewing guide gets only 20% of views. Source: analytics review.
 
 Next morning at the bar, the signals come together.
 
@@ -460,11 +460,11 @@ Next morning at the bar, the signals come together.
 
 She pulls up her earlier decision:
 
-**System**: "Decision d-tac-20260411-170000-c8w: 'Keep magic link login. No passwords. Revisit if customer support signals indicate problems.' The signal from Thomas directly challenges this."
+**System**: "Decision 20260411-170000-d-tac-c8w: 'Keep magic link login. No passwords. Revisit if customer support signals indicate problems.' The signal from Thomas directly challenges this."
 
 **Priya**: "Okay, I'm not going to rebuild auth right now. But I should at least add a way for people to update their email. That's the minimal fix."
 
-> **d-tac-20260423-090000-c9w**: Add email update flow for subscribers — they can change their login email from within an active session. Doesn't solve the locked-out case fully but prevents it going forward. Revisit auth approach if more signals accumulate. Supersedes: d-tac-20260411-170000-c8w. Refs: s-ops-20260421-161000-j7w.
+> **20260423-090000-d-tac-c9w**: Add email update flow for subscribers — they can change their login email from within an active session. Doesn't solve the locked-out case fully but prevents it going forward. Revisit auth approach if more signals accumulate. Supersedes: 20260411-170000-d-tac-c8w. Refs: 20260421-161000-s-ops-j7w.
 
 **Mara**: "The pause and reorder things are bigger questions. Pausing is about retention — we don't want people canceling just because they're traveling. And reordering... that's almost a different product. It changes us from pure subscription to something with a shop element."
 
@@ -472,15 +472,15 @@ She pulls up her earlier decision:
 
 **Mara**: "I agree. But Lena's request is real. Maybe it's not a shop — maybe it's just a 'get more of this discovery' button on the page you already have."
 
-> **d-cpt-20260423-091500-b4k**: Add a subscription pause feature — subscribers can skip one month. This is a retention mechanism. Refs: s-ops-20260422-114000-n4t.
+> **20260423-091500-d-cpt-b4k**: Add a subscription pause feature — subscribers can skip one month. This is a retention mechanism. Refs: 20260422-114000-s-ops-n4t.
 
-> **s-cpt-20260423-092000-f6m**: Lena's reorder request raises a conceptual question: should subscribers be able to buy more of a specific discovery? This could be a simple add-on or it could shift the product toward a shop model. Needs careful thought — the strategic direction is discovery/curation, not e-commerce. Refs: s-ops-20260420-173000-c2j, d-stg-20260405-090000-f3a.
+> **20260423-092000-s-cpt-f6m**: Lena's reorder request raises a conceptual question: should subscribers be able to buy more of a specific discovery? This could be a simple add-on or it could shift the product toward a shop model. Needs careful thought — the strategic direction is discovery/curation, not e-commerce. Refs: 20260420-173000-s-ops-c2j, 20260405-090000-d-stg-f3a.
 
 Notice what happens with the reorder question: Mara captures it as a signal, not a decision. They're not ready to decide. The signal references the original strategic direction — the system will flag it if a future decision conflicts. It sits in the graph, waiting for more data or a conversation that resolves it.
 
 **Jun**: "One more thing — the brewing guide. People aren't reading it. I think it's because it's too generic. If I write 'this bean is best as a pour-over, here's exactly why' instead of a general guide... let me try it for the next discovery."
 
-> **d-cpt-20260423-093000-a2m**: Experiment: replace the generic brewing guide with Jun's specific recommendation per discovery. Hypothesis: engagement increases when the guide feels as personal as the tasting notes. Refs: s-ops-20260422-090000-k4w.
+> **20260423-093000-d-cpt-a2m**: Experiment: replace the generic brewing guide with Jun's specific recommendation per discovery. Hypothesis: engagement increases when the guide feels as personal as the tasting notes. Refs: 20260422-090000-s-ops-k4w.
 
 The rhythm is clear. Signals from real customers arrive in everyone's domain — Jun hears it at the counter, Mara gets the phone call, Priya sees it in the data. The morning conversation connects the dots. Some signals lead to immediate decisions. Some need more exploration. Some sit as open questions. Each person captures what's in their domain. The graph grows honestly — not everything is resolved, and that's fine.
 
@@ -490,7 +490,7 @@ The rhythm is clear. Signals from real customers arrive in everyone's domain —
 
 A month in, subscriptions are growing. The share-to-subscribe loop is working. Then Mara gets an email that changes the conversation.
 
-> **s-stg-20260510-091000-j8k**: GreenLeaf, a specialty grocery chain (12 locations), reached out. They want to stock Kōgen beans and offer a co-branded subscription through their stores.
+> **20260510-091000-s-stg-j8k**: GreenLeaf, a specialty grocery chain (12 locations), reached out. They want to stock Kōgen beans and offer a co-branded subscription through their stores.
 
 Mara's excited — this could be a huge growth channel. She mentions it at the morning coffee round.
 
@@ -500,13 +500,13 @@ Mara's excited — this could be a huge growth channel. She mentions it at the m
 
 She spends the evening in dialogue with her agent, modeling scenarios. Revenue potential, typical partnership terms in specialty food, what GreenLeaf's size means for volume.
 
-> **s-stg-20260510-201000-p3a**: GreenLeaf partnership could mean 80-100 new subscribers through in-store promotion within six months. Revenue roughly 3x current base. Source: modeled from GreenLeaf's store traffic and comparable specialty food partnerships.
+> **20260510-201000-s-stg-p3a**: GreenLeaf partnership could mean 80-100 new subscribers through in-store promotion within six months. Revenue roughly 3x current base. Source: modeled from GreenLeaf's store traffic and comparable specialty food partnerships.
 
-> **s-stg-20260510-203000-r8b**: Co-branded specialty food partnerships typically require: partner branding on the experience, input on product selection, volume commitments, and shared customer data. Source: research on comparable partnerships (Kaffebox/retailer, Blue Bottle/grocery).
+> **20260510-203000-s-stg-r8b**: Co-branded specialty food partnerships typically require: partner branding on the experience, input on product selection, volume commitments, and shared customer data. Source: research on comparable partnerships (Kaffebox/retailer, Blue Bottle/grocery).
 
 She also asks the system what existing decisions this might conflict with.
 
-**System**: "This potentially conflicts with several decisions. The original strategic direction (d-stg-20260405-090000-f3a) positions the product as personal and story-driven under Kōgen's full control. The whole decision chain builds on this — Jun's voice being central, the curated experience, the personal notes on shares. A co-branded partnership where the partner influences product selection would cut across most of this."
+**System**: "This potentially conflicts with several decisions. The original strategic direction (20260405-090000-d-stg-f3a) positions the product as personal and story-driven under Kōgen's full control. The whole decision chain builds on this — Jun's voice being central, the curated experience, the personal notes on shares. A co-branded partnership where the partner influences product selection would cut across most of this."
 
 She brings it to the next morning round with the research:
 
@@ -524,13 +524,13 @@ She brings it to the next morning round with the research:
 
 **Jun**: "I pick the beans. I write the stories. The page looks like Kōgen, not like GreenLeaf. If someone gets our coffee through them, it should feel the same as getting it from us."
 
-> **d-stg-20260511-160000-w4p**: We will explore the GreenLeaf partnership on the condition that Kōgen brand, curation, and voice remain fully under our control. No white-labeling, no external curation influence. GreenLeaf distributes, we create. If negotiation signals indicate they won't accept these terms, we walk away. Refs: d-stg-20260405-090000-f3a, s-stg-20260510-091000-j8k. Confidence: medium.
+> **20260511-160000-d-stg-w4p**: We will explore the GreenLeaf partnership on the condition that Kōgen brand, curation, and voice remain fully under our control. No white-labeling, no external curation influence. GreenLeaf distributes, we create. If negotiation signals indicate they won't accept these terms, we walk away. Refs: 20260405-090000-d-stg-f3a, 20260510-091000-s-stg-j8k. Confidence: medium.
 
 Mara records this. The confidence is medium — it's an experiment at the strategic layer. The decision enables exploration without full commitment.
 
 **Jun** adds his own guardrail:
 
-> **d-stg-20260511-161000-k3f**: Guardrail: any partnership or distribution deal must preserve Jun's sole authority over bean selection and discovery content. This is non-negotiable and applies to all future partnership signals, not just GreenLeaf. Refs: d-stg-20260511-160000-w4p, d-stg-20260405-090000-f3a.
+> **20260511-161000-d-stg-k3f**: Guardrail: any partnership or distribution deal must preserve Jun's sole authority over bean selection and discovery content. This is non-negotiable and applies to all future partnership signals, not just GreenLeaf. Refs: 20260511-160000-d-stg-w4p, 20260405-090000-d-stg-f3a.
 
 This is the first explicit guardrail in the system. It didn't come from a governance framework or a risk assessment. It came from Jun knowing what matters and recording it as a constraint that will guide future decisions — by humans and agents — without needing to re-have this conversation.
 
