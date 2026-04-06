@@ -8,8 +8,8 @@ set -euo pipefail
 #
 # Examples:
 #   sdd-new.sh s stg "customers asking about shipping beans"
-#   sdd-new.sh d cpt --refs s-stg-20260405-084500-j3n --confidence medium "subscription with sharing built in"
-#   sdd-new.sh a tac --refs d-tac-20260407-145000-k8p "built prototype and deployed to staging"
+#   sdd-new.sh d cpt --refs 20260405-084500-s-stg-j3n --confidence medium "subscription with sharing built in"
+#   sdd-new.sh a tac --refs 20260407-145000-d-tac-k8p "built prototype and deployed to staging"
 
 GRAPH_DIR="$(git rev-parse --show-toplevel)/docs/framework/graph"
 
@@ -76,7 +76,7 @@ description="${description_parts[*]:-}"
 # Generate ID: type-layer-YYYYMMDD-HHmmss-xxx
 timestamp=$(date +%Y%m%d-%H%M%S)
 random_suffix=$(head -c 100 /dev/urandom | LC_ALL=C tr -dc 'a-z0-9' | head -c3)
-id="${type_abbr}-${layer_abbr}-${timestamp}-${random_suffix}"
+id="${timestamp}-${type_abbr}-${layer_abbr}-${random_suffix}"
 filename="${id}.md"
 filepath="${GRAPH_DIR}/${filename}"
 

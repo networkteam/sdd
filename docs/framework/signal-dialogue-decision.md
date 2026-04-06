@@ -145,15 +145,15 @@ Decisions and signals are stored as an evolutionary DAG (directed acyclic graph)
 Each document's filename is its ID, formatted as:
 
 ```
-{type}-{layer}-{YYYYMMDD}-{HHmmss}-{xxx}.md
+{YYYYMMDD}-{HHmmss}-{type}-{layer}-{xxx}.md
 ```
 
 Type abbreviations: `d` (decision), `s` (signal), `a` (action).
 Layer abbreviations: `stg` (strategic), `cpt` (conceptual), `tac` (tactical), `ops` (operational), `prc` (process).
 
 Where `xxx` is a short random suffix to prevent collisions. Examples:
-- `d-stg-20260405-143022-k7x.md`
-- `s-ops-20260405-150301-m2p.md`
+- `20260405-143022-d-stg-k7x.md`
+- `20260405-150301-s-ops-m2p.md`
 
 IDs are human-readable, chronologically sortable, self-describing, and require no coordination across branches.
 
