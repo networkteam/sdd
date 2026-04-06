@@ -23,7 +23,7 @@ The loop is fractal: it operates the same way whether a CEO is responding to a m
 
 ## Layers
 
-The loop runs at four layers of abstraction. These are not org chart levels — they describe the depth and time horizon of the thinking involved.
+The loop runs at five layers of abstraction. These are not org chart levels — they describe the depth and time horizon of the thinking involved.
 
 | Layer | Thinking | Horizon | Typical human/agent balance |
 |-------|----------|---------|----------------------------|
@@ -140,8 +140,6 @@ Decisions and signals are stored as an evolutionary DAG (directed acyclic graph)
 
 ### Document Format
 
-Small, categorized markdown files with frontmatter:
-
 ### Document IDs
 
 Each document's filename is its ID, formatted as:
@@ -164,7 +162,7 @@ IDs are human-readable, chronologically sortable, self-describing, and require n
 ```markdown
 ---
 type: decision | signal | action
-layer: strategic | conceptual | tactical | operational
+layer: strategic | conceptual | tactical | operational | process
 refs: [filenames of parent decisions/signals this builds on]
 participants: [who was in the dialogue]
 confidence: high | medium | low
@@ -209,13 +207,15 @@ These views are ephemeral — derived from the graph, never maintained as separa
 
 ## Open Questions
 
-- **Bootstrapping**: How does the decision graph start for a new product or team? What is the first signal, the first decision?
-- **Garbage collection**: The graph grows indefinitely. How do you keep it navigable beyond materialized views?
+- **Bootstrapping**: Explored in the Kōgen story — a person introduces the system, initial signals and direction are captured through onboarding dialogue. Needs more exploration for larger teams joining an existing graph.
+- **Graph growth**: The graph grows indefinitely. Materialized views help, but attention management (decay surfacing, parking decisions, relevance filtering) is an unsolved design challenge.
 - **Trust calibration**: When does a human trust an agent's distillation enough to decide without going deeper? How does this evolve over time?
-- **Conflict resolution**: When branches produce contradictory decisions, what's the concrete dialogue process for resolution?
-- **Tooling**: What are the minimal tools/skills needed to make this workable? Graph traversal, coverage dashboards, signal routing, materialized views.
-- **Adoption**: How does a team transition from current processes? Is there a minimal starting point?
+- **Conflict resolution**: Explored partially — dialogue to narrow disagreement, then branch experiments to test. Needs stress-testing in higher-stakes settings.
+- **Tooling**: What are the minimal tools/skills needed to make this workable? Graph traversal, coverage dashboards, signal routing, materialized views, session management with graph-based context reconstruction.
+- **Adoption**: Explored in Kōgen — organic adoption by one person, then team invitation. Needs exploration for larger orgs with existing processes.
+- **Compliance and regulation**: How do mandatory external constraints (legal, regulatory) enter the graph? How do mandatory review contracts differ from voluntary ones? (See signals.md for details.)
 
 ## Next Steps
 
-Write a practical story: a team building a product with agents using this framework. Explore the challenges and insights that emerge when the abstract framework meets concrete reality.
+- Write a second story in a compliance-heavy setting (healthcare or fintech) to stress-test mandatory reviews, external guardrails, audit trails, multi-team coordination, and risk-based escalation.
+- Identify minimal tooling needed to make the framework workable in practice.
