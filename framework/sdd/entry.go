@@ -63,6 +63,7 @@ type Entry struct {
 	Type         EntryType
 	Layer        Layer
 	Refs         []string
+	Supersedes   []string
 	Participants []string
 	Confidence   string
 	Content      string
@@ -74,6 +75,7 @@ type frontmatter struct {
 	Type         string   `yaml:"type"`
 	Layer        string   `yaml:"layer"`
 	Refs         []string `yaml:"refs,omitempty"`
+	Supersedes   []string `yaml:"supersedes,omitempty"`
 	Participants []string `yaml:"participants,omitempty"`
 	Confidence   string   `yaml:"confidence,omitempty"`
 }
@@ -107,6 +109,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Type:         entryType,
 		Layer:        layer,
 		Refs:         fm.Refs,
+		Supersedes:   fm.Supersedes,
 		Participants: fm.Participants,
 		Confidence:   fm.Confidence,
 		Content:      strings.TrimSpace(body),
@@ -154,6 +157,7 @@ func FormatFrontmatter(e *Entry) string {
 		Type:         string(e.Type),
 		Layer:        string(e.Layer),
 		Refs:         e.Refs,
+		Supersedes:   e.Supersedes,
 		Participants: e.Participants,
 		Confidence:   e.Confidence,
 	}

@@ -145,7 +145,7 @@ Original decision.`)
 	writeFile(t, dir, "20260406-110000-d-tac-bbb.md", `---
 type: decision
 layer: tactical
-refs:
+supersedes:
   - 20260406-100000-d-tac-aaa
 ---
 

@@ -63,22 +63,22 @@ func LoadGraph(dir string) (*Graph, error) {
 	return g, nil
 }
 
-// ActiveDecisions returns decisions that are not superseded by another decision.
-// A decision is considered superseded if another decision references it.
+// ActiveDecisions returns decisions that are not explicitly superseded.
+// A decision is superseded only if another entry lists it in its "supersedes" field.
 func (g *Graph) ActiveDecisions() []*Entry {
+	superseded := make(map[string]bool)
+	for _, e := range g.Entries {
+		for _, s := range e.Supersedes {
+			superseded[s] = true
+		}
+	}
+
 	var active []*Entry
 	for _, e := range g.Entries {
 		if e.Type != TypeDecision {
 			continue
 		}
-		superseded := false
-		for _, refBy := range g.RefsTo[e.ID] {
-			if ref, ok := g.ByID[refBy]; ok && ref.Type == TypeDecision {
-				superseded = true
-				break
-			}
-		}
-		if !superseded {
+		if !superseded[e.ID] {
 			active = append(active, e)
 		}
 	}

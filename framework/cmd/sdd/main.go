@@ -205,6 +205,10 @@ func newCmd() *cli.Command {
 				Usage: "Comma-separated list of referenced entry IDs",
 			},
 			&cli.StringFlag{
+				Name:  "supersedes",
+				Usage: "Comma-separated list of decision IDs this supersedes",
+			},
+			&cli.StringFlag{
 				Name:  "participants",
 				Usage: "Comma-separated list of participants",
 			},
@@ -264,6 +268,9 @@ func newCmd() *cli.Command {
 
 			if refs := cmd.String("refs"); refs != "" {
 				entry.Refs = strings.Split(refs, ",")
+			}
+			if supersedes := cmd.String("supersedes"); supersedes != "" {
+				entry.Supersedes = strings.Split(supersedes, ",")
 			}
 			if participants := cmd.String("participants"); participants != "" {
 				entry.Participants = strings.Split(participants, ",")

@@ -125,7 +125,7 @@ Decisions and signals are stored as an evolutionary DAG (directed acyclic graph)
 
 **Documents are never modified after creation.** This is a hard constraint.
 
-- A decision is never updated. It is **superseded** by a new decision that references the old one.
+- A decision is never updated. It is **superseded** by a new decision that lists the old one in its `supersedes` field (distinct from `refs`, which means "builds on").
 - The old document does not know about its successor — just like a Git commit doesn't know what comes after it.
 - "Current state" is always a query result: all decisions with no successor that supersedes them. Whether something is "active," "experimental," or "superseded" is not a field on the document — it's a property of its position in the graph.
 - Current state is **reconstructed by traversing the graph**, never maintained as a separate document.
@@ -163,7 +163,8 @@ IDs are human-readable, chronologically sortable, self-describing, and require n
 ---
 type: decision | signal | action
 layer: strategic | conceptual | tactical | operational | process
-refs: [filenames of parent decisions/signals this builds on]
+refs: [filenames of entries this builds on / depends on]
+supersedes: [filenames of decisions this replaces]
 participants: [who was in the dialogue]
 confidence: high | medium | low
 ---
