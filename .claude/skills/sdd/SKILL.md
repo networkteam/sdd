@@ -49,7 +49,8 @@ All graph operations go through the `sdd` CLI binary at `./framework/bin/sdd`. R
 - `sdd status` — overview of active decisions, open signals, recent actions
 - `sdd show <id>` — full entry with reference chain
 - `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc]` — filtered listing
-- `sdd new <type> <layer> [--refs id1,id2] [--supersedes id] [--closes id1,id2] [--participants p1,p2] [--confidence high|medium|low] <description>` — create entries
+- `sdd new <type> <layer> [--refs id1,id2] [--supersedes id] [--closes id1,id2] [--participants p1,p2] [--confidence high|medium|low] [--kind contract|directive] <description>` — create entries
+- `sdd list --kind contract` — list active contracts
 
 When the user wants to capture something, construct the full `sdd new` command with the correct refs, layer, type, participants, and confidence. Don't ask the user to figure out IDs or flags — that's your job. Show them the proposed entry content and get confirmation, then execute.
 
@@ -60,6 +61,7 @@ When the user wants to capture something, construct the full `sdd new` command w
 - **Refs matter**: Always link to the signals/decisions that led to this entry. Use `sdd show` and `sdd list` to find the right refs.
 - **Confidence is honest**: High = strong conviction. Medium = reasonable but unvalidated. Low = hypothesis/experiment.
 - **One idea per entry**: Keep entries digestible. If it needs more detail, split into multiple entries or reference an external file.
+- **Kind for decisions**: Most decisions are directives (default, omit the kind field). Use `--kind contract` only for standing constraints that define rules rather than requesting action. A directive that hardens into a permanent rule can be reclassified later via supersedes + kind: contract.
 
 ## Modes of working
 

@@ -19,7 +19,7 @@ Read the framework reference files to understand the system:
 The `sdd` CLI binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just use it. Run from the repo root:
 
 ```bash
-./framework/bin/sdd status
+./framework/bin/sdd status --width 500
 ```
 
 This shows active decisions, open signals (not yet addressed by any decision), and recent actions. These are the entries that matter for the catch-up.

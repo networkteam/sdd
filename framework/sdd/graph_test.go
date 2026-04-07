@@ -43,6 +43,10 @@ func withCloses(ids ...string) entryOpt {
 	return func(e *Entry) { e.Closes = ids }
 }
 
+func withKind(k Kind) entryOpt {
+	return func(e *Entry) { e.Kind = k }
+}
+
 func withContent(c string) entryOpt {
 	return func(e *Entry) { e.Content = c }
 }
@@ -337,7 +341,7 @@ func TestFilterOpen(t *testing.T) {
 		entry("20260406-100500-a-tac-fff", withCloses("20260406-100200-d-tac-ccc")),
 	})
 
-	open := g.FilterOpen("", "")
+	open := g.FilterOpen("", "", "")
 	ids := entryIDs(open)
 
 	// aaa (open signal), eee (active decision), fff (action) = 3
@@ -353,12 +357,12 @@ func TestFilterOpen(t *testing.T) {
 	assertNotContains(t, ids, "20260406-100200-d-tac-ccc", "closed decision")
 	assertNotContains(t, ids, "20260406-100300-d-tac-ddd", "superseded decision")
 
-	openSignals := g.FilterOpen(TypeSignal, "")
+	openSignals := g.FilterOpen(TypeSignal, "", "")
 	if len(openSignals) != 1 {
 		t.Errorf("FilterOpen(signal, '') = %d, want 1", len(openSignals))
 	}
 
-	openDecisions := g.FilterOpen(TypeDecision, "")
+	openDecisions := g.FilterOpen(TypeDecision, "", "")
 	if len(openDecisions) != 1 {
 		t.Errorf("FilterOpen(decision, '') = %d, want 1", len(openDecisions))
 	}
@@ -370,12 +374,148 @@ func TestFilterOpenWithLayerFilter(t *testing.T) {
 		entry("20260406-100100-s-ops-bbb"),
 	})
 
-	tacOpen := g.FilterOpen(TypeSignal, LayerTactical)
+	tacOpen := g.FilterOpen(TypeSignal, LayerTactical, "")
 	if len(tacOpen) != 1 {
 		t.Fatalf("FilterOpen(signal, tactical) = %d, want 1", len(tacOpen))
 	}
 	if tacOpen[0].ID != "20260406-100000-s-tac-aaa" {
 		t.Errorf("Got %q, want aaa", tacOpen[0].ID)
+	}
+}
+
+func TestActiveDecisionsExcludesContracts(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-cpt-aaa", withKind(KindContract)),
+		entry("20260406-100100-d-tac-bbb"),
+	})
+
+	active := g.ActiveDecisions()
+	if len(active) != 1 {
+		t.Fatalf("ActiveDecisions = %d, want 1 (contract excluded)", len(active))
+	}
+	if active[0].ID != "20260406-100100-d-tac-bbb" {
+		t.Errorf("Active = %q, want bbb", active[0].ID)
+	}
+}
+
+func TestContracts(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-cpt-aaa", withKind(KindContract)),
+		entry("20260406-100100-d-tac-bbb"),
+		entry("20260406-100200-d-cpt-ccc", withKind(KindContract)),
+		entry("20260406-100300-d-cpt-ddd", withKind(KindContract), withContent("Superseded contract")),
+		entry("20260406-100400-d-cpt-eee", withKind(KindContract), withSupersedes("20260406-100300-d-cpt-ddd")),
+	})
+
+	contracts := g.Contracts()
+	ids := entryIDs(contracts)
+	if len(contracts) != 3 {
+		t.Fatalf("Contracts = %v (len %d), want 3", ids, len(contracts))
+	}
+	assertContains(t, ids, "20260406-100000-d-cpt-aaa", "contract")
+	assertContains(t, ids, "20260406-100200-d-cpt-ccc", "contract")
+	assertContains(t, ids, "20260406-100400-d-cpt-eee", "superseding contract")
+	assertNotContains(t, ids, "20260406-100100-d-tac-bbb", "directive")
+	assertNotContains(t, ids, "20260406-100300-d-cpt-ddd", "superseded contract")
+}
+
+func TestFilterOpenWithKind(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-cpt-aaa", withKind(KindContract)),
+		entry("20260406-100100-d-tac-bbb"),
+		entry("20260406-100200-s-tac-ccc"),
+	})
+
+	// Kind=contract: only contracts
+	contracts := g.FilterOpen(TypeDecision, "", KindContract)
+	if len(contracts) != 1 {
+		t.Fatalf("FilterOpen(decision, '', contract) = %d, want 1", len(contracts))
+	}
+	if contracts[0].ID != "20260406-100000-d-cpt-aaa" {
+		t.Errorf("Got %q, want aaa", contracts[0].ID)
+	}
+
+	// Kind=directive: only directives
+	directives := g.FilterOpen(TypeDecision, "", KindDirective)
+	if len(directives) != 1 {
+		t.Fatalf("FilterOpen(decision, '', directive) = %d, want 1", len(directives))
+	}
+	if directives[0].ID != "20260406-100100-d-tac-bbb" {
+		t.Errorf("Got %q, want bbb", directives[0].ID)
+	}
+
+	// Kind filter doesn't affect signals
+	all := g.FilterOpen("", "", KindContract)
+	if len(all) != 2 {
+		t.Errorf("FilterOpen('', '', contract) = %d, want 2 (signal + contract)", len(all))
+	}
+}
+
+func TestShortContent(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		maxLen  int
+		want    string
+	}{
+		{
+			name:    "short enough",
+			content: "Hello world.",
+			maxLen:  80,
+			want:    "Hello world.",
+		},
+		{
+			name:    "truncate at sentence boundary shows ellipsis",
+			content: "First sentence. Second sentence. Third sentence that is longer.",
+			maxLen:  50,
+			want:    "First sentence. Second sentence. ...",
+		},
+		{
+			name:    "single long sentence falls back to words",
+			content: "This is a very long single sentence without any period at the end",
+			maxLen:  40,
+			want:    "This is a very long single sentence ...",
+		},
+		{
+			name:    "first sentence too long falls back to words",
+			content: "This entire first sentence is way too long for the limit. Short.",
+			maxLen:  30,
+			want:    "This entire first sentence ...",
+		},
+		{
+			name:    "multiline uses first line only",
+			content: "First line.\nSecond line.",
+			maxLen:  80,
+			want:    "First line.",
+		},
+		{
+			name:    "accumulates sentences, no room for ellipsis",
+			content: "One. Two. Three. Four. Five.",
+			maxLen:  24,
+			want:    "One. Two. Three. Four.",
+		},
+		{
+			name:    "accumulates sentences with ellipsis when room",
+			content: "One. Two. Three. Four. Five. Six.",
+			maxLen:  32,
+			want:    "One. Two. Three. Four. Five. ...",
+		},
+		{
+			name:    "exact fit",
+			content: "Exact.",
+			maxLen:  6,
+			want:    "Exact.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &Entry{Content: tt.content}
+			got := e.ShortContent(tt.maxLen)
+			if got != tt.want {
+				t.Errorf("ShortContent(%d) = %q, want %q", tt.maxLen, got, tt.want)
+			}
+		})
 	}
 }
 

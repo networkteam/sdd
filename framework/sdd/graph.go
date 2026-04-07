@@ -79,14 +79,14 @@ func LoadGraph(dir string) (*Graph, error) {
 	return g, nil
 }
 
-// ActiveDecisions returns decisions that are not closed and not superseded.
+// ActiveDecisions returns active directive decisions (not closed, not superseded, not contracts).
 func (g *Graph) ActiveDecisions() []*Entry {
 	closed := g.closedSet()
 	superseded := g.supersededSet()
 
 	var active []*Entry
 	for _, e := range g.Entries {
-		if e.Type != TypeDecision {
+		if e.Type != TypeDecision || e.IsContract() {
 			continue
 		}
 		if !closed[e.ID] && !superseded[e.ID] {
@@ -94,6 +94,23 @@ func (g *Graph) ActiveDecisions() []*Entry {
 		}
 	}
 	return active
+}
+
+// Contracts returns active contract decisions (not superseded).
+// Contracts are never closed — they stay active until superseded.
+func (g *Graph) Contracts() []*Entry {
+	superseded := g.supersededSet()
+
+	var contracts []*Entry
+	for _, e := range g.Entries {
+		if e.Type != TypeDecision || !e.IsContract() {
+			continue
+		}
+		if !superseded[e.ID] {
+			contracts = append(contracts, e)
+		}
+	}
+	return contracts
 }
 
 // OpenSignals returns signals that are not closed and not superseded.
@@ -172,7 +189,8 @@ func (g *Graph) Filter(typ EntryType, layer Layer) []*Entry {
 // Open signals = not closed and not superseded.
 // Active decisions = not closed and not superseded.
 // Actions are always included (they are facts of execution).
-func (g *Graph) FilterOpen(typ EntryType, layer Layer) []*Entry {
+// Kind filter applies only to decisions: "contract" or "directive" (empty = all).
+func (g *Graph) FilterOpen(typ EntryType, layer Layer, kind Kind) []*Entry {
 	closed := g.closedSet()
 	superseded := g.supersededSet()
 
@@ -183,6 +201,14 @@ func (g *Graph) FilterOpen(typ EntryType, layer Layer) []*Entry {
 		}
 		if layer != "" && e.Layer != layer {
 			continue
+		}
+		if kind != "" && e.Type == TypeDecision {
+			if kind == KindDirective && e.IsContract() {
+				continue
+			}
+			if kind == KindContract && !e.IsContract() {
+				continue
+			}
 		}
 		switch e.Type {
 		case TypeSignal, TypeDecision:

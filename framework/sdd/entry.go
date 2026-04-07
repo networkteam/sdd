@@ -58,10 +58,19 @@ var LayerFromAbbrev = map[string]Layer{
 	"prc": LayerProcess,
 }
 
+// Kind distinguishes directive decisions (need action) from contract decisions (standing constraints).
+type Kind string
+
+const (
+	KindDirective Kind = "directive"
+	KindContract  Kind = "contract"
+)
+
 type Entry struct {
 	ID           string
 	Type         EntryType
 	Layer        Layer
+	Kind         Kind // only meaningful for decisions; empty = directive (default)
 	Refs         []string
 	Supersedes   []string
 	Closes       []string
@@ -71,10 +80,16 @@ type Entry struct {
 	Time         time.Time
 }
 
+// IsContract returns true if this decision is a standing constraint.
+func (e *Entry) IsContract() bool {
+	return e.Kind == KindContract
+}
+
 // frontmatter is the YAML structure in the file header.
 type frontmatter struct {
 	Type         string   `yaml:"type"`
 	Layer        string   `yaml:"layer"`
+	Kind         string   `yaml:"kind,omitempty"`
 	Refs         []string `yaml:"refs,omitempty"`
 	Supersedes   []string `yaml:"supersedes,omitempty"`
 	Closes       []string `yaml:"closes,omitempty"`
@@ -110,6 +125,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		ID:           id,
 		Type:         entryType,
 		Layer:        layer,
+		Kind:         Kind(fm.Kind),
 		Refs:         fm.Refs,
 		Supersedes:   fm.Supersedes,
 		Closes:       fm.Closes,
@@ -187,6 +203,7 @@ func FormatFrontmatter(e *Entry) string {
 	fm := frontmatter{
 		Type:         string(e.Type),
 		Layer:        string(e.Layer),
+		Kind:         string(e.Kind),
 		Refs:         e.Refs,
 		Supersedes:   e.Supersedes,
 		Closes:       e.Closes,
@@ -225,14 +242,63 @@ func (e *Entry) LayerLabel() string {
 	return string(e.Layer)
 }
 
-// ShortContent returns the first line of content, truncated to maxLen.
+// ShortContent returns content truncated to maxLen, preferring sentence boundaries.
+// Accumulates complete sentences up to the limit. If no sentence fits, accumulates words.
 func (e *Entry) ShortContent(maxLen int) string {
 	line := e.Content
 	if idx := strings.Index(line, "\n"); idx >= 0 {
 		line = line[:idx]
 	}
-	if len(line) > maxLen {
-		line = line[:maxLen-3] + "..."
+	if len(line) <= maxLen {
+		return line
 	}
-	return line
+
+	// Try to accumulate sentences
+	sentences := splitSentences(line)
+	if len(sentences) > 1 {
+		result := sentences[0]
+		included := 1
+		for _, s := range sentences[1:] {
+			candidate := result + " " + s
+			if len(candidate) > maxLen {
+				break
+			}
+			result = candidate
+			included++
+		}
+		if included < len(sentences) && len(result)+4 <= maxLen {
+			result += " ..."
+		}
+		if len(result) <= maxLen {
+			return result
+		}
+	}
+
+	// Fall back to accumulating words
+	words := strings.Fields(line)
+	result := words[0]
+	for _, w := range words[1:] {
+		candidate := result + " " + w
+		if len(candidate)+4 > maxLen { // +4 for " ..."
+			break
+		}
+		result = candidate
+	}
+	return result + " ..."
+}
+
+// splitSentences splits text on sentence-ending punctuation followed by a space.
+func splitSentences(text string) []string {
+	var sentences []string
+	start := 0
+	for i := 0; i < len(text)-1; i++ {
+		if (text[i] == '.' || text[i] == '!' || text[i] == '?') && text[i+1] == ' ' {
+			sentences = append(sentences, text[start:i+1])
+			start = i + 2
+		}
+	}
+	if start < len(text) {
+		sentences = append(sentences, text[start:])
+	}
+	return sentences
 }

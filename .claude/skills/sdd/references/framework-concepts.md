@@ -39,9 +39,18 @@ Three fields with distinct semantics:
 
 **Open signal** = not superseded, not closed. **Active decision** = not superseded, not closed.
 
+## Decision Kinds
+
+Decisions have an optional `kind` property:
+
+- **`directive`** (default, omitted): Requests action. Closed when fulfilled by an action.
+- **`contract`**: Standing constraint. Never closed — stays active until superseded. A directive can become a contract via a new decision with `supersedes` + `kind: contract`.
+
+The `sdd status` view separates contracts from active directives. `sdd list --kind contract|directive` filters by kind.
+
 ## Contracts
 
-Contracts are process-layer decisions (`d-prc`) about who decides what. They emerge from working patterns — the system observes who has been making which decisions and suggests formalizing it. Contracts define decision *authority*, not participation boundaries — anyone can contribute signals and dialogue.
+Contracts are decisions marked `kind: contract`. They define standing constraints — architectural rules, authority boundaries, process agreements. They emerge from working patterns: a directive that hardens into a permanent rule can be reclassified. Contracts define constraints, not participation boundaries — anyone can contribute signals and dialogue.
 
 ## Coverage
 

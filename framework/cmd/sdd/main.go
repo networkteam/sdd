@@ -24,6 +24,12 @@ func main() {
 				Usage:   "Path to graph directory",
 				Value:   "docs/framework/graph",
 			},
+			&cli.IntFlag{
+				Name:    "width",
+				Aliases: []string{"w"},
+				Usage:   "Max content width for entry summaries",
+				Value:   160,
+			},
 		},
 		Commands: []*cli.Command{
 			statusCmd(),
@@ -65,6 +71,25 @@ func statusCmd() *cli.Command {
 			fmt.Printf("Graph: %d entries (%d decisions, %d signals, %d actions)\n\n",
 				len(g.Entries), len(decisions), len(signals), len(actions))
 
+			// Contracts grouped by layer
+			contracts := g.Contracts()
+			if len(contracts) > 0 {
+				fmt.Println("## Contracts")
+				fmt.Println()
+				byLayer := groupByLayer(contracts)
+				for _, layer := range layerOrder() {
+					entries, ok := byLayer[layer]
+					if !ok {
+						continue
+					}
+					fmt.Printf("### %s\n", layer)
+					for _, e := range entries {
+						printEntry(e, int(cmd.Int("width")))
+					}
+					fmt.Println()
+				}
+			}
+
 			// Active decisions grouped by layer
 			active := g.ActiveDecisions()
 			if len(active) > 0 {
@@ -78,7 +103,7 @@ func statusCmd() *cli.Command {
 					}
 					fmt.Printf("### %s\n", layer)
 					for _, e := range entries {
-						printEntry(e)
+						printEntry(e, int(cmd.Int("width")))
 					}
 					fmt.Println()
 				}
@@ -90,7 +115,7 @@ func statusCmd() *cli.Command {
 				fmt.Println("## Open Signals")
 				fmt.Println()
 				for _, e := range open {
-					printEntry(e)
+					printEntry(e, int(cmd.Int("width")))
 				}
 				fmt.Println()
 			}
@@ -101,7 +126,7 @@ func statusCmd() *cli.Command {
 				fmt.Println("## Recent Actions")
 				fmt.Println()
 				for _, e := range recent {
-					printEntry(e)
+					printEntry(e, int(cmd.Int("width")))
 				}
 				fmt.Println()
 			}
@@ -143,7 +168,7 @@ func showCmd() *cli.Command {
 						if j > 0 {
 							fmt.Println("---")
 						}
-						fmt.Printf("(shown above) %s  %s\n", e.ID, e.ShortContent(80))
+						fmt.Printf("(shown above) %s  %s\n", e.ID, e.ShortContent(int(cmd.Int("width"))))
 					} else {
 						if j > 0 {
 							fmt.Println("---")
@@ -174,6 +199,11 @@ func listCmd() *cli.Command {
 				Aliases: []string{"l"},
 				Usage:   "Filter by layer (stg, cpt, tac, ops, prc)",
 			},
+			&cli.StringFlag{
+				Name:    "kind",
+				Aliases: []string{"k"},
+				Usage:   "Filter decisions by kind (contract, directive)",
+			},
 			&cli.BoolFlag{
 				Name:  "all",
 				Usage: "Show all entries including addressed signals and superseded decisions",
@@ -203,14 +233,19 @@ func listCmd() *cli.Command {
 				}
 			}
 
+			var kind sdd.Kind
+			if k := cmd.String("kind"); k != "" {
+				kind = sdd.Kind(k)
+			}
+
 			var entries []*sdd.Entry
 			if cmd.Bool("all") {
 				entries = g.Filter(typ, layer)
 			} else {
-				entries = g.FilterOpen(typ, layer)
+				entries = g.FilterOpen(typ, layer, kind)
 			}
 			for _, e := range entries {
-				printEntry(e)
+				printEntry(e, int(cmd.Int("width")))
 			}
 
 			return nil
@@ -243,6 +278,10 @@ func newCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:  "confidence",
 				Usage: "Confidence level (high, medium, low)",
+			},
+			&cli.StringFlag{
+				Name:  "kind",
+				Usage: "Decision kind (contract, directive). Only applies to decisions.",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -309,6 +348,9 @@ func newCmd() *cli.Command {
 			if confidence := cmd.String("confidence"); confidence != "" {
 				entry.Confidence = confidence
 			}
+			if kind := cmd.String("kind"); kind != "" {
+				entry.Kind = sdd.Kind(kind)
+			}
 
 			// Write file
 			dir := cmd.String("graph-dir")
@@ -332,13 +374,13 @@ func newCmd() *cli.Command {
 	}
 }
 
-func printEntry(e *sdd.Entry) {
+func printEntry(e *sdd.Entry, width int) {
 	conf := ""
 	if e.Confidence != "" {
 		conf = fmt.Sprintf(" [%s]", e.Confidence)
 	}
 	fmt.Printf("  %s  %-8s %-12s%s  %s\n",
-		e.ID, e.TypeLabel(), e.LayerLabel(), conf, e.ShortContent(80))
+		e.ID, e.TypeLabel(), e.LayerLabel(), conf, e.ShortContent(width))
 }
 
 func printEntryFull(e *sdd.Entry) {
