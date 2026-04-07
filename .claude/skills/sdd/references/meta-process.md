@@ -4,8 +4,7 @@ Guidelines for how to work with the decision graph in a session.
 
 ## Starting a Session
 
-1. Build the CLI if needed: `cd framework && go build -o bin/sdd ./cmd/sdd/`
-2. Run `sdd status` to see the current graph state
+1. Run `sdd status` to see the current graph state (binary is pre-built at `framework/bin/sdd`)
 3. Based on the state, suggest what's next — don't wait for the user to figure it out
 
 ## Modes of Working

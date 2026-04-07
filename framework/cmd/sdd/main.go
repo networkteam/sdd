@@ -114,12 +114,12 @@ func statusCmd() *cli.Command {
 func showCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "show",
-		Usage:     "Show an entry with its reference chain",
-		ArgsUsage: "<id>",
+		Usage:     "Show entries with their reference chains",
+		ArgsUsage: "<id> [id2 id3 ...]",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			id := cmd.Args().First()
-			if id == "" {
-				return fmt.Errorf("usage: sdd show <id>")
+			ids := cmd.Args().Slice()
+			if len(ids) == 0 {
+				return fmt.Errorf("usage: sdd show <id> [id2 id3 ...]")
 			}
 
 			g, err := loadGraph(cmd)
@@ -127,16 +127,31 @@ func showCmd() *cli.Command {
 				return err
 			}
 
-			chain := g.RefChain(id)
-			if len(chain) == 0 {
-				return fmt.Errorf("entry not found: %s", id)
-			}
-
-			for i, e := range chain {
-				if i > 0 {
-					fmt.Println("---")
+			seen := make(map[string]bool)
+			for i, id := range ids {
+				chain := g.RefChain(id)
+				if len(chain) == 0 {
+					return fmt.Errorf("entry not found: %s", id)
 				}
-				printEntryFull(e)
+
+				if i > 0 {
+					fmt.Println()
+				}
+
+				for j, e := range chain {
+					if seen[e.ID] {
+						if j > 0 {
+							fmt.Println("---")
+						}
+						fmt.Printf("(shown above) %s  %s\n", e.ID, e.ShortContent(80))
+					} else {
+						if j > 0 {
+							fmt.Println("---")
+						}
+						printEntryFull(e)
+						seen[e.ID] = true
+					}
+				}
 			}
 
 			return nil
@@ -147,7 +162,7 @@ func showCmd() *cli.Command {
 func listCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "list",
-		Usage: "List entries with optional filters",
+		Usage: "List entries with optional filters (open/active only by default)",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "type",
@@ -158,6 +173,10 @@ func listCmd() *cli.Command {
 				Name:    "layer",
 				Aliases: []string{"l"},
 				Usage:   "Filter by layer (stg, cpt, tac, ops, prc)",
+			},
+			&cli.BoolFlag{
+				Name:  "all",
+				Usage: "Show all entries including addressed signals and superseded decisions",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -184,7 +203,12 @@ func listCmd() *cli.Command {
 				}
 			}
 
-			entries := g.Filter(typ, layer)
+			var entries []*sdd.Entry
+			if cmd.Bool("all") {
+				entries = g.Filter(typ, layer)
+			} else {
+				entries = g.FilterOpen(typ, layer)
+			}
 			for _, e := range entries {
 				printEntry(e)
 			}
@@ -206,7 +230,11 @@ func newCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:  "supersedes",
-				Usage: "Comma-separated list of decision IDs this supersedes",
+				Usage: "Comma-separated list of entry IDs this supersedes",
+			},
+			&cli.StringFlag{
+				Name:  "closes",
+				Usage: "Comma-separated list of entry IDs this closes/resolves",
 			},
 			&cli.StringFlag{
 				Name:  "participants",
@@ -271,6 +299,9 @@ func newCmd() *cli.Command {
 			}
 			if supersedes := cmd.String("supersedes"); supersedes != "" {
 				entry.Supersedes = strings.Split(supersedes, ",")
+			}
+			if closes := cmd.String("closes"); closes != "" {
+				entry.Closes = strings.Split(closes, ",")
 			}
 			if participants := cmd.String("participants"); participants != "" {
 				entry.Participants = strings.Split(participants, ",")

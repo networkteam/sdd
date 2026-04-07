@@ -64,6 +64,7 @@ type Entry struct {
 	Layer        Layer
 	Refs         []string
 	Supersedes   []string
+	Closes       []string
 	Participants []string
 	Confidence   string
 	Content      string
@@ -76,6 +77,7 @@ type frontmatter struct {
 	Layer        string   `yaml:"layer"`
 	Refs         []string `yaml:"refs,omitempty"`
 	Supersedes   []string `yaml:"supersedes,omitempty"`
+	Closes       []string `yaml:"closes,omitempty"`
 	Participants []string `yaml:"participants,omitempty"`
 	Confidence   string   `yaml:"confidence,omitempty"`
 }
@@ -84,9 +86,9 @@ type frontmatter struct {
 func ParseEntry(filename, content string) (*Entry, error) {
 	id := strings.TrimSuffix(filename, ".md")
 
-	t, err := ParseIDTime(id)
+	idParts, err := ParseID(id)
 	if err != nil {
-		return nil, fmt.Errorf("parsing time from %q: %w", id, err)
+		return nil, fmt.Errorf("parsing ID %q: %w", id, err)
 	}
 
 	fm, body, err := parseFrontmatter(content)
@@ -110,22 +112,51 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Layer:        layer,
 		Refs:         fm.Refs,
 		Supersedes:   fm.Supersedes,
+		Closes:       fm.Closes,
 		Participants: fm.Participants,
 		Confidence:   fm.Confidence,
 		Content:      strings.TrimSpace(body),
-		Time:         t,
+		Time:         idParts.Time,
 	}, nil
 }
 
-// ParseIDTime extracts the timestamp from a document ID.
-// ID format: {YYYYMMDD}-{HHmmss}-{type}-{layer}-{suffix}
-func ParseIDTime(id string) (time.Time, error) {
-	parts := strings.SplitN(id, "-", 3)
-	if len(parts) < 2 {
-		return time.Time{}, fmt.Errorf("invalid ID format: %q", id)
-	}
-	return time.Parse("20060102-150405", parts[0]+"-"+parts[1])
+// IDParts holds the parsed components of a document ID.
+type IDParts struct {
+	Timestamp string
+	Time      time.Time
+	TypeCode  string // abbreviation: "s", "d", "a"
+	LayerCode string // abbreviation: "stg", "cpt", "tac", "ops", "prc"
+	Suffix    string
 }
+
+// ParseID parses a document ID into its components.
+// ID format: {YYYYMMDD}-{HHmmss}-{type}-{layer}-{suffix}
+func ParseID(id string) (IDParts, error) {
+	dashes := []int{}
+	for i, c := range id {
+		if c == '-' {
+			dashes = append(dashes, i)
+		}
+	}
+	if len(dashes) < 4 {
+		return IDParts{}, fmt.Errorf("invalid ID format: %q (need at least 4 dashes)", id)
+	}
+
+	timestamp := id[:dashes[1]]
+	t, err := time.Parse("20060102-150405", timestamp)
+	if err != nil {
+		return IDParts{}, fmt.Errorf("parsing time from %q: %w", id, err)
+	}
+
+	return IDParts{
+		Timestamp: timestamp,
+		Time:      t,
+		TypeCode:  id[dashes[1]+1 : dashes[2]],
+		LayerCode: id[dashes[2]+1 : dashes[3]],
+		Suffix:    id[dashes[3]+1:],
+	}, nil
+}
+
 
 // parseFrontmatter splits content into YAML frontmatter and body.
 func parseFrontmatter(content string) (*frontmatter, string, error) {
@@ -158,6 +189,7 @@ func FormatFrontmatter(e *Entry) string {
 		Layer:        string(e.Layer),
 		Refs:         e.Refs,
 		Supersedes:   e.Supersedes,
+		Closes:       e.Closes,
 		Participants: e.Participants,
 		Confidence:   e.Confidence,
 	}

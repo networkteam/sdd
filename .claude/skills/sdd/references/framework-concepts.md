@@ -29,10 +29,15 @@ Every entry has a layer describing the depth of thinking:
 - Current state is reconstructed by traversing the graph, never maintained separately.
 - Each fact lives in exactly one place — no redundancy across layers.
 
-## Refs vs Supersedes
+## Reference Fields
 
-- `refs`: "builds on / depends on" — the entry uses these as context or foundation
-- `supersedes`: "replaces" — the referenced decision is no longer active
+Three fields with distinct semantics:
+
+- `refs`: "builds on / depends on" — context or foundation, **no status effect**
+- `supersedes`: "replaces" — the referenced entry is no longer active/open
+- `closes`: "resolves / fulfills" — the referenced entry is no longer active/open. Decisions close signals, actions close decisions and signals.
+
+**Open signal** = not superseded, not closed. **Active decision** = not superseded, not closed.
 
 ## Contracts
 
@@ -64,6 +69,6 @@ The `sdd` binary (built from `framework/cmd/sdd/`) provides:
 - `sdd status` — active decisions, open signals, recent actions
 - `sdd show <id>` — entry with full reference chain
 - `sdd list [--type d|s|a] [--layer stg|cpt|...]` — filtered listing
-- `sdd new <type> <layer> [--refs id1,id2] [--supersedes id] [--participants p1,p2] [--confidence high|medium|low] <description>` — create entries
+- `sdd new <type> <layer> [--refs id1,id2] [--supersedes id] [--closes id1,id2] [--participants p1,p2] [--confidence high|medium|low] <description>` — create entries
 
-Build: `cd framework && go build -o bin/sdd ./cmd/sdd/`
+The binary is pre-built at `framework/bin/sdd`.
