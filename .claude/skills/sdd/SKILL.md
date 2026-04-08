@@ -12,7 +12,7 @@ If you haven't read the framework reference files in this session, read them now
 - [Framework concepts](references/framework-concepts.md) — the loop, entry types, layers, immutability, refs vs supersedes
 - [Meta process](references/meta-process.md) — modes of working, capture guidelines, session protocol
 
-Then invoke the `/sdd-catchup` skill to get a synthesized summary of the current graph state. Present the catch-up to the user and suggest where to start.
+Then invoke the `/sdd-catchup` skill to get a synthesized summary of the current graph state. Present it using the Catch-up Playbook and suggest where to start.
 
 ## How you behave
 
@@ -71,7 +71,7 @@ When the user wants to capture something, construct the full `sdd new` command w
 
 You don't ask "which mode?" — you read the situation and act accordingly. These describe how you behave in different contexts:
 
-**Check-in**: User starts a session or says "where are we?" Invoke `/sdd-catchup` for a fresh summary. Present it and suggest where to start.
+**Check-in**: User starts a session or says "where are we?" Invoke `/sdd-catchup` for a fresh summary. Present it using the Catch-up Playbook below and suggest where to start.
 
 **Capture**: User shares an observation, insight, or finding. Dialogue first — play back what you'd capture, confirm, then record. Could be a signal (observation), decision (commitment), or action (something done).
 
@@ -90,6 +90,41 @@ You don't ask "which mode?" — you read the situation and act accordingly. Thes
 ### Proactive grooming suggestion
 
 When running catch-up or status, if you notice several older open entries (3+ entries older than a few days with no downstream activity), suggest grooming: "There are N older entries that might need grooming. Want to do a sweep?" Don't force it — just surface the option.
+
+## Catch-up Playbook
+
+The `/sdd-catchup` sub-skill returns structured blocks per item, grouped by thread, with full entry IDs and context. Present a skimmable summary for the user:
+
+### Formatting
+
+- **Keep the thread grouping and narratives** from the sub-skill. Lead with the most active/actionable thread.
+- **Number every item sequentially** (1, 2, 3...) across all threads. Sub-aspects of a single item get letters (1a, 1b). The user references items by number — "let's dig into 3" — so every item must have its own number.
+- **One item per number.** Never group multiple entries under one number (e.g. "3-5. Infrastructure signals" with a sub-list is wrong — each gets its own number).
+- **Include the entry ID suffix** after each item title in parentheses (e.g. `s-prc-qyi`). This gives the user a handle without cluttering the display. Keep full IDs in your context for CLI commands.
+- **Narrative, not dashboard.** Write like a colleague briefing, not a monitoring tool. No raw stats or dates unless meaningful.
+- **Keep it skimmable.** Bold thread names, short item descriptions. A busy person should get the picture in 10 seconds.
+
+### Example format
+
+```
+### Where things stand
+
+**[Thread name]** — [1-2 sentence narrative]
+
+1. [Item title] (`s-cpt-abc`) — [one sentence description]
+2. [Item title] (`d-prc-xyz`) — [one sentence description]
+   - 2a. [Sub-aspect]
+   - 2b. [Sub-aspect]
+
+**[Second thread]** — [narrative]
+
+3. [Item title] (`s-ops-def`) — [one sentence description]
+4. [Item title] (`s-prc-ghi`) — [one sentence description]
+
+**Parked / not urgent**
+
+5. [Item title] (`s-stg-jkl`) — [one sentence description]
+```
 
 ## Explore Playbook
 

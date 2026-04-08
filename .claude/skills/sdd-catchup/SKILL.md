@@ -37,34 +37,43 @@ The `sdd list` command also shows only open/active entries by default. Use `--al
 ./framework/bin/sdd list --type d        # active decisions only
 ```
 
-## Step 3 — Synthesize the catch-up
+## Step 3 — Produce the catch-up
 
-Produce a summary in this format. This is what the user will see:
+Your output is consumed by the outer SDD agent, not shown to the user directly. The outer agent formats it for presentation. Include full entry IDs and enough context that the outer agent can act on any item without additional lookups.
 
-```markdown
-### Where things stand
+Structure your output as one numbered block per open item, grouped by thread:
 
-**[Active thread name]** — [1-2 sentence narrative of where this thread is and what's driving it]
+```
+## Catch-up
 
-1. [Most actionable open item in this thread]
-   - 1a. [Sub-aspect or connected question]
-   - 1b. [Another sub-aspect]
-2. [Next open item]
+### [Thread name]
 
-**[Second thread or direction]** — [brief narrative]
+[1-2 sentence narrative of where this thread is and what's driving it]
 
-3. [Open item]
-4. [Open item]
+**1. [short title]** (ID: [full-entry-id])
+- Status: [open signal / active decision / contract] | Layer: [layer]
+- Description: [full entry description from the graph]
+- Context: [what's happened around this — downstream activity, related decisions, current state]
 
-**Parked / not urgent**
+**2. [short title]** (ID: [full-entry-id])
+- Status: ... | Layer: ...
+- Description: ...
+- Context: ...
 
-5. [Item that exists but isn't blocking anything]
-6. [Another low-priority item]
+### [Second thread]
 
-Where do you want to start?
+[narrative]
+
+**3. [short title]** (ID: [full-entry-id])
+...
+
+### Parked / not urgent
+
+**5. [short title]** (ID: [full-entry-id])
+...
 ```
 
-### Guidelines for good catch-ups
+### Guidelines
 
 **Group by project thread, not by entry type.** Don't list "decisions" then "signals" — group by what they're about. A thread is a coherent direction of work (e.g. "the skill system", "framework naming", "graph scaling").
 
@@ -72,12 +81,10 @@ Where do you want to start?
 
 **Prioritize by actionability.** What can the user actually do something about right now? That goes first. Things that are waiting, blocked, or exploratory go under "parked."
 
-**CRITICAL: Number everything.** Every open item MUST have a number (1, 2, 3...) and sub-aspects MUST have lettered sub-items (1a, 1b, 2a...). The user references items by number in conversation — "let's dig into 1b" — so unnumbered items are unusable. This is not optional formatting, it is a functional requirement.
+**One item per number.** Every open entry gets its own sequential number (1, 2, 3...). Sub-aspects of a single item get letters (1a, 1b). Never group multiple entries under one number.
 
-**No raw stats, no IDs, no dates** unless a date is actually meaningful (e.g. "parked 3 weeks ago — still relevant?"). The user doesn't need to know there are "19 entries" or that something is "20260406-232057-s-cpt-cvz."
+**Include full entry IDs.** The outer agent needs these to pass to `sdd-explore`, `sdd show`, and `sdd new` commands. Always use the full ID format (e.g. `20260407-214509-s-prc-qyi`).
 
-**Keep it skimmable.** Headings, bold thread names, bullet points. A busy person should get the picture in 10 seconds.
+**Include enough context per item.** The outer agent should be able to discuss any item, suggest exploring it, or propose a resolution based solely on what you provide — no extra lookups needed.
 
-**Narrative, not dashboard.** Write like a colleague who understands the project giving a brief, not a monitoring tool producing a report.
-
-**CRITICAL: Every open signal must appear.** Do not silently drop open signals. Prioritize by grouping and detail level — active threads get more narrative, parked items get a brief line — but nothing is omitted. If the status command shows it as open, it must be in the catch-up somewhere. This is a hard requirement.
+**Every open signal and active decision must appear.** Do not silently drop entries. Prioritize by grouping and detail level — active threads get more narrative, parked items get less — but nothing is omitted. If the status command shows it as open, it must be in the catch-up.
