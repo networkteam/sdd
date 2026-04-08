@@ -419,6 +419,12 @@ func printEntryFull(e *sdd.Entry) {
 	if len(e.Refs) > 0 {
 		fmt.Printf("Refs:   %s\n", strings.Join(e.Refs, ", "))
 	}
+	if len(e.Closes) > 0 {
+		fmt.Printf("Closes: %s\n", strings.Join(e.Closes, ", "))
+	}
+	if len(e.Supersedes) > 0 {
+		fmt.Printf("Supersedes: %s\n", strings.Join(e.Supersedes, ", "))
+	}
 	fmt.Printf("Time:   %s\n", e.Time.Format("2006-01-02 15:04:05"))
 	fmt.Println()
 	fmt.Println(e.Content)
