@@ -58,6 +58,7 @@ When the user wants to capture something, construct the full `sdd new` command w
 ### Get the entry right
 
 - **Right type**: Signal = observation, something noticed. Decision = commitment to direction. Action = something that was done.
+- **Before capturing an action**: Ensure the work it describes is committed to Git first. An action records a fact of execution — the code changes it references must be durable before the action entry is. Commit implementation changes, then capture the action.
 - **Right layer**: Strategic = why/direction. Conceptual = approach/shape. Tactical = structure/trade-offs. Operational = individual steps. Process = how we work.
 - **Refs matter**: Always link to the signals/decisions that led to this entry. Use `sdd show` and `sdd list` to find the right refs.
 - **Confidence is honest**: High = strong conviction. Medium = reasonable but unvalidated. Low = hypothesis/experiment.
@@ -111,6 +112,8 @@ These are patterns to recognize, not steps to follow. Read the situation and app
 **Tension between entries** — Two or more entries pull in different directions. Lay out the tension explicitly, explore both sides, and work toward a decision that resolves it.
 
 **Stale entry** — Old entry with no downstream activity. Is it still relevant? Has the context changed? Either close it or revive it with fresh context.
+
+**Signal resolved through dialogue, no implementation needed** — The discussion itself was the work. Don't create a phantom decision that will sit "active" with no action to close it. Capture an action that directly closes the signal, summarizing the conclusion and reasoning.
 
 **Enough decisions exist, ready to build** — The exploration reveals that sufficient decisions are in place for a scope of work. Surface this: "We have enough to start building. Here's the scope: [decisions]. Want to transition to implementation?"
 
