@@ -43,10 +43,10 @@ Look for these patterns:
 A downstream action or decision references this entry via `refs` and appears to resolve it, but doesn't use `closes`. Evidence: the downstream entry's content describes completing or addressing the concern.
 
 ### Pattern B: Superseded in practice
-A newer entry covers the same ground — the older entry is effectively superseded but no `supersedes` link exists.
+A newer entry covers the same ground — the older entry is effectively superseded but no `supersedes` link exists. To detect this: compare each older open entry against newer entries at the same or adjacent layers. If a newer signal or decision addresses the same concern with more specificity, updated context, or a different framing, the older one is a supersession candidate. Flag both entries so the user can confirm the relationship.
 
 ### Pattern C: Stale entry
-No downstream activity at all, and the entry is older than a few days. May still be relevant, but worth asking.
+No downstream activity at all, and the entry is older than a few days. May still be relevant, but worth asking. For each stale candidate, note the age and briefly assess whether the concern it describes still applies given the current graph state — has the context shifted? Have related decisions changed the landscape?
 
 ## Step 4 — Check Git for unrecorded work
 

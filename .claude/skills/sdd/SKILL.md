@@ -141,9 +141,12 @@ For each candidate, based on its pattern:
 
 **Pattern A (missing `closes`)** — The work is done, just the link is missing. Show the evidence (the downstream entry that resolved it) and propose a closure action: "Action X already resolved this. I'd capture an action with `--closes [id]` to record it. Sound right?" Then execute.
 
-**Pattern B (superseded in practice)** — A newer entry covers the same ground. Propose a new decision or action with `--supersedes [id]` or `--closes [id]`. Confirm with the user.
+**Pattern B (superseded in practice)** — A newer entry covers the same ground but without an explicit `supersedes` link. Show both entries side by side and ask: "This newer entry seems to cover the same concern. Is the older one superseded?" If yes, capture a new decision or signal with `--supersedes [old-id]` to formalize the relationship. If the entries are complementary rather than redundant, note that and move on.
 
-**Pattern C (stale, no activity)** — No evidence of resolution. Ask the user: "This has been open since [date] with no activity. Is it still relevant, or can we close it?" If closing, capture an action that closes the signal with a brief note on why it's no longer needed.
+**Pattern C (stale, no activity)** — No evidence of resolution. Brief the user on the entry and the current context: "This has been open since [date] with no activity. Given [current state / related decisions since then], is this still relevant?" Three outcomes:
+- **Still relevant**: Leave it open. Optionally capture a fresh signal that updates the context or re-frames the concern.
+- **No longer relevant**: Capture an action with `--closes [id]` noting why — context changed, concern was absorbed by another direction, no longer applies.
+- **Partially relevant**: The original framing is stale but the underlying concern persists. Capture a new signal that re-frames it, then close the old one with `--closes`.
 
 **Pattern C with Git evidence** — The sub-skill found commits that look related. Show the commit(s) and ask: "This commit looks like it addresses this entry. Want to capture an action for it?" If yes, capture the action with `--closes [id]`.
 
