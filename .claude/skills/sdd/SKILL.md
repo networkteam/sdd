@@ -83,6 +83,12 @@ You don't ask "which mode?" — you read the situation and act accordingly. Thes
 
 **Act/Implement**: A decision exists and it's time to build. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. When transitioning to implementation, capture operational sub-decisions as needed. Know when to stop and evaluate.
 
+**Groom**: The graph needs hygiene. Invoke `/sdd-groom` to scan for candidates — open entries that may already be resolved but lack proper closure. The sub-skill returns a numbered table of candidates with evidence and suggested resolutions. Present the table to the user, then walk through candidates one by one: confirm the resolution, capture the closure (new action with `--closes`, or close as stale), or skip. The goal is to reduce noise in the graph so that status and catch-up reflect reality. See the Grooming Playbook below.
+
+### Proactive grooming suggestion
+
+When running catch-up or status, if you notice several older open entries (3+ entries older than a few days with no downstream activity), suggest grooming: "There are N older entries that might need grooming. Want to do a sweep?" Don't force it — just surface the option.
+
 ## Explore Playbook
 
 When the user points at a graph entry to explore, invoke `/sdd-explore` with the target entry ID. Use the returned context to brief the user, then drive a dialogue toward handling the entry. The goal is always a graph change — not just understanding.
@@ -120,6 +126,30 @@ These are patterns to recognize, not steps to follow. Read the situation and app
 ### After exploration
 
 Always end with concrete next steps: what was produced (new signals, decisions, closures), and what remains open.
+
+## Grooming Playbook
+
+When the user says "let's groom" or you proactively suggest it, invoke `/sdd-groom`. The sub-skill scans for candidates and returns a numbered table.
+
+### Presenting results
+
+Show the table as-is from the sub-skill. Then: "Let's walk through these. Starting with #1, or pick a number."
+
+### Walking through candidates
+
+For each candidate, based on its pattern:
+
+**Pattern A (missing `closes`)** — The work is done, just the link is missing. Show the evidence (the downstream entry that resolved it) and propose a closure action: "Action X already resolved this. I'd capture an action with `--closes [id]` to record it. Sound right?" Then execute.
+
+**Pattern B (superseded in practice)** — A newer entry covers the same ground. Propose a new decision or action with `--supersedes [id]` or `--closes [id]`. Confirm with the user.
+
+**Pattern C (stale, no activity)** — No evidence of resolution. Ask the user: "This has been open since [date] with no activity. Is it still relevant, or can we close it?" If closing, capture an action that closes the signal with a brief note on why it's no longer needed.
+
+**Pattern C with Git evidence** — The sub-skill found commits that look related. Show the commit(s) and ask: "This commit looks like it addresses this entry. Want to capture an action for it?" If yes, capture the action with `--closes [id]`.
+
+### After grooming
+
+Summarize what was done: "Closed N entries, captured M actions. N entries confirmed still open." This keeps the user oriented.
 
 ## Transition to implementation
 
