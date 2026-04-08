@@ -70,22 +70,19 @@ This catches the "reality-graph gap" — work done in code but never recorded as
 
 ## Step 5 — Return the grooming report
 
-Structure your output as a numbered list. Each candidate gets:
+Structure your output as one numbered block per candidate. No summary table — the outer skill formats for presentation. Each block should include enough evidence that the outer skill can discuss any candidate without additional lookups.
 
 ```
 ## Grooming candidates
 
-| # | Entry | Layer | Age | Pattern | Suggested resolution |
-|---|-------|-------|-----|---------|---------------------|
-| 1 | [short description] | [layer] | [days old] | [A/B/C] | [what to do] |
-| 2 | ... | ... | ... | ... | ... |
-
-### Details
-
 **1. [short description]** (ID: [full-id])
+- Layer: [layer] | Age: [days old] | Pattern: [A/B/C]
 - Status: [open signal / active decision]
-- Evidence: [what downstream entry or Git commit suggests resolution]
-- Suggested resolution: [e.g. "Add closes field to action X" / "Capture action for commit abc123" / "Close as stale — superseded by decision Y" / "Ask: is this still relevant?"]
+- Evidence: [summarizing note — a short explanation of why this candidate is flagged, written for a human to understand the situation at a glance]
+  - [For Pattern A/B: full description text of each downstream entry that suggests resolution, prefixed with its ID]
+  - [For Pattern C with Git evidence: commit hash + full commit message + file stats]
+  - [For Pattern C without evidence: note that no downstream activity or relevant commits were found]
+- Suggested resolution: [e.g. "Capture action with --closes [id]" / "Capture action for commit abc123 with --closes [id]" / "Close as stale" / "Ask: is this still relevant?"]
 
 **2. ...**
 ```
@@ -93,7 +90,7 @@ Structure your output as a numbered list. Each candidate gets:
 ### Guidelines
 
 - **Order by confidence.** Candidates with strong evidence (Pattern A — clear downstream resolution) first. Stale entries with no evidence last.
-- **Include the evidence.** Don't just say "might be resolved" — show the downstream entry ID or commit hash that supports it.
+- **Include rich evidence.** Don't just say "might be resolved" — include the full description text of downstream entries and full commit messages. The outer skill needs this in context to discuss candidates with the user without additional lookups.
 - **Suggest specific commands when possible.** If the resolution is "add closes field," note that the outer skill will need to capture a new action with `--closes`. If it's "capture missing action," sketch what the action description should say.
 - **Don't over-flag.** An entry that's 1 day old with no downstream activity is not stale — it's just new. Use judgment. Entries from the current day are never stale candidates.
 - **Include entries with no resolution too.** If an open entry has no downstream activity and no Git evidence, still list it as Pattern C with "Ask: is this still relevant?" The user decides.

@@ -131,11 +131,13 @@ Always end with concrete next steps: what was produced (new signals, decisions, 
 
 ## Grooming Playbook
 
-When the user says "let's groom" or you proactively suggest it, invoke `/sdd-groom`. The sub-skill scans for candidates and returns a numbered table.
+When the user says "let's groom" or you proactively suggest it, invoke `/sdd-groom`. The sub-skill returns one structured block per candidate with rich evidence (downstream entry descriptions, commit messages).
 
 ### Presenting results
 
-Show the table as-is from the sub-skill. Then: "Let's walk through these. Starting with #1, or pick a number."
+Build a summary table from the sub-skill's structured data with these columns: #, Entry, Layer, Age, Pattern, Evidence (a short summarizing note), Suggested resolution. The table is the scanning surface — it should be enough for the user to make quick calls on straightforward candidates. When mentioning entry IDs in the evidence column or in dialogue, always follow each ID with a short title in quotes (e.g. `d-cpt-axa` "evaluate explore mode"). The full evidence from the sub-skill stays in your context so you can answer follow-up questions about any candidate without additional lookups.
+
+Then: "Let's walk through these. Starting with #1, or pick a number."
 
 ### Walking through candidates
 
