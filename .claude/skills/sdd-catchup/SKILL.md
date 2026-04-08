@@ -2,6 +2,7 @@
 name: sdd-catchup
 description: Synthesize a prioritized catch-up summary of the SDD decision graph state. Returns a narrative briefing grouped by project thread.
 context: fork
+model: sonnet
 user-invocable: false
 allowed-tools: Bash Read Grep Glob
 ---

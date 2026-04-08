@@ -519,6 +519,92 @@ func TestShortContent(t *testing.T) {
 	}
 }
 
+func TestDownstream(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+		entry("20260406-100100-d-stg-bbb", withRefs("20260406-100000-s-stg-aaa")),
+		entry("20260406-100200-a-tac-ccc", withRefs("20260406-100100-d-stg-bbb"), withCloses("20260406-100100-d-stg-bbb")),
+		entry("20260406-100300-d-tac-ddd"), // unrelated
+	})
+
+	downstream := g.Downstream("20260406-100000-s-stg-aaa")
+	ids := entryIDs(downstream)
+	if len(downstream) != 1 {
+		t.Fatalf("Downstream(aaa) = %v (len %d), want 1", ids, len(downstream))
+	}
+	assertContains(t, ids, "20260406-100100-d-stg-bbb", "decision referencing signal")
+
+	downstream = g.Downstream("20260406-100100-d-stg-bbb")
+	ids = entryIDs(downstream)
+	if len(downstream) != 1 {
+		t.Fatalf("Downstream(bbb) = %v (len %d), want 1", ids, len(downstream))
+	}
+	assertContains(t, ids, "20260406-100200-a-tac-ccc", "action referencing+closing decision")
+}
+
+func TestDownstreamSupersedes(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-tac-aaa"),
+		entry("20260406-100100-d-tac-bbb", withSupersedes("20260406-100000-d-tac-aaa")),
+	})
+
+	downstream := g.Downstream("20260406-100000-d-tac-aaa")
+	ids := entryIDs(downstream)
+	if len(downstream) != 1 {
+		t.Fatalf("Downstream(aaa) = %v (len %d), want 1", ids, len(downstream))
+	}
+	assertContains(t, ids, "20260406-100100-d-tac-bbb", "superseding decision")
+}
+
+func TestDownstreamDeduplicates(t *testing.T) {
+	// Entry both refs and closes the same target — should appear once
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-tac-aaa"),
+		entry("20260406-100100-d-tac-bbb", withRefs("20260406-100000-s-tac-aaa"), withCloses("20260406-100000-s-tac-aaa")),
+	})
+
+	downstream := g.Downstream("20260406-100000-s-tac-aaa")
+	if len(downstream) != 1 {
+		t.Fatalf("Downstream(aaa) = %d, want 1 (deduplicated)", len(downstream))
+	}
+}
+
+func TestDownstreamEmpty(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-tac-aaa"),
+	})
+
+	downstream := g.Downstream("20260406-100000-s-tac-aaa")
+	if len(downstream) != 0 {
+		t.Errorf("Downstream(leaf) = %d, want 0", len(downstream))
+	}
+
+	downstream = g.Downstream("nonexistent")
+	if len(downstream) != 0 {
+		t.Errorf("Downstream(nonexistent) = %d, want 0", len(downstream))
+	}
+}
+
+func TestDownstreamSortedByTime(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+		entry("20260406-100300-d-tac-ddd", withRefs("20260406-100000-s-stg-aaa")),
+		entry("20260406-100100-s-cpt-bbb", withRefs("20260406-100000-s-stg-aaa")),
+		entry("20260406-100200-d-stg-ccc", withRefs("20260406-100000-s-stg-aaa")),
+	})
+
+	downstream := g.Downstream("20260406-100000-s-stg-aaa")
+	if len(downstream) != 3 {
+		t.Fatalf("Downstream = %d, want 3", len(downstream))
+	}
+	if downstream[0].ID != "20260406-100100-s-cpt-bbb" {
+		t.Errorf("First = %q, want bbb (earliest)", downstream[0].ID)
+	}
+	if downstream[2].ID != "20260406-100300-d-tac-ddd" {
+		t.Errorf("Last = %q, want ddd (latest)", downstream[2].ID)
+	}
+}
+
 // --- test helpers ---
 
 func entryIDs(entries []*Entry) []string {

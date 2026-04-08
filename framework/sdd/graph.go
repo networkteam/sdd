@@ -241,6 +241,48 @@ func (g *Graph) supersededSet() map[string]bool {
 	return set
 }
 
+// Downstream returns entries that reference, close, or supersede the given ID.
+// Results are sorted by time (oldest first).
+func (g *Graph) Downstream(id string) []*Entry {
+	seen := make(map[string]bool)
+	var result []*Entry
+
+	add := func(eid string) {
+		if seen[eid] {
+			return
+		}
+		if e, ok := g.ByID[eid]; ok {
+			seen[eid] = true
+			result = append(result, e)
+		}
+	}
+
+	// Entries that reference this ID
+	for _, eid := range g.RefsTo[id] {
+		add(eid)
+	}
+
+	// Entries that close this ID
+	for _, eid := range g.ClosedBy[id] {
+		add(eid)
+	}
+
+	// Entries that supersede this ID
+	for _, e := range g.Entries {
+		for _, s := range e.Supersedes {
+			if s == id {
+				add(e.ID)
+			}
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Time.Before(result[j].Time)
+	})
+
+	return result
+}
+
 // GraphDir returns the directory the graph was loaded from.
 func (g *Graph) GraphDir() string {
 	return g.graphDir

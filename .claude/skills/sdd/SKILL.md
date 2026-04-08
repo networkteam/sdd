@@ -50,6 +50,7 @@ All graph operations go through the `sdd` CLI binary at `./framework/bin/sdd`. R
 - `sdd show <id>` — full entry with reference chain
 - `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc]` — filtered listing
 - `sdd new <type> <layer> [--refs id1,id2] [--supersedes id] [--closes id1,id2] [--participants p1,p2] [--confidence high|medium|low] [--kind contract|directive] <description>` — create entries
+- `sdd show <id> --downstream` — entries that reference, close, or supersede the target
 - `sdd list --kind contract` — list active contracts
 
 When the user wants to capture something, construct the full `sdd new` command with the correct refs, layer, type, participants, and confidence. Don't ask the user to figure out IDs or flags — that's your job. Show them the proposed entry content and get confirmation, then execute.
@@ -73,11 +74,49 @@ You don't ask "which mode?" — you read the situation and act accordingly. Thes
 
 **Evaluate**: An action was completed. Help the user assess: did it meet the intent of the decision it references? What gaps remain? Capture evaluation findings as signals.
 
+**Explore**: User points at something in the graph that needs attention — "dig into #3", a specific entry ID, or a topic. Invoke the `/sdd-explore` skill with the target entry ID. Use its output (full upstream chain, downstream refs, related entries, status) to brief the user and drive a working dialogue. The goal is to **handle** the entry — work through it until the next graph move is clear. See the Explore Playbook below.
+
 **Reflect/Dialogue**: Open exploration around a signal, decision, or question. Be a thinking partner. Synthesize, challenge, connect dots. Don't rush to capture — let the thinking develop. Capture when something crystallizes.
 
 **Decide**: Open signals or tensions need resolution. Summarize the relevant signals, lay out options with trade-offs, help the user choose. Capture the decision with appropriate confidence and refs.
 
 **Act/Implement**: A decision exists and it's time to build. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. When transitioning to implementation, capture operational sub-decisions as needed. Know when to stop and evaluate.
+
+## Explore Playbook
+
+When the user points at a graph entry to explore, invoke `/sdd-explore` with the target entry ID. Use the returned context to brief the user, then drive a dialogue toward handling the entry. The goal is always a graph change — not just understanding.
+
+### Briefing
+
+Present the entry in context:
+- What is this entry about? (one paragraph synthesis from the full chain)
+- What's its status? (open signal, active decision, closed, stale?)
+- What's happened since? (downstream entries, if any)
+- What's related? (entries the sub-skill flagged as connected)
+
+Then ask the orienting question: **"What does this need?"**
+
+### Playbook moves
+
+These are patterns to recognize, not steps to follow. Read the situation and apply the right one:
+
+**Open signal, no decisions addressing it** — Is this still relevant? If yes, what would a decision look like? Explore the signal's implications, challenge assumptions, and work toward a decision or close it as no longer relevant.
+
+**Active decision, no actions yet** — What would it take to close this? Does the decision need decomposition into sub-decisions first, or is it actionable as-is? Work toward defining the concrete action (or actions) that would fulfill it.
+
+**Active decision, needs decomposition** — The decision is too broad to act on directly. Help the user break it into sub-decisions at a lower layer. Each sub-decision should be independently actionable.
+
+**Active decision, partial progress** — Some downstream actions exist but the decision isn't closed. What's left? Are the remaining parts still needed? Work toward completing or adjusting scope.
+
+**Tension between entries** — Two or more entries pull in different directions. Lay out the tension explicitly, explore both sides, and work toward a decision that resolves it.
+
+**Stale entry** — Old entry with no downstream activity. Is it still relevant? Has the context changed? Either close it or revive it with fresh context.
+
+**Enough decisions exist, ready to build** — The exploration reveals that sufficient decisions are in place for a scope of work. Surface this: "We have enough to start building. Here's the scope: [decisions]. Want to transition to implementation?"
+
+### After exploration
+
+Always end with concrete next steps: what was produced (new signals, decisions, closures), and what remains open.
 
 ## Transition to implementation
 

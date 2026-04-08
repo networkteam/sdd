@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -141,6 +142,12 @@ func showCmd() *cli.Command {
 		Name:      "show",
 		Usage:     "Show entries with their reference chains",
 		ArgsUsage: "<id> [id2 id3 ...]",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "downstream",
+				Usage: "Show entries that reference, close, or supersede the target (instead of upstream chain)",
+			},
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ids := cmd.Args().Slice()
 			if len(ids) == 0 {
@@ -152,18 +159,29 @@ func showCmd() *cli.Command {
 				return err
 			}
 
+			downstream := cmd.Bool("downstream")
+
 			seen := make(map[string]bool)
 			for i, id := range ids {
-				chain := g.RefChain(id)
-				if len(chain) == 0 {
-					return fmt.Errorf("entry not found: %s", id)
+				var entries []*sdd.Entry
+				if downstream {
+					// Check the target exists
+					if _, ok := g.ByID[id]; !ok {
+						return fmt.Errorf("entry not found: %s", id)
+					}
+					entries = g.Downstream(id)
+				} else {
+					entries = g.RefChain(id)
+					if len(entries) == 0 {
+						return fmt.Errorf("entry not found: %s", id)
+					}
 				}
 
 				if i > 0 {
 					fmt.Println()
 				}
 
-				for j, e := range chain {
+				for j, e := range entries {
 					if seen[e.ID] {
 						if j > 0 {
 							fmt.Println("---")
@@ -369,6 +387,11 @@ func newCmd() *cli.Command {
 			fmt.Println(filename)
 			fmt.Printf("  → %s\n", filePath)
 
+			// Auto-commit the new entry
+			if err := gitCommit(filePath, fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72))); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: git commit failed: %v\n", err)
+			}
+
 			return nil
 		},
 	}
@@ -418,6 +441,20 @@ func layerOrder() []sdd.Layer {
 		sdd.LayerOperational,
 		sdd.LayerProcess,
 	}
+}
+
+func gitCommit(filePath, message string) error {
+	add := exec.Command("git", "add", filePath)
+	if out, err := add.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %s (%w)", out, err)
+	}
+
+	commit := exec.Command("git", "commit", "-m", message)
+	if out, err := commit.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %s (%w)", out, err)
+	}
+
+	return nil
 }
 
 func randomSuffix(n int) (string, error) {
