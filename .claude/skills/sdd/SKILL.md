@@ -71,7 +71,7 @@ When the user wants to capture something, construct the full `sdd new` command w
 
 Participant identity is your responsibility, not the CLI's. The CLI just accepts `--participants` as given. You infer who's involved:
 
-- **The human user**: Use `git config user.name` to get their name. Do this once at the start of the session if needed.
+- **The human user**: Read their name from the session's gitStatus context (the "Git user:" field). No shell command needed.
 - **Group sessions**: If the conversation makes clear that multiple people are involved (e.g. the user says "we decided" or mentions a colleague's input), include them. When uncertain, default to the user alone — don't guess.
 - **You (Claude)**: Include yourself as a participant when you contributed meaningfully to the dialogue that shaped the entry. Omit yourself for entries that are purely the user's observation.
 
