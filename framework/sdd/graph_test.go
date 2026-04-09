@@ -116,6 +116,73 @@ Current practices produce overhead.`
 	}
 }
 
+func TestResolveAttachmentLinks(t *testing.T) {
+	tests := []struct {
+		content string
+		id      string
+		want    string
+	}{
+		{
+			"See [notes]({{attachments}}/design.md) for details.",
+			"20260409-110000-d-tac-abc",
+			"See [notes](./09-110000-d-tac-abc/design.md) for details.",
+		},
+		{
+			"Two links: [a]({{attachments}}/a.md) and [b]({{attachments}}/b.png).",
+			"20260409-110000-d-tac-abc",
+			"Two links: [a](./09-110000-d-tac-abc/a.md) and [b](./09-110000-d-tac-abc/b.png).",
+		},
+		{
+			"No placeholders here.",
+			"20260409-110000-d-tac-abc",
+			"No placeholders here.",
+		},
+	}
+
+	for _, tt := range tests {
+		got := ResolveAttachmentLinks(tt.content, tt.id)
+		if got != tt.want {
+			t.Errorf("ResolveAttachmentLinks(%q, %q) = %q, want %q", tt.content, tt.id, got, tt.want)
+		}
+	}
+}
+
+func TestLoadGraphWithAttachments(t *testing.T) {
+	dir := t.TempDir()
+
+	writeGraphEntry(t, dir, "20260406-115516-s-stg-beh", `---
+type: signal
+layer: strategic
+---
+
+See [design](./06-115516-s-stg-beh/design.md) for details.`)
+
+	// Create attachment directory and file
+	attachDir := filepath.Join(dir, "2026", "04", "06-115516-s-stg-beh")
+	if err := os.MkdirAll(attachDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(attachDir, "design.md"), []byte("# Design"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := LoadGraph(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(g.Entries) != 1 {
+		t.Fatalf("Entries = %d, want 1", len(g.Entries))
+	}
+	e := g.Entries[0]
+	if len(e.Attachments) != 1 {
+		t.Fatalf("Attachments = %v, want [design.md]", e.Attachments)
+	}
+	if e.Attachments[0] != "design.md" {
+		t.Errorf("Attachments[0] = %q, want %q", e.Attachments[0], "design.md")
+	}
+}
+
 func TestIDToRelPath(t *testing.T) {
 	tests := []struct {
 		id      string

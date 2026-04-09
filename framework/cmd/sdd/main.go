@@ -301,6 +301,10 @@ func newCmd() *cli.Command {
 				Name:  "kind",
 				Usage: "Decision kind (contract, directive). Only applies to decisions.",
 			},
+			&cli.StringFlag{
+				Name:  "attach",
+				Usage: "Comma-separated list of file paths to attach",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			args := cmd.Args()
@@ -393,7 +397,21 @@ func newCmd() *cli.Command {
 				}
 			}
 
-			// Write file
+			// Parse attachment paths
+			var attachPaths []string
+			if attach := cmd.String("attach"); attach != "" {
+				attachPaths = strings.Split(attach, ",")
+				for _, p := range attachPaths {
+					if _, err := os.Stat(p); err != nil {
+						return fmt.Errorf("attachment file not found: %s", p)
+					}
+				}
+			}
+
+			// Resolve {{attachments}} placeholders in description
+			entry.Content = sdd.ResolveAttachmentLinks(entry.Content, id)
+
+			// Write entry file
 			relPath, err := sdd.IDToRelPath(id)
 			if err != nil {
 				return fmt.Errorf("computing path for %s: %w", id, err)
@@ -409,11 +427,37 @@ func newCmd() *cli.Command {
 				return fmt.Errorf("writing %s: %w", filePath, err)
 			}
 
+			commitPaths := []string{filePath}
+
+			// Copy attachments
+			if len(attachPaths) > 0 {
+				attachDirRel, err := sdd.AttachDirRelPath(id)
+				if err != nil {
+					return fmt.Errorf("computing attachment dir for %s: %w", id, err)
+				}
+				attachDir := filepath.Join(dir, attachDirRel)
+				if err := os.MkdirAll(attachDir, 0755); err != nil {
+					return fmt.Errorf("creating attachment directory: %w", err)
+				}
+
+				for _, src := range attachPaths {
+					data, err := os.ReadFile(src)
+					if err != nil {
+						return fmt.Errorf("reading attachment %s: %w", src, err)
+					}
+					dst := filepath.Join(attachDir, filepath.Base(src))
+					if err := os.WriteFile(dst, data, 0644); err != nil {
+						return fmt.Errorf("writing attachment %s: %w", dst, err)
+					}
+					commitPaths = append(commitPaths, dst)
+				}
+			}
+
 			fmt.Println(id + ".md")
 			fmt.Printf("  → %s\n", filePath)
 
-			// Auto-commit the new entry
-			if err := gitCommit(filePath, fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72))); err != nil {
+			// Auto-commit the new entry (with attachments if any)
+			if err := gitCommit(fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72)), commitPaths...); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: git commit failed: %v\n", err)
 			}
 
@@ -450,6 +494,9 @@ func printEntryFull(e *sdd.Entry) {
 	if len(e.Supersedes) > 0 {
 		fmt.Printf("Supersedes: %s\n", strings.Join(e.Supersedes, ", "))
 	}
+	if len(e.Attachments) > 0 {
+		fmt.Printf("Attach: %s\n", strings.Join(e.Attachments, ", "))
+	}
 	fmt.Printf("Time:   %s\n", e.Time.Format("2006-01-02 15:04:05"))
 	fmt.Println()
 	fmt.Println(e.Content)
@@ -474,8 +521,9 @@ func layerOrder() []sdd.Layer {
 	}
 }
 
-func gitCommit(filePath, message string) error {
-	add := exec.Command("git", "add", filePath)
+func gitCommit(message string, filePaths ...string) error {
+	args := append([]string{"add"}, filePaths...)
+	add := exec.Command("git", args...)
 	if out, err := add.CombinedOutput(); err != nil {
 		return fmt.Errorf("git add: %s (%w)", out, err)
 	}

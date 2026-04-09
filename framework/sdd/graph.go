@@ -89,6 +89,24 @@ func LoadGraph(dir string) (*Graph, error) {
 		return nil, fmt.Errorf("walking graph dir: %w", err)
 	}
 
+	// Scan for attachment directories
+	for _, e := range entries {
+		attachRel, err := AttachDirRelPath(e.ID)
+		if err != nil {
+			continue
+		}
+		attachDir := filepath.Join(dir, attachRel)
+		files, err := os.ReadDir(attachDir)
+		if err != nil {
+			continue // no attachment directory
+		}
+		for _, f := range files {
+			if !f.IsDir() {
+				e.Attachments = append(e.Attachments, f.Name())
+			}
+		}
+	}
+
 	g := NewGraph(entries)
 	g.graphDir = dir
 	return g, nil

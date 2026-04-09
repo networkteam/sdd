@@ -79,6 +79,7 @@ type Entry struct {
 	Confidence   string
 	Content      string
 	Time         time.Time
+	Attachments  []string // filenames discovered from the co-located attachment directory
 }
 
 // IsContract returns true if this decision is a standing constraint.
@@ -198,6 +199,28 @@ func RelPathToID(rel string) (string, error) {
 	mm := parts[1]
 	filename := strings.TrimSuffix(parts[2], ".md")
 	return yyyy + mm + filename, nil
+}
+
+// AttachDirRelPath returns the relative path to the attachment directory for an entry ID.
+// This is the entry's file path without the .md extension.
+func AttachDirRelPath(id string) (string, error) {
+	rel, err := IDToRelPath(id)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(rel, ".md"), nil
+}
+
+// ResolveAttachmentLinks replaces {{attachments}} placeholders in content with the
+// actual relative directory path for markdown links.
+func ResolveAttachmentLinks(content, id string) string {
+	if len(id) < 8 {
+		return content
+	}
+	// The short filename (without YYYYMM prefix and .md) serves as the directory name
+	// relative to the entry file in the same directory.
+	shortName := id[6:] // DD-HHmmss-type-layer-suffix
+	return strings.ReplaceAll(content, "{{attachments}}", "./"+shortName)
 }
 
 // parseFrontmatter splits content into YAML frontmatter and body.
