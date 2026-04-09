@@ -494,8 +494,8 @@ func printEntryFull(e *sdd.Entry) {
 	if len(e.Supersedes) > 0 {
 		fmt.Printf("Supersedes: %s\n", strings.Join(e.Supersedes, ", "))
 	}
-	if len(e.Attachments) > 0 {
-		fmt.Printf("Attach: %s\n", strings.Join(e.Attachments, ", "))
+	for _, a := range e.Attachments {
+		fmt.Printf("Attachment: %s\n", a)
 	}
 	fmt.Printf("Time:   %s\n", e.Time.Format("2006-01-02 15:04:05"))
 	fmt.Println()
