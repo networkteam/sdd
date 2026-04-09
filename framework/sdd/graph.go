@@ -57,6 +57,9 @@ func LoadGraph(dir string) (*Graph, error) {
 		if err != nil {
 			return err
 		}
+		if IsWIPDir(d) {
+			return fs.SkipDir
+		}
 		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
 			return nil
 		}

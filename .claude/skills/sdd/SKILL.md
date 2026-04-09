@@ -83,7 +83,7 @@ You don't ask "which mode?" — you read the situation and act accordingly. Thes
 
 **Decide**: Open signals or tensions need resolution. Summarize the relevant signals, lay out options with trade-offs, help the user choose. Capture the decision with appropriate confidence and refs.
 
-**Act/Implement**: A decision exists and it's time to build. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. When transitioning to implementation, capture operational sub-decisions as needed. Know when to stop and evaluate.
+**Act/Implement**: A decision exists and it's time to build. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. When transitioning to implementation, create an exclusive WIP marker (`sdd wip start <entry-id> --exclusive --participant <name> <description>`). Capture operational sub-decisions as needed. When implementation is complete, remove the marker (`sdd wip done <marker-id>`). If implementation is paused (e.g. a missing decision is discovered), leave the marker active — it signals work is in flight. Know when to stop and evaluate.
 
 **Groom**: The graph needs hygiene. Invoke `/sdd-groom` to scan for candidates — open entries that may already be resolved but lack proper closure. The sub-skill returns a numbered table of candidates with evidence and suggested resolutions. Present the table to the user, then walk through candidates one by one: confirm the resolution, capture the closure (new action with `--closes`, or close as stale), or skip. The goal is to reduce noise in the graph so that status and catch-up reflect reality. See the Grooming Playbook below.
 
@@ -189,6 +189,8 @@ For each candidate, based on its pattern:
 
 **Pattern C with Git evidence** — The sub-skill found commits that look related. Show the commit(s) and ask: "This commit looks like it addresses this entry. Want to capture an action for it?" If yes, capture the action with `--closes [id]`.
 
+**Pattern D (stale WIP marker)** — A WIP marker is still active but the work appears done, abandoned, or paused. Show the marker details and ask: "This marker has been active since [date]. Is the work still in progress?" If done, run `sdd wip done <marker-id>`. If the work was completed, also check whether the referenced entry needs a closing action.
+
 ### After grooming
 
 Summarize what was done: "Closed N entries, captured M actions. N entries confirmed still open." This keeps the user oriented.
@@ -200,5 +202,8 @@ When the conversation reaches "let's build this":
 1. Check: are there enough decisions to scope the work?
 2. If gaps exist, surface them: "Before building, we should decide X"
 3. If scope is clear, capture any needed operational sub-decisions
-4. Implementation happens in the same session — the meta-process stays active
-5. After implementation, prompt for evaluation signals
+4. Create an exclusive WIP marker for the entry being implemented (`sdd wip start <entry-id> --exclusive --participant <name> <description>`)
+5. Implementation happens in the same session — the meta-process stays active
+6. If you hit a design choice not covered by existing decisions: **stop implementation**, capture an action recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself.
+7. After implementation, commit the code changes first, then capture the action, then remove the WIP marker (`sdd wip done <marker-id>`)
+8. Prompt for evaluation signals

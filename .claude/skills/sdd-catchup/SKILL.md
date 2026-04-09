@@ -25,6 +25,11 @@ The `sdd` CLI binary is pre-built at `./framework/bin/sdd`. Do NOT build it — 
 
 This shows active decisions, open signals (not yet addressed by any decision), and recent actions. These are the entries that matter for the catch-up.
 
+Also check for active WIP markers:
+```bash
+./framework/bin/sdd wip list
+```
+
 For each active decision and open signal in the output, run `sdd show` with all IDs in a single call to get the full content:
 ```bash
 ./framework/bin/sdd show <id1> <id2> <id3> ...
@@ -71,6 +76,16 @@ Structure your output as one numbered block per open item, grouped by thread:
 
 **5. [short title]** (ID: [full-entry-id])
 ...
+```
+
+### WIP markers
+
+If `sdd wip list` returns active markers, include a **Work in progress** section before the threads. For each marker, note: the marker ID, who's working, which entry it's on (with the entry's short description), whether it's exclusive, and the marker's description. This tells the user what's actively being worked on and by whom — important context before suggesting where to start.
+
+```
+### Work in progress
+
+- **Christopher** is working on `d-cpt-axa` "Evaluate explore mode" (exclusive) — Prototyping widget layout for dashboard.
 ```
 
 ### Guidelines

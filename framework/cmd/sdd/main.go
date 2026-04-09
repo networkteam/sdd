@@ -37,6 +37,7 @@ func main() {
 			showCmd(),
 			listCmd(),
 			newCmd(),
+			wipCmd(),
 		},
 		DefaultCommand: "status",
 	}
@@ -534,6 +535,184 @@ func gitCommit(message string, filePaths ...string) error {
 	}
 
 	return nil
+}
+
+func graphDir(cmd *cli.Command) string {
+	dir := cmd.String("graph-dir")
+	if !filepath.IsAbs(dir) {
+		dir, _ = filepath.Abs(dir)
+	}
+	return dir
+}
+
+func wipCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "wip",
+		Usage: "Manage work-in-progress markers",
+		Commands: []*cli.Command{
+			wipStartCmd(),
+			wipDoneCmd(),
+			wipListCmd(),
+		},
+	}
+}
+
+func wipStartCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "start",
+		Usage:     "Create a WIP marker for a graph entry",
+		ArgsUsage: "<entry-id> [description]",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "exclusive",
+				Usage: "Discourage parallel work on this entry",
+			},
+			&cli.StringFlag{
+				Name:  "participant",
+				Usage: "Participant name (defaults to git user.name)",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			args := cmd.Args()
+			if args.Len() < 1 {
+				return fmt.Errorf("usage: sdd wip start <entry-id> [description]")
+			}
+
+			entryID := args.Get(0)
+			description := strings.Join(args.Slice()[1:], " ")
+
+			// Validate entry exists
+			g, err := loadGraph(cmd)
+			if err != nil {
+				return err
+			}
+			if _, ok := g.ByID[entryID]; !ok {
+				return fmt.Errorf("entry not found: %s", entryID)
+			}
+
+			// Resolve participant
+			participant := cmd.String("participant")
+			if participant == "" {
+				return fmt.Errorf("--participant is required")
+			}
+
+			// Check for existing exclusive markers
+			dir := graphDir(cmd)
+			markers, err := sdd.LoadWIPMarkers(dir)
+			if err != nil {
+				return fmt.Errorf("loading WIP markers: %w", err)
+			}
+			if existing, ok := sdd.HasExclusiveMarker(markers, entryID); ok {
+				fmt.Fprintf(os.Stderr, "warning: exclusive marker exists for %s by %s (%s)\n",
+					entryID, existing.Participant, existing.ID)
+			}
+
+			// Create marker
+			markerID := sdd.GenerateWIPMarkerID(participant)
+			marker := &sdd.WIPMarker{
+				ID:          markerID,
+				Entry:       entryID,
+				Participant: participant,
+				Exclusive:   cmd.Bool("exclusive"),
+				Content:     description,
+			}
+
+			markerPath := filepath.Join(dir, sdd.WIPMarkerPath(markerID))
+			if err := os.MkdirAll(filepath.Dir(markerPath), 0755); err != nil {
+				return fmt.Errorf("creating wip directory: %w", err)
+			}
+
+			content := sdd.FormatWIPMarker(marker)
+			if err := os.WriteFile(markerPath, []byte(content), 0644); err != nil {
+				return fmt.Errorf("writing marker: %w", err)
+			}
+
+			fmt.Printf("%s\n", markerID)
+			fmt.Printf("  → %s\n", markerPath)
+
+			if err := gitCommit(fmt.Sprintf("sdd: wip start %s (%s)", entryID, participant), markerPath); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: git commit failed: %v\n", err)
+			}
+
+			return nil
+		},
+	}
+}
+
+func wipDoneCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "done",
+		Usage:     "Remove a WIP marker",
+		ArgsUsage: "<marker-id>",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			args := cmd.Args()
+			if args.Len() < 1 {
+				return fmt.Errorf("usage: sdd wip done <marker-id>")
+			}
+
+			markerID := args.Get(0)
+			dir := graphDir(cmd)
+			markerPath := filepath.Join(dir, sdd.WIPMarkerPath(markerID))
+
+			if _, err := os.Stat(markerPath); err != nil {
+				return fmt.Errorf("marker not found: %s", markerID)
+			}
+
+			if err := os.Remove(markerPath); err != nil {
+				return fmt.Errorf("removing marker: %w", err)
+			}
+
+			fmt.Printf("removed %s\n", markerID)
+
+			// Git rm and commit
+			rm := exec.Command("git", "rm", "--cached", "-f", markerPath)
+			if out, err := rm.CombinedOutput(); err != nil {
+				// File already removed from disk, try git add the deletion
+				add := exec.Command("git", "add", markerPath)
+				if out2, err2 := add.CombinedOutput(); err2 != nil {
+					fmt.Fprintf(os.Stderr, "warning: git stage failed: %s (%v); %s (%v)\n", out, err, out2, err2)
+					return nil
+				}
+			}
+
+			commit := exec.Command("git", "commit", "-m", fmt.Sprintf("sdd: wip done %s", markerID))
+			if out, err := commit.CombinedOutput(); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: git commit failed: %s (%v)\n", out, err)
+			}
+
+			return nil
+		},
+	}
+}
+
+func wipListCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "list",
+		Usage: "List all active WIP markers",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			dir := graphDir(cmd)
+			markers, err := sdd.LoadWIPMarkers(dir)
+			if err != nil {
+				return fmt.Errorf("loading WIP markers: %w", err)
+			}
+
+			if len(markers) == 0 {
+				fmt.Println("No active WIP markers.")
+				return nil
+			}
+
+			for _, m := range markers {
+				excl := ""
+				if m.Exclusive {
+					excl = " [exclusive]"
+				}
+				fmt.Printf("  %s  %-15s%s  %s  %s\n",
+					m.ID, m.Participant, excl, m.Entry, m.ShortContent(int(cmd.Int("width"))))
+			}
+
+			return nil
+		},
+	}
 }
 
 func randomSuffix(n int) (string, error) {

@@ -48,9 +48,22 @@ A newer entry covers the same ground — the older entry is effectively supersed
 ### Pattern C: Stale entry
 No downstream activity at all, and the entry is older than a few days. May still be relevant, but worth asking. For each stale candidate, note the age and briefly assess whether the concern it describes still applies given the current graph state — has the context shifted? Have related decisions changed the landscape?
 
-## Step 4 — Check Git for unrecorded work
+## Step 4 — Check for stale WIP markers
 
-For each open entry that has NO downstream activity (Pattern C candidates), scan recent Git history for evidence that the work was done but never captured:
+```bash
+./framework/bin/sdd wip list
+```
+
+If there are active markers, check whether they look stale — old markers with no recent Git activity on the referenced entry. For each marker, check if recent commits mention the entry ID or related keywords. A marker older than a day with no related activity is a candidate.
+
+Report stale markers as an additional pattern:
+
+### Pattern D: Stale WIP marker
+A WIP marker is still active but the work appears to be done, abandoned, or paused without removing the marker. Evidence: marker age, lack of recent commits, or presence of a closing action on the referenced entry.
+
+## Step 5 — Check Git for unrecorded work
+
+For each open entry that has NO downstream activity (Pattern C candidates) and each stale WIP marker (Pattern D candidates), scan recent Git history for evidence that the work was done but never captured:
 
 ```bash
 git log --oneline --since="2 weeks ago" --all
@@ -68,7 +81,7 @@ git show --stat <commit-hash>
 
 This catches the "reality-graph gap" — work done in code but never recorded as a graph action.
 
-## Step 5 — Return the grooming report
+## Step 6 — Return the grooming report
 
 Structure your output as one numbered block per candidate. No summary table — the outer skill formats for presentation. Each block should include enough evidence that the outer skill can discuss any candidate without additional lookups.
 
