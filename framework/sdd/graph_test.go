@@ -176,10 +176,11 @@ See [design](./06-115516-s-stg-beh/design.md) for details.`)
 	}
 	e := g.Entries[0]
 	if len(e.Attachments) != 1 {
-		t.Fatalf("Attachments = %v, want [design.md]", e.Attachments)
+		t.Fatalf("Attachments = %v, want 1 entry", e.Attachments)
 	}
-	if e.Attachments[0] != "design.md" {
-		t.Errorf("Attachments[0] = %q, want %q", e.Attachments[0], "design.md")
+	wantPath := filepath.ToSlash(e.Attachments[0])
+	if wantPath != "2026/04/06-115516-s-stg-beh/design.md" {
+		t.Errorf("Attachments[0] = %q, want %q", wantPath, "2026/04/06-115516-s-stg-beh/design.md")
 	}
 }
 

@@ -102,7 +102,7 @@ func LoadGraph(dir string) (*Graph, error) {
 		}
 		for _, f := range files {
 			if !f.IsDir() {
-				e.Attachments = append(e.Attachments, f.Name())
+				e.Attachments = append(e.Attachments, filepath.Join(attachRel, f.Name()))
 			}
 		}
 	}
