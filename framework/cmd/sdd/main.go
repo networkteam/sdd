@@ -394,15 +394,22 @@ func newCmd() *cli.Command {
 			}
 
 			// Write file
-			filename := id + ".md"
-			filePath := filepath.Join(dir, filename)
+			relPath, err := sdd.IDToRelPath(id)
+			if err != nil {
+				return fmt.Errorf("computing path for %s: %w", id, err)
+			}
+			filePath := filepath.Join(dir, relPath)
 			content := sdd.FormatFrontmatter(entry) + "\n" + entry.Content + "\n"
+
+			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+				return fmt.Errorf("creating directories: %w", err)
+			}
 
 			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 				return fmt.Errorf("writing %s: %w", filePath, err)
 			}
 
-			fmt.Println(filename)
+			fmt.Println(id + ".md")
 			fmt.Printf("  → %s\n", filePath)
 
 			// Auto-commit the new entry

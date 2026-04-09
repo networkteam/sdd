@@ -42,7 +42,8 @@ framework/
 ## Key decisions
 
 - Graph entries are immutable markdown files with YAML frontmatter in `docs/framework/graph/`
+- Hierarchical directory layout: `graph/YYYY/MM/DD-HHmmss-type-layer-suffix.md`
 - The CLI defaults to `--graph-dir docs/framework/graph` (relative to cwd, typically repo root)
 - Three entry types: signal (`s`), decision (`d`), action (`a`)
 - Five layers: strategic (`stg`), conceptual (`cpt`), tactical (`tac`), operational (`ops`), process (`prc`)
-- ID format: `{YYYYMMDD}-{HHmmss}-{type}-{layer}-{suffix}`
+- ID format: `{YYYYMMDD}-{HHmmss}-{type}-{layer}-{suffix}` (full ID used everywhere, path derived from it)

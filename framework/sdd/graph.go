@@ -2,6 +2,7 @@ package sdd
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -48,30 +49,44 @@ func NewGraph(entries []*Entry) *Graph {
 	return g
 }
 
-// LoadGraph reads all .md files from dir and builds the graph.
+// LoadGraph reads all .md files from dir (hierarchical YYYY/MM/ layout) and builds the graph.
 func LoadGraph(dir string) (*Graph, error) {
-	dirEntries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("reading graph dir: %w", err)
-	}
-
 	var entries []*Entry
-	for _, de := range dirEntries {
-		if de.IsDir() || !strings.HasSuffix(de.Name(), ".md") {
-			continue
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			return nil
 		}
 
-		data, err := os.ReadFile(filepath.Join(dir, de.Name()))
+		rel, err := filepath.Rel(dir, path)
 		if err != nil {
-			return nil, fmt.Errorf("reading %s: %w", de.Name(), err)
+			return fmt.Errorf("getting relative path for %s: %w", path, err)
 		}
 
-		entry, err := ParseEntry(de.Name(), string(data))
+		id, err := RelPathToID(rel)
 		if err != nil {
-			return nil, fmt.Errorf("parsing %s: %w", de.Name(), err)
+			// Skip files that don't match the expected layout
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", path, err)
+		}
+
+		entry, err := ParseEntry(id+".md", string(data))
+		if err != nil {
+			return fmt.Errorf("parsing %s: %w", path, err)
 		}
 
 		entries = append(entries, entry)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walking graph dir: %w", err)
 	}
 
 	g := NewGraph(entries)

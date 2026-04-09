@@ -2,6 +2,7 @@ package sdd
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -173,6 +174,31 @@ func ParseID(id string) (IDParts, error) {
 	}, nil
 }
 
+
+// IDToRelPath converts an entry ID to its relative file path in the hierarchical layout.
+// ID format: YYYYMMDD-HHmmss-type-layer-suffix
+// Path format: YYYY/MM/DD-HHmmss-type-layer-suffix.md
+func IDToRelPath(id string) (string, error) {
+	if len(id) < 8 {
+		return "", fmt.Errorf("ID too short: %q", id)
+	}
+	yyyy := id[0:4]
+	mm := id[4:6]
+	shortName := id[6:] // DD-HHmmss-type-layer-suffix
+	return filepath.Join(yyyy, mm, shortName+".md"), nil
+}
+
+// RelPathToID converts a relative path (YYYY/MM/DD-HHmmss-type-layer-suffix.md) to a full entry ID.
+func RelPathToID(rel string) (string, error) {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("expected YYYY/MM/filename.md, got %q", rel)
+	}
+	yyyy := parts[0]
+	mm := parts[1]
+	filename := strings.TrimSuffix(parts[2], ".md")
+	return yyyy + mm + filename, nil
+}
 
 // parseFrontmatter splits content into YAML frontmatter and body.
 func parseFrontmatter(content string) (*frontmatter, string, error) {

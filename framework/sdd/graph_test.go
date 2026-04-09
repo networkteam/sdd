@@ -116,17 +116,81 @@ Current practices produce overhead.`
 	}
 }
 
+func TestIDToRelPath(t *testing.T) {
+	tests := []struct {
+		id      string
+		want    string
+		wantErr bool
+	}{
+		{"20260406-115516-s-stg-beh", "2026/04/06-115516-s-stg-beh.md", false},
+		{"20260407-214507-s-ops-jpb", "2026/04/07-214507-s-ops-jpb.md", false},
+		{"20251231-235959-d-cpt-abc", "2025/12/31-235959-d-cpt-abc.md", false},
+		{"short", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			got, err := IDToRelPath(tt.id)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("IDToRelPath(%q) = %q, want error", tt.id, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("IDToRelPath(%q) error: %v", tt.id, err)
+			}
+			// Normalize to forward slashes for comparison
+			got = filepath.ToSlash(got)
+			if got != tt.want {
+				t.Errorf("IDToRelPath(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRelPathToID(t *testing.T) {
+	tests := []struct {
+		rel     string
+		want    string
+		wantErr bool
+	}{
+		{"2026/04/06-115516-s-stg-beh.md", "20260406-115516-s-stg-beh", false},
+		{"2025/12/31-235959-d-cpt-abc.md", "20251231-235959-d-cpt-abc", false},
+		{"flat-file.md", "", true},
+		{"too/many/levels/deep.md", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.rel, func(t *testing.T) {
+			got, err := RelPathToID(tt.rel)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("RelPathToID(%q) = %q, want error", tt.rel, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RelPathToID(%q) error: %v", tt.rel, err)
+			}
+			if got != tt.want {
+				t.Errorf("RelPathToID(%q) = %q, want %q", tt.rel, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadGraph(t *testing.T) {
 	dir := t.TempDir()
 
-	writeFile(t, dir, "20260406-115516-s-stg-beh.md", `---
+	writeGraphEntry(t, dir, "20260406-115516-s-stg-beh", `---
 type: signal
 layer: strategic
 ---
 
 Signal one.`)
 
-	writeFile(t, dir, "20260406-115540-d-stg-0gh.md", `---
+	writeGraphEntry(t, dir, "20260406-115540-d-stg-0gh", `---
 type: decision
 layer: strategic
 refs:
@@ -137,7 +201,7 @@ closes:
 
 Decision closing signal.`)
 
-	writeFile(t, dir, "20260406-115559-a-cpt-f8v.md", `---
+	writeGraphEntry(t, dir, "20260406-115559-a-cpt-f8v", `---
 type: action
 layer: conceptual
 refs:
@@ -629,9 +693,19 @@ func assertNotContains(t *testing.T, ids []string, unwanted, label string) {
 	}
 }
 
-func writeFile(t *testing.T, dir, name, content string) {
+// writeGraphEntry writes a graph entry file in the hierarchical YYYY/MM/ layout.
+// The id is the full entry ID (e.g. "20260406-115516-s-stg-beh").
+func writeGraphEntry(t *testing.T, dir, id, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+	relPath, err := IDToRelPath(id)
+	if err != nil {
+		t.Fatalf("IDToRelPath(%q): %v", id, err)
+	}
+	fullPath := filepath.Join(dir, relPath)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 }
