@@ -164,43 +164,7 @@ func showCmd() *cli.Command {
 
 			downstream := cmd.Bool("downstream")
 
-			seen := make(map[string]bool)
-			for i, id := range ids {
-				var entries []*sdd.Entry
-				if downstream {
-					// Check the target exists
-					if _, ok := g.ByID[id]; !ok {
-						return fmt.Errorf("entry not found: %s", id)
-					}
-					entries = g.Downstream(id)
-				} else {
-					entries = g.RefChain(id)
-					if len(entries) == 0 {
-						return fmt.Errorf("entry not found: %s", id)
-					}
-				}
-
-				if i > 0 {
-					fmt.Println()
-				}
-
-				for j, e := range entries {
-					if seen[e.ID] {
-						if j > 0 {
-							fmt.Println("---")
-						}
-						fmt.Printf("(shown above) %s  %s\n", e.ID, e.ShortContent(int(cmd.Int("width"))))
-					} else {
-						if j > 0 {
-							fmt.Println("---")
-						}
-						printEntryFull(e)
-						seen[e.ID] = true
-					}
-				}
-			}
-
-			return nil
+			return sdd.RenderShow(os.Stdout, g, ids, downstream)
 		},
 	}
 }
@@ -518,38 +482,6 @@ func printEntry(e *sdd.Entry, width int) {
 		e.ID, e.TypeLabel(), e.LayerLabel(), conf, e.ShortContent(width))
 }
 
-func printEntryFull(e *sdd.Entry) {
-	fmt.Printf("ID:     %s\n", e.ID)
-	fmt.Printf("Type:   %s\n", e.TypeLabel())
-	fmt.Printf("Layer:  %s\n", e.LayerLabel())
-	if e.Confidence != "" {
-		fmt.Printf("Conf:   %s\n", e.Confidence)
-	}
-	if len(e.Participants) > 0 {
-		fmt.Printf("Who:    %s\n", strings.Join(e.Participants, ", "))
-	}
-	if len(e.Refs) > 0 {
-		fmt.Printf("Refs:   %s\n", strings.Join(e.Refs, ", "))
-	}
-	if len(e.Closes) > 0 {
-		fmt.Printf("Closes: %s\n", strings.Join(e.Closes, ", "))
-	}
-	if len(e.Supersedes) > 0 {
-		fmt.Printf("Supersedes: %s\n", strings.Join(e.Supersedes, ", "))
-	}
-	for _, a := range e.Attachments {
-		fmt.Printf("Attachment: %s\n", a)
-	}
-	if len(e.Warnings) > 0 {
-		for _, w := range e.Warnings {
-			fmt.Printf("⚠ %s\n", w.Message)
-		}
-	}
-	fmt.Printf("Time:   %s\n", e.Time.Format("2006-01-02 15:04:05"))
-	fmt.Println()
-	fmt.Println(e.Content)
-	fmt.Println()
-}
 
 func groupByLayer(entries []*sdd.Entry) map[sdd.Layer][]*sdd.Entry {
 	m := make(map[sdd.Layer][]*sdd.Entry)
