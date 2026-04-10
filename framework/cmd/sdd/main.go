@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -303,9 +304,9 @@ func newCmd() *cli.Command {
 				Name:  "kind",
 				Usage: "Decision kind (contract, directive). Only applies to decisions.",
 			},
-			&cli.StringFlag{
+			&cli.StringSliceFlag{
 				Name:  "attach",
-				Usage: "Comma-separated list of file paths to attach",
+				Usage: "File to attach (repeatable). Supports source:target mapping and -:name for stdin",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -382,22 +383,17 @@ func newCmd() *cli.Command {
 				dir, _ = filepath.Abs(dir)
 			}
 
-			var attachPaths []string
-			if attach := cmd.String("attach"); attach != "" {
-				attachPaths = strings.Split(attach, ",")
-				for _, p := range attachPaths {
-					if _, err := os.Stat(p); err != nil {
-						return fmt.Errorf("attachment file not found: %s", p)
-					}
-				}
-				// Populate Attachments with the filenames being attached,
-				// using the same relative path format LoadGraph produces
+			attachments, err := parseAttachFlags(cmd.StringSlice("attach"), os.Stdin)
+			if err != nil {
+				return err
+			}
+			if len(attachments) > 0 {
 				attachRel, err := sdd.AttachDirRelPath(id)
 				if err != nil {
 					return fmt.Errorf("computing attachment dir for %s: %w", id, err)
 				}
-				for _, p := range attachPaths {
-					entry.Attachments = append(entry.Attachments, filepath.Join(attachRel, filepath.Base(p)))
+				for _, a := range attachments {
+					entry.Attachments = append(entry.Attachments, filepath.Join(attachRel, a.target))
 				}
 			}
 
@@ -436,7 +432,7 @@ func newCmd() *cli.Command {
 			commitPaths := []string{filePath}
 
 			// Copy attachments
-			if len(attachPaths) > 0 {
+			if len(attachments) > 0 {
 				attachDirRel, err := sdd.AttachDirRelPath(id)
 				if err != nil {
 					return fmt.Errorf("computing attachment dir for %s: %w", id, err)
@@ -446,12 +442,18 @@ func newCmd() *cli.Command {
 					return fmt.Errorf("creating attachment directory: %w", err)
 				}
 
-				for _, src := range attachPaths {
-					data, err := os.ReadFile(src)
-					if err != nil {
-						return fmt.Errorf("reading attachment %s: %w", src, err)
+				for _, a := range attachments {
+					var data []byte
+					if a.source == "-" {
+						data = a.data
+					} else {
+						var err error
+						data, err = os.ReadFile(a.source)
+						if err != nil {
+							return fmt.Errorf("reading attachment %s: %w", a.source, err)
+						}
 					}
-					dst := filepath.Join(attachDir, filepath.Base(src))
+					dst := filepath.Join(attachDir, a.target)
 					if err := os.WriteFile(dst, data, 0644); err != nil {
 						return fmt.Errorf("writing attachment %s: %w", dst, err)
 					}
@@ -758,6 +760,59 @@ func wipListCmd() *cli.Command {
 			return nil
 		},
 	}
+}
+
+// parseAttachSpec splits an --attach value into source and target.
+// Formats: "path" (target=""), "source:target", "-:target" (stdin).
+// Splits on the last colon to tolerate colons in source paths.
+func parseAttachSpec(spec string) (source, target string) {
+	i := strings.LastIndex(spec, ":")
+	if i < 0 {
+		return spec, ""
+	}
+	return spec[:i], spec[i+1:]
+}
+
+type attachment struct {
+	source string // file path or "-" for stdin
+	target string // destination filename
+	data   []byte // populated for stdin
+}
+
+// parseAttachFlags parses and validates a list of --attach flag values.
+// stdinReader is used when source is "-"; pass nil if stdin is not available.
+func parseAttachFlags(specs []string, stdinReader io.Reader) ([]attachment, error) {
+	var attachments []attachment
+	stdinUsed := false
+	for _, spec := range specs {
+		src, tgt := parseAttachSpec(spec)
+		if src == "-" {
+			if stdinUsed {
+				return nil, fmt.Errorf("stdin (-) can only be used once in --attach")
+			}
+			if tgt == "" {
+				return nil, fmt.Errorf("stdin (-) requires a target name: --attach -:filename")
+			}
+			stdinUsed = true
+			if stdinReader == nil {
+				return nil, fmt.Errorf("stdin not available")
+			}
+			data, err := io.ReadAll(stdinReader)
+			if err != nil {
+				return nil, fmt.Errorf("reading stdin for attachment: %w", err)
+			}
+			attachments = append(attachments, attachment{source: "-", target: tgt, data: data})
+		} else {
+			if _, err := os.Stat(src); err != nil {
+				return nil, fmt.Errorf("attachment file not found: %s", src)
+			}
+			if tgt == "" {
+				tgt = filepath.Base(src)
+			}
+			attachments = append(attachments, attachment{source: src, target: tgt})
+		}
+	}
+	return attachments, nil
 }
 
 func randomSuffix(n int) (string, error) {

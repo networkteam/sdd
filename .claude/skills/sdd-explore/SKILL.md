@@ -18,6 +18,7 @@ You receive a target entry ID (e.g. `20260407-145025-s-cpt-lul`).
 Read the framework reference files to understand entry types, layers, and graph structure:
 - Read `${CLAUDE_SKILL_DIR}/../sdd/references/framework-concepts.md`
 - Read `${CLAUDE_SKILL_DIR}/../sdd/references/meta-process.md`
+- Read `${CLAUDE_SKILL_DIR}/../sdd/references/cli-reference.md`
 
 ## Step 2 — Fetch the target and its chains
 

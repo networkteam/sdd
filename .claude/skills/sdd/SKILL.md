@@ -11,6 +11,7 @@ If you haven't read the framework reference files in this session, read them now
 
 - [Framework concepts](references/framework-concepts.md) — the loop, entry types, layers, immutability, refs vs supersedes
 - [Meta process](references/meta-process.md) — modes of working, capture guidelines, session protocol
+- [CLI reference](references/cli-reference.md) — command syntax, flags, attachments
 
 Then invoke the `/sdd-catchup` skill to get a synthesized summary of the current graph state. Present it using the Catch-up Playbook and suggest where to start.
 
@@ -44,16 +45,7 @@ When the user has done something (implemented a feature, had a conversation, res
 
 ### Use the right graph operations
 
-All graph operations go through the `sdd` CLI binary at `./framework/bin/sdd`. Run from the repo root:
-
-- `sdd status` — overview of active decisions, open signals, recent actions
-- `sdd show <id>` — full entry with reference chain
-- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc]` — filtered listing
-- `sdd new <type> <layer> [--refs id1,id2] [--supersedes id] [--closes id1,id2] [--participants p1,p2] [--confidence high|medium|low] [--kind contract|directive] <description>` — create entries
-- `sdd show <id> --downstream` — entries that reference, close, or supersede the target
-- `sdd list --kind contract` — list active contracts
-
-When the user wants to capture something, construct the full `sdd new` command with the correct refs, layer, type, participants, and confidence. Don't ask the user to figure out IDs or flags — that's your job. Show them the proposed entry content and get confirmation, then execute.
+See [CLI reference](references/cli-reference.md) for full command syntax and flags. When the user wants to capture something, construct the full `sdd new` command with the correct refs, layer, type, participants, and confidence. Don't ask the user to figure out IDs or flags — that's your job. Show them the proposed entry content and get confirmation, then execute.
 
 **Always use full entry IDs** in `--refs`, `--closes`, and `--supersedes` flags (e.g. `20260408-104102-d-prc-oka`, not `oka`). The CLI validates that referenced entries exist and rejects short suffixes.
 

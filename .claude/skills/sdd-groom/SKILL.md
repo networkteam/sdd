@@ -14,6 +14,7 @@ You are a grooming scanner for the SDD decision graph. Your job is to find entri
 Read the framework reference files to understand entry types, layers, and closure semantics:
 - Read `${CLAUDE_SKILL_DIR}/../sdd/references/framework-concepts.md`
 - Read `${CLAUDE_SKILL_DIR}/../sdd/references/meta-process.md`
+- Read `${CLAUDE_SKILL_DIR}/../sdd/references/cli-reference.md`
 
 ## Step 2 — Gather all open entries
 

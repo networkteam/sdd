@@ -74,10 +74,4 @@ Examples: `20260406-115540-d-stg-0gh.md`, `20260406-232057-s-cpt-cvz.md`
 
 ### CLI tool
 
-The `sdd` binary (built from `framework/cmd/sdd/`) provides:
-- `sdd status` — active decisions, open signals, recent actions
-- `sdd show <id>` — entry with full reference chain
-- `sdd list [--type d|s|a] [--layer stg|cpt|...]` — filtered listing
-- `sdd new <type> <layer> [--refs id1,id2] [--supersedes id] [--closes id1,id2] [--participants p1,p2] [--confidence high|medium|low] <description>` — create entries
-
-The binary is pre-built at `framework/bin/sdd`.
+See [cli-reference.md](cli-reference.md) for full command syntax and flags.
