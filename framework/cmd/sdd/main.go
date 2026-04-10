@@ -38,6 +38,7 @@ func main() {
 			listCmd(),
 			newCmd(),
 			wipCmd(),
+			lintCmd(),
 		},
 		DefaultCommand: "status",
 	}
@@ -467,6 +468,41 @@ func newCmd() *cli.Command {
 	}
 }
 
+func lintCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "lint",
+		Usage: "Check graph entries for integrity issues",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			g, err := loadGraph(cmd)
+			if err != nil {
+				return err
+			}
+
+			entries := g.Lint()
+			if len(entries) == 0 {
+				fmt.Println("No issues found.")
+				return nil
+			}
+
+			total := 0
+			for _, e := range entries {
+				total += len(e.Warnings)
+			}
+
+			fmt.Printf("%d issue(s) in %d entry/entries:\n\n", total, len(entries))
+			for _, e := range entries {
+				fmt.Printf("  %s  %s  %s\n", e.ID, e.TypeLabel(), e.ShortContent(int(cmd.Int("width"))))
+				for _, w := range e.Warnings {
+					fmt.Printf("    ⚠ %s\n", w.Message)
+				}
+				fmt.Println()
+			}
+
+			return fmt.Errorf("lint found %d issue(s)", total)
+		},
+	}
+}
+
 func printEntry(e *sdd.Entry, width int) {
 	conf := ""
 	if e.Confidence != "" {
@@ -497,6 +533,11 @@ func printEntryFull(e *sdd.Entry) {
 	}
 	for _, a := range e.Attachments {
 		fmt.Printf("Attachment: %s\n", a)
+	}
+	if len(e.Warnings) > 0 {
+		for _, w := range e.Warnings {
+			fmt.Printf("⚠ %s\n", w.Message)
+		}
 	}
 	fmt.Printf("Time:   %s\n", e.Time.Format("2006-01-02 15:04:05"))
 	fmt.Println()

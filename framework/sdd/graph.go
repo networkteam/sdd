@@ -46,6 +46,9 @@ func NewGraph(entries []*Entry) *Graph {
 		return g.Entries[i].Time.Before(g.Entries[j].Time)
 	})
 
+	// Validate all entries and populate warnings
+	g.validate()
+
 	return g
 }
 
@@ -322,4 +325,99 @@ func (g *Graph) Downstream(id string) []*Entry {
 // GraphDir returns the directory the graph was loaded from.
 func (g *Graph) GraphDir() string {
 	return g.graphDir
+}
+
+// Lint returns all entries that have validation warnings.
+func (g *Graph) Lint() []*Entry {
+	var result []*Entry
+	for _, e := range g.Entries {
+		if len(e.Warnings) > 0 {
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+// validate checks all entries for integrity issues and populates their Warnings fields.
+func (g *Graph) validate() {
+	for _, e := range g.Entries {
+		g.validateRefs(e, "refs", e.Refs)
+		g.validateRefs(e, "closes", e.Closes)
+		g.validateRefs(e, "supersedes", e.Supersedes)
+		g.validateCloses(e)
+		g.validateSupersedes(e)
+	}
+}
+
+// validateRefs checks that all IDs in the given field are well-formed and exist in the graph.
+func (g *Graph) validateRefs(e *Entry, field string, ids []string) {
+	for _, id := range ids {
+		_, err := ParseID(id)
+		if err != nil {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   field,
+				Value:   id,
+				Message: fmt.Sprintf("malformed ID in %s: %s", field, id),
+			})
+			continue
+		}
+		if _, ok := g.ByID[id]; !ok {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   field,
+				Value:   id,
+				Message: fmt.Sprintf("dangling ref in %s: %s (entry not found)", field, id),
+			})
+		}
+	}
+}
+
+// validateCloses checks type constraints on closes references.
+// Valid: decision closes signal, action closes decision, action closes signal.
+// Invalid: anything closes action, signal closes anything, decision closes decision.
+func (g *Graph) validateCloses(e *Entry) {
+	for _, id := range e.Closes {
+		target, ok := g.ByID[id]
+		if !ok {
+			continue // already reported by validateRefs
+		}
+
+		switch {
+		case e.Type == TypeSignal:
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "closes",
+				Value:   id,
+				Message: fmt.Sprintf("signal cannot close entries (closes %s %s)", target.Type, id),
+			})
+		case target.Type == TypeAction:
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "closes",
+				Value:   id,
+				Message: fmt.Sprintf("actions cannot be closed (closes action %s)", id),
+			})
+		case e.Type == TypeDecision && target.Type == TypeDecision:
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "closes",
+				Value:   id,
+				Message: fmt.Sprintf("decision cannot close another decision — use supersedes instead (closes decision %s)", id),
+			})
+		}
+	}
+}
+
+// validateSupersedes checks that supersedes references point at the same entry type.
+func (g *Graph) validateSupersedes(e *Entry) {
+	for _, id := range e.Supersedes {
+		target, ok := g.ByID[id]
+		if !ok {
+			continue // already reported by validateRefs
+		}
+
+		if target.Type != e.Type {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:      "supersedes",
+				Value:      id,
+				Message:    fmt.Sprintf("type mismatch in supersedes: %s supersedes %s %s (expected %s)", e.Type, target.Type, id, e.Type),
+			})
+		}
+	}
 }

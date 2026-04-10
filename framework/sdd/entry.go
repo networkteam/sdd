@@ -67,6 +67,13 @@ const (
 	KindContract  Kind = "contract"
 )
 
+// Warning represents a validation issue found on a graph entry.
+type Warning struct {
+	Field   string // "refs", "closes", "supersedes"
+	Value   string // the offending ID or value
+	Message string // human-readable description
+}
+
 type Entry struct {
 	ID           string
 	Type         EntryType
@@ -79,7 +86,8 @@ type Entry struct {
 	Confidence   string
 	Content      string
 	Time         time.Time
-	Attachments  []string // filenames discovered from the co-located attachment directory
+	Attachments  []string  // filenames discovered from the co-located attachment directory
+	Warnings     []Warning // validation issues found during graph construction
 }
 
 // IsContract returns true if this decision is a standing constraint.

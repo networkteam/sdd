@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -734,6 +735,236 @@ func TestDownstreamSortedByTime(t *testing.T) {
 	}
 	if downstream[2].ID != "20260406-100300-d-tac-ddd" {
 		t.Errorf("Last = %q, want ddd (latest)", downstream[2].ID)
+	}
+}
+
+// --- lint / validation tests ---
+
+func TestLintDanglingRef(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+		entry("20260406-100100-d-stg-bbb", withRefs("20260406-100000-s-stg-aaa", "20260406-099999-s-stg-missing")),
+	})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	if lint[0].ID != "20260406-100100-d-stg-bbb" {
+		t.Errorf("Lint entry = %q, want bbb", lint[0].ID)
+	}
+	if len(lint[0].Warnings) != 1 {
+		t.Fatalf("Warnings = %d, want 1", len(lint[0].Warnings))
+	}
+	w := lint[0].Warnings[0]
+	if w.Field != "refs" {
+		t.Errorf("Field = %q, want refs", w.Field)
+	}
+	if w.Value != "20260406-099999-s-stg-missing" {
+		t.Errorf("Value = %q, want the missing ID", w.Value)
+	}
+}
+
+func TestLintDanglingCloses(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-a-tac-aaa", withCloses("20260406-099999-d-tac-missing")),
+	})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	if lint[0].Warnings[0].Field != "closes" {
+		t.Errorf("Field = %q, want closes", lint[0].Warnings[0].Field)
+	}
+}
+
+func TestLintMalformedID(t *testing.T) {
+	// Simulate an entry with a short/malformed ID in refs (like the s-stg-qg0 bug)
+	e := entry("20260406-100000-d-stg-aaa")
+	e.Refs = []string{"d-stg-0gh"} // short suffix, not a full ID
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	w := lint[0].Warnings[0]
+	if w.Field != "refs" {
+		t.Errorf("Field = %q, want refs", w.Field)
+	}
+	if w.Value != "d-stg-0gh" {
+		t.Errorf("Value = %q, want d-stg-0gh", w.Value)
+	}
+}
+
+func TestLintClosesTypeMismatch(t *testing.T) {
+	tests := []struct {
+		name      string
+		entries   []*Entry
+		wantWarns int
+		wantMsg   string
+	}{
+		{
+			name: "signal cannot close",
+			entries: []*Entry{
+				entry("20260406-100000-d-stg-aaa"),
+				func() *Entry {
+					e := entry("20260406-100100-s-stg-bbb")
+					e.Closes = []string{"20260406-100000-d-stg-aaa"}
+					return e
+				}(),
+			},
+			wantWarns: 1,
+			wantMsg:   "signal cannot close entries",
+		},
+		{
+			name: "cannot close action",
+			entries: []*Entry{
+				entry("20260406-100000-a-tac-aaa"),
+				func() *Entry {
+					e := entry("20260406-100100-d-tac-bbb")
+					e.Closes = []string{"20260406-100000-a-tac-aaa"}
+					return e
+				}(),
+			},
+			wantWarns: 1,
+			wantMsg:   "actions cannot be closed",
+		},
+		{
+			name: "decision cannot close decision",
+			entries: []*Entry{
+				entry("20260406-100000-d-tac-aaa"),
+				func() *Entry {
+					e := entry("20260406-100100-d-tac-bbb")
+					e.Closes = []string{"20260406-100000-d-tac-aaa"}
+					return e
+				}(),
+			},
+			wantWarns: 1,
+			wantMsg:   "decision cannot close another decision",
+		},
+		{
+			name: "valid: decision closes signal",
+			entries: []*Entry{
+				entry("20260406-100000-s-stg-aaa"),
+				entry("20260406-100100-d-stg-bbb", withCloses("20260406-100000-s-stg-aaa")),
+			},
+			wantWarns: 0,
+		},
+		{
+			name: "valid: action closes decision",
+			entries: []*Entry{
+				entry("20260406-100000-d-tac-aaa"),
+				entry("20260406-100100-a-tac-bbb", withCloses("20260406-100000-d-tac-aaa")),
+			},
+			wantWarns: 0,
+		},
+		{
+			name: "valid: action closes signal",
+			entries: []*Entry{
+				entry("20260406-100000-s-tac-aaa"),
+				entry("20260406-100100-a-tac-bbb", withCloses("20260406-100000-s-tac-aaa")),
+			},
+			wantWarns: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewGraph(tt.entries)
+			lint := g.Lint()
+
+			totalWarns := 0
+			for _, e := range lint {
+				totalWarns += len(e.Warnings)
+			}
+
+			if totalWarns != tt.wantWarns {
+				msgs := []string{}
+				for _, e := range lint {
+					for _, w := range e.Warnings {
+						msgs = append(msgs, w.Message)
+					}
+				}
+				t.Fatalf("warnings = %d (%v), want %d", totalWarns, msgs, tt.wantWarns)
+			}
+
+			if tt.wantMsg != "" && totalWarns > 0 {
+				found := false
+				for _, e := range lint {
+					for _, w := range e.Warnings {
+						if strings.Contains(w.Message, tt.wantMsg) {
+							found = true
+						}
+					}
+				}
+				if !found {
+					t.Errorf("expected warning containing %q", tt.wantMsg)
+				}
+			}
+		})
+	}
+}
+
+func TestLintSupersedesTypeMismatch(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+		entry("20260406-100100-d-stg-bbb", withSupersedes("20260406-100000-s-stg-aaa")),
+	})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	w := lint[0].Warnings[0]
+	if w.Field != "supersedes" {
+		t.Errorf("Field = %q, want supersedes", w.Field)
+	}
+}
+
+func TestLintSupersedesSameTypeValid(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-tac-aaa"),
+		entry("20260406-100100-d-tac-bbb", withSupersedes("20260406-100000-d-tac-aaa")),
+	})
+
+	lint := g.Lint()
+	if len(lint) != 0 {
+		t.Errorf("Lint() = %d entries, want 0 for valid same-type supersedes", len(lint))
+	}
+}
+
+func TestLintCleanGraph(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+		entry("20260406-100100-d-stg-bbb", withRefs("20260406-100000-s-stg-aaa"), withCloses("20260406-100000-s-stg-aaa")),
+		entry("20260406-100200-a-tac-ccc", withRefs("20260406-100100-d-stg-bbb"), withCloses("20260406-100100-d-stg-bbb")),
+	})
+
+	lint := g.Lint()
+	if len(lint) != 0 {
+		for _, e := range lint {
+			for _, w := range e.Warnings {
+				t.Logf("unexpected warning on %s: %s", e.ID, w.Message)
+			}
+		}
+		t.Fatalf("Lint() = %d entries, want 0 for clean graph", len(lint))
+	}
+}
+
+func TestLintMultipleWarningsOnOneEntry(t *testing.T) {
+	e := entry("20260406-100000-d-stg-aaa")
+	e.Refs = []string{"bad-id"}
+	e.Closes = []string{"also-bad"}
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	if len(lint[0].Warnings) != 2 {
+		t.Errorf("Warnings = %d, want 2", len(lint[0].Warnings))
 	}
 }
 
