@@ -341,16 +341,23 @@ func (g *Graph) Lint() []*Entry {
 // validate checks all entries for integrity issues and populates their Warnings fields.
 func (g *Graph) validate() {
 	for _, e := range g.Entries {
-		g.validateRefs(e, "refs", e.Refs)
-		g.validateRefs(e, "closes", e.Closes)
-		g.validateRefs(e, "supersedes", e.Supersedes)
-		g.validateCloses(e)
-		g.validateSupersedes(e)
+		ValidateEntry(e, g)
 	}
 }
 
-// validateRefs checks that all IDs in the given field are well-formed and exist in the graph.
-func (g *Graph) validateRefs(e *Entry, field string, ids []string) {
+// ValidateEntry checks a single entry for integrity issues and populates its Warnings field.
+// Used both at lint time (all entries) and at write time (new entry before commit).
+func ValidateEntry(e *Entry, g *Graph) {
+	validateIDRefs(e, g, "refs", e.Refs)
+	validateIDRefs(e, g, "closes", e.Closes)
+	validateIDRefs(e, g, "supersedes", e.Supersedes)
+	validateCloses(e, g)
+	validateSupersedes(e, g)
+	validateAttachmentLinks(e)
+}
+
+// validateIDRefs checks that all IDs in the given field are well-formed and exist in the graph.
+func validateIDRefs(e *Entry, g *Graph, field string, ids []string) {
 	for _, id := range ids {
 		_, err := ParseID(id)
 		if err != nil {
@@ -374,11 +381,11 @@ func (g *Graph) validateRefs(e *Entry, field string, ids []string) {
 // validateCloses checks type constraints on closes references.
 // Valid: decision closes signal, action closes decision, action closes signal.
 // Invalid: anything closes action, signal closes anything, decision closes decision.
-func (g *Graph) validateCloses(e *Entry) {
+func validateCloses(e *Entry, g *Graph) {
 	for _, id := range e.Closes {
 		target, ok := g.ByID[id]
 		if !ok {
-			continue // already reported by validateRefs
+			continue // already reported by validateIDRefs
 		}
 
 		switch {
@@ -405,19 +412,68 @@ func (g *Graph) validateCloses(e *Entry) {
 }
 
 // validateSupersedes checks that supersedes references point at the same entry type.
-func (g *Graph) validateSupersedes(e *Entry) {
+func validateSupersedes(e *Entry, g *Graph) {
 	for _, id := range e.Supersedes {
 		target, ok := g.ByID[id]
 		if !ok {
-			continue // already reported by validateRefs
+			continue // already reported by validateIDRefs
 		}
 
 		if target.Type != e.Type {
 			e.Warnings = append(e.Warnings, Warning{
-				Field:      "supersedes",
-				Value:      id,
-				Message:    fmt.Sprintf("type mismatch in supersedes: %s supersedes %s %s (expected %s)", e.Type, target.Type, id, e.Type),
+				Field:   "supersedes",
+				Value:   id,
+				Message: fmt.Sprintf("type mismatch in supersedes: %s supersedes %s %s (expected %s)", e.Type, target.Type, id, e.Type),
 			})
 		}
+	}
+}
+
+// validateAttachmentLinks checks that markdown links referencing the entry's attachment
+// directory point to files that exist in the entry's Attachments list.
+func validateAttachmentLinks(e *Entry) {
+	if len(e.ID) < 8 {
+		return
+	}
+	shortName := e.ID[6:] // DD-HHmmss-type-layer-suffix
+	prefix := "./" + shortName + "/"
+
+	if !strings.Contains(e.Content, prefix) {
+		return
+	}
+
+	// Build set of known attachment filenames
+	knownFiles := make(map[string]bool)
+	for _, a := range e.Attachments {
+		knownFiles[filepath.Base(a)] = true
+	}
+
+	// Find all references to the attachment directory in content
+	rest := e.Content
+	for {
+		idx := strings.Index(rest, prefix)
+		if idx < 0 {
+			break
+		}
+		after := rest[idx+len(prefix):]
+		// Extract filename until a markdown/whitespace delimiter
+		end := strings.IndexAny(after, ") \n\t\"'")
+		var filename string
+		if end > 0 {
+			filename = after[:end]
+		} else if end < 0 {
+			filename = after // rest of string
+		}
+		if filename != "" && !knownFiles[filename] {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "attachments",
+				Value:   prefix + filename,
+				Message: fmt.Sprintf("broken attachment link: %s%s (file not found in attachment directory)", prefix, filename),
+			})
+		}
+		if end < 0 {
+			break
+		}
+		rest = after[end:]
 	}
 }

@@ -376,30 +376,12 @@ func newCmd() *cli.Command {
 				entry.Kind = sdd.Kind(kind)
 			}
 
-			// Validate refs, closes, supersedes against existing graph
+			// Parse attachment paths and populate entry.Attachments for validation
 			dir := cmd.String("graph-dir")
 			if !filepath.IsAbs(dir) {
 				dir, _ = filepath.Abs(dir)
 			}
 
-			allIDRefs := make([]string, 0)
-			allIDRefs = append(allIDRefs, entry.Refs...)
-			allIDRefs = append(allIDRefs, entry.Closes...)
-			allIDRefs = append(allIDRefs, entry.Supersedes...)
-
-			if len(allIDRefs) > 0 {
-				graph, err := sdd.LoadGraph(dir)
-				if err != nil {
-					return fmt.Errorf("loading graph for validation: %w", err)
-				}
-				for _, refID := range allIDRefs {
-					if _, exists := graph.ByID[refID]; !exists {
-						return fmt.Errorf("referenced entry not found: %s (use full entry IDs)", refID)
-					}
-				}
-			}
-
-			// Parse attachment paths
 			var attachPaths []string
 			if attach := cmd.String("attach"); attach != "" {
 				attachPaths = strings.Split(attach, ",")
@@ -408,10 +390,32 @@ func newCmd() *cli.Command {
 						return fmt.Errorf("attachment file not found: %s", p)
 					}
 				}
+				// Populate Attachments with the filenames being attached,
+				// using the same relative path format LoadGraph produces
+				attachRel, err := sdd.AttachDirRelPath(id)
+				if err != nil {
+					return fmt.Errorf("computing attachment dir for %s: %w", id, err)
+				}
+				for _, p := range attachPaths {
+					entry.Attachments = append(entry.Attachments, filepath.Join(attachRel, filepath.Base(p)))
+				}
 			}
 
 			// Resolve {{attachments}} placeholders in description
 			entry.Content = sdd.ResolveAttachmentLinks(entry.Content, id)
+
+			// Validate entry against the graph
+			graph, err := sdd.LoadGraph(dir)
+			if err != nil {
+				return fmt.Errorf("loading graph for validation: %w", err)
+			}
+			sdd.ValidateEntry(entry, graph)
+			if len(entry.Warnings) > 0 {
+				for _, w := range entry.Warnings {
+					fmt.Fprintf(os.Stderr, "error: %s\n", w.Message)
+				}
+				return fmt.Errorf("validation failed: %d issue(s)", len(entry.Warnings))
+			}
 
 			// Write entry file
 			relPath, err := sdd.IDToRelPath(id)

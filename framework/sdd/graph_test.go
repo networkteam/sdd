@@ -52,6 +52,10 @@ func withContent(c string) entryOpt {
 	return func(e *Entry) { e.Content = c }
 }
 
+func withAttachments(paths ...string) entryOpt {
+	return func(e *Entry) { e.Attachments = paths }
+}
+
 
 func TestParseEntry(t *testing.T) {
 	content := `---
@@ -965,6 +969,75 @@ func TestLintMultipleWarningsOnOneEntry(t *testing.T) {
 	}
 	if len(lint[0].Warnings) != 2 {
 		t.Errorf("Warnings = %d, want 2", len(lint[0].Warnings))
+	}
+}
+
+func TestLintBrokenAttachmentLink(t *testing.T) {
+	e := entry("20260406-115516-s-stg-beh",
+		withContent("See [design](./06-115516-s-stg-beh/design.md) for details."),
+	)
+	// No attachments — the link is broken
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	w := lint[0].Warnings[0]
+	if w.Field != "attachments" {
+		t.Errorf("Field = %q, want attachments", w.Field)
+	}
+	if !strings.Contains(w.Message, "design.md") {
+		t.Errorf("Message = %q, want mention of design.md", w.Message)
+	}
+}
+
+func TestLintValidAttachmentLink(t *testing.T) {
+	e := entry("20260406-115516-s-stg-beh",
+		withContent("See [design](./06-115516-s-stg-beh/design.md) for details."),
+		withAttachments("2026/04/06-115516-s-stg-beh/design.md"),
+	)
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 0 {
+		for _, e := range lint {
+			for _, w := range e.Warnings {
+				t.Logf("unexpected warning: %s", w.Message)
+			}
+		}
+		t.Fatalf("Lint() = %d entries, want 0 for valid attachment link", len(lint))
+	}
+}
+
+func TestLintMultipleBrokenAttachmentLinks(t *testing.T) {
+	e := entry("20260409-110000-d-tac-abc",
+		withContent("See [a](./09-110000-d-tac-abc/a.md) and [b](./09-110000-d-tac-abc/b.png)."),
+		withAttachments("2026/04/09-110000-d-tac-abc/a.md"), // only a.md exists
+	)
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	if len(lint[0].Warnings) != 1 {
+		t.Fatalf("Warnings = %d, want 1 (only b.png is broken)", len(lint[0].Warnings))
+	}
+	if !strings.Contains(lint[0].Warnings[0].Message, "b.png") {
+		t.Errorf("Message = %q, want mention of b.png", lint[0].Warnings[0].Message)
+	}
+}
+
+func TestLintNoAttachmentLinksNoWarning(t *testing.T) {
+	e := entry("20260406-100000-s-stg-aaa",
+		withContent("No attachment links here."),
+	)
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 0 {
+		t.Errorf("Lint() = %d entries, want 0 for entry without attachment links", len(lint))
 	}
 }
 
