@@ -2,14 +2,23 @@
 
 Go module for the SDD decision graph tooling.
 
-## Build
+## Setup
+
+The `sdd` binary is not checked into git. In a fresh clone or worktree, build it first:
 
 ```bash
 cd framework
 go build -o bin/sdd ./cmd/sdd
 ```
 
-The pre-built binary lives at `framework/bin/sdd`. Rebuild after changing Go source files.
+## Build
+
+Rebuild after changing Go source files:
+
+```bash
+cd framework
+go build -o bin/sdd ./cmd/sdd
+```
 
 ## Test
 
