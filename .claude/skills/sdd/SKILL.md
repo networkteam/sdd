@@ -266,10 +266,19 @@ Recommend when: the exploration was shallow, nothing emerged beyond "tried it, d
 2. Capture summary signal on main (key learning if any)
 3. `sdd wip done <marker-id> --force` — removes marker, force-deletes branch
 
-### Worktree mode (optional, manual setup)
+### Worktree mode (optional)
 
-For multiple concurrent branches on the same machine. Worktrees are a local environment concern — not managed by the CLI. After creating a branch with `sdd wip start --branch`, manually create a worktree:
-```bash
-git worktree add ../<worktree-name> <branch-name>
-```
-Start a new agent session in the worktree directory. Check CLAUDE.md for setup instructions (e.g., build binaries). A single worktree can be reused for different branches over time. Clean up with `git worktree remove` when no longer needed.
+For multiple concurrent branches on the same machine. When the user asks for worktree isolation, the agent sets it up:
+
+1. After `sdd wip start --branch`, switch back so the branch is free for the worktree:
+   ```bash
+   git checkout main
+   ```
+2. Create the worktree (sibling directory, named after the branch with slashes replaced by hyphens):
+   ```bash
+   git worktree add ../<branch-name-as-dir> <branch-name>
+   ```
+3. Check CLAUDE.md for setup instructions (build steps, dependency installs) and run them inside the worktree directory
+4. Tell the user: "The worktree is ready at `<path>`. Start a new agent session there to continue working on this branch." Close the current session's work on this topic — the new session picks up from the WIP marker and plan.
+
+A single worktree can be reused for different branches over time. Clean up with `git worktree remove ../<path>` when no longer needed.
