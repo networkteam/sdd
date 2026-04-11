@@ -59,12 +59,14 @@ var LayerFromAbbrev = map[string]Layer{
 	"prc": LayerProcess,
 }
 
-// Kind distinguishes directive decisions (need action) from contract decisions (standing constraints).
+// Kind distinguishes directive decisions (need action), contract decisions (standing constraints),
+// and plan decisions (implementation plans that need action to close).
 type Kind string
 
 const (
 	KindDirective Kind = "directive"
 	KindContract  Kind = "contract"
+	KindPlan      Kind = "plan"
 )
 
 // Warning represents a validation issue found on a graph entry.
@@ -93,6 +95,11 @@ type Entry struct {
 // IsContract returns true if this decision is a standing constraint.
 func (e *Entry) IsContract() bool {
 	return e.Kind == KindContract
+}
+
+// IsPlan returns true if this decision is an implementation plan.
+func (e *Entry) IsPlan() bool {
+	return e.Kind == KindPlan
 }
 
 // frontmatter is the YAML structure in the file header.

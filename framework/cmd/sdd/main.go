@@ -69,9 +69,9 @@ func statusCmd() *cli.Command {
 			}
 
 			// Summary
-			decisions := g.Filter(sdd.TypeDecision, "")
-			signals := g.Filter(sdd.TypeSignal, "")
-			actions := g.Filter(sdd.TypeAction, "")
+			decisions := g.Filter(sdd.GraphFilter{Type: sdd.TypeDecision})
+			signals := g.Filter(sdd.GraphFilter{Type: sdd.TypeSignal})
+			actions := g.Filter(sdd.GraphFilter{Type: sdd.TypeAction})
 			fmt.Printf("Graph: %d entries (%d decisions, %d signals, %d actions)\n\n",
 				len(g.Entries), len(decisions), len(signals), len(actions))
 
@@ -81,6 +81,25 @@ func statusCmd() *cli.Command {
 				fmt.Println("## Contracts")
 				fmt.Println()
 				byLayer := groupByLayer(contracts)
+				for _, layer := range layerOrder() {
+					entries, ok := byLayer[layer]
+					if !ok {
+						continue
+					}
+					fmt.Printf("### %s\n", layer)
+					for _, e := range entries {
+						printEntry(e, int(cmd.Int("width")))
+					}
+					fmt.Println()
+				}
+			}
+
+			// Plans grouped by layer
+			plans := g.Plans()
+			if len(plans) > 0 {
+				fmt.Println("## Plans")
+				fmt.Println()
+				byLayer := groupByLayer(plans)
 				for _, layer := range layerOrder() {
 					entries, ok := byLayer[layer]
 					if !ok {
@@ -187,7 +206,7 @@ func listCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:    "kind",
 				Aliases: []string{"k"},
-				Usage:   "Filter decisions by kind (contract, directive)",
+				Usage:   "Filter decisions by kind (contract, directive, plan)",
 			},
 			&cli.BoolFlag{
 				Name:  "all",
@@ -224,11 +243,8 @@ func listCmd() *cli.Command {
 			}
 
 			var entries []*sdd.Entry
-			if cmd.Bool("all") {
-				entries = g.Filter(typ, layer)
-			} else {
-				entries = g.FilterOpen(typ, layer, kind)
-			}
+			f := sdd.GraphFilter{Type: typ, Layer: layer, Kind: kind, OpenOnly: !cmd.Bool("all")}
+			entries = g.Filter(f)
 			for _, e := range entries {
 				printEntry(e, int(cmd.Int("width")))
 			}
@@ -266,7 +282,7 @@ func newCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:  "kind",
-				Usage: "Decision kind (contract, directive). Only applies to decisions.",
+				Usage: "Decision kind (contract, directive, plan). Only applies to decisions.",
 			},
 			&cli.StringSliceFlag{
 				Name:  "attach",

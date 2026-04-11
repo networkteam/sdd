@@ -118,6 +118,9 @@ func WriteEntryFull(w io.Writer, e *Entry) {
 	fmt.Fprintf(w, "ID:     %s\n", e.ID)
 	fmt.Fprintf(w, "Type:   %s\n", e.TypeLabel())
 	fmt.Fprintf(w, "Layer:  %s\n", e.LayerLabel())
+	if e.Kind != "" && e.Kind != KindDirective {
+		fmt.Fprintf(w, "Kind:   %s\n", e.Kind)
+	}
 	if e.Confidence != "" {
 		fmt.Fprintf(w, "Conf:   %s\n", e.Confidence)
 	}

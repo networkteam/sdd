@@ -125,7 +125,7 @@ func (g *Graph) ActiveDecisions() []*Entry {
 
 	var active []*Entry
 	for _, e := range g.Entries {
-		if e.Type != TypeDecision || e.IsContract() {
+		if e.Type != TypeDecision || e.IsContract() || e.IsPlan() {
 			continue
 		}
 		if !closed[e.ID] && !superseded[e.ID] {
@@ -133,6 +133,23 @@ func (g *Graph) ActiveDecisions() []*Entry {
 		}
 	}
 	return active
+}
+
+// Plans returns active plan decisions (not closed, not superseded).
+func (g *Graph) Plans() []*Entry {
+	closed := g.closedSet()
+	superseded := g.supersededSet()
+
+	var plans []*Entry
+	for _, e := range g.Entries {
+		if e.Type != TypeDecision || !e.IsPlan() {
+			continue
+		}
+		if !closed[e.ID] && !superseded[e.ID] {
+			plans = append(plans, e)
+		}
+	}
+	return plans
 }
 
 // Contracts returns active contract decisions (not superseded).
@@ -209,50 +226,51 @@ func (g *Graph) RefChain(id string) []*Entry {
 	return chain
 }
 
-// Filter returns entries matching the given criteria. Empty values match all.
-func (g *Graph) Filter(typ EntryType, layer Layer) []*Entry {
-	var result []*Entry
-	for _, e := range g.Entries {
-		if typ != "" && e.Type != typ {
-			continue
-		}
-		if layer != "" && e.Layer != layer {
-			continue
-		}
-		result = append(result, e)
-	}
-	return result
+// GraphFilter specifies criteria for filtering graph entries.
+type GraphFilter struct {
+	Type     EntryType
+	Layer    Layer
+	Kind     Kind
+	OpenOnly bool // when true, exclude closed/superseded signals and decisions
 }
 
-// FilterOpen returns only open/active entries matching the criteria.
-// Open signals = not closed and not superseded.
-// Active decisions = not closed and not superseded.
-// Actions are always included (they are facts of execution).
-// Kind filter applies only to decisions: "contract" or "directive" (empty = all).
-func (g *Graph) FilterOpen(typ EntryType, layer Layer, kind Kind) []*Entry {
-	closed := g.closedSet()
-	superseded := g.supersededSet()
+// Filter returns entries matching the given filter criteria. Zero-value fields match all.
+// When Kind is specified, only decisions are returned (kind is meaningless for other types).
+func (g *Graph) Filter(f GraphFilter) []*Entry {
+	var closed, superseded map[string]bool
+	if f.OpenOnly {
+		closed = g.closedSet()
+		superseded = g.supersededSet()
+	}
 
 	var result []*Entry
 	for _, e := range g.Entries {
-		if typ != "" && e.Type != typ {
+		if f.Type != "" && e.Type != f.Type {
 			continue
 		}
-		if layer != "" && e.Layer != layer {
+		if f.Layer != "" && e.Layer != f.Layer {
 			continue
 		}
-		if kind != "" && e.Type == TypeDecision {
-			if kind == KindDirective && e.IsContract() {
+		if f.Kind != "" {
+			if e.Type != TypeDecision {
 				continue
 			}
-			if kind == KindContract && !e.IsContract() {
+			if f.Kind == KindDirective && (e.IsContract() || e.IsPlan()) {
+				continue
+			}
+			if f.Kind == KindContract && !e.IsContract() {
+				continue
+			}
+			if f.Kind == KindPlan && !e.IsPlan() {
 				continue
 			}
 		}
-		switch e.Type {
-		case TypeSignal, TypeDecision:
-			if closed[e.ID] || superseded[e.ID] {
-				continue
+		if f.OpenOnly {
+			switch e.Type {
+			case TypeSignal, TypeDecision:
+				if closed[e.ID] || superseded[e.ID] {
+					continue
+				}
 			}
 		}
 		result = append(result, e)

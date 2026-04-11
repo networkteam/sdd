@@ -447,28 +447,28 @@ func TestFilter(t *testing.T) {
 		entry("20260406-100200-d-tac-ccc"),
 	})
 
-	signals := g.Filter(TypeSignal, "")
+	signals := g.Filter(GraphFilter{Type: TypeSignal})
 	if len(signals) != 2 {
-		t.Errorf("Filter(signal, '') = %d, want 2", len(signals))
+		t.Errorf("Filter(signal) = %d, want 2", len(signals))
 	}
 
-	tactical := g.Filter("", LayerTactical)
+	tactical := g.Filter(GraphFilter{Layer: LayerTactical})
 	if len(tactical) != 2 {
-		t.Errorf("Filter('', tactical) = %d, want 2", len(tactical))
+		t.Errorf("Filter(tactical) = %d, want 2", len(tactical))
 	}
 
-	tacSignals := g.Filter(TypeSignal, LayerTactical)
+	tacSignals := g.Filter(GraphFilter{Type: TypeSignal, Layer: LayerTactical})
 	if len(tacSignals) != 1 {
 		t.Errorf("Filter(signal, tactical) = %d, want 1", len(tacSignals))
 	}
 
-	all := g.Filter("", "")
+	all := g.Filter(GraphFilter{})
 	if len(all) != 3 {
-		t.Errorf("Filter('', '') = %d, want 3", len(all))
+		t.Errorf("Filter({}) = %d, want 3", len(all))
 	}
 }
 
-func TestFilterOpen(t *testing.T) {
+func TestFilterOpenOnly(t *testing.T) {
 	g := NewGraph([]*Entry{
 		entry("20260406-100000-s-tac-aaa", withContent("Open signal")),
 		entry("20260406-100100-s-tac-bbb", withContent("Closed signal")),
@@ -478,13 +478,13 @@ func TestFilterOpen(t *testing.T) {
 		entry("20260406-100500-a-tac-fff", withCloses("20260406-100200-d-tac-ccc")),
 	})
 
-	open := g.FilterOpen("", "", "")
+	open := g.Filter(GraphFilter{OpenOnly: true})
 	ids := entryIDs(open)
 
 	// aaa (open signal), eee (active decision), fff (action) = 3
 	// excluded: bbb (closed signal), ccc (closed decision), ddd (superseded decision)
 	if len(open) != 3 {
-		t.Fatalf("FilterOpen('', '') = %v (len %d), want 3 entries", ids, len(open))
+		t.Fatalf("Filter(OpenOnly) = %v (len %d), want 3 entries", ids, len(open))
 	}
 
 	assertContains(t, ids, "20260406-100000-s-tac-aaa", "open signal")
@@ -494,26 +494,26 @@ func TestFilterOpen(t *testing.T) {
 	assertNotContains(t, ids, "20260406-100200-d-tac-ccc", "closed decision")
 	assertNotContains(t, ids, "20260406-100300-d-tac-ddd", "superseded decision")
 
-	openSignals := g.FilterOpen(TypeSignal, "", "")
+	openSignals := g.Filter(GraphFilter{Type: TypeSignal, OpenOnly: true})
 	if len(openSignals) != 1 {
-		t.Errorf("FilterOpen(signal, '') = %d, want 1", len(openSignals))
+		t.Errorf("Filter(signal, OpenOnly) = %d, want 1", len(openSignals))
 	}
 
-	openDecisions := g.FilterOpen(TypeDecision, "", "")
+	openDecisions := g.Filter(GraphFilter{Type: TypeDecision, OpenOnly: true})
 	if len(openDecisions) != 1 {
-		t.Errorf("FilterOpen(decision, '') = %d, want 1", len(openDecisions))
+		t.Errorf("Filter(decision, OpenOnly) = %d, want 1", len(openDecisions))
 	}
 }
 
-func TestFilterOpenWithLayerFilter(t *testing.T) {
+func TestFilterOpenOnlyWithLayerFilter(t *testing.T) {
 	g := NewGraph([]*Entry{
 		entry("20260406-100000-s-tac-aaa"),
 		entry("20260406-100100-s-ops-bbb"),
 	})
 
-	tacOpen := g.FilterOpen(TypeSignal, LayerTactical, "")
+	tacOpen := g.Filter(GraphFilter{Type: TypeSignal, Layer: LayerTactical, OpenOnly: true})
 	if len(tacOpen) != 1 {
-		t.Fatalf("FilterOpen(signal, tactical) = %d, want 1", len(tacOpen))
+		t.Fatalf("Filter(signal, tactical, OpenOnly) = %d, want 1", len(tacOpen))
 	}
 	if tacOpen[0].ID != "20260406-100000-s-tac-aaa" {
 		t.Errorf("Got %q, want aaa", tacOpen[0].ID)
@@ -556,36 +556,86 @@ func TestContracts(t *testing.T) {
 	assertNotContains(t, ids, "20260406-100300-d-cpt-ddd", "superseded contract")
 }
 
-func TestFilterOpenWithKind(t *testing.T) {
+func TestFilterWithKind(t *testing.T) {
 	g := NewGraph([]*Entry{
 		entry("20260406-100000-d-cpt-aaa", withKind(KindContract)),
 		entry("20260406-100100-d-tac-bbb"),
+		entry("20260406-100150-d-tac-ppp", withKind(KindPlan)),
 		entry("20260406-100200-s-tac-ccc"),
 	})
 
-	// Kind=contract: only contracts
-	contracts := g.FilterOpen(TypeDecision, "", KindContract)
+	// Kind=contract: only contract decisions
+	contracts := g.Filter(GraphFilter{Kind: KindContract, OpenOnly: true})
 	if len(contracts) != 1 {
-		t.Fatalf("FilterOpen(decision, '', contract) = %d, want 1", len(contracts))
+		t.Fatalf("Filter(contract, OpenOnly) = %d, want 1", len(contracts))
 	}
 	if contracts[0].ID != "20260406-100000-d-cpt-aaa" {
 		t.Errorf("Got %q, want aaa", contracts[0].ID)
 	}
 
-	// Kind=directive: only directives
-	directives := g.FilterOpen(TypeDecision, "", KindDirective)
+	// Kind=directive: only directive decisions (excludes contracts and plans)
+	directives := g.Filter(GraphFilter{Kind: KindDirective, OpenOnly: true})
 	if len(directives) != 1 {
-		t.Fatalf("FilterOpen(decision, '', directive) = %d, want 1", len(directives))
+		t.Fatalf("Filter(directive, OpenOnly) = %d, want 1", len(directives))
 	}
 	if directives[0].ID != "20260406-100100-d-tac-bbb" {
 		t.Errorf("Got %q, want bbb", directives[0].ID)
 	}
 
-	// Kind filter doesn't affect signals
-	all := g.FilterOpen("", "", KindContract)
-	if len(all) != 2 {
-		t.Errorf("FilterOpen('', '', contract) = %d, want 2 (signal + contract)", len(all))
+	// Kind=plan: only plan decisions
+	plans := g.Filter(GraphFilter{Kind: KindPlan, OpenOnly: true})
+	if len(plans) != 1 {
+		t.Fatalf("Filter(plan, OpenOnly) = %d, want 1", len(plans))
 	}
+	if plans[0].ID != "20260406-100150-d-tac-ppp" {
+		t.Errorf("Got %q, want ppp", plans[0].ID)
+	}
+
+	// Kind filter excludes non-decisions (signals, actions)
+	contractOnly := g.Filter(GraphFilter{Kind: KindContract})
+	if len(contractOnly) != 1 {
+		t.Errorf("Filter(contract) = %d, want 1 (only contract, no signal)", len(contractOnly))
+	}
+}
+
+func TestActiveDecisionsExcludesPlans(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-cpt-aaa", withKind(KindContract)),
+		entry("20260406-100100-d-tac-bbb"),
+		entry("20260406-100200-d-tac-ccc", withKind(KindPlan)),
+	})
+
+	active := g.ActiveDecisions()
+	if len(active) != 1 {
+		t.Fatalf("ActiveDecisions = %d, want 1 (contract and plan excluded)", len(active))
+	}
+	if active[0].ID != "20260406-100100-d-tac-bbb" {
+		t.Errorf("Active = %q, want bbb", active[0].ID)
+	}
+}
+
+func TestPlans(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-cpt-aaa", withKind(KindPlan)),
+		entry("20260406-100100-d-tac-bbb"),
+		entry("20260406-100200-d-cpt-ccc", withKind(KindPlan)),
+		entry("20260406-100300-d-cpt-ddd", withKind(KindPlan), withContent("Superseded plan")),
+		entry("20260406-100400-d-cpt-eee", withKind(KindPlan), withSupersedes("20260406-100300-d-cpt-ddd")),
+		entry("20260406-100500-d-cpt-fff", withKind(KindPlan)),
+		entry("20260406-100600-a-cpt-ggg", withCloses("20260406-100500-d-cpt-fff")),
+	})
+
+	plans := g.Plans()
+	ids := entryIDs(plans)
+	if len(plans) != 3 {
+		t.Fatalf("Plans = %v (len %d), want 3", ids, len(plans))
+	}
+	assertContains(t, ids, "20260406-100000-d-cpt-aaa", "plan")
+	assertContains(t, ids, "20260406-100200-d-cpt-ccc", "plan")
+	assertContains(t, ids, "20260406-100400-d-cpt-eee", "superseding plan")
+	assertNotContains(t, ids, "20260406-100100-d-tac-bbb", "directive")
+	assertNotContains(t, ids, "20260406-100300-d-cpt-ddd", "superseded plan")
+	assertNotContains(t, ids, "20260406-100500-d-cpt-fff", "closed plan")
 }
 
 func TestShortContent(t *testing.T) {

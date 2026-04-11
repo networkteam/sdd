@@ -464,3 +464,35 @@ func TestRenderShow_ShownAboveHasBlankLineAfterHeading(t *testing.T) {
 		t.Errorf("expected blank line between heading and '(shown above)', got:\n%q", secondSection)
 	}
 }
+
+func TestWriteEntryFull_KindDisplayed(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     Kind
+		wantKind bool
+		wantText string
+	}{
+		{"plan shows Kind", KindPlan, true, "Kind:   plan"},
+		{"contract shows Kind", KindContract, true, "Kind:   contract"},
+		{"directive omits Kind", KindDirective, false, "Kind:"},
+		{"empty kind omits Kind", "", false, "Kind:"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := entry("20260410-100000-d-tac-aaa", withKind(tt.kind), withContent("Test"))
+
+			var buf bytes.Buffer
+			WriteEntryFull(&buf, e)
+			out := buf.String()
+
+			hasKind := strings.Contains(out, tt.wantText)
+			if tt.wantKind && !hasKind {
+				t.Errorf("expected %q in output, got:\n%s", tt.wantText, out)
+			}
+			if !tt.wantKind && strings.Contains(out, "Kind:") {
+				t.Errorf("expected no Kind line in output, got:\n%s", out)
+			}
+		})
+	}
+}
