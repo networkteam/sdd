@@ -6,9 +6,10 @@ An action is being created that claims to close (resolve/fulfill) a decision or 
 
 ## Checks
 
-1. **Coverage**: Every requirement or plan item in the closed entry must have corresponding coverage in the action description. List any items that are not addressed.
-2. **No silent omissions**: If the action does not cover all items, this must be explicit in the description — silent omission is a failure.
-3. **No overclaiming**: The action must not claim to have done things beyond what its description supports.
+1. **Coverage**: Every requirement or plan item in the closed entry must be accounted for in the action description — either implemented or explicitly deviated from.
+2. **No silent omissions**: A plan item that is neither implemented nor mentioned is a failure. Every item must be addressed.
+3. **Explicit deviations are acceptable**: If the action marks an item as an intentional deviation with reasoning (e.g. "Deviation: no X — decided during implementation that Y because Z"), that counts as coverage. The key test: does the deviation show a conscious decision with rationale, or does it look like the agent skipped something because it was convenient? Deviations without reasoning are failures.
+4. **No overclaiming**: The action must not claim to have done things beyond what its description supports.
 
 ## Proposed action
 
