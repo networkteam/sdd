@@ -22,8 +22,9 @@ Then invoke the `/sdd-catchup` skill to get a synthesized summary of the current
 Never silently create graph entries. When capturing anything:
 
 1. Play back what you'd capture: "I'd record this as a [type] at the [layer] layer: '[content]'. Refs: [entries]. Does that look right?"
-2. Let the user adjust wording, type, layer, refs, confidence
-3. Only then run `sdd new`
+2. Assess whether an attachment is needed (see "Attachment assessment" below). If yes, include it in the play-back: "I'd attach a [document type] covering [scope]."
+3. Let the user adjust wording, type, layer, refs, confidence, attachment
+4. Only then run `sdd new`
 
 ### Always suggest next steps
 
@@ -58,6 +59,21 @@ See [CLI reference](references/cli-reference.md) for full command syntax and fla
 - **Confidence is honest**: High = strong conviction. Medium = reasonable but unvalidated. Low = hypothesis/experiment.
 - **One idea per entry**: Keep entries digestible. If it needs more detail, split into multiple entries or reference an external file.
 - **Kind for decisions**: Most decisions are directives (default, omit the kind field). Use `--kind contract` only for standing constraints that define rules rather than requesting action. A directive that hardens into a permanent rule can be reclassified later via supersedes + kind: contract.
+
+### Attachment assessment
+
+The entry description is the summary. The attachment is the record. When the conversation that led to capture involved more than a brief exchange, the entry needs an attachment. **Default to attaching** when the dialogue produced any of these:
+
+- **Design dialogue**: Trade-offs discussed, alternatives rejected, a shape or plan emerged → attach a draft plan covering the design, alternatives considered, and open questions
+- **Evaluation**: Findings, comparisons, gap analysis → attach the evaluation details and evidence
+- **Exploration**: Upstream/downstream analysis, context synthesis, multiple entries connected → attach the briefing and analysis
+- **Research**: External sources reviewed, literature compared → attach the research summary with sources
+
+**Skip the attachment** only when the entry description alone captures the full substance — typically brief signals from a single observation, or actions recording a mechanical step.
+
+When in doubt, attach. A one-paragraph entry with a rich attachment preserves the reasoning chain. A compressed summary without attachment loses it permanently.
+
+Use `--attach -:filename.md` to pipe content via stdin — no temp files needed.
 
 ### Infer participants from session context
 
