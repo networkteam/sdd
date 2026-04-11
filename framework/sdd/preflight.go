@@ -210,19 +210,21 @@ func FormatEntryForPrompt(e *Entry) string {
 }
 
 // RenderPrompt renders the pre-flight prompt for the given check type and context.
+// All templates are parsed together so partials (e.g. contracts.tmpl) are available.
 func RenderPrompt(checkType CheckType, pctx *PreflightContext) (string, error) {
 	tmplName, ok := checkTypeTemplates[checkType]
 	if !ok {
 		return "", fmt.Errorf("no template for check type %s", checkType)
 	}
 
-	tmpl, err := template.ParseFS(preflightTemplates, tmplName)
+	// Parse all templates together so {{ template "contracts" . }} works
+	tmpl, err := template.ParseFS(preflightTemplates, "preflight_templates/*.tmpl")
 	if err != nil {
-		return "", fmt.Errorf("parsing template %s: %w", tmplName, err)
+		return "", fmt.Errorf("parsing templates: %w", err)
 	}
 
 	var b strings.Builder
-	if err := tmpl.Execute(&b, pctx); err != nil {
+	if err := tmpl.ExecuteTemplate(&b, filepath.Base(tmplName), pctx); err != nil {
 		return "", fmt.Errorf("executing template %s: %w", tmplName, err)
 	}
 

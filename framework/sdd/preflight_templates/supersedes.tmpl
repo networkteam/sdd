@@ -21,11 +21,7 @@ An entry is being created that supersedes (replaces) an existing entry. Verify t
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ if .ActiveContracts }}
-## Active contracts (standing constraints — check for violations)
-
-{{ .ActiveContracts }}
-{{ end }}
+{{ end }}{{ template "contracts" . }}
 ## Output format
 
 Respond with exactly:

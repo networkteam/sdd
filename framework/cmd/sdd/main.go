@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/networkteam/resonance/framework/sdd"
 	"github.com/urfave/cli/v3"
@@ -408,7 +409,9 @@ func newCmd() *cli.Command {
 				fmt.Fprintf(os.Stderr, "warning: pre-flight validation skipped\n")
 			} else {
 				runner := &claudeRunner{model: cmd.String("preflight-model")}
-				result, err := sdd.RunPreflight(ctx, runner, entry, graph)
+				preflightCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				result, err := sdd.RunPreflight(preflightCtx, runner, entry, graph)
 				if err != nil {
 					// Infrastructure failure — warn and proceed
 					entry.Preflight = "error"

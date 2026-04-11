@@ -17,11 +17,7 @@ A signal (observation/fact) is being captured. Perform a classification check.
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ if .ActiveContracts }}
-## Active contracts (standing constraints — check for violations)
-
-{{ .ActiveContracts }}
-{{ end }}
+{{ end }}{{ template "contracts" . }}
 ## Output format
 
 Respond with exactly:

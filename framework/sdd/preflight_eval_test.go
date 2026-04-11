@@ -259,6 +259,65 @@ func TestPreflightEval_ValidSignal(t *testing.T) {
 	}
 }
 
+func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
+	// True positive based on real graph history: action a-tac-tsd claimed to close
+	// decision d-tac-kfo but silently dropped the attachment validation requirement.
+	// The decision listed 4 checks including "broken or missing attachment references"
+	// but the action only implemented 3 and noted the omission at the end.
+	// Expected: FAIL — the action should not close the decision with incomplete coverage.
+
+	decision := &Entry{
+		ID:      "20260410-122858-d-tac-kfo",
+		Type:    TypeDecision,
+		Layer:   LayerTactical,
+		Kind:    KindDirective,
+		Content: "Build a sdd lint command for graph integrity checks. Checks: dangling refs (pointing at non-existent entries), short/malformed IDs in refs/closes/supersedes, type mismatches (e.g. closes pointing at an action), broken or missing attachment references. LoadGraph collects validation errors per entry as a custom structured error type on the Entry struct. sdd lint formats the full report. sdd show displays warnings per entry (including entries in the ref chain). Structured errors enable good formatting across contexts.",
+		Time:    time.Date(2026, 4, 10, 12, 28, 58, 0, time.UTC),
+	}
+
+	graph := NewGraph([]*Entry{decision})
+
+	proposed := &Entry{
+		Type:    TypeAction,
+		Layer:   LayerTactical,
+		Refs:    []string{decision.ID},
+		Closes:  []string{decision.ID},
+		Content: "Built sdd lint command with checks for dangling refs (non-existent entries), malformed IDs (short suffixes), type mismatches in closes (signal can't close, action can't be closed, decision can't close decision), and type mismatches in supersedes (must be same type). Warnings are populated during graph construction on the Entry struct so sdd show displays them inline. Running against the live graph found 4 issues in 3 entries. Does NOT yet cover broken or missing attachment references — that requirement from d-tac-kfo remains unimplemented.",
+	}
+
+	checkType := SelectCheckType(proposed, graph)
+	pctx, err := AssembleContext(proposed, graph, checkType)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prompt, err := RenderPrompt(checkType, pctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
+	output, err := runner.Run(ctx, prompt)
+	if err != nil {
+		t.Fatalf("Runner error: %v", err)
+	}
+
+	result, err := ParseResult(output)
+	if err != nil {
+		t.Errorf("Parse error (raw output: %q): %v", output, err)
+		return
+	}
+
+	if result.Pass {
+		t.Errorf("Expected FAIL (action admits missing attachment validation requirement), got PASS. Raw output:\n%s", output)
+	} else {
+		t.Logf("Correctly caught silent scope-out. Gaps: %v", result.Gaps)
+	}
+}
+
 func TestPreflightEval_ContractViolation(t *testing.T) {
 	// True positive: entry violates an active contract.
 	// Expected: FAIL with contract violation noted.

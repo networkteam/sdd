@@ -25,11 +25,7 @@ An action is being created that claims to close (resolve/fulfill) a decision or 
 ## Referenced entries
 
 {{ .ReferencedEntries }}
-{{ end }}{{ if .ActiveContracts }}
-## Active contracts (standing constraints — check for violations)
-
-{{ .ActiveContracts }}
-{{ end }}
+{{ end }}{{ template "contracts" . }}
 ## Output format
 
 Respond with exactly:

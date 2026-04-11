@@ -21,11 +21,7 @@ A decision is being created that claims to close (resolve) one or more signals. 
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ if .ActiveContracts }}
-## Active contracts (standing constraints — check for violations)
-
-{{ .ActiveContracts }}
-{{ end }}
+{{ end }}{{ template "contracts" . }}
 ## Output format
 
 Respond with exactly:
