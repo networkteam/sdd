@@ -225,3 +225,36 @@ When the conversation reaches "let's build this":
 6. If you hit a design choice not covered by existing decisions: **stop implementation**, capture an action recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself.
 7. After implementation, commit the code changes first, then capture the action, then remove the WIP marker (`sdd wip done <marker-id>`)
 8. Prompt for evaluation signals
+
+### Branching for isolated work
+
+Use `--branch` on `sdd wip start` when the work needs isolation — uncertain explorations that might be discarded, concurrent work streams, or scope that could pollute the main graph if it doesn't pan out.
+
+**Starting a branch:**
+```
+sdd wip start <entry-id> --branch --exclusive --participant <name> "<description>"
+```
+The CLI creates a git branch (`sdd/<suffix>-<slug>`) and worktree at a sibling directory. The WIP marker is committed on main for coordination visibility. After the worktree is created, check CLAUDE.md for setup/init instructions and follow them if they exist.
+
+**Working on a branch:**
+- Create entries, make code changes, run the normal SDD loop — all on the branch
+- Regularly merge main into the branch (`git merge main`) to stay synchronized with WIP markers and prevent conflicts from diverging too far
+- Entries on the branch are invisible to main until merge — that's the isolation property
+
+**Ending a branch — two playbook moves, assess and recommend one:**
+
+#### "Conclude and keep"
+For explorations that produced entries worth preserving — the reasoning chain has value for future traversal.
+
+1. Merge main into branch (resolve any conflicts here, on the branch)
+2. Walk the entry chain — ensure all intermediate entries are properly closed or superseded (no open noise on main after merge)
+3. Selectively revert non-graph changes that shouldn't be kept via new commits — this is a deliberate per-commit assessment, not binary "keep all graph, drop all code"
+4. Merge branch to main
+5. Capture closing action + forward-looking signal on main
+6. `sdd wip done <marker-id>` — removes marker, cleans up worktree and deletes branch
+
+#### "Discard"
+For trivially shallow explorations where there's nothing worth preserving beyond a one-liner.
+
+1. Capture summary signal on main with the key learning (if any)
+2. `sdd wip done <marker-id> --force` — removes marker, force-deletes unmerged branch and worktree
