@@ -532,6 +532,49 @@ func gitCommit(message string, filePaths ...string) error {
 	return nil
 }
 
+func gitRepoRoot() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --show-toplevel: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func isBranchMerged(branch string) bool {
+	out, err := exec.Command("git", "branch", "--merged").Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		name := strings.TrimSpace(strings.TrimPrefix(line, "*"))
+		name = strings.TrimSpace(name)
+		if name == branch {
+			return true
+		}
+	}
+	return false
+}
+
+func removeWorktree(path string, force bool) {
+	args := []string{"worktree", "remove", path}
+	if force {
+		args = []string{"worktree", "remove", "--force", path}
+	}
+	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: git worktree remove: %s (%v)\n", out, err)
+	}
+}
+
+func deleteBranch(branch string, force bool) {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	if out, err := exec.Command("git", "branch", flag, branch).CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "  warning: git branch %s: %s (%v)\n", flag, out, err)
+	}
+}
+
 func graphDir(cmd *cli.Command) string {
 	dir := cmd.String("graph-dir")
 	if !filepath.IsAbs(dir) {
@@ -565,6 +608,10 @@ func wipStartCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:  "participant",
 				Usage: "Participant name (defaults to git user.name)",
+			},
+			&cli.BoolFlag{
+				Name:  "branch",
+				Usage: "Create a git branch and worktree for isolated work",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -602,6 +649,12 @@ func wipStartCmd() *cli.Command {
 					entryID, existing.Participant, existing.ID)
 			}
 
+			// Derive branch name if --branch is set
+			var branchName string
+			if cmd.Bool("branch") {
+				branchName = sdd.DeriveBranchName(entryID, description)
+			}
+
 			// Create marker
 			markerID := sdd.GenerateWIPMarkerID(participant)
 			marker := &sdd.WIPMarker{
@@ -609,6 +662,7 @@ func wipStartCmd() *cli.Command {
 				Entry:       entryID,
 				Participant: participant,
 				Exclusive:   cmd.Bool("exclusive"),
+				Branch:      branchName,
 				Content:     description,
 			}
 
@@ -625,8 +679,35 @@ func wipStartCmd() *cli.Command {
 			fmt.Printf("%s\n", markerID)
 			fmt.Printf("  → %s\n", markerPath)
 
+			// Commit marker on current branch (before creating the new branch)
 			if err := gitCommit(fmt.Sprintf("sdd: wip start %s (%s)", entryID, participant), markerPath); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: git commit failed: %v\n", err)
+			}
+
+			// Create branch and worktree if --branch
+			if branchName != "" {
+				repoRoot, err := gitRepoRoot()
+				if err != nil {
+					return fmt.Errorf("finding repo root: %w", err)
+				}
+				worktreePath := sdd.DeriveWorktreePath(repoRoot, branchName)
+
+				// Create branch
+				branchCmd := exec.Command("git", "branch", branchName)
+				if out, err := branchCmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("creating branch %s: %s (%w)", branchName, out, err)
+				}
+
+				// Create worktree
+				wtCmd := exec.Command("git", "worktree", "add", worktreePath, branchName)
+				if out, err := wtCmd.CombinedOutput(); err != nil {
+					// Clean up branch on failure
+					exec.Command("git", "branch", "-d", branchName).Run()
+					return fmt.Errorf("creating worktree at %s: %s (%w)", worktreePath, out, err)
+				}
+
+				fmt.Printf("  branch: %s\n", branchName)
+				fmt.Printf("  worktree: %s\n", worktreePath)
 			}
 
 			return nil
@@ -639,6 +720,12 @@ func wipDoneCmd() *cli.Command {
 		Name:      "done",
 		Usage:     "Remove a WIP marker",
 		ArgsUsage: "<marker-id>",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "force",
+				Usage: "Force-delete unmerged branch and worktree (discard flow)",
+			},
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			args := cmd.Args()
 			if args.Len() < 1 {
@@ -651,6 +738,16 @@ func wipDoneCmd() *cli.Command {
 
 			if _, err := os.Stat(markerPath); err != nil {
 				return fmt.Errorf("marker not found: %s", markerID)
+			}
+
+			// Read marker to check for branch
+			data, err := os.ReadFile(markerPath)
+			if err != nil {
+				return fmt.Errorf("reading marker: %w", err)
+			}
+			marker, err := sdd.ParseWIPMarker(filepath.Base(markerPath), string(data))
+			if err != nil {
+				return fmt.Errorf("parsing marker: %w", err)
 			}
 
 			if err := os.Remove(markerPath); err != nil {
@@ -673,6 +770,33 @@ func wipDoneCmd() *cli.Command {
 			commit := exec.Command("git", "commit", "-m", fmt.Sprintf("sdd: wip done %s", markerID))
 			if out, err := commit.CombinedOutput(); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: git commit failed: %s (%v)\n", out, err)
+			}
+
+			// Branch cleanup
+			if marker.Branch != "" {
+				repoRoot, err := gitRepoRoot()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not determine repo root for branch cleanup: %v\n", err)
+					return nil
+				}
+				worktreePath := sdd.DeriveWorktreePath(repoRoot, marker.Branch)
+
+				merged := isBranchMerged(marker.Branch)
+
+				if merged {
+					// Safe cleanup: branch was merged
+					removeWorktree(worktreePath, false)
+					deleteBranch(marker.Branch, false)
+					fmt.Printf("  cleaned up branch %s (merged)\n", marker.Branch)
+				} else if cmd.Bool("force") {
+					// Force cleanup: discard flow
+					removeWorktree(worktreePath, true)
+					deleteBranch(marker.Branch, true)
+					fmt.Printf("  force-deleted branch %s (unmerged)\n", marker.Branch)
+				} else {
+					fmt.Fprintf(os.Stderr, "  warning: branch %s has unmerged changes — marker removed but branch and worktree preserved\n", marker.Branch)
+					fmt.Fprintf(os.Stderr, "  use --force to delete the unmerged branch, or merge it first\n")
+				}
 			}
 
 			return nil
@@ -701,8 +825,12 @@ func wipListCmd() *cli.Command {
 				if m.Exclusive {
 					excl = " [exclusive]"
 				}
-				fmt.Printf("  %s  %-15s%s  %s  %s\n",
-					m.ID, m.Participant, excl, m.Entry, m.ShortContent(int(cmd.Int("width"))))
+				branch := ""
+				if m.Branch != "" {
+					branch = fmt.Sprintf("  branch:%s", m.Branch)
+				}
+				fmt.Printf("  %s  %-15s%s  %s%s  %s\n",
+					m.ID, m.Participant, excl, m.Entry, branch, m.ShortContent(int(cmd.Int("width"))))
 			}
 
 			return nil

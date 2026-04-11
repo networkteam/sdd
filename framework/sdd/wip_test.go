@@ -3,6 +3,7 @@ package sdd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -297,6 +298,98 @@ func TestWIPMarkerShortContent(t *testing.T) {
 	m.Content = "A very long description that exceeds the limit"
 	if got := m.ShortContent(20); got != "A very long desc ..." {
 		t.Errorf("ShortContent(20) = %q", got)
+	}
+}
+
+func TestParseWIPMarkerWithBranch(t *testing.T) {
+	content := `---
+entry: 20260411-115135-d-tac-3xw
+participant: Christopher
+exclusive: true
+branch: sdd/3xw-branching-implementation
+---
+
+Implementing branching support.
+`
+	m, err := ParseWIPMarker("20260411-193515-christopher.md", content)
+	if err != nil {
+		t.Fatalf("ParseWIPMarker: %v", err)
+	}
+
+	if m.Branch != "sdd/3xw-branching-implementation" {
+		t.Errorf("Branch = %q, want sdd/3xw-branching-implementation", m.Branch)
+	}
+}
+
+func TestFormatWIPMarkerWithBranch(t *testing.T) {
+	m := &WIPMarker{
+		ID:          "20260411-193515-christopher",
+		Entry:       "20260411-115135-d-tac-3xw",
+		Participant: "Christopher",
+		Exclusive:   true,
+		Branch:      "sdd/3xw-branching-implementation",
+		Content:     "Implementing branching support.",
+	}
+
+	got := FormatWIPMarker(m)
+	parsed, err := ParseWIPMarker(m.ID+".md", got)
+	if err != nil {
+		t.Fatalf("round-trip parse failed: %v", err)
+	}
+	if parsed.Branch != m.Branch {
+		t.Errorf("Branch = %q, want %q", parsed.Branch, m.Branch)
+	}
+}
+
+func TestFormatWIPMarkerWithoutBranch(t *testing.T) {
+	m := &WIPMarker{
+		ID:          "20260409-103000-christopher",
+		Entry:       "20260408-171831-d-cpt-axa",
+		Participant: "Christopher",
+		Exclusive:   true,
+		Content:     "No branch.",
+	}
+
+	got := FormatWIPMarker(m)
+	if strings.Contains(got, "branch:") {
+		t.Errorf("expected no branch field in output, got:\n%s", got)
+	}
+	parsed, err := ParseWIPMarker(m.ID+".md", got)
+	if err != nil {
+		t.Fatalf("round-trip parse failed: %v", err)
+	}
+	if parsed.Branch != "" {
+		t.Errorf("Branch = %q, want empty", parsed.Branch)
+	}
+}
+
+func TestDeriveBranchName(t *testing.T) {
+	tests := []struct {
+		entryID     string
+		description string
+		want        string
+	}{
+		{"20260411-115135-d-tac-3xw", "Branching implementation", "sdd/3xw-branching-implementation"},
+		{"20260410-211553-d-tac-s6w", "Pre-flight validator", "sdd/s6w-pre-flight-validator"},
+		{"20260410-211553-d-tac-s6w", "", "sdd/s6w"},
+		{"20260410-211553-d-tac-s6w", "  Spaces & special! chars  ", "sdd/s6w-spaces-special-chars"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.description, func(t *testing.T) {
+			got := DeriveBranchName(tt.entryID, tt.description)
+			if got != tt.want {
+				t.Errorf("DeriveBranchName(%q, %q) = %q, want %q", tt.entryID, tt.description, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeriveWorktreePath(t *testing.T) {
+	got := DeriveWorktreePath("/Users/hlubek/Dev/AI/Claude/resonance", "sdd/3xw-branching")
+	want := "/Users/hlubek/Dev/AI/Claude/sdd-3xw-branching"
+	if got != want {
+		t.Errorf("DeriveWorktreePath = %q, want %q", got, want)
 	}
 }
 

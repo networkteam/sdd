@@ -18,6 +18,7 @@ type WIPMarker struct {
 	Entry       string // graph entry ID being worked on
 	Participant string
 	Exclusive   bool
+	Branch      string // git branch name (empty if not a branched work stream)
 	Content     string // free-text description
 	Time        time.Time
 }
@@ -27,6 +28,7 @@ type wipFrontmatter struct {
 	Entry       string `yaml:"entry"`
 	Participant string `yaml:"participant"`
 	Exclusive   bool   `yaml:"exclusive,omitempty"`
+	Branch      string `yaml:"branch,omitempty"`
 }
 
 // GenerateWIPMarkerID creates a marker ID from the current timestamp and participant name.
@@ -65,6 +67,7 @@ func ParseWIPMarker(filename, content string) (*WIPMarker, error) {
 		Entry:       fm.Entry,
 		Participant: fm.Participant,
 		Exclusive:   fm.Exclusive,
+		Branch:      fm.Branch,
 		Content:     strings.TrimSpace(body),
 		Time:        t,
 	}, nil
@@ -76,6 +79,7 @@ func FormatWIPMarker(m *WIPMarker) string {
 		Entry:       m.Entry,
 		Participant: m.Participant,
 		Exclusive:   m.Exclusive,
+		Branch:      m.Branch,
 	}
 
 	data, _ := yaml.Marshal(&fm)
@@ -205,4 +209,51 @@ func WIPDir(graphDir string) string {
 // IsWIPDir returns true if the given directory entry represents the wip/ directory.
 func IsWIPDir(d fs.DirEntry) bool {
 	return d.IsDir() && d.Name() == "wip"
+}
+
+// DeriveBranchName creates a branch name from an entry ID and description.
+// Format: sdd/<entry-suffix>-<description-slug>
+func DeriveBranchName(entryID, description string) string {
+	parsed, err := ParseID(entryID)
+	if err != nil {
+		return "sdd/" + slugify(description)
+	}
+	slug := slugify(description)
+	if slug == "" {
+		return "sdd/" + parsed.Suffix
+	}
+	return "sdd/" + parsed.Suffix + "-" + slug
+}
+
+// DeriveWorktreePath returns the sibling directory path for a branch worktree.
+func DeriveWorktreePath(repoRoot, branchName string) string {
+	// Replace slashes with hyphens for the directory name
+	dirName := strings.ReplaceAll(branchName, "/", "-")
+	return filepath.Join(filepath.Dir(repoRoot), dirName)
+}
+
+// slugify converts a description into a URL/path-safe slug.
+func slugify(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var result []byte
+	lastWasDash := false
+	for _, c := range s {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			result = append(result, byte(c))
+			lastWasDash = false
+		} else if !lastWasDash && len(result) > 0 {
+			result = append(result, '-')
+			lastWasDash = true
+		}
+	}
+	// Trim trailing dash and limit length
+	out := strings.TrimRight(string(result), "-")
+	if len(out) > 40 {
+		// Cut at last dash before limit
+		out = out[:40]
+		if idx := strings.LastIndex(out, "-"); idx > 20 {
+			out = out[:idx]
+		}
+	}
+	return out
 }
