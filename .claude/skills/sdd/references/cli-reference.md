@@ -12,9 +12,9 @@ The `sdd` binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just
 - `sdd new <type> <layer> [flags] <description>` — create entries
 - `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links)
 - `sdd wip start <entry-id> --exclusive --participant <name> <description>` — create WIP marker
-- `sdd wip start <entry-id> --branch --exclusive --participant <name> <description>` — create WIP marker with git branch and worktree
-- `sdd wip done <marker-id>` — remove WIP marker (cleans up branch/worktree if merged)
-- `sdd wip done <marker-id> --force` — remove WIP marker and force-delete unmerged branch/worktree (discard flow)
+- `sdd wip start <entry-id> --branch --exclusive --participant <name> <description>` — create WIP marker, create git branch and check out to it
+- `sdd wip done <marker-id>` — remove WIP marker (deletes branch if merged)
+- `sdd wip done <marker-id> --force` — remove WIP marker and force-delete unmerged branch (discard flow)
 - `sdd wip list` — list active WIP markers
 
 ## `sdd new` flags

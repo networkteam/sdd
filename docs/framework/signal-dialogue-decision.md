@@ -204,6 +204,7 @@ These views are ephemeral — derived from the graph, never maintained as separa
 - Code may be less like a cathedral to maintain and more like a rendered output of decisions + constraints. Technical debt is not messy code — it's lost decisions.
 - The human skill shifts from "review all the code" to "assess whether the distillation is trustworthy and the coverage is sufficient for the risk."
 - The framework applies beyond development to the whole product lifecycle: discovery, marketing, operations, support. The loop is the same; the layers, participants, and contracts change.
+- The loop maps naturally to the Golden Circle (Why/How/What): Signals surface Why something needs attention, Decisions commit to How, Actions are What gets done. Unlike the Golden Circle as a communication model, the graph makes Why permanently traceable — every What can be traced back through its origin chain.
 - Existing frameworks (OODA, Cynefin, Viable System Model, Lean) share DNA with this approach but were designed for humans-only. The novel element is participants that operate at wildly different speeds, hold vast context, and run in parallel.
 
 ## Open Questions

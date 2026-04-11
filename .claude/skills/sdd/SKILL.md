@@ -228,33 +228,57 @@ When the conversation reaches "let's build this":
 
 ### Branching for isolated work
 
-Use `--branch` on `sdd wip start` when the work needs isolation — uncertain explorations that might be discarded, concurrent work streams, or scope that could pollute the main graph if it doesn't pan out.
+**When to suggest branching:**
+- The work is exploratory or uncertain — the direction might be discarded
+- Multi-participant project — other participants are active on main, and in-progress entries would create noise
+- The scope is large enough that intermediate entries would clutter main if the direction changes
+- There's an active WIP marker from another participant on a related entry — branching avoids collision
+
+**Don't branch for:** small confident changes, capturing signals/decisions from dialogue, solo work with no collaboration pressure.
 
 **Starting a branch:**
 ```
 sdd wip start <entry-id> --branch --exclusive --participant <name> "<description>"
 ```
-The CLI creates a git branch (`sdd/<suffix>-<slug>`) and worktree at a sibling directory. The WIP marker is committed on main for coordination visibility. After the worktree is created, check CLAUDE.md for setup/init instructions and follow them if they exist.
+The CLI creates a git branch (`sdd/<suffix>-<slug>`) and checks out to it. The WIP marker is committed on main before the checkout for coordination visibility. Same session, same directory.
 
 **Working on a branch:**
-- Create entries, make code changes, run the normal SDD loop — all on the branch
-- Regularly merge main into the branch (`git merge main`) to stay synchronized with WIP markers and prevent conflicts from diverging too far
+- Normal SDD loop — entries, code changes, all on the branch
+- `git merge main` regularly to stay synchronized with other participants' graph changes and WIP markers
 - Entries on the branch are invisible to main until merge — that's the isolation property
 
-**Ending a branch — two playbook moves, assess and recommend one:**
+**Ending a branch — assess and recommend one of two moves:**
 
 #### "Conclude and keep"
-For explorations that produced entries worth preserving — the reasoning chain has value for future traversal.
+Recommend when: the reasoning chain has value for future traversal (even if the conclusion is "this direction is wrong"), code changes are worth keeping, or multiple entries connect to the broader graph.
 
-1. Merge main into branch (resolve any conflicts here, on the branch)
-2. Walk the entry chain — ensure all intermediate entries are properly closed or superseded (no open noise on main after merge)
-3. Selectively revert non-graph changes that shouldn't be kept via new commits — this is a deliberate per-commit assessment, not binary "keep all graph, drop all code"
-4. Merge branch to main
+1. Commit all work, `git merge main`, resolve conflicts on the branch
+2. Walk the entry chain — close/supersede intermediate entries that shouldn't be open after merge
+3. Selectively revert unwanted non-graph changes via new commits
+4. `git checkout main` then `git merge <branch>`
 5. Capture closing action + forward-looking signal on main
-6. `sdd wip done <marker-id>` — removes marker, cleans up worktree and deletes branch
+6. `sdd wip done <marker-id>` — removes marker, deletes branch
 
 #### "Discard"
-For trivially shallow explorations where there's nothing worth preserving beyond a one-liner.
+Recommend when: the exploration was shallow, nothing emerged beyond "tried it, didn't work," and the key takeaway fits in a single signal on main.
 
-1. Capture summary signal on main with the key learning (if any)
-2. `sdd wip done <marker-id> --force` — removes marker, force-deletes unmerged branch and worktree
+1. `git checkout main`
+2. Capture summary signal on main (key learning if any)
+3. `sdd wip done <marker-id> --force` — removes marker, force-deletes branch
+
+### Worktree mode (optional)
+
+For multiple concurrent branches on the same machine. When the user asks for worktree isolation, the agent sets it up:
+
+1. After `sdd wip start --branch`, switch back so the branch is free for the worktree:
+   ```bash
+   git checkout main
+   ```
+2. Create the worktree (sibling directory, named after the branch with slashes replaced by hyphens):
+   ```bash
+   git worktree add ../<branch-name-as-dir> <branch-name>
+   ```
+3. Check CLAUDE.md for setup instructions (build steps, dependency installs) and run them inside the worktree directory
+4. Tell the user: "The worktree is ready at `<path>`. Start a new agent session there to continue working on this branch." Close the current session's work on this topic — the new session picks up from the WIP marker and plan.
+
+A single worktree can be reused for different branches over time. Clean up with `git worktree remove ../<path>` when no longer needed.
