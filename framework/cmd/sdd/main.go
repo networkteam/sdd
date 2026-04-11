@@ -409,7 +409,7 @@ func newCmd() *cli.Command {
 				fmt.Fprintf(os.Stderr, "warning: pre-flight validation skipped\n")
 			} else {
 				runner := &claudeRunner{model: cmd.String("preflight-model")}
-				preflightCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+				preflightCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 				defer cancel()
 				result, err := sdd.RunPreflight(preflightCtx, runner, entry, graph)
 				if err != nil {
