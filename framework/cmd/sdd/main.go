@@ -546,7 +546,8 @@ func isBranchMerged(branch string) bool {
 		return false
 	}
 	for _, line := range strings.Split(string(out), "\n") {
-		name := strings.TrimSpace(strings.TrimPrefix(line, "*"))
+		// git branch prefixes: * = current, + = worktree checkout
+		name := strings.TrimLeft(line, " *+")
 		name = strings.TrimSpace(name)
 		if name == branch {
 			return true
