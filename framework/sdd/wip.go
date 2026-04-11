@@ -225,13 +225,6 @@ func DeriveBranchName(entryID, description string) string {
 	return "sdd/" + parsed.Suffix + "-" + slug
 }
 
-// DeriveWorktreePath returns the sibling directory path for a branch worktree.
-func DeriveWorktreePath(repoRoot, branchName string) string {
-	// Replace slashes with hyphens for the directory name
-	dirName := strings.ReplaceAll(branchName, "/", "-")
-	return filepath.Join(filepath.Dir(repoRoot), dirName)
-}
-
 // slugify converts a description into a URL/path-safe slug.
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))

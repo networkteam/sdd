@@ -532,14 +532,6 @@ func gitCommit(message string, filePaths ...string) error {
 	return nil
 }
 
-func gitRepoRoot() (string, error) {
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse --show-toplevel: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 func isBranchMerged(branch string) bool {
 	out, err := exec.Command("git", "branch", "--merged").Output()
 	if err != nil {
@@ -554,16 +546,6 @@ func isBranchMerged(branch string) bool {
 		}
 	}
 	return false
-}
-
-func removeWorktree(path string, force bool) {
-	args := []string{"worktree", "remove", path}
-	if force {
-		args = []string{"worktree", "remove", "--force", path}
-	}
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "  warning: git worktree remove: %s (%v)\n", out, err)
-	}
 }
 
 func deleteBranch(branch string, force bool) {
@@ -612,7 +594,7 @@ func wipStartCmd() *cli.Command {
 			},
 			&cli.BoolFlag{
 				Name:  "branch",
-				Usage: "Create a git branch and worktree for isolated work",
+				Usage: "Create a git branch and check out to it",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -685,30 +667,14 @@ func wipStartCmd() *cli.Command {
 				fmt.Fprintf(os.Stderr, "warning: git commit failed: %v\n", err)
 			}
 
-			// Create branch and worktree if --branch
+			// Create branch and check out if --branch
 			if branchName != "" {
-				repoRoot, err := gitRepoRoot()
-				if err != nil {
-					return fmt.Errorf("finding repo root: %w", err)
-				}
-				worktreePath := sdd.DeriveWorktreePath(repoRoot, branchName)
-
-				// Create branch
-				branchCmd := exec.Command("git", "branch", branchName)
-				if out, err := branchCmd.CombinedOutput(); err != nil {
+				checkoutCmd := exec.Command("git", "checkout", "-b", branchName)
+				if out, err := checkoutCmd.CombinedOutput(); err != nil {
 					return fmt.Errorf("creating branch %s: %s (%w)", branchName, out, err)
 				}
 
-				// Create worktree
-				wtCmd := exec.Command("git", "worktree", "add", worktreePath, branchName)
-				if out, err := wtCmd.CombinedOutput(); err != nil {
-					// Clean up branch on failure
-					exec.Command("git", "branch", "-d", branchName).Run()
-					return fmt.Errorf("creating worktree at %s: %s (%w)", worktreePath, out, err)
-				}
-
-				fmt.Printf("  branch: %s\n", branchName)
-				fmt.Printf("  worktree: %s\n", worktreePath)
+				fmt.Printf("  branch: %s (checked out)\n", branchName)
 			}
 
 			return nil
@@ -724,7 +690,7 @@ func wipDoneCmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "force",
-				Usage: "Force-delete unmerged branch and worktree (discard flow)",
+				Usage: "Force-delete unmerged branch (discard flow)",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -775,27 +741,16 @@ func wipDoneCmd() *cli.Command {
 
 			// Branch cleanup
 			if marker.Branch != "" {
-				repoRoot, err := gitRepoRoot()
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not determine repo root for branch cleanup: %v\n", err)
-					return nil
-				}
-				worktreePath := sdd.DeriveWorktreePath(repoRoot, marker.Branch)
-
 				merged := isBranchMerged(marker.Branch)
 
 				if merged {
-					// Safe cleanup: branch was merged
-					removeWorktree(worktreePath, false)
 					deleteBranch(marker.Branch, false)
-					fmt.Printf("  cleaned up branch %s (merged)\n", marker.Branch)
+					fmt.Printf("  deleted branch %s (merged)\n", marker.Branch)
 				} else if cmd.Bool("force") {
-					// Force cleanup: discard flow
-					removeWorktree(worktreePath, true)
 					deleteBranch(marker.Branch, true)
 					fmt.Printf("  force-deleted branch %s (unmerged)\n", marker.Branch)
 				} else {
-					fmt.Fprintf(os.Stderr, "  warning: branch %s has unmerged changes — marker removed but branch and worktree preserved\n", marker.Branch)
+					fmt.Fprintf(os.Stderr, "  warning: branch %s has unmerged changes — marker removed but branch preserved\n", marker.Branch)
 					fmt.Fprintf(os.Stderr, "  use --force to delete the unmerged branch, or merge it first\n")
 				}
 			}

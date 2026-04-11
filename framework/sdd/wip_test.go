@@ -385,14 +385,6 @@ func TestDeriveBranchName(t *testing.T) {
 	}
 }
 
-func TestDeriveWorktreePath(t *testing.T) {
-	got := DeriveWorktreePath("/Users/hlubek/Dev/AI/Claude/resonance", "sdd/3xw-branching")
-	want := "/Users/hlubek/Dev/AI/Claude/sdd-3xw-branching"
-	if got != want {
-		t.Errorf("DeriveWorktreePath = %q, want %q", got, want)
-	}
-}
-
 // --- test helpers ---
 
 func writeWIPMarker(t *testing.T, graphDir, markerID, content string) {
