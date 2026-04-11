@@ -20,6 +20,15 @@ cd framework
 go build -o bin/sdd ./cmd/sdd
 ```
 
+## Check
+
+Use `go vet` to check compilation and correctness — never use `go build` just to check compilation (it produces no output on success):
+
+```bash
+cd framework
+go vet ./...
+```
+
 ## Test
 
 ```bash

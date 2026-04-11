@@ -288,6 +288,15 @@ func newCmd() *cli.Command {
 				Name:  "attach",
 				Usage: "File to attach (repeatable). Supports source:target mapping and -:name for stdin",
 			},
+			&cli.BoolFlag{
+				Name:  "skip-preflight",
+				Usage: "Skip pre-flight validation (entry is annotated with preflight: skipped)",
+			},
+			&cli.StringFlag{
+				Name:  "preflight-model",
+				Usage: "Model to use for pre-flight validation",
+				Value: "claude-haiku-4-5-20251001",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			args := cmd.Args()
@@ -391,6 +400,27 @@ func newCmd() *cli.Command {
 					fmt.Fprintf(os.Stderr, "error: %s\n", w.Message)
 				}
 				return fmt.Errorf("validation failed: %d issue(s)", len(entry.Warnings))
+			}
+
+			// Pre-flight validation
+			if cmd.Bool("skip-preflight") {
+				entry.Preflight = "skipped"
+				fmt.Fprintf(os.Stderr, "warning: pre-flight validation skipped\n")
+			} else {
+				runner := &claudeRunner{model: cmd.String("preflight-model")}
+				result, err := sdd.RunPreflight(ctx, runner, entry, graph)
+				if err != nil {
+					// Infrastructure failure — warn and proceed
+					entry.Preflight = "error"
+					fmt.Fprintf(os.Stderr, "warning: pre-flight validation failed: %v\n", err)
+				} else if !result.Pass {
+					// Validation failure — reject entry
+					fmt.Fprintf(os.Stderr, "pre-flight validation failed:\n")
+					for _, gap := range result.Gaps {
+						fmt.Fprintf(os.Stderr, "  - %s\n", gap)
+					}
+					return fmt.Errorf("pre-flight rejected entry: %d gap(s)", len(result.Gaps))
+				}
 			}
 
 			// Write entry file
@@ -515,6 +545,21 @@ func layerOrder() []sdd.Layer {
 		sdd.LayerOperational,
 		sdd.LayerProcess,
 	}
+}
+
+// claudeRunner implements sdd.PreflightRunner by invoking the claude CLI.
+type claudeRunner struct {
+	model string
+}
+
+func (r *claudeRunner) Run(ctx context.Context, prompt string) (string, error) {
+	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", r.model)
+	cmd.Stdin = strings.NewReader(prompt)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("claude -p: %w", err)
+	}
+	return string(out), nil
 }
 
 func gitCommit(message string, filePaths ...string) error {
