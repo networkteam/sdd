@@ -219,12 +219,13 @@ When the conversation reaches "let's build this":
 
 1. Check: are there enough decisions to scope the work?
 2. If gaps exist, surface them: "Before building, we should decide X"
-3. If scope is clear, capture any needed operational sub-decisions
-4. Create an exclusive WIP marker for the entry being implemented (`sdd wip start <entry-id> --exclusive --participant <name> <description>`)
-5. Implementation happens in the same session — the meta-process stays active
-6. If you hit a design choice not covered by existing decisions: **stop implementation**, capture an action recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself.
-7. After implementation, commit the code changes first, then capture the action, then remove the WIP marker (`sdd wip done <marker-id>`)
-8. Prompt for evaluation signals
+3. Assess whether a plan decision is needed. The test: **will the closing-action pre-flight have enough to validate against without a plan?** If the decision is specific enough on its own (small fix, single change, obvious path from signal to action), skip the plan. If the decision describes a direction but implementation requires decomposition (multiple requirements, design choices, multi-step scope), capture a plan decision first — the pre-flight validates every plan item at closing time, which is where the rigor pays off.
+4. If scope is clear, capture any needed operational sub-decisions
+5. Create an exclusive WIP marker for the entry being implemented (`sdd wip start <entry-id> --exclusive --participant <name> <description>`)
+6. Implementation happens in the same session — the meta-process stays active
+7. If you hit a design choice not covered by existing decisions: **stop implementation**, capture an action recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself.
+8. After implementation, commit the code changes first, then capture the action, then remove the WIP marker (`sdd wip done <marker-id>`)
+9. Prompt for evaluation signals
 
 ### Branching for isolated work
 
