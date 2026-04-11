@@ -298,6 +298,11 @@ func newCmd() *cli.Command {
 				Usage: "Model to use for pre-flight validation",
 				Value: "claude-haiku-4-5-20251001",
 			},
+			&cli.IntFlag{
+				Name:  "preflight-timeout",
+				Usage: "Timeout in seconds for pre-flight validation",
+				Value: 120,
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			args := cmd.Args()
@@ -409,7 +414,8 @@ func newCmd() *cli.Command {
 				fmt.Fprintf(os.Stderr, "warning: pre-flight validation skipped\n")
 			} else {
 				runner := &claudeRunner{model: cmd.String("preflight-model")}
-				preflightCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+				timeout := time.Duration(cmd.Int("preflight-timeout")) * time.Second
+				preflightCtx, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
 				result, err := sdd.RunPreflight(preflightCtx, runner, entry, graph)
 				if err != nil {
@@ -558,6 +564,9 @@ func (r *claudeRunner) Run(ctx context.Context, prompt string) (string, error) {
 	cmd.Stdin = strings.NewReader(prompt)
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("claude -p timed out (increase with --preflight-timeout)")
+		}
 		return "", fmt.Errorf("claude -p: %w", err)
 	}
 	return string(out), nil
