@@ -11,7 +11,7 @@
 // Failures mean "template may need tuning" or "LLM was non-deterministic, re-run to confirm".
 // Uses t.Errorf (not t.Fatal) so all cases run even if some fail.
 
-package sdd
+package finders
 
 import (
 	"context"
@@ -43,11 +43,11 @@ func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
 	// True positive: action claims to close a 4-item plan but only covers 2 items.
 	// Expected: FAIL with missing items listed.
 
-	plan := &Entry{
+	plan := &model.Entry{
 		ID:      "20260410-120000-d-tac-pln",
-		Type:    TypeDecision,
-		Layer:   LayerTactical,
-		Kind:    KindPlan,
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindPlan,
 		Content: "Implementation plan with 4 items.",
 		Time:    time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
 		Attachments: []string{
@@ -55,18 +55,18 @@ func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
 		},
 	}
 
-	graph := NewGraph([]*Entry{plan})
+	graph := model.NewGraph([]*model.Entry{plan})
 
-	proposed := &Entry{
-		Type:    TypeAction,
-		Layer:   LayerTactical,
+	proposed := &model.Entry{
+		Type:    model.TypeAction,
+		Layer:   model.LayerTactical,
 		Closes:  []string{plan.ID},
 		Content: "Implemented item 1 (database schema) and item 3 (API endpoints). Items 2 and 4 were not addressed.",
 	}
 
 	// We can't read the plan attachment from disk in this test, so inject it directly
-	checkType := SelectCheckType(proposed, graph)
-	pctx, err := AssembleContext(proposed, graph, checkType)
+	checkType := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, checkType)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
 4. Write integration tests for all endpoints
 `
 
-	prompt, err := RenderPrompt(checkType, pctx)
+	prompt, err := renderPrompt(checkType, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := ParseResult(output)
+	result, err := parseResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
@@ -110,26 +110,26 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 	// True negative: action legitimately covers all plan items, even with different wording.
 	// Expected: PASS.
 
-	plan := &Entry{
+	plan := &model.Entry{
 		ID:      "20260410-120000-d-tac-pln",
-		Type:    TypeDecision,
-		Layer:   LayerTactical,
-		Kind:    KindPlan,
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindPlan,
 		Content: "Implementation plan for user auth feature.",
 		Time:    time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
 	}
 
-	graph := NewGraph([]*Entry{plan})
+	graph := model.NewGraph([]*model.Entry{plan})
 
-	proposed := &Entry{
-		Type:    TypeAction,
-		Layer:   LayerTactical,
+	proposed := &model.Entry{
+		Type:    model.TypeAction,
+		Layer:   model.LayerTactical,
 		Closes:  []string{plan.ID},
 		Content: "Built the complete user authentication feature: added users table with email/password columns (bcrypt hashed), wrote Express middleware that validates JWT tokens on protected routes, created REST endpoints for all CRUD operations (create user via signup, read user profile, update user settings, delete user account), and added a full integration test suite covering happy paths and error cases for every endpoint.",
 	}
 
-	checkType := SelectCheckType(proposed, graph)
-	pctx, err := AssembleContext(proposed, graph, checkType)
+	checkType := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, checkType)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 4. Write integration tests for all endpoints
 `
 
-	prompt, err := RenderPrompt(checkType, pctx)
+	prompt, err := renderPrompt(checkType, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := ParseResult(output)
+	result, err := parseResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
@@ -173,22 +173,22 @@ func TestPreflightEval_SignalSmuggleDecision(t *testing.T) {
 	// True positive: something labeled as a signal actually prescribes action.
 	// Expected: FAIL.
 
-	graph := NewGraph(nil)
+	graph := model.NewGraph(nil)
 
-	proposed := &Entry{
-		Type:       TypeSignal,
-		Layer:      LayerTactical,
+	proposed := &model.Entry{
+		Type:       model.TypeSignal,
+		Layer:      model.LayerTactical,
 		Confidence: "high",
 		Content:    "We must migrate the database to PostgreSQL by next sprint and deprecate the MongoDB adapter. The team should start immediately with the schema migration scripts.",
 	}
 
-	checkType := SelectCheckType(proposed, graph)
-	pctx, err := AssembleContext(proposed, graph, checkType)
+	checkType := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, checkType)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	prompt, err := RenderPrompt(checkType, pctx)
+	prompt, err := renderPrompt(checkType, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestPreflightEval_SignalSmuggleDecision(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := ParseResult(output)
+	result, err := parseResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
@@ -219,22 +219,22 @@ func TestPreflightEval_ValidSignal(t *testing.T) {
 	// True negative: a well-formed signal that is genuinely an observation.
 	// Expected: PASS.
 
-	graph := NewGraph(nil)
+	graph := model.NewGraph(nil)
 
-	proposed := &Entry{
-		Type:       TypeSignal,
-		Layer:      LayerConceptual,
+	proposed := &model.Entry{
+		Type:       model.TypeSignal,
+		Layer:      model.LayerConceptual,
 		Confidence: "medium",
 		Content:    "Three of the last five customer support tickets mention confusion about the billing page layout. The most common complaint is that the 'current plan' and 'upgrade options' sections look too similar, making it hard to tell which plan is currently active.",
 	}
 
-	checkType := SelectCheckType(proposed, graph)
-	pctx, err := AssembleContext(proposed, graph, checkType)
+	checkType := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, checkType)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	prompt, err := RenderPrompt(checkType, pctx)
+	prompt, err := renderPrompt(checkType, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestPreflightEval_ValidSignal(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := ParseResult(output)
+	result, err := parseResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
@@ -268,32 +268,32 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 	// but the action only implemented 3 and noted the omission at the end.
 	// Expected: FAIL — the action should not close the decision with incomplete coverage.
 
-	decision := &Entry{
+	decision := &model.Entry{
 		ID:      "20260410-122858-d-tac-kfo",
-		Type:    TypeDecision,
-		Layer:   LayerTactical,
-		Kind:    KindDirective,
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindDirective,
 		Content: "Build a sdd lint command for graph integrity checks. Checks: dangling refs (pointing at non-existent entries), short/malformed IDs in refs/closes/supersedes, type mismatches (e.g. closes pointing at an action), broken or missing attachment references. LoadGraph collects validation errors per entry as a custom structured error type on the Entry struct. sdd lint formats the full report. sdd show displays warnings per entry (including entries in the ref chain). Structured errors enable good formatting across contexts.",
 		Time:    time.Date(2026, 4, 10, 12, 28, 58, 0, time.UTC),
 	}
 
-	graph := NewGraph([]*Entry{decision})
+	graph := model.NewGraph([]*model.Entry{decision})
 
-	proposed := &Entry{
-		Type:    TypeAction,
-		Layer:   LayerTactical,
+	proposed := &model.Entry{
+		Type:    model.TypeAction,
+		Layer:   model.LayerTactical,
 		Refs:    []string{decision.ID},
 		Closes:  []string{decision.ID},
 		Content: "Built sdd lint command with checks for dangling refs (non-existent entries), malformed IDs (short suffixes), type mismatches in closes (signal can't close, action can't be closed, decision can't close decision), and type mismatches in supersedes (must be same type). Warnings are populated during graph construction on the Entry struct so sdd show displays them inline. Running against the live graph found 4 issues in 3 entries. Does NOT yet cover broken or missing attachment references — that requirement from d-tac-kfo remains unimplemented.",
 	}
 
-	checkType := SelectCheckType(proposed, graph)
-	pctx, err := AssembleContext(proposed, graph, checkType)
+	checkType := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, checkType)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	prompt, err := RenderPrompt(checkType, pctx)
+	prompt, err := renderPrompt(checkType, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := ParseResult(output)
+	result, err := parseResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
@@ -324,30 +324,30 @@ func TestPreflightEval_ContractViolation(t *testing.T) {
 	// True positive: entry violates an active contract.
 	// Expected: FAIL with contract violation noted.
 
-	contract := &Entry{
+	contract := &model.Entry{
 		ID:      "20260408-120000-d-prc-ccc",
-		Type:    TypeDecision,
-		Layer:   LayerProcess,
-		Kind:    KindContract,
+		Type:    model.TypeDecision,
+		Layer:   model.LayerProcess,
+		Kind:    model.KindContract,
 		Content: "All decisions at the tactical layer or below must include refs to the signals or decisions that motivated them. No decision may be created without explicit grounding.",
 		Time:    time.Date(2026, 4, 8, 12, 0, 0, 0, time.UTC),
 	}
 
-	graph := NewGraph([]*Entry{contract})
+	graph := model.NewGraph([]*model.Entry{contract})
 
-	proposed := &Entry{
-		Type:    TypeDecision,
-		Layer:   LayerTactical,
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
 		Content: "Switch the logging framework from log4j to slog for better structured logging support.",
 	}
 
-	checkType := SelectCheckType(proposed, graph)
-	pctx, err := AssembleContext(proposed, graph, checkType)
+	checkType := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, checkType)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	prompt, err := RenderPrompt(checkType, pctx)
+	prompt, err := renderPrompt(checkType, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestPreflightEval_ContractViolation(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := ParseResult(output)
+	result, err := parseResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return

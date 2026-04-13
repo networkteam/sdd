@@ -1,4 +1,4 @@
-package sdd
+package finders
 
 import (
 	"context"
@@ -10,58 +10,85 @@ import (
 	"text/template"
 
 	"github.com/networkteam/resonance/framework/sdd/model"
+	"github.com/networkteam/resonance/framework/sdd/query"
 )
 
 //go:embed preflight_templates/*.tmpl
 var preflightTemplates embed.FS
 
-// CheckType identifies which pre-flight check to run.
-type CheckType int
+// Preflight runs the pre-flight validator against the given query.
+// Returns the parsed result for both pass and fail cases.
+// Returns an error only for infrastructure failures (runner error,
+// template error, parse error) — a FAIL result is not an error.
+func (f *Finder) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
+	ct := selectCheckType(q.Entry, q.Graph)
+
+	pctx, err := assembleContext(q.Entry, q.Graph, ct)
+	if err != nil {
+		return nil, fmt.Errorf("assembling pre-flight context: %w", err)
+	}
+
+	prompt, err := renderPrompt(ct, pctx)
+	if err != nil {
+		return nil, fmt.Errorf("rendering pre-flight prompt: %w", err)
+	}
+
+	output, err := f.preflightRunner.Run(ctx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("running pre-flight validator: %w", err)
+	}
+
+	result, err := parseResult(output)
+	if err != nil {
+		return nil, fmt.Errorf("parsing pre-flight result: %w", err)
+	}
+	return result, nil
+}
+
+// --- internal helpers ---
+
+// checkType identifies which pre-flight check to run.
+type checkType int
 
 const (
-	CheckClosingAction       CheckType = iota // action closing a decision/plan
-	CheckClosingDecision                      // decision closing signals
-	CheckDecisionRefs                         // decision with refs, no closes
-	CheckActionClosesSignals                  // action closing signals directly
-	CheckSignalCapture                        // signal validation
-	CheckSupersedes                           // supersedes operation
+	checkClosingAction       checkType = iota // action closing a decision/plan
+	checkClosingDecision                      // decision closing signals
+	checkDecisionRefs                         // decision with refs, no closes
+	checkActionClosesSignals                  // action closing signals directly
+	checkSignalCapture                        // signal validation
+	checkSupersedes                           // supersedes operation
 )
 
-func (c CheckType) String() string {
+func (c checkType) String() string {
 	switch c {
-	case CheckClosingAction:
+	case checkClosingAction:
 		return "closing-action"
-	case CheckClosingDecision:
+	case checkClosingDecision:
 		return "closing-decision"
-	case CheckDecisionRefs:
+	case checkDecisionRefs:
 		return "decision-refs"
-	case CheckActionClosesSignals:
+	case checkActionClosesSignals:
 		return "action-closes-signals"
-	case CheckSignalCapture:
+	case checkSignalCapture:
 		return "signal-capture"
-	case CheckSupersedes:
+	case checkSupersedes:
 		return "supersedes"
 	default:
 		return fmt.Sprintf("unknown(%d)", int(c))
 	}
 }
 
-var checkTypeTemplates = map[CheckType]string{
-	CheckClosingAction:       "preflight_templates/closing_action.tmpl",
-	CheckClosingDecision:     "preflight_templates/closing_decision.tmpl",
-	CheckDecisionRefs:        "preflight_templates/decision_refs.tmpl",
-	CheckActionClosesSignals: "preflight_templates/action_closes_signals.tmpl",
-	CheckSignalCapture:       "preflight_templates/signal_capture.tmpl",
-	CheckSupersedes:          "preflight_templates/supersedes.tmpl",
+var checkTypeTemplates = map[checkType]string{
+	checkClosingAction:       "preflight_templates/closing_action.tmpl",
+	checkClosingDecision:     "preflight_templates/closing_decision.tmpl",
+	checkDecisionRefs:        "preflight_templates/decision_refs.tmpl",
+	checkActionClosesSignals: "preflight_templates/action_closes_signals.tmpl",
+	checkSignalCapture:       "preflight_templates/signal_capture.tmpl",
+	checkSupersedes:          "preflight_templates/supersedes.tmpl",
 }
 
-// PreflightRunner executes a prompt and returns the model's response.
-type PreflightRunner interface {
-	Run(ctx context.Context, prompt string) (string, error)
-}
-
-// PreflightContext holds all data needed to render a pre-flight prompt template.
-type PreflightContext struct {
+// preflightContext holds all data needed to render a pre-flight prompt template.
+type preflightContext struct {
 	ProposedEntry     string
 	ReferencedEntries string
 	ClosedEntries     string
@@ -71,43 +98,37 @@ type PreflightContext struct {
 	OpenSignals       string
 }
 
-// PreflightResult holds the parsed validator response.
-type PreflightResult struct {
-	Pass bool
-	Gaps []string
-}
-
-// SelectCheckType determines the pre-flight check type from entry properties and graph context.
-func SelectCheckType(entry *model.Entry, graph *model.Graph) CheckType {
+// selectCheckType determines the pre-flight check type from entry properties and graph context.
+func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 	if len(entry.Supersedes) > 0 {
-		return CheckSupersedes
+		return checkSupersedes
 	}
 
 	if entry.Type == model.TypeAction && len(entry.Closes) > 0 {
 		for _, id := range entry.Closes {
 			if target, ok := graph.ByID[id]; ok && target.Type == model.TypeDecision {
-				return CheckClosingAction
+				return checkClosingAction
 			}
 		}
-		return CheckActionClosesSignals
+		return checkActionClosesSignals
 	}
 
 	if entry.Type == model.TypeDecision && len(entry.Closes) > 0 {
-		return CheckClosingDecision
+		return checkClosingDecision
 	}
 
 	if entry.Type == model.TypeDecision {
-		return CheckDecisionRefs
+		return checkDecisionRefs
 	}
 
-	return CheckSignalCapture
+	return checkSignalCapture
 }
 
-// AssembleContext gathers graph data needed for the pre-flight prompt.
+// assembleContext gathers graph data needed for the pre-flight prompt.
 // It reads plan attachment content from disk when the graph was loaded from a directory.
-func AssembleContext(entry *model.Entry, graph *model.Graph, checkType CheckType) (*PreflightContext, error) {
-	pctx := &PreflightContext{
-		ProposedEntry: FormatEntryForPrompt(entry),
+func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType) (*preflightContext, error) {
+	pctx := &preflightContext{
+		ProposedEntry: formatEntryForPrompt(entry),
 	}
 
 	// Referenced entries
@@ -115,7 +136,7 @@ func AssembleContext(entry *model.Entry, graph *model.Graph, checkType CheckType
 		var parts []string
 		for _, id := range entry.Refs {
 			if e, ok := graph.ByID[id]; ok {
-				parts = append(parts, FormatEntryForPrompt(e))
+				parts = append(parts, formatEntryForPrompt(e))
 			}
 		}
 		if len(parts) > 0 {
@@ -131,7 +152,7 @@ func AssembleContext(entry *model.Entry, graph *model.Graph, checkType CheckType
 			if !ok {
 				continue
 			}
-			parts = append(parts, FormatEntryForPrompt(e))
+			parts = append(parts, formatEntryForPrompt(e))
 
 			if e.IsPlan() && graph.GraphDir() != "" {
 				for _, att := range e.Attachments {
@@ -153,7 +174,7 @@ func AssembleContext(entry *model.Entry, graph *model.Graph, checkType CheckType
 		var parts []string
 		for _, id := range entry.Supersedes {
 			if e, ok := graph.ByID[id]; ok {
-				parts = append(parts, FormatEntryForPrompt(e))
+				parts = append(parts, formatEntryForPrompt(e))
 			}
 		}
 		if len(parts) > 0 {
@@ -166,18 +187,18 @@ func AssembleContext(entry *model.Entry, graph *model.Graph, checkType CheckType
 	if len(contracts) > 0 {
 		var parts []string
 		for _, c := range contracts {
-			parts = append(parts, FormatEntryForPrompt(c))
+			parts = append(parts, formatEntryForPrompt(c))
 		}
 		pctx.ActiveContracts = strings.Join(parts, "\n\n---\n\n")
 	}
 
 	// Open signals (for decision-refs check)
-	if checkType == CheckDecisionRefs {
+	if ct == checkDecisionRefs {
 		signals := graph.OpenSignals()
 		if len(signals) > 0 {
 			var parts []string
 			for _, s := range signals {
-				parts = append(parts, FormatEntryForPrompt(s))
+				parts = append(parts, formatEntryForPrompt(s))
 			}
 			pctx.OpenSignals = strings.Join(parts, "\n\n---\n\n")
 		}
@@ -186,8 +207,8 @@ func AssembleContext(entry *model.Entry, graph *model.Graph, checkType CheckType
 	return pctx, nil
 }
 
-// FormatEntryForPrompt formats an entry as readable text for inclusion in a prompt.
-func FormatEntryForPrompt(e *model.Entry) string {
+// formatEntryForPrompt formats an entry as readable text for inclusion in a prompt.
+func formatEntryForPrompt(e *model.Entry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ID: %s\n", e.ID)
 	fmt.Fprintf(&b, "Type: %s\n", e.Type)
@@ -211,15 +232,14 @@ func FormatEntryForPrompt(e *model.Entry) string {
 	return b.String()
 }
 
-// RenderPrompt renders the pre-flight prompt for the given check type and context.
+// renderPrompt renders the pre-flight prompt for the given check type and context.
 // All templates are parsed together so partials (e.g. contracts.tmpl) are available.
-func RenderPrompt(checkType CheckType, pctx *PreflightContext) (string, error) {
-	tmplName, ok := checkTypeTemplates[checkType]
+func renderPrompt(ct checkType, pctx *preflightContext) (string, error) {
+	tmplName, ok := checkTypeTemplates[ct]
 	if !ok {
-		return "", fmt.Errorf("no template for check type %s", checkType)
+		return "", fmt.Errorf("no template for check type %s", ct)
 	}
 
-	// Parse all templates together so {{ template "contracts" . }} works
 	tmpl, err := template.ParseFS(preflightTemplates, "preflight_templates/*.tmpl")
 	if err != nil {
 		return "", fmt.Errorf("parsing templates: %w", err)
@@ -233,8 +253,8 @@ func RenderPrompt(checkType CheckType, pctx *PreflightContext) (string, error) {
 	return b.String(), nil
 }
 
-// ParseResult parses the validator's raw output into a structured result.
-func ParseResult(output string) (*PreflightResult, error) {
+// parseResult parses the validator's raw output into a structured result.
+func parseResult(output string) (*query.PreflightResult, error) {
 	output = strings.TrimSpace(output)
 	if output == "" {
 		return nil, fmt.Errorf("empty pre-flight response")
@@ -244,7 +264,7 @@ func ParseResult(output string) (*PreflightResult, error) {
 	first := strings.TrimSpace(lines[0])
 
 	if strings.EqualFold(first, "PASS") {
-		return &PreflightResult{Pass: true}, nil
+		return &query.PreflightResult{Pass: true}, nil
 	}
 
 	if strings.EqualFold(first, "FAIL") {
@@ -257,37 +277,8 @@ func ParseResult(output string) (*PreflightResult, error) {
 				gaps = append(gaps, line)
 			}
 		}
-		return &PreflightResult{Pass: false, Gaps: gaps}, nil
+		return &query.PreflightResult{Pass: false, Gaps: gaps}, nil
 	}
 
 	return nil, fmt.Errorf("unexpected pre-flight response: first line must be PASS or FAIL, got %q", first)
-}
-
-// RunPreflight orchestrates the full pre-flight validation.
-// Returns the result for both pass and fail cases.
-// Returns an error only for infrastructure failures (runner error, template error, parse error).
-func RunPreflight(ctx context.Context, runner PreflightRunner, entry *model.Entry, graph *model.Graph) (*PreflightResult, error) {
-	checkType := SelectCheckType(entry, graph)
-
-	pctx, err := AssembleContext(entry, graph, checkType)
-	if err != nil {
-		return nil, fmt.Errorf("assembling pre-flight context: %w", err)
-	}
-
-	prompt, err := RenderPrompt(checkType, pctx)
-	if err != nil {
-		return nil, fmt.Errorf("rendering pre-flight prompt: %w", err)
-	}
-
-	output, err := runner.Run(ctx, prompt)
-	if err != nil {
-		return nil, fmt.Errorf("running pre-flight validator: %w", err)
-	}
-
-	result, err := ParseResult(output)
-	if err != nil {
-		return nil, fmt.Errorf("parsing pre-flight result: %w", err)
-	}
-
-	return result, nil
 }

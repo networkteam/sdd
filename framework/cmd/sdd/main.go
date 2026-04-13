@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -15,9 +12,27 @@ import (
 	"time"
 
 	"github.com/networkteam/resonance/framework/sdd"
+	"github.com/networkteam/resonance/framework/sdd/command"
+	"github.com/networkteam/resonance/framework/sdd/finders"
+	"github.com/networkteam/resonance/framework/sdd/handlers"
 	"github.com/networkteam/resonance/framework/sdd/model"
 	"github.com/urfave/cli/v3"
 )
+
+// splitCSV returns the comma-split fields of s, or nil if s is empty.
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
+}
+
+// gitCommitterFunc adapts a plain commit function to the handlers.Committer interface.
+type gitCommitterFunc func(message string, paths ...string) error
+
+func (f gitCommitterFunc) Commit(message string, paths ...string) error {
+	return f(message, paths...)
+}
 
 func main() {
 	app := &cli.Command{
@@ -338,203 +353,70 @@ func newCmd() *cli.Command {
 				}
 			}
 
-			// Description from remaining args
 			description := strings.Join(args.Slice()[2:], " ")
 			if description == "" {
 				description = "[TODO: describe this " + string(typ) + "]"
 			}
 
-			// Generate random suffix
-			suffix, err := randomSuffix(3)
-			if err != nil {
-				return fmt.Errorf("generating suffix: %w", err)
-			}
-
-			id := model.GenerateID(typ, layer, suffix)
-
-			// Build entry
-			entry := &model.Entry{
-				ID:      id,
-				Type:    typ,
-				Layer:   layer,
-				Content: description,
-			}
-
-			if refs := cmd.String("refs"); refs != "" {
-				entry.Refs = strings.Split(refs, ",")
-			}
-			if supersedes := cmd.String("supersedes"); supersedes != "" {
-				entry.Supersedes = strings.Split(supersedes, ",")
-			}
-			if closes := cmd.String("closes"); closes != "" {
-				entry.Closes = strings.Split(closes, ",")
-			}
-			if participants := cmd.String("participants"); participants != "" {
-				entry.Participants = strings.Split(participants, ",")
-			}
-			if confidence := cmd.String("confidence"); confidence != "" {
-				entry.Confidence = confidence
-			}
-			if kind := cmd.String("kind"); kind != "" {
-				entry.Kind = model.Kind(kind)
-			}
-
-			// Parse attachment paths and populate entry.Attachments for validation
 			dir := cmd.String("graph-dir")
 			if !filepath.IsAbs(dir) {
 				dir, _ = filepath.Abs(dir)
 			}
 
-			attachments, err := parseAttachFlags(cmd.StringSlice("attach"), os.Stdin)
+			// Parse attachment specs into command.Attachment values. For stdin,
+			// this reads stdin bytes into Attachment.Data — after this point
+			// the handler receives fully-materialized command values.
+			cliAtts, err := parseAttachFlags(cmd.StringSlice("attach"), os.Stdin)
 			if err != nil {
 				return err
 			}
-			if len(attachments) > 0 {
-				attachRel, err := model.AttachDirRelPath(id)
-				if err != nil {
-					return fmt.Errorf("computing attachment dir for %s: %w", id, err)
-				}
-				for _, a := range attachments {
-					entry.Attachments = append(entry.Attachments, filepath.Join(attachRel, a.target))
-				}
+			var atts []command.Attachment
+			for _, a := range cliAtts {
+				atts = append(atts, command.Attachment{
+					Source: a.source,
+					Target: a.target,
+					Data:   a.data,
+				})
 			}
 
-			dryRun := cmd.Bool("dry-run")
-			stdinAtt := findStdinAttachment(attachments)
-			stdinSaved := false
-
-			// reportSavedStdin saves stdin attachment to .sdd-tmp/ and prints the
-			// path so the user can re-pipe without reassembling the heredoc. Save
-			// failures are surfaced as warnings — they must not mask the underlying
-			// pre-flight result. Idempotent: subsequent calls in the same invocation
-			// are no-ops so dry-run + reject doesn't print the save twice.
-			reportSavedStdin := func(reason string) {
-				if stdinAtt == nil || stdinSaved {
-					return
-				}
-				stdinSaved = true
-				path, err := saveStdinAttachment(dir, stdinAtt.target, stdinAtt.data)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not save stdin attachment: %v\n", err)
-					return
-				}
-				fmt.Fprintf(os.Stderr, "stdin attachment saved (%s): %s\n", reason, path)
-				fmt.Fprintf(os.Stderr, "  retry: cat %s | sdd new ... --attach -:%s\n", path, stdinAtt.target)
+			var kind model.Kind
+			if k := cmd.String("kind"); k != "" {
+				kind = model.Kind(k)
 			}
 
-			// On dry-run, ensure stdin is saved no matter how the command exits —
-			// including early returns from graph validation failure. The plan
-			// requires saving on every dry-run (pass or fail). The savedAlready
-			// flag inside reportSavedStdin makes this safe to compose with the
-			// inline calls in the rejection and post-pre-flight branches.
-			if dryRun {
-				defer reportSavedStdin("dry-run")
-			}
-
-			// Resolve {{attachments}} placeholders in description
-			entry.Content = model.ResolveAttachmentLinks(entry.Content, id)
-
-			// Validate entry against the graph
-			graph, err := sdd.LoadGraph(dir)
-			if err != nil {
-				return fmt.Errorf("loading graph for validation: %w", err)
-			}
-			model.ValidateEntry(entry, graph)
-			if len(entry.Warnings) > 0 {
-				for _, w := range entry.Warnings {
-					fmt.Fprintf(os.Stderr, "error: %s\n", w.Message)
-				}
-				return fmt.Errorf("validation failed: %d issue(s)", len(entry.Warnings))
-			}
-
-			// Pre-flight validation
-			if cmd.Bool("skip-preflight") {
-				entry.Preflight = "skipped"
-				fmt.Fprintf(os.Stderr, "warning: pre-flight validation skipped\n")
-			} else {
-				runner := &claudeRunner{model: cmd.String("preflight-model")}
-				timeout := time.Duration(cmd.Int("preflight-timeout")) * time.Second
-				preflightCtx, cancel := context.WithTimeout(ctx, timeout)
-				defer cancel()
-				result, err := sdd.RunPreflight(preflightCtx, runner, entry, graph)
-				if err != nil {
-					return fmt.Errorf("pre-flight error: %w (use --skip-preflight to bypass)", err)
-				}
-				if !result.Pass {
-					fmt.Fprintf(os.Stderr, "pre-flight validation failed:\n")
-					for _, gap := range result.Gaps {
-						fmt.Fprintf(os.Stderr, "  - %s\n", gap)
+			ncmd := &command.NewEntryCmd{
+				Type:             typ,
+				Layer:            layer,
+				Kind:             kind,
+				Description:      description,
+				Participants:     splitCSV(cmd.String("participants")),
+				Refs:             splitCSV(cmd.String("refs")),
+				Supersedes:       splitCSV(cmd.String("supersedes")),
+				Closes:           splitCSV(cmd.String("closes")),
+				Confidence:       cmd.String("confidence"),
+				Attachments:      atts,
+				SkipPreflight:    cmd.Bool("skip-preflight"),
+				DryRun:           cmd.Bool("dry-run"),
+				PreflightModel:   cmd.String("preflight-model"),
+				PreflightTimeout: time.Duration(cmd.Int("preflight-timeout")) * time.Second,
+				OnNewEntry: func(id string) {
+					fmt.Println(id + ".md")
+					if rel, err := model.IDToRelPath(id); err == nil {
+						fmt.Printf("  → %s\n", filepath.Join(dir, rel))
 					}
-					reportSavedStdin("pre-flight rejected")
-					return fmt.Errorf("pre-flight rejected entry: %d gap(s)", len(result.Gaps))
-				}
+				},
 			}
 
-			// Dry-run: validation and pre-flight passed (or were skipped). Save
-			// stdin so the user can do the real run with the same content, then
-			// exit without writing the entry or committing.
-			if dryRun {
-				reportSavedStdin("dry-run")
-				return nil
-			}
+			runner := &claudeRunner{model: cmd.String("preflight-model")}
+			finder := finders.New(runner)
+			handler := handlers.New(handlers.Options{
+				GraphDir:    dir,
+				Preflighter: finder,
+				Committer:   gitCommitterFunc(gitCommit),
+				LoadGraph:   sdd.LoadGraph,
+			})
 
-			// Write entry file
-			relPath, err := model.IDToRelPath(id)
-			if err != nil {
-				return fmt.Errorf("computing path for %s: %w", id, err)
-			}
-			filePath := filepath.Join(dir, relPath)
-			content := model.FormatFrontmatter(entry) + "\n" + entry.Content + "\n"
-
-			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-				return fmt.Errorf("creating directories: %w", err)
-			}
-
-			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-				return fmt.Errorf("writing %s: %w", filePath, err)
-			}
-
-			commitPaths := []string{filePath}
-
-			// Copy attachments
-			if len(attachments) > 0 {
-				attachDirRel, err := model.AttachDirRelPath(id)
-				if err != nil {
-					return fmt.Errorf("computing attachment dir for %s: %w", id, err)
-				}
-				attachDir := filepath.Join(dir, attachDirRel)
-				if err := os.MkdirAll(attachDir, 0755); err != nil {
-					return fmt.Errorf("creating attachment directory: %w", err)
-				}
-
-				for _, a := range attachments {
-					var data []byte
-					if a.source == "-" {
-						data = a.data
-					} else {
-						var err error
-						data, err = os.ReadFile(a.source)
-						if err != nil {
-							return fmt.Errorf("reading attachment %s: %w", a.source, err)
-						}
-					}
-					dst := filepath.Join(attachDir, a.target)
-					if err := os.WriteFile(dst, data, 0644); err != nil {
-						return fmt.Errorf("writing attachment %s: %w", dst, err)
-					}
-					commitPaths = append(commitPaths, dst)
-				}
-			}
-
-			fmt.Println(id + ".md")
-			fmt.Printf("  → %s\n", filePath)
-
-			// Auto-commit the new entry (with attachments if any)
-			if err := gitCommit(fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72)), commitPaths...); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: git commit failed: %v\n", err)
-			}
-
-			return nil
+			return handler.NewEntry(ctx, ncmd)
 		},
 	}
 }
@@ -897,38 +779,6 @@ func wipListCmd() *cli.Command {
 	}
 }
 
-// stdinSaveDir is the directory under graph-dir where rejected/dry-run stdin
-// attachments are persisted so users can re-pipe them without re-sending.
-const stdinSaveDir = ".sdd-tmp"
-
-// findStdinAttachment returns the attachment populated from stdin, or nil if
-// no stdin attachment is present.
-func findStdinAttachment(atts []attachment) *attachment {
-	for i := range atts {
-		if atts[i].source == "-" {
-			return &atts[i]
-		}
-	}
-	return nil
-}
-
-// saveStdinAttachment writes stdin content to <graph-dir>/.sdd-tmp/<hash>-<target>
-// and returns the absolute saved path. The hash is the first 8 chars of sha256
-// of the content — stable enough for single-user iteration.
-func saveStdinAttachment(graphDir string, target string, data []byte) (string, error) {
-	sum := sha256.Sum256(data)
-	hash := hex.EncodeToString(sum[:])[:8]
-	dir := filepath.Join(graphDir, stdinSaveDir)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", fmt.Errorf("creating %s: %w", dir, err)
-	}
-	path := filepath.Join(dir, hash+"-"+target)
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return "", fmt.Errorf("writing %s: %w", path, err)
-	}
-	return path, nil
-}
-
 // parseAttachSpec splits an --attach value into source and target.
 // Formats: "path" (target=""), "source:target", "-:target" (stdin).
 // Splits on the last colon to tolerate colons in source paths.
@@ -982,14 +832,3 @@ func parseAttachFlags(specs []string, stdinReader io.Reader) ([]attachment, erro
 	return attachments, nil
 }
 
-func randomSuffix(n int) (string, error) {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	for i := range b {
-		b[i] = charset[b[i]%byte(len(charset))]
-	}
-	return string(b), nil
-}
