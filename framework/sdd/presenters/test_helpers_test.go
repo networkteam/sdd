@@ -1,4 +1,4 @@
-package sdd
+package presenters_test
 
 import (
 	"fmt"
@@ -7,7 +7,6 @@ import (
 )
 
 // entry is a test helper that builds a model.Entry from an ID string.
-// It parses the type, layer, and time from the ID using model.ParseID.
 func entry(id string, opts ...entryOpt) *model.Entry {
 	parts, err := model.ParseID(id)
 	if err != nil {
@@ -47,8 +46,4 @@ func withKind(k model.Kind) entryOpt {
 
 func withContent(c string) entryOpt {
 	return func(e *model.Entry) { e.Content = c }
-}
-
-func withAttachments(paths ...string) entryOpt {
-	return func(e *model.Entry) { e.Attachments = paths }
 }

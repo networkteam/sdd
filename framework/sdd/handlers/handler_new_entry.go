@@ -86,7 +86,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	entry.Content = model.ResolveAttachmentLinks(entry.Content, id)
 
 	// Load graph and validate entry against it.
-	graph, err := h.loadGraph(h.graphDir)
+	graph, err := h.reader.LoadGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph for validation: %w", err)
 	}
@@ -109,7 +109,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		}
 		pctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		result, err := h.preflighter.Preflight(pctx, query.PreflightQuery{
+		result, err := h.reader.Preflight(pctx, query.PreflightQuery{
 			Entry:   entry,
 			Graph:   graph,
 			Model:   cmd.PreflightModel,

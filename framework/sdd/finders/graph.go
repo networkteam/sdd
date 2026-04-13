@@ -1,4 +1,4 @@
-package sdd
+package finders
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 )
 
 // LoadGraph reads all .md files from dir (hierarchical YYYY/MM/ layout) and builds the graph.
-func LoadGraph(dir string) (*model.Graph, error) {
+func (f *Finder) LoadGraph(dir string) (*model.Graph, error) {
 	var entries []*model.Entry
 
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -64,9 +64,9 @@ func LoadGraph(dir string) (*model.Graph, error) {
 		if err != nil {
 			continue // no attachment directory
 		}
-		for _, f := range files {
-			if !f.IsDir() {
-				e.Attachments = append(e.Attachments, filepath.Join(attachRel, f.Name()))
+		for _, file := range files {
+			if !file.IsDir() {
+				e.Attachments = append(e.Attachments, filepath.Join(attachRel, file.Name()))
 			}
 		}
 	}

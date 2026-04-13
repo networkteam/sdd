@@ -1,4 +1,4 @@
-package sdd
+package finders
 
 import (
 	"os"
@@ -40,7 +40,8 @@ closes:
 
 Action closing decision.`)
 
-	g, err := LoadGraph(dir)
+	f := New(nil)
+	g, err := f.LoadGraph(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,8 @@ See [design](./06-115516-s-stg-beh/design.md) for details.`)
 		t.Fatal(err)
 	}
 
-	g, err := LoadGraph(dir)
+	f := New(nil)
+	g, err := f.LoadGraph(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

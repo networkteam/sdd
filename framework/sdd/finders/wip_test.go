@@ -1,4 +1,4 @@
-package sdd
+package finders
 
 import (
 	"os"
@@ -31,7 +31,8 @@ participant: Bob
 Second task.
 `)
 
-	markers, err := LoadWIPMarkers(dir)
+	f := New(nil)
+	markers, err := f.LoadWIPMarkers(dir)
 	if err != nil {
 		t.Fatalf("LoadWIPMarkers: %v", err)
 	}
@@ -51,7 +52,8 @@ Second task.
 
 func TestLoadWIPMarkersNoDir(t *testing.T) {
 	dir := t.TempDir()
-	markers, err := LoadWIPMarkers(dir)
+	f := New(nil)
+	markers, err := f.LoadWIPMarkers(dir)
 	if err != nil {
 		t.Fatalf("LoadWIPMarkers: %v", err)
 	}
@@ -85,7 +87,8 @@ participant: Alice
 Working on it.
 `)
 
-	g, err := LoadGraph(dir)
+	f := New(nil)
+	g, err := f.LoadGraph(dir)
 	if err != nil {
 		t.Fatalf("LoadGraph: %v", err)
 	}

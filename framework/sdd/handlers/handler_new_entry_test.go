@@ -14,10 +14,28 @@ import (
 	"github.com/networkteam/resonance/framework/sdd/query"
 )
 
-// emptyGraphLoader returns an empty graph — useful for tests that just want
-// validation to run against known-empty state.
-func emptyGraphLoader(_ string) (*model.Graph, error) {
+// fakeReader bundles every read the handler needs into one stub. Tests
+// configure preflightResult/preflightErr and graph as needed; LoadWIPMarkers
+// returns nil since the new-entry handler doesn't touch it.
+type fakeReader struct {
+	preflightResult *query.PreflightResult
+	preflightErr    error
+	graph           *model.Graph
+}
+
+func (f *fakeReader) LoadGraph(_ string) (*model.Graph, error) {
+	if f.graph != nil {
+		return f.graph, nil
+	}
 	return model.NewGraph(nil), nil
+}
+
+func (f *fakeReader) LoadWIPMarkers(_ string) ([]*model.WIPMarker, error) {
+	return nil, nil
+}
+
+func (f *fakeReader) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
+	return f.preflightResult, f.preflightErr
 }
 
 // recordingCommitter captures commit calls so tests can assert whether a
@@ -29,16 +47,6 @@ type recordingCommitter struct {
 func (r *recordingCommitter) Commit(message string, paths ...string) error {
 	r.calls++
 	return nil
-}
-
-// fakePreflight returns a fixed PreflightResult.
-type fakePreflight struct {
-	result *query.PreflightResult
-	err    error
-}
-
-func (f *fakePreflight) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
-	return f.result, f.err
 }
 
 // TestNewEntry_DryRun_SavesStdinOnValidationFailure is the regression test for
@@ -53,8 +61,8 @@ func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 
 	h := handlers.New(handlers.Options{
 		GraphDir:  tmp,
+		Reader:    &fakeReader{},
 		Committer: committer,
-		LoadGraph: emptyGraphLoader,
 		Stderr:    stderr,
 	})
 
@@ -126,9 +134,9 @@ func TestNewEntry_DryRun_Pass_SavesStdinOnce(t *testing.T) {
 	stderr := &bytes.Buffer{}
 
 	h := handlers.New(handlers.Options{
-		GraphDir:  tmp,
-		LoadGraph: emptyGraphLoader,
-		Stderr:    stderr,
+		GraphDir: tmp,
+		Reader:   &fakeReader{},
+		Stderr:   stderr,
 	})
 
 	cmd := &command.NewEntryCmd{
@@ -169,11 +177,10 @@ func TestNewEntry_PreflightReject_SavesStdin(t *testing.T) {
 
 	h := handlers.New(handlers.Options{
 		GraphDir: tmp,
-		Preflighter: &fakePreflight{
-			result: &query.PreflightResult{Pass: false, Gaps: []string{"missing ref"}},
+		Reader: &fakeReader{
+			preflightResult: &query.PreflightResult{Pass: false, Gaps: []string{"missing ref"}},
 		},
-		LoadGraph: emptyGraphLoader,
-		Stderr:    stderr,
+		Stderr: stderr,
 	})
 
 	cmd := &command.NewEntryCmd{

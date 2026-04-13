@@ -15,10 +15,14 @@ import (
 	"github.com/networkteam/resonance/framework/sdd/query"
 )
 
-// Preflighter is the handler-side view of the preflight finder. Defined here
-// (rather than imported from finders/) so consumers can substitute fakes in
-// tests — standard "accept interfaces, return structs" Go pattern.
-type Preflighter interface {
+// Reader is the handler-side view of the finder. It bundles every read
+// operation handlers need (graph loading, pre-flight, WIP markers). Defined
+// here (rather than imported as the concrete *finders.Finder) so consumers
+// can substitute fakes in tests — standard "accept interfaces, return
+// structs" Go pattern. *finders.Finder satisfies this interface.
+type Reader interface {
+	LoadGraph(dir string) (*model.Graph, error)
+	LoadWIPMarkers(graphDir string) ([]*model.WIPMarker, error)
 	Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error)
 }
 
@@ -28,42 +32,45 @@ type Committer interface {
 	Commit(message string, paths ...string) error
 }
 
-// LoadGraphFunc reads a graph from disk. sdd.LoadGraph satisfies this signature.
-// Injected so handlers don't depend on the sdd package directly and tests can
-// substitute in-memory fixtures.
-type LoadGraphFunc func(dir string) (*model.Graph, error)
+// Brancher performs git branch operations. Injected so tests can fake
+// checkout/branch deletion without touching real git.
+type Brancher interface {
+	Checkout(branch string, create bool) error
+	BranchMerged(branch string) bool
+	DeleteBranch(branch string, force bool) error
+}
 
 // Handler holds injected dependencies shared across command methods.
 // Each public method corresponds to one command and lives in its own file
 // (handler_new_entry.go, etc.).
 type Handler struct {
-	graphDir    string
-	preflighter Preflighter
-	committer   Committer
-	loadGraph   LoadGraphFunc
-	stderr      io.Writer
-	now         func() time.Time
+	graphDir  string
+	reader    Reader
+	committer Committer
+	brancher  Brancher
+	stderr    io.Writer
+	now       func() time.Time
 }
 
 // Options configures a new Handler. Zero-valued fields get sensible defaults.
 type Options struct {
-	GraphDir    string
-	Preflighter Preflighter
-	Committer   Committer
-	LoadGraph   LoadGraphFunc
-	Stderr      io.Writer
-	Now         func() time.Time
+	GraphDir  string
+	Reader    Reader
+	Committer Committer
+	Brancher  Brancher
+	Stderr    io.Writer
+	Now       func() time.Time
 }
 
 // New constructs a Handler with the given options.
 func New(opts Options) *Handler {
 	h := &Handler{
-		graphDir:    opts.GraphDir,
-		preflighter: opts.Preflighter,
-		committer:   opts.Committer,
-		loadGraph:   opts.LoadGraph,
-		stderr:      opts.Stderr,
-		now:         opts.Now,
+		graphDir:  opts.GraphDir,
+		reader:    opts.Reader,
+		committer: opts.Committer,
+		brancher:  opts.Brancher,
+		stderr:    opts.Stderr,
+		now:       opts.Now,
 	}
 	if h.stderr == nil {
 		h.stderr = os.Stderr

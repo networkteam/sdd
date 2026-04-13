@@ -1,30 +1,40 @@
-package sdd
+package presenters_test
 
 import (
 	"bytes"
 	"strings"
 	"testing"
 
+	"github.com/networkteam/resonance/framework/sdd/finders"
 	"github.com/networkteam/resonance/framework/sdd/model"
+	"github.com/networkteam/resonance/framework/sdd/presenters"
+	"github.com/networkteam/resonance/framework/sdd/query"
 )
+
+// renderShow exercises the finder + presenter together — show rendering
+// is an integration of tree-walk + format, so testing them as a pair
+// catches both layers' bugs against the same fixtures.
+func renderShow(t *testing.T, g *model.Graph, ids []string, downstream bool) string {
+	t.Helper()
+	f := finders.New(nil)
+	result, err := f.Show(query.ShowQuery{Graph: g, IDs: ids, Downstream: downstream})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	presenters.RenderShow(&buf, result)
+	return buf.String()
+}
 
 func TestRenderShow_SingleEntryNoRefs(t *testing.T) {
 	e := entry("20260410-100000-s-tac-aaa", withContent("A signal about something"))
 	g := model.NewGraph([]*model.Entry{e})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100000-s-tac-aaa"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := renderShow(t, g, []string{"20260410-100000-s-tac-aaa"}, false)
 
-	out := buf.String()
-
-	// Primary gets # heading
 	if !strings.Contains(out, "# 20260410-100000-s-tac-aaa\n") {
 		t.Errorf("expected # heading for primary entry, got:\n%s", out)
 	}
-	// Full content present
 	if !strings.Contains(out, "A signal about something") {
 		t.Errorf("expected entry content, got:\n%s", out)
 	}
@@ -36,23 +46,14 @@ func TestRenderShow_SingleEntryWithRefs(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{a, b})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100100-d-cpt-bbb"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := renderShow(t, g, []string{"20260410-100100-d-cpt-bbb"}, false)
 
-	out := buf.String()
-
-	// Primary at #
 	if !strings.Contains(out, "# 20260410-100100-d-cpt-bbb\n") {
 		t.Errorf("expected # heading for primary, got:\n%s", out)
 	}
-	// Ref at ##
 	if !strings.Contains(out, "## ref: 20260410-100000-s-stg-aaa\n") {
 		t.Errorf("expected ## ref heading, got:\n%s", out)
 	}
-	// Primary appears before ref
 	primaryIdx := strings.Index(out, "# 20260410-100100-d-cpt-bbb")
 	refIdx := strings.Index(out, "## ref: 20260410-100000-s-stg-aaa")
 	if primaryIdx > refIdx {
@@ -67,15 +68,8 @@ func TestRenderShow_DeepChain(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{a, b, c})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100200-d-tac-ccc"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := renderShow(t, g, []string{"20260410-100200-d-tac-ccc"}, false)
 
-	out := buf.String()
-
-	// Primary at #, direct ref at ##, transitive ref at ###
 	if !strings.Contains(out, "# 20260410-100200-d-tac-ccc\n") {
 		t.Errorf("expected # for primary, got:\n%s", out)
 	}
@@ -94,18 +88,11 @@ func TestRenderShow_MultiEntryDedup(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{shared, first, second})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{
+	out := renderShow(t, g, []string{
 		"20260410-100100-d-cpt-bbb",
 		"20260410-100200-d-cpt-ccc",
 	}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	out := buf.String()
-
-	// Both primaries at #
 	if !strings.Contains(out, "# 20260410-100100-d-cpt-bbb\n") {
 		t.Errorf("expected # for first primary, got:\n%s", out)
 	}
@@ -113,7 +100,6 @@ func TestRenderShow_MultiEntryDedup(t *testing.T) {
 		t.Errorf("expected # for second primary, got:\n%s", out)
 	}
 
-	// Shared ref appears full under first primary
 	firstPrimaryIdx := strings.Index(out, "# 20260410-100100-d-cpt-bbb")
 	secondPrimaryIdx := strings.Index(out, "# 20260410-100200-d-cpt-ccc")
 
@@ -122,7 +108,6 @@ func TestRenderShow_MultiEntryDedup(t *testing.T) {
 		t.Errorf("expected full content for shared ref under first primary, got:\n%s", firstSection)
 	}
 
-	// Under second primary, shared ref should be "(shown above)"
 	secondSection := out[secondPrimaryIdx:]
 	if !strings.Contains(secondSection, "(shown above)") {
 		t.Errorf("expected '(shown above)' for shared ref under second primary, got:\n%s", secondSection)
@@ -133,25 +118,16 @@ func TestRenderShow_MultiEntryDedup(t *testing.T) {
 }
 
 func TestRenderShow_ShownBelowForFuturePrimary(t *testing.T) {
-	// B refs A, both are primaries. A appears as ref under B first,
-	// but should be "(shown below)" since it's a future primary.
 	a := entry("20260410-100000-s-stg-aaa", withContent("Entry A content"))
 	b := entry("20260410-100100-d-cpt-bbb", withContent("Entry B content"), withRefs("20260410-100000-s-stg-aaa"))
 
 	g := model.NewGraph([]*model.Entry{a, b})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{
+	out := renderShow(t, g, []string{
 		"20260410-100100-d-cpt-bbb",
 		"20260410-100000-s-stg-aaa",
 	}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	out := buf.String()
-
-	// Under B's section, A should be "(shown below)" — not full content
 	firstPrimaryIdx := strings.Index(out, "# 20260410-100100-d-cpt-bbb")
 	separatorIdx := strings.Index(out, "---")
 	firstSection := out[firstPrimaryIdx:separatorIdx]
@@ -166,7 +142,6 @@ func TestRenderShow_ShownBelowForFuturePrimary(t *testing.T) {
 		t.Errorf("expected A's content to NOT appear under B, got:\n%s", firstSection)
 	}
 
-	// A's own primary section should have full content
 	secondSection := out[separatorIdx:]
 	if !strings.Contains(secondSection, "# 20260410-100000-s-stg-aaa\n") {
 		t.Errorf("expected # heading for A as primary, got:\n%s", secondSection)
@@ -177,26 +152,17 @@ func TestRenderShow_ShownBelowForFuturePrimary(t *testing.T) {
 }
 
 func TestRenderShow_ShownBelowSkipsSubtree(t *testing.T) {
-	// C refs B refs A. C and A are both primaries. A appears as transitive
-	// ref under C but should be "(shown below)" with no subtree traversal.
 	a := entry("20260410-100000-s-stg-aaa", withContent("Root"))
 	b := entry("20260410-100100-s-cpt-bbb", withContent("Middle"), withRefs("20260410-100000-s-stg-aaa"))
 	c := entry("20260410-100200-d-tac-ccc", withContent("Primary C"), withRefs("20260410-100100-s-cpt-bbb"))
 
 	g := model.NewGraph([]*model.Entry{a, b, c})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{
+	out := renderShow(t, g, []string{
 		"20260410-100200-d-tac-ccc",
 		"20260410-100000-s-stg-aaa",
 	}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	out := buf.String()
-
-	// Under C, B should be full (not a primary), A should be "(shown below)"
 	separatorIdx := strings.Index(out, "---")
 	firstSection := out[:separatorIdx]
 
@@ -207,7 +173,6 @@ func TestRenderShow_ShownBelowSkipsSubtree(t *testing.T) {
 		t.Errorf("expected '(shown below)' for A under C, got:\n%s", firstSection)
 	}
 
-	// A should appear full as its own primary
 	secondSection := out[separatorIdx:]
 	if !strings.Contains(secondSection, "Root") {
 		t.Errorf("expected A's full content as primary, got:\n%s", secondSection)
@@ -221,15 +186,8 @@ func TestRenderShow_FollowsCloses(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{signal, action})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100100-a-tac-bbb"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := renderShow(t, g, []string{"20260410-100100-a-tac-bbb"}, false)
 
-	out := buf.String()
-
-	// The closed signal should appear with "closes" label
 	if !strings.Contains(out, "## closes: 20260410-100000-s-tac-aaa\n") {
 		t.Errorf("expected ## closes heading, got:\n%s", out)
 	}
@@ -245,15 +203,8 @@ func TestRenderShow_FollowsSupersedes(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{old, replacement})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100100-d-tac-bbb"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := renderShow(t, g, []string{"20260410-100100-d-tac-bbb"}, false)
 
-	out := buf.String()
-
-	// The superseded entry should appear with "supersedes" label
 	if !strings.Contains(out, "## supersedes: 20260410-100000-d-tac-aaa\n") {
 		t.Errorf("expected ## supersedes heading, got:\n%s", out)
 	}
@@ -263,7 +214,6 @@ func TestRenderShow_FollowsSupersedes(t *testing.T) {
 }
 
 func TestRenderShow_MixedReferenceTypes(t *testing.T) {
-	// An action that refs a decision, closes a signal, and the decision refs the signal
 	signal := entry("20260410-100000-s-tac-aaa", withContent("The signal"))
 	decision := entry("20260410-100100-d-tac-bbb", withContent("The decision"),
 		withRefs("20260410-100000-s-tac-aaa"))
@@ -273,23 +223,14 @@ func TestRenderShow_MixedReferenceTypes(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{signal, decision, action})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100200-a-tac-ccc"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := renderShow(t, g, []string{"20260410-100200-a-tac-ccc"}, false)
 
-	out := buf.String()
-
-	// Should have ref for decision and closes for signal
 	if !strings.Contains(out, "## ref: 20260410-100100-d-tac-bbb\n") {
 		t.Errorf("expected ## ref for decision, got:\n%s", out)
 	}
 	if !strings.Contains(out, "## closes: 20260410-100000-s-tac-aaa\n") {
 		t.Errorf("expected ## closes for signal, got:\n%s", out)
 	}
-	// Signal appears under both (via decision's ref and action's closes)
-	// but only full once — second time is "(shown above)"
 	signalCount := strings.Count(out, "The signal")
 	if signalCount != 1 {
 		t.Errorf("expected signal content exactly once, got %d in:\n%s", signalCount, out)
@@ -303,19 +244,11 @@ func TestRenderShow_Downstream(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{target, d1, d2})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100000-s-stg-aaa"}, true)
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := renderShow(t, g, []string{"20260410-100000-s-stg-aaa"}, true)
 
-	out := buf.String()
-
-	// Target at #
 	if !strings.Contains(out, "# 20260410-100000-s-stg-aaa\n") {
 		t.Errorf("expected # for target, got:\n%s", out)
 	}
-	// Downstream entries at ## with "downstream" label
 	if !strings.Contains(out, "## downstream: 20260410-100100-d-cpt-bbb\n") {
 		t.Errorf("expected ## downstream for d1, got:\n%s", out)
 	}
@@ -327,8 +260,8 @@ func TestRenderShow_Downstream(t *testing.T) {
 func TestRenderShow_EntryNotFound(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100000-s-stg-xxx"}, false)
+	f := finders.New(nil)
+	_, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{"20260410-100000-s-stg-xxx"}})
 	if err == nil {
 		t.Fatal("expected error for missing entry")
 	}
@@ -343,16 +276,10 @@ func TestRenderShow_SeparatorBetweenPrimaries(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{a, b})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{
+	out := renderShow(t, g, []string{
 		"20260410-100000-s-stg-aaa",
 		"20260410-100100-s-cpt-bbb",
 	}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	out := buf.String()
 
 	if !strings.Contains(out, "\n---\n") {
 		t.Errorf("expected --- separator between primaries, got:\n%s", out)
@@ -368,13 +295,7 @@ func TestRenderShow_BranchingRefs(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{d, b, c, a})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100300-d-tac-aaa"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	out := buf.String()
+	out := renderShow(t, g, []string{"20260410-100300-d-tac-aaa"}, false)
 
 	if !strings.Contains(out, "# 20260410-100300-d-tac-aaa\n") {
 		t.Errorf("expected # for primary, got:\n%s", out)
@@ -399,13 +320,7 @@ func TestRenderShow_BlankLineAfterHeading(t *testing.T) {
 	e := entry("20260410-100000-s-tac-aaa", withContent("Content"))
 	g := model.NewGraph([]*model.Entry{e})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{"20260410-100000-s-tac-aaa"}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	out := buf.String()
+	out := renderShow(t, g, []string{"20260410-100000-s-tac-aaa"}, false)
 
 	if !strings.Contains(out, "# 20260410-100000-s-tac-aaa\n\n") {
 		t.Errorf("expected blank line after heading, got:\n%q", out)
@@ -420,16 +335,10 @@ func TestRenderShow_ShownAboveSkipsSubtree(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{root, mid, first, second})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{
+	out := renderShow(t, g, []string{
 		"20260410-100200-d-tac-ccc",
 		"20260410-100300-d-tac-ddd",
 	}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	out := buf.String()
 
 	secondPrimaryIdx := strings.Index(out, "# 20260410-100300-d-tac-ddd")
 	secondSection := out[secondPrimaryIdx:]
@@ -449,16 +358,10 @@ func TestRenderShow_ShownAboveHasBlankLineAfterHeading(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{a, b, c})
 
-	var buf bytes.Buffer
-	err := RenderShow(&buf, g, []string{
+	out := renderShow(t, g, []string{
 		"20260410-100100-d-cpt-bbb",
 		"20260410-100200-d-cpt-ccc",
 	}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	out := buf.String()
 
 	secondSection := out[strings.Index(out, "---"):]
 	refHeading := "## ref: 20260410-100000-s-stg-aaa\n\n(shown above)"
@@ -485,7 +388,7 @@ func TestWriteEntryFull_KindDisplayed(t *testing.T) {
 			e := entry("20260410-100000-d-tac-aaa", withKind(tt.kind), withContent("Test"))
 
 			var buf bytes.Buffer
-			WriteEntryFull(&buf, e)
+			presenters.WriteEntryFull(&buf, e)
 			out := buf.String()
 
 			hasKind := strings.Contains(out, tt.wantText)

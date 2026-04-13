@@ -11,13 +11,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/networkteam/resonance/framework/sdd"
 	"github.com/networkteam/resonance/framework/sdd/command"
 	"github.com/networkteam/resonance/framework/sdd/finders"
 	"github.com/networkteam/resonance/framework/sdd/handlers"
 	"github.com/networkteam/resonance/framework/sdd/model"
+	"github.com/networkteam/resonance/framework/sdd/presenters"
+	"github.com/networkteam/resonance/framework/sdd/query"
 	"github.com/urfave/cli/v3"
 )
+
+// newFinder constructs a Finder with a production claudeRunner. The runner
+// model is resolved per-call so flag overrides (--preflight-model on `sdd new`)
+// take effect.
+func newFinder(model string) *finders.Finder {
+	return finders.New(&claudeRunner{model: model})
+}
 
 // splitCSV returns the comma-split fields of s, or nil if s is empty.
 func splitCSV(s string) []string {
@@ -32,6 +40,37 @@ type gitCommitterFunc func(message string, paths ...string) error
 
 func (f gitCommitterFunc) Commit(message string, paths ...string) error {
 	return f(message, paths...)
+}
+
+// gitBrancher is the production handlers.Brancher: shells out to git for
+// checkout, merge-status check, and branch deletion.
+type gitBrancher struct{}
+
+func (gitBrancher) Checkout(branch string, create bool) error {
+	args := []string{"checkout"}
+	if create {
+		args = append(args, "-b")
+	}
+	args = append(args, branch)
+	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout: %s (%w)", out, err)
+	}
+	return nil
+}
+
+func (gitBrancher) BranchMerged(branch string) bool {
+	return isBranchMerged(branch)
+}
+
+func (gitBrancher) DeleteBranch(branch string, force bool) error {
+	flag := "-d"
+	if force {
+		flag = "-D"
+	}
+	if out, err := exec.Command("git", "branch", flag, branch).CombinedOutput(); err != nil {
+		return fmt.Errorf("git branch %s: %s (%w)", flag, out, err)
+	}
+	return nil
 }
 
 func main() {
@@ -69,12 +108,7 @@ func main() {
 }
 
 func loadGraph(cmd *cli.Command) (*model.Graph, error) {
-	dir := cmd.String("graph-dir")
-	if !filepath.IsAbs(dir) {
-		// Resolve relative to git root or cwd
-		dir, _ = filepath.Abs(dir)
-	}
-	return sdd.LoadGraph(dir)
+	return newFinder("").LoadGraph(graphDir(cmd))
 }
 
 func statusCmd() *cli.Command {
@@ -87,92 +121,11 @@ func statusCmd() *cli.Command {
 				return err
 			}
 
-			// Summary
-			decisions := g.Filter(model.GraphFilter{Type: model.TypeDecision})
-			signals := g.Filter(model.GraphFilter{Type: model.TypeSignal})
-			actions := g.Filter(model.GraphFilter{Type: model.TypeAction})
-			fmt.Printf("Graph: %d entries (%d decisions, %d signals, %d actions)\n\n",
-				len(g.Entries), len(decisions), len(signals), len(actions))
-
-			// Contracts grouped by layer
-			contracts := g.Contracts()
-			if len(contracts) > 0 {
-				fmt.Println("## Contracts")
-				fmt.Println()
-				byLayer := groupByLayer(contracts)
-				for _, layer := range layerOrder() {
-					entries, ok := byLayer[layer]
-					if !ok {
-						continue
-					}
-					fmt.Printf("### %s\n", layer)
-					for _, e := range entries {
-						printEntry(e, int(cmd.Int("width")))
-					}
-					fmt.Println()
-				}
+			result, err := newFinder("").Status(query.StatusQuery{Graph: g})
+			if err != nil {
+				return err
 			}
-
-			// Plans grouped by layer
-			plans := g.Plans()
-			if len(plans) > 0 {
-				fmt.Println("## Plans")
-				fmt.Println()
-				byLayer := groupByLayer(plans)
-				for _, layer := range layerOrder() {
-					entries, ok := byLayer[layer]
-					if !ok {
-						continue
-					}
-					fmt.Printf("### %s\n", layer)
-					for _, e := range entries {
-						printEntry(e, int(cmd.Int("width")))
-					}
-					fmt.Println()
-				}
-			}
-
-			// Active decisions grouped by layer
-			active := g.ActiveDecisions()
-			if len(active) > 0 {
-				fmt.Println("## Active Decisions")
-				fmt.Println()
-				byLayer := groupByLayer(active)
-				for _, layer := range layerOrder() {
-					entries, ok := byLayer[layer]
-					if !ok {
-						continue
-					}
-					fmt.Printf("### %s\n", layer)
-					for _, e := range entries {
-						printEntry(e, int(cmd.Int("width")))
-					}
-					fmt.Println()
-				}
-			}
-
-			// Open signals
-			open := g.OpenSignals()
-			if len(open) > 0 {
-				fmt.Println("## Open Signals")
-				fmt.Println()
-				for _, e := range open {
-					printEntry(e, int(cmd.Int("width")))
-				}
-				fmt.Println()
-			}
-
-			// Recent actions
-			recent := g.RecentActions(5)
-			if len(recent) > 0 {
-				fmt.Println("## Recent Actions")
-				fmt.Println()
-				for _, e := range recent {
-					printEntry(e, int(cmd.Int("width")))
-				}
-				fmt.Println()
-			}
-
+			presenters.RenderStatus(os.Stdout, result, int(cmd.Int("width")))
 			return nil
 		},
 	}
@@ -200,9 +153,16 @@ func showCmd() *cli.Command {
 				return err
 			}
 
-			downstream := cmd.Bool("downstream")
-
-			return sdd.RenderShow(os.Stdout, g, ids, downstream)
+			result, err := newFinder("").Show(query.ShowQuery{
+				Graph:      g,
+				IDs:        ids,
+				Downstream: cmd.Bool("downstream"),
+			})
+			if err != nil {
+				return err
+			}
+			presenters.RenderShow(os.Stdout, result)
+			return nil
 		},
 	}
 }
@@ -261,13 +221,19 @@ func listCmd() *cli.Command {
 				kind = model.Kind(k)
 			}
 
-			var entries []*model.Entry
-			f := model.GraphFilter{Type: typ, Layer: layer, Kind: kind, OpenOnly: !cmd.Bool("all")}
-			entries = g.Filter(f)
-			for _, e := range entries {
-				printEntry(e, int(cmd.Int("width")))
+			result, err := newFinder("").List(query.ListQuery{
+				Graph: g,
+				Filter: model.GraphFilter{
+					Type:     typ,
+					Layer:    layer,
+					Kind:     kind,
+					OpenOnly: !cmd.Bool("all"),
+				},
+			})
+			if err != nil {
+				return err
 			}
-
+			presenters.RenderList(os.Stdout, result, int(cmd.Int("width")))
 			return nil
 		},
 	}
@@ -407,13 +373,11 @@ func newCmd() *cli.Command {
 				},
 			}
 
-			runner := &claudeRunner{model: cmd.String("preflight-model")}
-			finder := finders.New(runner)
+			finder := newFinder(cmd.String("preflight-model"))
 			handler := handlers.New(handlers.Options{
-				GraphDir:    dir,
-				Preflighter: finder,
-				Committer:   gitCommitterFunc(gitCommit),
-				LoadGraph:   sdd.LoadGraph,
+				GraphDir:  dir,
+				Reader:    finder,
+				Committer: gitCommitterFunc(gitCommit),
 			})
 
 			return handler.NewEntry(ctx, ncmd)
@@ -431,60 +395,20 @@ func lintCmd() *cli.Command {
 				return err
 			}
 
-			entries := g.Lint()
-			if len(entries) == 0 {
-				fmt.Println("No issues found.")
-				return nil
+			result, err := newFinder("").Lint(query.LintQuery{Graph: g})
+			if err != nil {
+				return err
 			}
-
-			total := 0
-			for _, e := range entries {
-				total += len(e.Warnings)
+			presenters.RenderLint(os.Stdout, result, int(cmd.Int("width")))
+			if result.TotalIssues > 0 {
+				return fmt.Errorf("lint found %d issue(s)", result.TotalIssues)
 			}
-
-			fmt.Printf("%d issue(s) in %d entry/entries:\n\n", total, len(entries))
-			for _, e := range entries {
-				fmt.Printf("  %s  %s  %s\n", e.ID, e.TypeLabel(), e.ShortContent(int(cmd.Int("width"))))
-				for _, w := range e.Warnings {
-					fmt.Printf("    ⚠ %s\n", w.Message)
-				}
-				fmt.Println()
-			}
-
-			return fmt.Errorf("lint found %d issue(s)", total)
+			return nil
 		},
 	}
 }
 
-func printEntry(e *model.Entry, width int) {
-	conf := ""
-	if e.Confidence != "" {
-		conf = fmt.Sprintf(" [%s]", e.Confidence)
-	}
-	fmt.Printf("  %s  %-8s %-12s%s  %s\n",
-		e.ID, e.TypeLabel(), e.LayerLabel(), conf, e.ShortContent(width))
-}
-
-
-func groupByLayer(entries []*model.Entry) map[model.Layer][]*model.Entry {
-	m := make(map[model.Layer][]*model.Entry)
-	for _, e := range entries {
-		m[e.Layer] = append(m[e.Layer], e)
-	}
-	return m
-}
-
-func layerOrder() []model.Layer {
-	return []model.Layer{
-		model.LayerStrategic,
-		model.LayerConceptual,
-		model.LayerTactical,
-		model.LayerOperational,
-		model.LayerProcess,
-	}
-}
-
-// claudeRunner implements sdd.PreflightRunner by invoking the claude CLI.
+// claudeRunner implements finders.PreflightRunner by invoking the claude CLI.
 type claudeRunner struct {
 	model string
 }
@@ -533,16 +457,6 @@ func isBranchMerged(branch string) bool {
 	return false
 }
 
-func deleteBranch(branch string, force bool) {
-	flag := "-d"
-	if force {
-		flag = "-D"
-	}
-	if out, err := exec.Command("git", "branch", flag, branch).CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "  warning: git branch %s: %s (%v)\n", flag, out, err)
-	}
-}
-
 func graphDir(cmd *cli.Command) string {
 	dir := cmd.String("graph-dir")
 	if !filepath.IsAbs(dir) {
@@ -588,81 +502,32 @@ func wipStartCmd() *cli.Command {
 				return fmt.Errorf("usage: sdd wip start <entry-id> [description]")
 			}
 
-			entryID := args.Get(0)
-			description := strings.Join(args.Slice()[1:], " ")
-
-			// Validate entry exists
-			g, err := loadGraph(cmd)
-			if err != nil {
-				return err
-			}
-			if _, ok := g.ByID[entryID]; !ok {
-				return fmt.Errorf("entry not found: %s", entryID)
-			}
-
-			// Resolve participant
-			participant := cmd.String("participant")
-			if participant == "" {
-				return fmt.Errorf("--participant is required")
-			}
-
-			// Check for existing exclusive markers
-			dir := graphDir(cmd)
-			markers, err := sdd.LoadWIPMarkers(dir)
-			if err != nil {
-				return fmt.Errorf("loading WIP markers: %w", err)
-			}
-			if existing, ok := model.HasExclusiveMarker(markers, entryID); ok {
-				fmt.Fprintf(os.Stderr, "warning: exclusive marker exists for %s by %s (%s)\n",
-					entryID, existing.Participant, existing.ID)
-			}
-
-			// Derive branch name if --branch is set
-			var branchName string
-			if cmd.Bool("branch") {
-				branchName = model.DeriveBranchName(entryID, description)
-			}
-
-			// Create marker
-			markerID := model.GenerateWIPMarkerID(participant)
-			marker := &model.WIPMarker{
-				ID:          markerID,
-				Entry:       entryID,
-				Participant: participant,
+			startCmd := &command.StartWIPCmd{
+				EntryID:     args.Get(0),
+				Description: strings.Join(args.Slice()[1:], " "),
+				Participant: cmd.String("participant"),
 				Exclusive:   cmd.Bool("exclusive"),
-				Branch:      branchName,
-				Content:     description,
+				Branch:      cmd.Bool("branch"),
+				OnStarted: func(markerID, markerPath string) {
+					fmt.Println(markerID)
+					fmt.Printf("  → %s\n", markerPath)
+				},
+				OnBranchCreated: func(branch string) {
+					fmt.Printf("  branch: %s (checked out)\n", branch)
+				},
+				OnExclusiveCollision: func(existing *model.WIPMarker) {
+					fmt.Fprintf(os.Stderr, "warning: exclusive marker exists for %s by %s (%s)\n",
+						existing.Entry, existing.Participant, existing.ID)
+				},
 			}
 
-			markerPath := filepath.Join(dir, model.WIPMarkerPath(markerID))
-			if err := os.MkdirAll(filepath.Dir(markerPath), 0755); err != nil {
-				return fmt.Errorf("creating wip directory: %w", err)
-			}
-
-			content := model.FormatWIPMarker(marker)
-			if err := os.WriteFile(markerPath, []byte(content), 0644); err != nil {
-				return fmt.Errorf("writing marker: %w", err)
-			}
-
-			fmt.Printf("%s\n", markerID)
-			fmt.Printf("  → %s\n", markerPath)
-
-			// Commit marker on current branch (before creating the new branch)
-			if err := gitCommit(fmt.Sprintf("sdd: wip start %s (%s)", entryID, participant), markerPath); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: git commit failed: %v\n", err)
-			}
-
-			// Create branch and check out if --branch
-			if branchName != "" {
-				checkoutCmd := exec.Command("git", "checkout", "-b", branchName)
-				if out, err := checkoutCmd.CombinedOutput(); err != nil {
-					return fmt.Errorf("creating branch %s: %s (%w)", branchName, out, err)
-				}
-
-				fmt.Printf("  branch: %s (checked out)\n", branchName)
-			}
-
-			return nil
+			handler := handlers.New(handlers.Options{
+				GraphDir:  graphDir(cmd),
+				Reader:    newFinder(""),
+				Committer: gitCommitterFunc(gitCommit),
+				Brancher:  gitBrancher{},
+			})
+			return handler.StartWIP(ctx, startCmd)
 		},
 	}
 }
@@ -684,65 +549,55 @@ func wipDoneCmd() *cli.Command {
 				return fmt.Errorf("usage: sdd wip done <marker-id>")
 			}
 
-			markerID := args.Get(0)
-			dir := graphDir(cmd)
-			markerPath := filepath.Join(dir, model.WIPMarkerPath(markerID))
-
-			if _, err := os.Stat(markerPath); err != nil {
-				return fmt.Errorf("marker not found: %s", markerID)
+			doneCmd := &command.FinishWIPCmd{
+				MarkerID: args.Get(0),
+				Force:    cmd.Bool("force"),
+				OnRemoved: func(id string) {
+					fmt.Printf("removed %s\n", id)
+				},
+				OnBranchDeleted: func(branch string, forced bool) {
+					if forced {
+						fmt.Printf("  force-deleted branch %s (unmerged)\n", branch)
+					} else {
+						fmt.Printf("  deleted branch %s (merged)\n", branch)
+					}
+				},
+				OnBranchPreserved: func(branch string) {
+					fmt.Fprintf(os.Stderr, "  warning: branch %s has unmerged changes — marker removed but branch preserved\n", branch)
+					fmt.Fprintln(os.Stderr, "  use --force to delete the unmerged branch, or merge it first")
+				},
 			}
 
-			// Read marker to check for branch
-			data, err := os.ReadFile(markerPath)
-			if err != nil {
-				return fmt.Errorf("reading marker: %w", err)
-			}
-			marker, err := model.ParseWIPMarker(filepath.Base(markerPath), string(data))
-			if err != nil {
-				return fmt.Errorf("parsing marker: %w", err)
-			}
-
-			if err := os.Remove(markerPath); err != nil {
-				return fmt.Errorf("removing marker: %w", err)
-			}
-
-			fmt.Printf("removed %s\n", markerID)
-
-			// Git rm and commit
-			rm := exec.Command("git", "rm", "--cached", "-f", markerPath)
-			if out, err := rm.CombinedOutput(); err != nil {
-				// File already removed from disk, try git add the deletion
-				add := exec.Command("git", "add", markerPath)
-				if out2, err2 := add.CombinedOutput(); err2 != nil {
-					fmt.Fprintf(os.Stderr, "warning: git stage failed: %s (%v); %s (%v)\n", out, err, out2, err2)
-					return nil
-				}
-			}
-
-			commit := exec.Command("git", "commit", "-m", fmt.Sprintf("sdd: wip done %s", markerID))
-			if out, err := commit.CombinedOutput(); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: git commit failed: %s (%v)\n", out, err)
-			}
-
-			// Branch cleanup
-			if marker.Branch != "" {
-				merged := isBranchMerged(marker.Branch)
-
-				if merged {
-					deleteBranch(marker.Branch, false)
-					fmt.Printf("  deleted branch %s (merged)\n", marker.Branch)
-				} else if cmd.Bool("force") {
-					deleteBranch(marker.Branch, true)
-					fmt.Printf("  force-deleted branch %s (unmerged)\n", marker.Branch)
-				} else {
-					fmt.Fprintf(os.Stderr, "  warning: branch %s has unmerged changes — marker removed but branch preserved\n", marker.Branch)
-					fmt.Fprintf(os.Stderr, "  use --force to delete the unmerged branch, or merge it first\n")
-				}
-			}
-
-			return nil
+			handler := handlers.New(handlers.Options{
+				GraphDir:  graphDir(cmd),
+				Reader:    newFinder(""),
+				Committer: gitCommitterFunc(gitRemoveAndCommit),
+				Brancher:  gitBrancher{},
+			})
+			return handler.FinishWIP(ctx, doneCmd)
 		},
 	}
+}
+
+// gitRemoveAndCommit stages the deletion of the given paths and commits.
+// Used by FinishWIP — the marker file has already been removed from disk
+// when this runs, so we use `git rm --cached` (or `git add` as fallback)
+// to stage the deletion before committing.
+func gitRemoveAndCommit(message string, paths ...string) error {
+	for _, p := range paths {
+		rm := exec.Command("git", "rm", "--cached", "-f", p)
+		if out, err := rm.CombinedOutput(); err != nil {
+			add := exec.Command("git", "add", p)
+			if out2, err2 := add.CombinedOutput(); err2 != nil {
+				return fmt.Errorf("git stage: %s (%v); fallback %s (%w)", out, err, out2, err2)
+			}
+		}
+	}
+	commit := exec.Command("git", "commit", "-m", message)
+	if out, err := commit.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %s (%w)", out, err)
+	}
+	return nil
 }
 
 func wipListCmd() *cli.Command {
@@ -750,30 +605,11 @@ func wipListCmd() *cli.Command {
 		Name:  "list",
 		Usage: "List all active WIP markers",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			dir := graphDir(cmd)
-			markers, err := sdd.LoadWIPMarkers(dir)
+			result, err := newFinder("").WIPList(query.WIPListQuery{GraphDir: graphDir(cmd)})
 			if err != nil {
 				return fmt.Errorf("loading WIP markers: %w", err)
 			}
-
-			if len(markers) == 0 {
-				fmt.Println("No active WIP markers.")
-				return nil
-			}
-
-			for _, m := range markers {
-				excl := ""
-				if m.Exclusive {
-					excl = " [exclusive]"
-				}
-				branch := ""
-				if m.Branch != "" {
-					branch = fmt.Sprintf("  branch:%s", m.Branch)
-				}
-				fmt.Printf("  %s  %-15s%s  %s%s  %s\n",
-					m.ID, m.Participant, excl, m.Entry, branch, m.ShortContent(int(cmd.Int("width"))))
-			}
-
+			presenters.RenderWIPList(os.Stdout, result, int(cmd.Int("width")))
 			return nil
 		},
 	}
@@ -831,4 +667,3 @@ func parseAttachFlags(specs []string, stdinReader io.Reader) ([]attachment, erro
 	}
 	return attachments, nil
 }
-

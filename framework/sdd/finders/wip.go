@@ -1,4 +1,4 @@
-package sdd
+package finders
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 )
 
 // LoadWIPMarkers reads all marker files from the wip/ subdirectory of graphDir.
-func LoadWIPMarkers(graphDir string) ([]*model.WIPMarker, error) {
+func (f *Finder) LoadWIPMarkers(graphDir string) ([]*model.WIPMarker, error) {
 	wipDir := filepath.Join(graphDir, "wip")
 
 	entries, err := os.ReadDir(wipDir)
