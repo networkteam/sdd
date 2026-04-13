@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -293,6 +295,10 @@ func newCmd() *cli.Command {
 				Name:  "skip-preflight",
 				Usage: "Skip pre-flight validation (entry is annotated with preflight: skipped)",
 			},
+			&cli.BoolFlag{
+				Name:  "dry-run",
+				Usage: "Run validation and pre-flight only, without writing or committing the entry",
+			},
 			&cli.StringFlag{
 				Name:  "preflight-model",
 				Usage: "Model to use for pre-flight validation",
@@ -408,6 +414,26 @@ func newCmd() *cli.Command {
 				return fmt.Errorf("validation failed: %d issue(s)", len(entry.Warnings))
 			}
 
+			dryRun := cmd.Bool("dry-run")
+			stdinAtt := findStdinAttachment(attachments)
+
+			// reportSavedStdin saves stdin attachment to .sdd-tmp/ and prints the
+			// path so the user can re-pipe without reassembling the heredoc. Save
+			// failures are surfaced as warnings — they must not mask the underlying
+			// pre-flight result.
+			reportSavedStdin := func(reason string) {
+				if stdinAtt == nil {
+					return
+				}
+				path, err := saveStdinAttachment(dir, stdinAtt.target, stdinAtt.data)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not save stdin attachment: %v\n", err)
+					return
+				}
+				fmt.Fprintf(os.Stderr, "stdin attachment saved (%s): %s\n", reason, path)
+				fmt.Fprintf(os.Stderr, "  retry: cat %s | sdd new ... --attach -:%s\n", path, stdinAtt.target)
+			}
+
 			// Pre-flight validation
 			if cmd.Bool("skip-preflight") {
 				entry.Preflight = "skipped"
@@ -426,8 +452,17 @@ func newCmd() *cli.Command {
 					for _, gap := range result.Gaps {
 						fmt.Fprintf(os.Stderr, "  - %s\n", gap)
 					}
+					reportSavedStdin("pre-flight rejected")
 					return fmt.Errorf("pre-flight rejected entry: %d gap(s)", len(result.Gaps))
 				}
+			}
+
+			// Dry-run: validation and pre-flight passed (or were skipped). Save
+			// stdin so the user can do the real run with the same content, then
+			// exit without writing the entry or committing.
+			if dryRun {
+				reportSavedStdin("dry-run")
+				return nil
 			}
 
 			// Write entry file
@@ -847,6 +882,38 @@ func wipListCmd() *cli.Command {
 			return nil
 		},
 	}
+}
+
+// stdinSaveDir is the directory under graph-dir where rejected/dry-run stdin
+// attachments are persisted so users can re-pipe them without re-sending.
+const stdinSaveDir = ".sdd-tmp"
+
+// findStdinAttachment returns the attachment populated from stdin, or nil if
+// no stdin attachment is present.
+func findStdinAttachment(atts []attachment) *attachment {
+	for i := range atts {
+		if atts[i].source == "-" {
+			return &atts[i]
+		}
+	}
+	return nil
+}
+
+// saveStdinAttachment writes stdin content to <graph-dir>/.sdd-tmp/<hash>-<target>
+// and returns the absolute saved path. The hash is the first 8 chars of sha256
+// of the content — stable enough for single-user iteration.
+func saveStdinAttachment(graphDir string, target string, data []byte) (string, error) {
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])[:8]
+	dir := filepath.Join(graphDir, stdinSaveDir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("creating %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, hash+"-"+target)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return "", fmt.Errorf("writing %s: %w", path, err)
+	}
+	return path, nil
 }
 
 // parseAttachSpec splits an --attach value into source and target.
