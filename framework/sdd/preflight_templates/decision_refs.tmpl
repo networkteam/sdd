@@ -21,7 +21,7 @@ A decision is being created with references but not closing any entries. Verify 
 ## Open signals in the graph (check for missing refs)
 
 {{ .OpenSignals }}
-{{ end }}{{ template "contracts" . }}
+{{ end }}{{ template "contracts" . }}{{ template "entry_quality" . }}
 ## Output format
 
 Respond with exactly:

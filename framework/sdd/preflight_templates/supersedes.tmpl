@@ -21,7 +21,7 @@ An entry is being created that supersedes (replaces) an existing entry. Verify t
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ template "contracts" . }}
+{{ end }}{{ template "contracts" . }}{{ template "entry_quality" . }}
 ## Output format
 
 Respond with exactly:

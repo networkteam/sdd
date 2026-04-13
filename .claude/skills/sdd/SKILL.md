@@ -22,9 +22,13 @@ Then invoke the `/sdd-catchup` skill to get a synthesized summary of the current
 Never silently create graph entries. When capturing anything:
 
 1. Play back what you'd capture: "I'd record this as a [type] at the [layer] layer: '[content]'. Refs: [entries]. Does that look right?"
-2. Assess whether an attachment is needed (see "Attachment assessment" below). If yes, include it in the play-back: "I'd attach a [document type] covering [scope]."
-3. Let the user adjust wording, type, layer, refs, confidence, attachment
-4. Only then run `sdd new`
+2. **Fold substantive dialogue into the entry content.** If the conversation leading to capture involved trade-offs, rejected alternatives, or reasoning for the conclusion, include those in the entry description itself. The user confirms the play-back, so misrepresentations get caught. Future readers (and the pre-flight validator) get the *why*, not just the *what*.
+3. **Write a self-describing first sentence.** The opening sentence must work as a standalone summary — `sdd status` truncates descriptions, so "Plan for d-tac-1g4" tells a reader nothing. Lead with what the entry is about: "Improve pre-flight accuracy by flowing dialogue context into entries..."
+4. Assess whether an attachment is needed (see "Attachment assessment" below). If yes, include it in the play-back: "I'd attach a [document type] covering [scope]."
+5. Let the user adjust wording, type, layer, refs, confidence, attachment
+6. Only then run `sdd new`
+
+**If pre-flight rejects an entry**, don't just tweak wording. Read the rejection as a prompt: what dialogue reasoning did we fail to include in the entry text? Revise the content to fold in the missing context, then retry. If the rejection argues with rationale that was dialogued and confirmed, that's a pre-flight over-correction — consider `--skip-preflight` after confirming with the user.
 
 ### Always suggest next steps
 
