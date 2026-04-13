@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/networkteam/resonance/framework/sdd/model"
 )
 
 //go:embed preflight_templates/*.tmpl
@@ -76,25 +78,25 @@ type PreflightResult struct {
 }
 
 // SelectCheckType determines the pre-flight check type from entry properties and graph context.
-func SelectCheckType(entry *Entry, graph *Graph) CheckType {
+func SelectCheckType(entry *model.Entry, graph *model.Graph) CheckType {
 	if len(entry.Supersedes) > 0 {
 		return CheckSupersedes
 	}
 
-	if entry.Type == TypeAction && len(entry.Closes) > 0 {
+	if entry.Type == model.TypeAction && len(entry.Closes) > 0 {
 		for _, id := range entry.Closes {
-			if target, ok := graph.ByID[id]; ok && target.Type == TypeDecision {
+			if target, ok := graph.ByID[id]; ok && target.Type == model.TypeDecision {
 				return CheckClosingAction
 			}
 		}
 		return CheckActionClosesSignals
 	}
 
-	if entry.Type == TypeDecision && len(entry.Closes) > 0 {
+	if entry.Type == model.TypeDecision && len(entry.Closes) > 0 {
 		return CheckClosingDecision
 	}
 
-	if entry.Type == TypeDecision {
+	if entry.Type == model.TypeDecision {
 		return CheckDecisionRefs
 	}
 
@@ -103,7 +105,7 @@ func SelectCheckType(entry *Entry, graph *Graph) CheckType {
 
 // AssembleContext gathers graph data needed for the pre-flight prompt.
 // It reads plan attachment content from disk when the graph was loaded from a directory.
-func AssembleContext(entry *Entry, graph *Graph, checkType CheckType) (*PreflightContext, error) {
+func AssembleContext(entry *model.Entry, graph *model.Graph, checkType CheckType) (*PreflightContext, error) {
 	pctx := &PreflightContext{
 		ProposedEntry: FormatEntryForPrompt(entry),
 	}
@@ -185,12 +187,12 @@ func AssembleContext(entry *Entry, graph *Graph, checkType CheckType) (*Prefligh
 }
 
 // FormatEntryForPrompt formats an entry as readable text for inclusion in a prompt.
-func FormatEntryForPrompt(e *Entry) string {
+func FormatEntryForPrompt(e *model.Entry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ID: %s\n", e.ID)
 	fmt.Fprintf(&b, "Type: %s\n", e.Type)
 	fmt.Fprintf(&b, "Layer: %s\n", e.Layer)
-	if e.Kind != "" && e.Kind != KindDirective {
+	if e.Kind != "" && e.Kind != model.KindDirective {
 		fmt.Fprintf(&b, "Kind: %s\n", e.Kind)
 	}
 	if len(e.Refs) > 0 {
@@ -264,7 +266,7 @@ func ParseResult(output string) (*PreflightResult, error) {
 // RunPreflight orchestrates the full pre-flight validation.
 // Returns the result for both pass and fail cases.
 // Returns an error only for infrastructure failures (runner error, template error, parse error).
-func RunPreflight(ctx context.Context, runner PreflightRunner, entry *Entry, graph *Graph) (*PreflightResult, error) {
+func RunPreflight(ctx context.Context, runner PreflightRunner, entry *model.Entry, graph *model.Graph) (*PreflightResult, error) {
 	checkType := SelectCheckType(entry, graph)
 
 	pctx, err := AssembleContext(entry, graph, checkType)

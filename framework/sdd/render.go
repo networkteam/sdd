@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/networkteam/resonance/framework/sdd/model"
 )
 
 // refTreeItem represents an entry at a specific depth in the ref tree.
 type refTreeItem struct {
-	entry    *Entry
+	entry    *model.Entry
 	depth    int
 	relation string // "", "ref", "closes", "supersedes", "downstream"
 }
@@ -17,7 +19,7 @@ type refTreeItem struct {
 // The root entry is at depth 0, its direct refs/closes/supersedes at depth 1, etc.
 // When an entry was already rendered, is a future primary, or was already visited
 // in this tree walk, it appears in the result but its subtree is not traversed.
-func buildRefTree(g *Graph, id string, depth int, relation string, visited map[string]bool, rendered map[string]bool, primaries map[string]bool) []refTreeItem {
+func buildRefTree(g *model.Graph, id string, depth int, relation string, visited map[string]bool, rendered map[string]bool, primaries map[string]bool) []refTreeItem {
 	e, ok := g.ByID[id]
 	if !ok {
 		return nil
@@ -48,7 +50,7 @@ func buildRefTree(g *Graph, id string, depth int, relation string, visited map[s
 // with increasing heading depth. Deduped entries print only the heading plus
 // "(shown above)". Entries that are future primaries print "(shown below)".
 // In downstream mode, the target is the primary and downstream entries are flat at ##.
-func RenderShow(w io.Writer, g *Graph, ids []string, downstream bool) error {
+func RenderShow(w io.Writer, g *model.Graph, ids []string, downstream bool) error {
 	seen := make(map[string]bool)
 
 	// Build set of primary IDs so we can detect "shown below" cases
@@ -91,7 +93,7 @@ func RenderShow(w io.Writer, g *Graph, ids []string, downstream bool) error {
 // renderEntry writes a single entry with a markdown heading at the given depth.
 // depth 0 = #, depth 1 = ##, etc. label is prepended to the ID in the heading
 // (e.g. "ref", "closes", "supersedes", "downstream") — empty for primaries.
-func renderEntry(w io.Writer, e *Entry, depth int, label string, seen map[string]bool, primaries map[string]bool) {
+func renderEntry(w io.Writer, e *model.Entry, depth int, label string, seen map[string]bool, primaries map[string]bool) {
 	hashes := strings.Repeat("#", depth+1)
 
 	if label != "" {
@@ -114,11 +116,11 @@ func renderEntry(w io.Writer, e *Entry, depth int, label string, seen map[string
 }
 
 // WriteEntryFull writes the full metadata and content of an entry.
-func WriteEntryFull(w io.Writer, e *Entry) {
+func WriteEntryFull(w io.Writer, e *model.Entry) {
 	fmt.Fprintf(w, "ID:     %s\n", e.ID)
 	fmt.Fprintf(w, "Type:   %s\n", e.TypeLabel())
 	fmt.Fprintf(w, "Layer:  %s\n", e.LayerLabel())
-	if e.Kind != "" && e.Kind != KindDirective {
+	if e.Kind != "" && e.Kind != model.KindDirective {
 		fmt.Fprintf(w, "Kind:   %s\n", e.Kind)
 	}
 	if e.Confidence != "" {

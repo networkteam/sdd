@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/networkteam/resonance/framework/sdd/model"
 )
 
 // liveRunner implements PreflightRunner using the real claude CLI.

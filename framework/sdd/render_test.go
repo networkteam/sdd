@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/networkteam/resonance/framework/sdd/model"
 )
 
 func TestRenderShow_SingleEntryNoRefs(t *testing.T) {
 	e := entry("20260410-100000-s-tac-aaa", withContent("A signal about something"))
-	g := NewGraph([]*Entry{e})
+	g := model.NewGraph([]*model.Entry{e})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100000-s-tac-aaa"}, false)
@@ -32,7 +34,7 @@ func TestRenderShow_SingleEntryWithRefs(t *testing.T) {
 	a := entry("20260410-100000-s-stg-aaa", withContent("Root signal"))
 	b := entry("20260410-100100-d-cpt-bbb", withContent("Decision based on root"), withRefs("20260410-100000-s-stg-aaa"))
 
-	g := NewGraph([]*Entry{a, b})
+	g := model.NewGraph([]*model.Entry{a, b})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100100-d-cpt-bbb"}, false)
@@ -63,7 +65,7 @@ func TestRenderShow_DeepChain(t *testing.T) {
 	b := entry("20260410-100100-s-cpt-bbb", withContent("Level 1 ref"), withRefs("20260410-100000-s-stg-aaa"))
 	c := entry("20260410-100200-d-tac-ccc", withContent("Primary"), withRefs("20260410-100100-s-cpt-bbb"))
 
-	g := NewGraph([]*Entry{a, b, c})
+	g := model.NewGraph([]*model.Entry{a, b, c})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100200-d-tac-ccc"}, false)
@@ -90,7 +92,7 @@ func TestRenderShow_MultiEntryDedup(t *testing.T) {
 	first := entry("20260410-100100-d-cpt-bbb", withContent("First primary"), withRefs("20260410-100000-s-stg-aaa"))
 	second := entry("20260410-100200-d-cpt-ccc", withContent("Second primary"), withRefs("20260410-100000-s-stg-aaa"))
 
-	g := NewGraph([]*Entry{shared, first, second})
+	g := model.NewGraph([]*model.Entry{shared, first, second})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{
@@ -136,7 +138,7 @@ func TestRenderShow_ShownBelowForFuturePrimary(t *testing.T) {
 	a := entry("20260410-100000-s-stg-aaa", withContent("Entry A content"))
 	b := entry("20260410-100100-d-cpt-bbb", withContent("Entry B content"), withRefs("20260410-100000-s-stg-aaa"))
 
-	g := NewGraph([]*Entry{a, b})
+	g := model.NewGraph([]*model.Entry{a, b})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{
@@ -181,7 +183,7 @@ func TestRenderShow_ShownBelowSkipsSubtree(t *testing.T) {
 	b := entry("20260410-100100-s-cpt-bbb", withContent("Middle"), withRefs("20260410-100000-s-stg-aaa"))
 	c := entry("20260410-100200-d-tac-ccc", withContent("Primary C"), withRefs("20260410-100100-s-cpt-bbb"))
 
-	g := NewGraph([]*Entry{a, b, c})
+	g := model.NewGraph([]*model.Entry{a, b, c})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{
@@ -217,7 +219,7 @@ func TestRenderShow_FollowsCloses(t *testing.T) {
 	action := entry("20260410-100100-a-tac-bbb", withContent("Action closing signal"),
 		withCloses("20260410-100000-s-tac-aaa"))
 
-	g := NewGraph([]*Entry{signal, action})
+	g := model.NewGraph([]*model.Entry{signal, action})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100100-a-tac-bbb"}, false)
@@ -241,7 +243,7 @@ func TestRenderShow_FollowsSupersedes(t *testing.T) {
 	replacement := entry("20260410-100100-d-tac-bbb", withContent("New decision"),
 		withSupersedes("20260410-100000-d-tac-aaa"))
 
-	g := NewGraph([]*Entry{old, replacement})
+	g := model.NewGraph([]*model.Entry{old, replacement})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100100-d-tac-bbb"}, false)
@@ -269,7 +271,7 @@ func TestRenderShow_MixedReferenceTypes(t *testing.T) {
 		withRefs("20260410-100100-d-tac-bbb"),
 		withCloses("20260410-100000-s-tac-aaa"))
 
-	g := NewGraph([]*Entry{signal, decision, action})
+	g := model.NewGraph([]*model.Entry{signal, decision, action})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100200-a-tac-ccc"}, false)
@@ -299,7 +301,7 @@ func TestRenderShow_Downstream(t *testing.T) {
 	d1 := entry("20260410-100100-d-cpt-bbb", withContent("Decision referencing target"), withRefs("20260410-100000-s-stg-aaa"))
 	d2 := entry("20260410-100200-a-tac-ccc", withContent("Action closing target"), withCloses("20260410-100000-s-stg-aaa"))
 
-	g := NewGraph([]*Entry{target, d1, d2})
+	g := model.NewGraph([]*model.Entry{target, d1, d2})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100000-s-stg-aaa"}, true)
@@ -323,7 +325,7 @@ func TestRenderShow_Downstream(t *testing.T) {
 }
 
 func TestRenderShow_EntryNotFound(t *testing.T) {
-	g := NewGraph([]*Entry{})
+	g := model.NewGraph([]*model.Entry{})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100000-s-stg-xxx"}, false)
@@ -339,7 +341,7 @@ func TestRenderShow_SeparatorBetweenPrimaries(t *testing.T) {
 	a := entry("20260410-100000-s-stg-aaa", withContent("First"))
 	b := entry("20260410-100100-s-cpt-bbb", withContent("Second"))
 
-	g := NewGraph([]*Entry{a, b})
+	g := model.NewGraph([]*model.Entry{a, b})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{
@@ -364,7 +366,7 @@ func TestRenderShow_BranchingRefs(t *testing.T) {
 	a := entry("20260410-100300-d-tac-aaa", withContent("Primary with two branches"),
 		withRefs("20260410-100100-s-cpt-bbb", "20260410-100200-s-cpt-ccc"))
 
-	g := NewGraph([]*Entry{d, b, c, a})
+	g := model.NewGraph([]*model.Entry{d, b, c, a})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100300-d-tac-aaa"}, false)
@@ -395,7 +397,7 @@ func TestRenderShow_BranchingRefs(t *testing.T) {
 
 func TestRenderShow_BlankLineAfterHeading(t *testing.T) {
 	e := entry("20260410-100000-s-tac-aaa", withContent("Content"))
-	g := NewGraph([]*Entry{e})
+	g := model.NewGraph([]*model.Entry{e})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{"20260410-100000-s-tac-aaa"}, false)
@@ -416,7 +418,7 @@ func TestRenderShow_ShownAboveSkipsSubtree(t *testing.T) {
 	first := entry("20260410-100200-d-tac-ccc", withContent("First primary"), withRefs("20260410-100100-s-cpt-bbb"))
 	second := entry("20260410-100300-d-tac-ddd", withContent("Second primary"), withRefs("20260410-100100-s-cpt-bbb"))
 
-	g := NewGraph([]*Entry{root, mid, first, second})
+	g := model.NewGraph([]*model.Entry{root, mid, first, second})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{
@@ -445,7 +447,7 @@ func TestRenderShow_ShownAboveHasBlankLineAfterHeading(t *testing.T) {
 	b := entry("20260410-100100-d-cpt-bbb", withContent("First"), withRefs("20260410-100000-s-stg-aaa"))
 	c := entry("20260410-100200-d-cpt-ccc", withContent("Second"), withRefs("20260410-100000-s-stg-aaa"))
 
-	g := NewGraph([]*Entry{a, b, c})
+	g := model.NewGraph([]*model.Entry{a, b, c})
 
 	var buf bytes.Buffer
 	err := RenderShow(&buf, g, []string{
@@ -468,13 +470,13 @@ func TestRenderShow_ShownAboveHasBlankLineAfterHeading(t *testing.T) {
 func TestWriteEntryFull_KindDisplayed(t *testing.T) {
 	tests := []struct {
 		name     string
-		kind     Kind
+		kind     model.Kind
 		wantKind bool
 		wantText string
 	}{
-		{"plan shows Kind", KindPlan, true, "Kind:   plan"},
-		{"contract shows Kind", KindContract, true, "Kind:   contract"},
-		{"directive omits Kind", KindDirective, false, "Kind:"},
+		{"plan shows Kind", model.KindPlan, true, "Kind:   plan"},
+		{"contract shows Kind", model.KindContract, true, "Kind:   contract"},
+		{"directive omits Kind", model.KindDirective, false, "Kind:"},
 		{"empty kind omits Kind", "", false, "Kind:"},
 	}
 

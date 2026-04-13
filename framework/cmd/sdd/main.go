@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/networkteam/resonance/framework/sdd"
+	"github.com/networkteam/resonance/framework/sdd/model"
 	"github.com/urfave/cli/v3"
 )
 
@@ -52,7 +53,7 @@ func main() {
 	}
 }
 
-func loadGraph(cmd *cli.Command) (*sdd.Graph, error) {
+func loadGraph(cmd *cli.Command) (*model.Graph, error) {
 	dir := cmd.String("graph-dir")
 	if !filepath.IsAbs(dir) {
 		// Resolve relative to git root or cwd
@@ -72,9 +73,9 @@ func statusCmd() *cli.Command {
 			}
 
 			// Summary
-			decisions := g.Filter(sdd.GraphFilter{Type: sdd.TypeDecision})
-			signals := g.Filter(sdd.GraphFilter{Type: sdd.TypeSignal})
-			actions := g.Filter(sdd.GraphFilter{Type: sdd.TypeAction})
+			decisions := g.Filter(model.GraphFilter{Type: model.TypeDecision})
+			signals := g.Filter(model.GraphFilter{Type: model.TypeSignal})
+			actions := g.Filter(model.GraphFilter{Type: model.TypeAction})
 			fmt.Printf("Graph: %d entries (%d decisions, %d signals, %d actions)\n\n",
 				len(g.Entries), len(decisions), len(signals), len(actions))
 
@@ -222,31 +223,31 @@ func listCmd() *cli.Command {
 				return err
 			}
 
-			var typ sdd.EntryType
+			var typ model.EntryType
 			if t := cmd.String("type"); t != "" {
-				if resolved, ok := sdd.TypeFromAbbrev[t]; ok {
+				if resolved, ok := model.TypeFromAbbrev[t]; ok {
 					typ = resolved
 				} else {
-					typ = sdd.EntryType(t)
+					typ = model.EntryType(t)
 				}
 			}
 
-			var layer sdd.Layer
+			var layer model.Layer
 			if l := cmd.String("layer"); l != "" {
-				if resolved, ok := sdd.LayerFromAbbrev[l]; ok {
+				if resolved, ok := model.LayerFromAbbrev[l]; ok {
 					layer = resolved
 				} else {
-					layer = sdd.Layer(l)
+					layer = model.Layer(l)
 				}
 			}
 
-			var kind sdd.Kind
+			var kind model.Kind
 			if k := cmd.String("kind"); k != "" {
-				kind = sdd.Kind(k)
+				kind = model.Kind(k)
 			}
 
-			var entries []*sdd.Entry
-			f := sdd.GraphFilter{Type: typ, Layer: layer, Kind: kind, OpenOnly: !cmd.Bool("all")}
+			var entries []*model.Entry
+			f := model.GraphFilter{Type: typ, Layer: layer, Kind: kind, OpenOnly: !cmd.Bool("all")}
 			entries = g.Filter(f)
 			for _, e := range entries {
 				printEntry(e, int(cmd.Int("width")))
@@ -320,19 +321,19 @@ func newCmd() *cli.Command {
 			layerArg := args.Get(1)
 
 			// Resolve type
-			typ, ok := sdd.TypeFromAbbrev[typeArg]
+			typ, ok := model.TypeFromAbbrev[typeArg]
 			if !ok {
-				typ = sdd.EntryType(typeArg)
-				if _, exists := sdd.TypeAbbrev[typ]; !exists {
+				typ = model.EntryType(typeArg)
+				if _, exists := model.TypeAbbrev[typ]; !exists {
 					return fmt.Errorf("invalid type: %s (use d, s, or a)", typeArg)
 				}
 			}
 
 			// Resolve layer
-			layer, ok := sdd.LayerFromAbbrev[layerArg]
+			layer, ok := model.LayerFromAbbrev[layerArg]
 			if !ok {
-				layer = sdd.Layer(layerArg)
-				if _, exists := sdd.LayerAbbrev[layer]; !exists {
+				layer = model.Layer(layerArg)
+				if _, exists := model.LayerAbbrev[layer]; !exists {
 					return fmt.Errorf("invalid layer: %s (use stg, cpt, tac, ops, or prc)", layerArg)
 				}
 			}
@@ -349,10 +350,10 @@ func newCmd() *cli.Command {
 				return fmt.Errorf("generating suffix: %w", err)
 			}
 
-			id := sdd.GenerateID(typ, layer, suffix)
+			id := model.GenerateID(typ, layer, suffix)
 
 			// Build entry
-			entry := &sdd.Entry{
+			entry := &model.Entry{
 				ID:      id,
 				Type:    typ,
 				Layer:   layer,
@@ -375,7 +376,7 @@ func newCmd() *cli.Command {
 				entry.Confidence = confidence
 			}
 			if kind := cmd.String("kind"); kind != "" {
-				entry.Kind = sdd.Kind(kind)
+				entry.Kind = model.Kind(kind)
 			}
 
 			// Parse attachment paths and populate entry.Attachments for validation
@@ -389,7 +390,7 @@ func newCmd() *cli.Command {
 				return err
 			}
 			if len(attachments) > 0 {
-				attachRel, err := sdd.AttachDirRelPath(id)
+				attachRel, err := model.AttachDirRelPath(id)
 				if err != nil {
 					return fmt.Errorf("computing attachment dir for %s: %w", id, err)
 				}
@@ -431,14 +432,14 @@ func newCmd() *cli.Command {
 			}
 
 			// Resolve {{attachments}} placeholders in description
-			entry.Content = sdd.ResolveAttachmentLinks(entry.Content, id)
+			entry.Content = model.ResolveAttachmentLinks(entry.Content, id)
 
 			// Validate entry against the graph
 			graph, err := sdd.LoadGraph(dir)
 			if err != nil {
 				return fmt.Errorf("loading graph for validation: %w", err)
 			}
-			sdd.ValidateEntry(entry, graph)
+			model.ValidateEntry(entry, graph)
 			if len(entry.Warnings) > 0 {
 				for _, w := range entry.Warnings {
 					fmt.Fprintf(os.Stderr, "error: %s\n", w.Message)
@@ -478,12 +479,12 @@ func newCmd() *cli.Command {
 			}
 
 			// Write entry file
-			relPath, err := sdd.IDToRelPath(id)
+			relPath, err := model.IDToRelPath(id)
 			if err != nil {
 				return fmt.Errorf("computing path for %s: %w", id, err)
 			}
 			filePath := filepath.Join(dir, relPath)
-			content := sdd.FormatFrontmatter(entry) + "\n" + entry.Content + "\n"
+			content := model.FormatFrontmatter(entry) + "\n" + entry.Content + "\n"
 
 			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 				return fmt.Errorf("creating directories: %w", err)
@@ -497,7 +498,7 @@ func newCmd() *cli.Command {
 
 			// Copy attachments
 			if len(attachments) > 0 {
-				attachDirRel, err := sdd.AttachDirRelPath(id)
+				attachDirRel, err := model.AttachDirRelPath(id)
 				if err != nil {
 					return fmt.Errorf("computing attachment dir for %s: %w", id, err)
 				}
@@ -573,7 +574,7 @@ func lintCmd() *cli.Command {
 	}
 }
 
-func printEntry(e *sdd.Entry, width int) {
+func printEntry(e *model.Entry, width int) {
 	conf := ""
 	if e.Confidence != "" {
 		conf = fmt.Sprintf(" [%s]", e.Confidence)
@@ -583,21 +584,21 @@ func printEntry(e *sdd.Entry, width int) {
 }
 
 
-func groupByLayer(entries []*sdd.Entry) map[sdd.Layer][]*sdd.Entry {
-	m := make(map[sdd.Layer][]*sdd.Entry)
+func groupByLayer(entries []*model.Entry) map[model.Layer][]*model.Entry {
+	m := make(map[model.Layer][]*model.Entry)
 	for _, e := range entries {
 		m[e.Layer] = append(m[e.Layer], e)
 	}
 	return m
 }
 
-func layerOrder() []sdd.Layer {
-	return []sdd.Layer{
-		sdd.LayerStrategic,
-		sdd.LayerConceptual,
-		sdd.LayerTactical,
-		sdd.LayerOperational,
-		sdd.LayerProcess,
+func layerOrder() []model.Layer {
+	return []model.Layer{
+		model.LayerStrategic,
+		model.LayerConceptual,
+		model.LayerTactical,
+		model.LayerOperational,
+		model.LayerProcess,
 	}
 }
 
@@ -729,7 +730,7 @@ func wipStartCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("loading WIP markers: %w", err)
 			}
-			if existing, ok := sdd.HasExclusiveMarker(markers, entryID); ok {
+			if existing, ok := model.HasExclusiveMarker(markers, entryID); ok {
 				fmt.Fprintf(os.Stderr, "warning: exclusive marker exists for %s by %s (%s)\n",
 					entryID, existing.Participant, existing.ID)
 			}
@@ -737,12 +738,12 @@ func wipStartCmd() *cli.Command {
 			// Derive branch name if --branch is set
 			var branchName string
 			if cmd.Bool("branch") {
-				branchName = sdd.DeriveBranchName(entryID, description)
+				branchName = model.DeriveBranchName(entryID, description)
 			}
 
 			// Create marker
-			markerID := sdd.GenerateWIPMarkerID(participant)
-			marker := &sdd.WIPMarker{
+			markerID := model.GenerateWIPMarkerID(participant)
+			marker := &model.WIPMarker{
 				ID:          markerID,
 				Entry:       entryID,
 				Participant: participant,
@@ -751,12 +752,12 @@ func wipStartCmd() *cli.Command {
 				Content:     description,
 			}
 
-			markerPath := filepath.Join(dir, sdd.WIPMarkerPath(markerID))
+			markerPath := filepath.Join(dir, model.WIPMarkerPath(markerID))
 			if err := os.MkdirAll(filepath.Dir(markerPath), 0755); err != nil {
 				return fmt.Errorf("creating wip directory: %w", err)
 			}
 
-			content := sdd.FormatWIPMarker(marker)
+			content := model.FormatWIPMarker(marker)
 			if err := os.WriteFile(markerPath, []byte(content), 0644); err != nil {
 				return fmt.Errorf("writing marker: %w", err)
 			}
@@ -803,7 +804,7 @@ func wipDoneCmd() *cli.Command {
 
 			markerID := args.Get(0)
 			dir := graphDir(cmd)
-			markerPath := filepath.Join(dir, sdd.WIPMarkerPath(markerID))
+			markerPath := filepath.Join(dir, model.WIPMarkerPath(markerID))
 
 			if _, err := os.Stat(markerPath); err != nil {
 				return fmt.Errorf("marker not found: %s", markerID)
@@ -814,7 +815,7 @@ func wipDoneCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("reading marker: %w", err)
 			}
-			marker, err := sdd.ParseWIPMarker(filepath.Base(markerPath), string(data))
+			marker, err := model.ParseWIPMarker(filepath.Base(markerPath), string(data))
 			if err != nil {
 				return fmt.Errorf("parsing marker: %w", err)
 			}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/networkteam/resonance/framework/sdd/model"
 )
 
 // mockRunner implements PreflightRunner for testing.
@@ -24,73 +26,73 @@ func TestSelectCheckType(t *testing.T) {
 	// Base entries in the graph for reference
 	signal := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
 	decision := entry("20260410-120000-d-tac-bbb", withContent("some decision"))
-	plan := entry("20260410-120000-d-tac-ccc", withKind(KindPlan), withContent("some plan"))
+	plan := entry("20260410-120000-d-tac-ccc", withKind(model.KindPlan), withContent("some plan"))
 
-	graph := NewGraph([]*Entry{signal, decision, plan})
+	graph := model.NewGraph([]*model.Entry{signal, decision, plan})
 
 	tests := []struct {
 		name     string
-		entry    *Entry
+		entry    *model.Entry
 		expected CheckType
 	}{
 		{
 			name:     "action closing decision",
-			entry:    &Entry{Type: TypeAction, Closes: []string{decision.ID}},
+			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{decision.ID}},
 			expected: CheckClosingAction,
 		},
 		{
 			name:     "action closing plan",
-			entry:    &Entry{Type: TypeAction, Closes: []string{plan.ID}},
+			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{plan.ID}},
 			expected: CheckClosingAction,
 		},
 		{
 			name:     "action closing signal",
-			entry:    &Entry{Type: TypeAction, Closes: []string{signal.ID}},
+			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{signal.ID}},
 			expected: CheckActionClosesSignals,
 		},
 		{
 			name:     "action closing both decision and signal picks closing-action",
-			entry:    &Entry{Type: TypeAction, Closes: []string{decision.ID, signal.ID}},
+			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{decision.ID, signal.ID}},
 			expected: CheckClosingAction,
 		},
 		{
 			name:     "decision closing signal",
-			entry:    &Entry{Type: TypeDecision, Closes: []string{signal.ID}},
+			entry:    &model.Entry{Type: model.TypeDecision, Closes: []string{signal.ID}},
 			expected: CheckClosingDecision,
 		},
 		{
 			name:     "decision with refs only",
-			entry:    &Entry{Type: TypeDecision, Refs: []string{signal.ID}},
+			entry:    &model.Entry{Type: model.TypeDecision, Refs: []string{signal.ID}},
 			expected: CheckDecisionRefs,
 		},
 		{
 			name:     "decision with no refs or closes",
-			entry:    &Entry{Type: TypeDecision},
+			entry:    &model.Entry{Type: model.TypeDecision},
 			expected: CheckDecisionRefs,
 		},
 		{
 			name:     "signal",
-			entry:    &Entry{Type: TypeSignal},
+			entry:    &model.Entry{Type: model.TypeSignal},
 			expected: CheckSignalCapture,
 		},
 		{
 			name:     "signal with refs",
-			entry:    &Entry{Type: TypeSignal, Refs: []string{decision.ID}},
+			entry:    &model.Entry{Type: model.TypeSignal, Refs: []string{decision.ID}},
 			expected: CheckSignalCapture,
 		},
 		{
 			name:     "supersedes takes priority over closes",
-			entry:    &Entry{Type: TypeDecision, Supersedes: []string{decision.ID}, Closes: []string{signal.ID}},
+			entry:    &model.Entry{Type: model.TypeDecision, Supersedes: []string{decision.ID}, Closes: []string{signal.ID}},
 			expected: CheckSupersedes,
 		},
 		{
 			name:     "supersedes on action",
-			entry:    &Entry{Type: TypeAction, Supersedes: []string{decision.ID}},
+			entry:    &model.Entry{Type: model.TypeAction, Supersedes: []string{decision.ID}},
 			expected: CheckSupersedes,
 		},
 		{
 			name:     "supersedes on signal",
-			entry:    &Entry{Type: TypeSignal, Supersedes: []string{signal.ID}},
+			entry:    &model.Entry{Type: model.TypeSignal, Supersedes: []string{signal.ID}},
 			expected: CheckSupersedes,
 		},
 	}
@@ -127,11 +129,11 @@ func TestCheckTypeString(t *testing.T) {
 }
 
 func TestFormatEntryForPrompt(t *testing.T) {
-	e := &Entry{
+	e := &model.Entry{
 		ID:         "20260410-120000-d-tac-xyz",
-		Type:       TypeDecision,
-		Layer:      LayerTactical,
-		Kind:       KindPlan,
+		Type:       model.TypeDecision,
+		Layer:      model.LayerTactical,
+		Kind:       model.KindPlan,
 		Refs:       []string{"20260410-110000-s-cpt-aaa"},
 		Closes:     []string{"20260410-100000-s-stg-bbb"},
 		Confidence: "high",
@@ -159,11 +161,11 @@ func TestFormatEntryForPrompt(t *testing.T) {
 }
 
 func TestFormatEntryForPrompt_OmitsDefaultKind(t *testing.T) {
-	e := &Entry{
+	e := &model.Entry{
 		ID:      "20260410-120000-d-tac-xyz",
-		Type:    TypeDecision,
-		Layer:   LayerTactical,
-		Kind:    KindDirective,
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindDirective,
 		Content: "Some directive.",
 	}
 
@@ -174,10 +176,10 @@ func TestFormatEntryForPrompt_OmitsDefaultKind(t *testing.T) {
 }
 
 func TestFormatEntryForPrompt_OmitsEmptyFields(t *testing.T) {
-	e := &Entry{
+	e := &model.Entry{
 		ID:      "20260410-120000-s-cpt-xyz",
-		Type:    TypeSignal,
-		Layer:   LayerConceptual,
+		Type:    model.TypeSignal,
+		Layer:   model.LayerConceptual,
 		Content: "Observed something.",
 	}
 
@@ -191,11 +193,11 @@ func TestFormatEntryForPrompt_OmitsEmptyFields(t *testing.T) {
 
 func TestAssembleContext_BasicSignal(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("observed something"))
-	graph := NewGraph([]*Entry{sig})
+	graph := model.NewGraph([]*model.Entry{sig})
 
-	proposed := &Entry{
-		Type:    TypeSignal,
-		Layer:   LayerConceptual,
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerConceptual,
 		Content: "new signal",
 	}
 
@@ -218,11 +220,11 @@ func TestAssembleContext_BasicSignal(t *testing.T) {
 func TestAssembleContext_WithRefs(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("first signal"))
 	dec := entry("20260410-130000-d-tac-bbb", withContent("decision content"), withRefs(sig.ID))
-	graph := NewGraph([]*Entry{sig, dec})
+	graph := model.NewGraph([]*model.Entry{sig, dec})
 
-	proposed := &Entry{
-		Type:    TypeDecision,
-		Layer:   LayerTactical,
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
 		Refs:    []string{sig.ID},
 		Content: "new decision",
 	}
@@ -239,11 +241,11 @@ func TestAssembleContext_WithRefs(t *testing.T) {
 
 func TestAssembleContext_WithCloses(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("signal to close"))
-	graph := NewGraph([]*Entry{sig})
+	graph := model.NewGraph([]*model.Entry{sig})
 
-	proposed := &Entry{
-		Type:    TypeDecision,
-		Layer:   LayerConceptual,
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerConceptual,
 		Closes:  []string{sig.ID},
 		Content: "decision closing signal",
 	}
@@ -260,13 +262,13 @@ func TestAssembleContext_WithCloses(t *testing.T) {
 
 func TestAssembleContext_WithContracts(t *testing.T) {
 	contract := entry("20260410-120000-d-prc-aaa",
-		withKind(KindContract),
+		withKind(model.KindContract),
 		withContent("all entries must have refs"))
-	graph := NewGraph([]*Entry{contract})
+	graph := model.NewGraph([]*model.Entry{contract})
 
-	proposed := &Entry{
-		Type:    TypeSignal,
-		Layer:   LayerConceptual,
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerConceptual,
 		Content: "some signal",
 	}
 
@@ -282,11 +284,11 @@ func TestAssembleContext_WithContracts(t *testing.T) {
 
 func TestAssembleContext_WithSupersedes(t *testing.T) {
 	old := entry("20260410-120000-d-tac-aaa", withContent("old decision"))
-	graph := NewGraph([]*Entry{old})
+	graph := model.NewGraph([]*model.Entry{old})
 
-	proposed := &Entry{
-		Type:       TypeDecision,
-		Layer:      LayerTactical,
+	proposed := &model.Entry{
+		Type:       model.TypeDecision,
+		Layer:      model.LayerTactical,
 		Supersedes: []string{old.ID},
 		Content:    "replacement decision",
 	}
@@ -304,11 +306,11 @@ func TestAssembleContext_WithSupersedes(t *testing.T) {
 func TestAssembleContext_OpenSignalsForDecisionRefs(t *testing.T) {
 	sig1 := entry("20260410-120000-s-cpt-aaa", withContent("open signal one"))
 	sig2 := entry("20260410-120100-s-tac-bbb", withContent("open signal two"))
-	graph := NewGraph([]*Entry{sig1, sig2})
+	graph := model.NewGraph([]*model.Entry{sig1, sig2})
 
-	proposed := &Entry{
-		Type:    TypeDecision,
-		Layer:   LayerConceptual,
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerConceptual,
 		Refs:    []string{sig1.ID},
 		Content: "new decision",
 	}
@@ -331,11 +333,11 @@ func TestAssembleContext_OpenSignalsForDecisionRefs(t *testing.T) {
 
 func TestAssembleContext_OpenSignalsNotIncludedForOtherChecks(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("open signal"))
-	graph := NewGraph([]*Entry{sig})
+	graph := model.NewGraph([]*model.Entry{sig})
 
-	proposed := &Entry{
-		Type:    TypeSignal,
-		Layer:   LayerConceptual,
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerConceptual,
 		Content: "new signal",
 	}
 
@@ -509,11 +511,11 @@ func TestParseResult(t *testing.T) {
 
 func TestRunPreflight_Pass(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
-	graph := NewGraph([]*Entry{sig})
+	graph := model.NewGraph([]*model.Entry{sig})
 
-	proposed := &Entry{
-		Type:    TypeSignal,
-		Layer:   LayerConceptual,
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerConceptual,
 		Content: "new observation",
 	}
 
@@ -532,11 +534,11 @@ func TestRunPreflight_Pass(t *testing.T) {
 
 func TestRunPreflight_Fail(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
-	graph := NewGraph([]*Entry{sig})
+	graph := model.NewGraph([]*model.Entry{sig})
 
-	proposed := &Entry{
-		Type:    TypeDecision,
-		Layer:   LayerConceptual,
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerConceptual,
 		Closes:  []string{sig.ID},
 		Content: "decision closing signal",
 	}
@@ -555,11 +557,11 @@ func TestRunPreflight_Fail(t *testing.T) {
 }
 
 func TestRunPreflight_RunnerError(t *testing.T) {
-	graph := NewGraph(nil)
+	graph := model.NewGraph(nil)
 
-	proposed := &Entry{
-		Type:    TypeSignal,
-		Layer:   LayerConceptual,
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerConceptual,
 		Content: "some signal",
 	}
 
@@ -574,11 +576,11 @@ func TestRunPreflight_RunnerError(t *testing.T) {
 }
 
 func TestRunPreflight_ParseError(t *testing.T) {
-	graph := NewGraph(nil)
+	graph := model.NewGraph(nil)
 
-	proposed := &Entry{
-		Type:    TypeSignal,
-		Layer:   LayerConceptual,
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerConceptual,
 		Content: "some signal",
 	}
 
@@ -595,12 +597,12 @@ func TestRunPreflight_ParseError(t *testing.T) {
 func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
 	dec := entry("20260410-130000-d-tac-bbb", withContent("decision"))
-	graph := NewGraph([]*Entry{sig, dec})
+	graph := model.NewGraph([]*model.Entry{sig, dec})
 
 	// Action closing decision should use closing-action template
-	proposed := &Entry{
-		Type:    TypeAction,
-		Layer:   LayerTactical,
+	proposed := &model.Entry{
+		Type:    model.TypeAction,
+		Layer:   model.LayerTactical,
 		Closes:  []string{dec.ID},
 		Content: "implemented everything",
 	}

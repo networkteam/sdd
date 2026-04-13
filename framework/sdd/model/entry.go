@@ -1,4 +1,4 @@
-package sdd
+package model
 
 import (
 	"fmt"
@@ -192,7 +192,6 @@ func ParseID(id string) (IDParts, error) {
 		Suffix:    id[dashes[3]+1:],
 	}, nil
 }
-
 
 // IDToRelPath converts an entry ID to its relative file path in the hierarchical layout.
 // ID format: YYYYMMDD-HHmmss-type-layer-suffix
