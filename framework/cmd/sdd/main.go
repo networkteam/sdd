@@ -398,6 +398,38 @@ func newCmd() *cli.Command {
 				}
 			}
 
+			dryRun := cmd.Bool("dry-run")
+			stdinAtt := findStdinAttachment(attachments)
+			stdinSaved := false
+
+			// reportSavedStdin saves stdin attachment to .sdd-tmp/ and prints the
+			// path so the user can re-pipe without reassembling the heredoc. Save
+			// failures are surfaced as warnings — they must not mask the underlying
+			// pre-flight result. Idempotent: subsequent calls in the same invocation
+			// are no-ops so dry-run + reject doesn't print the save twice.
+			reportSavedStdin := func(reason string) {
+				if stdinAtt == nil || stdinSaved {
+					return
+				}
+				stdinSaved = true
+				path, err := saveStdinAttachment(dir, stdinAtt.target, stdinAtt.data)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not save stdin attachment: %v\n", err)
+					return
+				}
+				fmt.Fprintf(os.Stderr, "stdin attachment saved (%s): %s\n", reason, path)
+				fmt.Fprintf(os.Stderr, "  retry: cat %s | sdd new ... --attach -:%s\n", path, stdinAtt.target)
+			}
+
+			// On dry-run, ensure stdin is saved no matter how the command exits —
+			// including early returns from graph validation failure. The plan
+			// requires saving on every dry-run (pass or fail). The savedAlready
+			// flag inside reportSavedStdin makes this safe to compose with the
+			// inline calls in the rejection and post-pre-flight branches.
+			if dryRun {
+				defer reportSavedStdin("dry-run")
+			}
+
 			// Resolve {{attachments}} placeholders in description
 			entry.Content = sdd.ResolveAttachmentLinks(entry.Content, id)
 
@@ -412,26 +444,6 @@ func newCmd() *cli.Command {
 					fmt.Fprintf(os.Stderr, "error: %s\n", w.Message)
 				}
 				return fmt.Errorf("validation failed: %d issue(s)", len(entry.Warnings))
-			}
-
-			dryRun := cmd.Bool("dry-run")
-			stdinAtt := findStdinAttachment(attachments)
-
-			// reportSavedStdin saves stdin attachment to .sdd-tmp/ and prints the
-			// path so the user can re-pipe without reassembling the heredoc. Save
-			// failures are surfaced as warnings — they must not mask the underlying
-			// pre-flight result.
-			reportSavedStdin := func(reason string) {
-				if stdinAtt == nil {
-					return
-				}
-				path, err := saveStdinAttachment(dir, stdinAtt.target, stdinAtt.data)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not save stdin attachment: %v\n", err)
-					return
-				}
-				fmt.Fprintf(os.Stderr, "stdin attachment saved (%s): %s\n", reason, path)
-				fmt.Fprintf(os.Stderr, "  retry: cat %s | sdd new ... --attach -:%s\n", path, stdinAtt.target)
 			}
 
 			// Pre-flight validation
