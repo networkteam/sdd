@@ -57,7 +57,7 @@ See [CLI reference](references/cli-reference.md) for full command syntax and fla
 ### Get the entry right
 
 - **Right type**: Signal = observation, something noticed. Decision = commitment to direction. Action = something that was done.
-- **Before capturing an action**: Ensure the work it describes is committed to Git first. An action records a fact of execution — the code changes it references must be durable before the action entry is. Commit implementation changes, then capture the action.
+- **Before capturing an action**: Ensure the artifacts it references are durable — either via a prior commit (code or system changes) or via `--attach` on the entry itself (research, synthesis, design docs; the `sdd new` commit carries entry and attachments together).
 - **Right layer**: Strategic = why/direction. Conceptual = approach/shape. Tactical = structure/trade-offs. Operational = individual steps. Process = how we work.
 - **Refs matter**: Always link to the signals/decisions that led to this entry. Use `sdd show` and `sdd list` to find the right refs.
 - **Confidence is honest**: High = strong conviction. Medium = reasonable but unvalidated. Low = hypothesis/experiment.
