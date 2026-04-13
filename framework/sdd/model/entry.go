@@ -1,6 +1,7 @@
 package model
 
 import (
+	"crypto/rand"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -284,10 +285,29 @@ func FormatFrontmatter(e *Entry) string {
 
 // GenerateID creates a new document ID with the current timestamp and a random suffix.
 func GenerateID(typ EntryType, layer Layer, suffix string) string {
-	now := time.Now()
+	return GenerateIDAt(typ, layer, suffix, time.Now())
+}
+
+// GenerateIDAt creates a new document ID with the given timestamp and a random suffix.
+// Accepts the time explicitly so callers can inject a clock for testability.
+func GenerateIDAt(typ EntryType, layer Layer, suffix string, t time.Time) string {
 	ta := TypeAbbrev[typ]
 	la := LayerAbbrev[layer]
-	return fmt.Sprintf("%s-%s-%s-%s", now.Format("20060102-150405"), ta, la, suffix)
+	return fmt.Sprintf("%s-%s-%s-%s", t.Format("20060102-150405"), ta, la, suffix)
+}
+
+// RandomSuffix returns an n-character lowercase alphanumeric string suitable
+// for use as the trailing random portion of a document ID.
+func RandomSuffix(n int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	for i := range b {
+		b[i] = charset[b[i]%byte(len(charset))]
+	}
+	return string(b), nil
 }
 
 // TypeLabel returns a display label for the entry type.

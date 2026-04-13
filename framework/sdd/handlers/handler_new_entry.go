@@ -2,11 +2,9 @@ package handlers
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/networkteam/resonance/framework/sdd/command"
@@ -56,11 +54,11 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	}
 
 	// Build the entry in-memory.
-	suffix, err := randomSuffix(3)
+	suffix, err := model.RandomSuffix(3)
 	if err != nil {
 		return fmt.Errorf("generating suffix: %w", err)
 	}
-	id := generateID(cmd.Type, cmd.Layer, suffix, h.now())
+	id := model.GenerateIDAt(cmd.Type, cmd.Layer, suffix, h.now())
 
 	entry := &model.Entry{
 		ID:           id,
@@ -195,24 +193,3 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	return nil
 }
 
-// randomSuffix returns an n-character lowercase alphanumeric string.
-func randomSuffix(n int) (string, error) {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	for i := range b {
-		b[i] = charset[b[i]%byte(len(charset))]
-	}
-	return string(b), nil
-}
-
-// generateID constructs a new entry ID from the given timestamp.
-// A thin wrapper around model.GenerateID that accepts the clock as a
-// parameter for testability — model.GenerateID uses time.Now internally.
-func generateID(typ model.EntryType, layer model.Layer, suffix string, now time.Time) string {
-	ta := model.TypeAbbrev[typ]
-	la := model.LayerAbbrev[layer]
-	return strings.Join([]string{now.Format("20060102-150405"), ta, la, suffix}, "-")
-}

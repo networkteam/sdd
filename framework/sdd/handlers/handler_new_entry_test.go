@@ -1,4 +1,4 @@
-package handlers
+package handlers_test
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/networkteam/resonance/framework/sdd/command"
+	"github.com/networkteam/resonance/framework/sdd/handlers"
 	"github.com/networkteam/resonance/framework/sdd/model"
 	"github.com/networkteam/resonance/framework/sdd/query"
 )
@@ -50,7 +51,7 @@ func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	committer := &recordingCommitter{}
 
-	h := New(Options{
+	h := handlers.New(handlers.Options{
 		GraphDir:  tmp,
 		Committer: committer,
 		LoadGraph: emptyGraphLoader,
@@ -82,7 +83,7 @@ func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 	}
 
 	// The regression: on dry-run + validation failure, stdin MUST be saved.
-	saveDir := filepath.Join(tmp, stdinSaveDir)
+	saveDir := filepath.Join(tmp, ".sdd-tmp")
 	entries, err := os.ReadDir(saveDir)
 	if err != nil {
 		t.Fatalf(".sdd-tmp/ should exist after dry-run + stdin: %v", err)
@@ -124,7 +125,7 @@ func TestNewEntry_DryRun_Pass_SavesStdinOnce(t *testing.T) {
 	tmp := t.TempDir()
 	stderr := &bytes.Buffer{}
 
-	h := New(Options{
+	h := handlers.New(handlers.Options{
 		GraphDir:  tmp,
 		LoadGraph: emptyGraphLoader,
 		Stderr:    stderr,
@@ -145,7 +146,7 @@ func TestNewEntry_DryRun_Pass_SavesStdinOnce(t *testing.T) {
 		t.Fatalf("NewEntry: %v", err)
 	}
 
-	saveDir := filepath.Join(tmp, stdinSaveDir)
+	saveDir := filepath.Join(tmp, ".sdd-tmp")
 	entries, err := os.ReadDir(saveDir)
 	if err != nil {
 		t.Fatalf(".sdd-tmp/ should exist: %v", err)
@@ -166,7 +167,7 @@ func TestNewEntry_PreflightReject_SavesStdin(t *testing.T) {
 	tmp := t.TempDir()
 	stderr := &bytes.Buffer{}
 
-	h := New(Options{
+	h := handlers.New(handlers.Options{
 		GraphDir: tmp,
 		Preflighter: &fakePreflight{
 			result: &query.PreflightResult{Pass: false, Gaps: []string{"missing ref"}},
@@ -192,7 +193,7 @@ func TestNewEntry_PreflightReject_SavesStdin(t *testing.T) {
 		t.Errorf("error = %v, want pre-flight rejection", err)
 	}
 
-	saveDir := filepath.Join(tmp, stdinSaveDir)
+	saveDir := filepath.Join(tmp, ".sdd-tmp")
 	if _, err := os.Stat(saveDir); err != nil {
 		t.Fatalf(".sdd-tmp/ should exist after rejection: %v", err)
 	}
