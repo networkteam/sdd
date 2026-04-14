@@ -31,14 +31,9 @@ Also check for active WIP markers:
 ./framework/bin/sdd wip list
 ```
 
-For each active decision and open signal in the status output, fetch full details with upstream context:
+The summaries in the status output already describe each entry and its direct relationships. Use them to produce the catch-up narrative. If you need full details of specific entries (e.g. to understand a nuanced decision or resolve an ambiguous summary), fetch them all at once in a single call:
 ```bash
-./framework/bin/sdd show <id1> <id2> <id3> ...
-```
-
-If you need full details of a specific upstream entry (e.g. to understand a key decision in the chain), fetch it individually:
-```bash
-./framework/bin/sdd show --max-depth 0 <id>
+./framework/bin/sdd show --max-depth 0 <id1> <id2> <id3> ...
 ```
 
 ## Step 3 — Produce the catch-up
