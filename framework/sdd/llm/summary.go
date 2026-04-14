@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/networkteam/resonance/framework/sdd/model"
 )
@@ -36,12 +37,16 @@ func Summarize(ctx context.Context, runner Runner, entry *model.Entry, graph *mo
 		return nil, nil
 	}
 
+	start := time.Now()
 	output, err := runner.Run(ctx, prompt)
+	elapsed := time.Since(start)
 	if err != nil {
 		return nil, fmt.Errorf("running summary generator: %w", err)
 	}
 
-	summary := strings.TrimSpace(output)
+	logCallResult(ctx, output.Meta, "summarize", elapsed)
+
+	summary := strings.TrimSpace(output.Text)
 
 	return &SummarizeResult{
 		Summary:     summary,

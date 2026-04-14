@@ -23,14 +23,14 @@ type liveRunner struct {
 	model string
 }
 
-func (r *liveRunner) Run(ctx context.Context, prompt string) (string, error) {
+func (r *liveRunner) Run(ctx context.Context, prompt string) (*RunResult, error) {
 	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", r.model)
 	cmd.Stdin = strings.NewReader(prompt)
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("claude -p: %w", err)
+		return nil, fmt.Errorf("claude -p: %w", err)
 	}
-	return string(out), nil
+	return &RunResult{Text: string(out)}, nil
 }
 
 func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
@@ -78,14 +78,14 @@ func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
 	defer cancel()
 
 	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
-	output, err := runner.Run(ctx, prompt)
+	runResult, err := runner.Run(ctx, prompt)
 	if err != nil {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parsePreflightResult(output)
+	result, err := parsePreflightResult(runResult.Text)
 	if err != nil {
-		t.Errorf("Parse error (raw output: %q): %v", output, err)
+		t.Errorf("Parse error (raw output: %q): %v", runResult.Text, err)
 		return
 	}
 
@@ -139,14 +139,14 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 	defer cancel()
 
 	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
-	output, err := runner.Run(ctx, prompt)
+	runResult, err := runner.Run(ctx, prompt)
 	if err != nil {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parsePreflightResult(output)
+	result, err := parsePreflightResult(runResult.Text)
 	if err != nil {
-		t.Errorf("Parse error (raw output: %q): %v", output, err)
+		t.Errorf("Parse error (raw output: %q): %v", runResult.Text, err)
 		return
 	}
 
@@ -182,14 +182,14 @@ func TestPreflightEval_SignalSmuggleDecision(t *testing.T) {
 	defer cancel()
 
 	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
-	output, err := runner.Run(ctx, prompt)
+	runResult, err := runner.Run(ctx, prompt)
 	if err != nil {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parsePreflightResult(output)
+	result, err := parsePreflightResult(runResult.Text)
 	if err != nil {
-		t.Errorf("Parse error (raw output: %q): %v", output, err)
+		t.Errorf("Parse error (raw output: %q): %v", runResult.Text, err)
 		return
 	}
 
@@ -225,14 +225,14 @@ func TestPreflightEval_ValidSignal(t *testing.T) {
 	defer cancel()
 
 	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
-	output, err := runner.Run(ctx, prompt)
+	runResult, err := runner.Run(ctx, prompt)
 	if err != nil {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parsePreflightResult(output)
+	result, err := parsePreflightResult(runResult.Text)
 	if err != nil {
-		t.Errorf("Parse error (raw output: %q): %v", output, err)
+		t.Errorf("Parse error (raw output: %q): %v", runResult.Text, err)
 		return
 	}
 
@@ -278,14 +278,14 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 	defer cancel()
 
 	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
-	output, err := runner.Run(ctx, prompt)
+	runResult, err := runner.Run(ctx, prompt)
 	if err != nil {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parsePreflightResult(output)
+	result, err := parsePreflightResult(runResult.Text)
 	if err != nil {
-		t.Errorf("Parse error (raw output: %q): %v", output, err)
+		t.Errorf("Parse error (raw output: %q): %v", runResult.Text, err)
 		return
 	}
 
@@ -329,14 +329,14 @@ func TestPreflightEval_ContractViolation(t *testing.T) {
 	defer cancel()
 
 	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
-	output, err := runner.Run(ctx, prompt)
+	runResult, err := runner.Run(ctx, prompt)
 	if err != nil {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parsePreflightResult(output)
+	result, err := parsePreflightResult(runResult.Text)
 	if err != nil {
-		t.Errorf("Parse error (raw output: %q): %v", output, err)
+		t.Errorf("Parse error (raw output: %q): %v", runResult.Text, err)
 		return
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,17 +15,19 @@ import (
 	"github.com/networkteam/resonance/framework/sdd/command"
 	"github.com/networkteam/resonance/framework/sdd/finders"
 	"github.com/networkteam/resonance/framework/sdd/handlers"
+	"github.com/networkteam/resonance/framework/sdd/llm/claude"
 	"github.com/networkteam/resonance/framework/sdd/model"
 	"github.com/networkteam/resonance/framework/sdd/presenters"
 	"github.com/networkteam/resonance/framework/sdd/query"
+	"github.com/networkteam/slogutils"
 	"github.com/urfave/cli/v3"
 )
 
-// newFinder constructs a Finder with a production claudeRunner. The runner
+// newFinder constructs a Finder with a production claude runner. The runner
 // model is resolved per-call so flag overrides (--preflight-model on `sdd new`)
 // take effect.
 func newFinder(model string) *finders.Finder {
-	return finders.New(&claudeRunner{model: model})
+	return finders.New(claude.NewRunner(model))
 }
 
 // splitCSV returns the comma-split fields of s, or nil if s is empty.
@@ -84,7 +87,30 @@ func main() {
 				Usage:   "Path to graph directory",
 				Value:   "docs/framework/graph",
 			},
+			&cli.BoolFlag{
+				Name:    "verbose",
+				Aliases: []string{"v"},
+				Usage:   "Enable info-level logging",
 			},
+			&cli.BoolFlag{
+				Name:    "extra-verbose",
+				Aliases: []string{"vv"},
+				Usage:   "Enable debug-level logging",
+			},
+		},
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			level := slog.LevelWarn
+			if cmd.Bool("extra-verbose") {
+				level = slog.LevelDebug
+			} else if cmd.Bool("verbose") {
+				level = slog.LevelInfo
+			}
+			logger := slog.New(slogutils.NewCLIHandler(os.Stderr, &slogutils.CLIHandlerOptions{
+				Level: level,
+			}))
+			slog.SetDefault(logger)
+			return slogutils.WithLogger(ctx, logger), nil
+		},
 		Commands: []*cli.Command{
 			statusCmd(),
 			showCmd(),
@@ -294,6 +320,8 @@ func newCmd() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ctx = slogutils.WithLogger(ctx, slogutils.FromContext(ctx).With("command", "new"))
+
 			args := cmd.Args()
 			if args.Len() < 2 {
 				return fmt.Errorf("usage: sdd new <type> <layer> [description]")
@@ -378,7 +406,7 @@ func newCmd() *cli.Command {
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
 				Reader:    finder,
-				LLMRunner: &claudeRunner{model: cmd.String("preflight-model")},
+				LLMRunner: claude.NewRunner(cmd.String("preflight-model")),
 				Committer: gitCommitterFunc(gitCommit),
 			})
 
@@ -457,6 +485,8 @@ func summarizeCmd() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ctx = slogutils.WithLogger(ctx, slogutils.FromContext(ctx).With("command", "summarize"))
+
 			ids := cmd.Args().Slice()
 			if len(ids) == 0 && !cmd.Bool("all") {
 				return fmt.Errorf("usage: sdd summarize <id>... or sdd summarize --all")
@@ -475,11 +505,10 @@ func summarizeCmd() *cli.Command {
 				},
 			}
 
-			runner := &claudeRunner{model: cmd.String("model")}
 			handler := handlers.New(handlers.Options{
 				GraphDir:  graphDir(cmd),
 				Reader:    newFinder(cmd.String("model")),
-				LLMRunner: runner,
+				LLMRunner: claude.NewRunner(cmd.String("model")),
 				Committer: gitCommitterFunc(gitCommit),
 			})
 			return handler.Summarize(ctx, sumCmd)
@@ -487,23 +516,6 @@ func summarizeCmd() *cli.Command {
 	}
 }
 
-// claudeRunner implements finders.PreflightRunner by invoking the claude CLI.
-type claudeRunner struct {
-	model string
-}
-
-func (r *claudeRunner) Run(ctx context.Context, prompt string) (string, error) {
-	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", r.model)
-	cmd.Stdin = strings.NewReader(prompt)
-	out, err := cmd.Output()
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("claude -p timed out (increase with --preflight-timeout)")
-		}
-		return "", fmt.Errorf("claude -p: %w", err)
-	}
-	return string(out), nil
-}
 
 func gitCommit(message string, filePaths ...string) error {
 	args := append([]string{"add"}, filePaths...)

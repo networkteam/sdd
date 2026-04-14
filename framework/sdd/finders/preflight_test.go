@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/resonance/framework/sdd/llm"
 	"github.com/networkteam/resonance/framework/sdd/model"
 	"github.com/networkteam/resonance/framework/sdd/query"
 )
@@ -18,9 +19,12 @@ type mockRunner struct {
 	lastPrompt string
 }
 
-func (m *mockRunner) Run(_ context.Context, prompt string) (string, error) {
+func (m *mockRunner) Run(_ context.Context, prompt string) (*llm.RunResult, error) {
 	m.lastPrompt = prompt
-	return m.response, m.err
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &llm.RunResult{Text: m.response}, nil
 }
 
 func TestRunPreflight_Pass(t *testing.T) {
