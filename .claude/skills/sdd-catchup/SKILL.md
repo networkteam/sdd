@@ -21,26 +21,24 @@ Read the framework reference files to understand the system:
 The `sdd` CLI binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just use it. Run from the repo root:
 
 ```bash
-./framework/bin/sdd status --width 500
+./framework/bin/sdd status
 ```
 
-This shows active decisions, open signals (not yet addressed by any decision), and recent actions. These are the entries that matter for the catch-up.
+This shows active decisions, open signals, and recent actions with summaries. These are the entries that matter for the catch-up.
 
 Also check for active WIP markers:
 ```bash
 ./framework/bin/sdd wip list
 ```
 
-For each active decision and open signal in the output, run `sdd show` with all IDs in a single call to get the full content:
+For each active decision and open signal in the status output, fetch full details with upstream context:
 ```bash
 ./framework/bin/sdd show <id1> <id2> <id3> ...
 ```
 
-The `sdd list` command also shows only open/active entries by default. Use `--all` to see everything including addressed signals and superseded decisions:
+If you need full details of a specific upstream entry (e.g. to understand a key decision in the chain), fetch it individually:
 ```bash
-./framework/bin/sdd list --type s        # open signals only
-./framework/bin/sdd list --type s --all  # all signals including addressed
-./framework/bin/sdd list --type d        # active decisions only
+./framework/bin/sdd show --max-depth 0 <id>
 ```
 
 ## Step 3 — Produce the catch-up
