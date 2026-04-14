@@ -389,7 +389,28 @@ func lintCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "lint",
 		Usage: "Check graph entries for integrity issues",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{Name: "fix", Usage: "Automatically fix mechanical issues"},
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.Bool("fix") {
+				fixCmd := &command.LintFixCmd{
+					OnFixed: func(id string, fixes []string) {
+						for _, f := range fixes {
+							fmt.Fprintf(os.Stderr, "  fixed %s: %s\n", id, f)
+						}
+					},
+				}
+				handler := handlers.New(handlers.Options{
+					GraphDir:  graphDir(cmd),
+					Reader:    newFinder(""),
+					Committer: gitCommitterFunc(gitCommit),
+				})
+				if err := handler.LintFix(ctx, fixCmd); err != nil {
+					return err
+				}
+			}
+
 			g, err := loadGraph(cmd)
 			if err != nil {
 				return err

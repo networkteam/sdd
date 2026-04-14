@@ -60,30 +60,10 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	}
 	id := model.GenerateIDAt(cmd.Type, cmd.Layer, suffix, h.now())
 
-	entry := &model.Entry{
-		ID:           id,
-		Type:         cmd.Type,
-		Layer:        cmd.Layer,
-		Kind:         cmd.Kind,
-		Refs:         cmd.Refs,
-		Supersedes:   cmd.Supersedes,
-		Closes:       cmd.Closes,
-		Participants: cmd.Participants,
-		Confidence:   cmd.Confidence,
-		Content:      cmd.Description,
+	entry, err := cmd.BuildEntry(id)
+	if err != nil {
+		return err
 	}
-
-	if len(cmd.Attachments) > 0 {
-		attachRel, err := model.AttachDirRelPath(id)
-		if err != nil {
-			return fmt.Errorf("computing attachment dir for %s: %w", id, err)
-		}
-		for _, a := range cmd.Attachments {
-			entry.Attachments = append(entry.Attachments, filepath.Join(attachRel, a.Target))
-		}
-	}
-
-	entry.Content = model.ResolveAttachmentLinks(entry.Content, id)
 
 	// Load graph and validate entry against it.
 	graph, err := h.reader.LoadGraph(h.graphDir)

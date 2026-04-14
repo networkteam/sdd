@@ -161,7 +161,7 @@ func Test_formatEntryForPrompt(t *testing.T) {
 	}
 }
 
-func Test_formatEntryForPrompt_OmitsDefaultKind(t *testing.T) {
+func Test_formatEntryForPrompt_ShowsKindForDecisions(t *testing.T) {
 	e := &model.Entry{
 		ID:      "20260410-120000-d-tac-xyz",
 		Type:    model.TypeDecision,
@@ -171,8 +171,22 @@ func Test_formatEntryForPrompt_OmitsDefaultKind(t *testing.T) {
 	}
 
 	result := formatEntryForPrompt(e)
+	if !strings.Contains(result, "Kind: directive") {
+		t.Errorf("formatEntryForPrompt() should show Kind for decisions, got:\n%s", result)
+	}
+}
+
+func Test_formatEntryForPrompt_OmitsKindForSignals(t *testing.T) {
+	e := &model.Entry{
+		ID:      "20260410-120000-s-tac-xyz",
+		Type:    model.TypeSignal,
+		Layer:   model.LayerTactical,
+		Content: "Observed something.",
+	}
+
+	result := formatEntryForPrompt(e)
 	if strings.Contains(result, "Kind:") {
-		t.Errorf("formatEntryForPrompt() should omit Kind for directive, got:\n%s", result)
+		t.Errorf("formatEntryForPrompt() should omit Kind for signals, got:\n%s", result)
 	}
 }
 

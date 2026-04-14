@@ -309,6 +309,7 @@ func ValidateEntry(e *Entry, g *Graph) {
 	validateIDRefs(e, g, "supersedes", e.Supersedes)
 	validateCloses(e, g)
 	validateSupersedes(e, g)
+	validateKind(e)
 	validateAttachmentLinks(e)
 }
 
@@ -382,6 +383,16 @@ func validateSupersedes(e *Entry, g *Graph) {
 				Message: fmt.Sprintf("type mismatch in supersedes: %s supersedes %s %s (expected %s)", e.Type, target.Type, id, e.Type),
 			})
 		}
+	}
+}
+
+// validateKind checks that decisions have an explicit Kind field.
+func validateKind(e *Entry) {
+	if e.Type == TypeDecision && e.Kind == "" {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "kind",
+			Message: "decision missing kind field (expected directive, contract, or plan)",
+		})
 	}
 }
 

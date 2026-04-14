@@ -16,10 +16,17 @@ func entry(id string, opts ...entryOpt) *Entry {
 		panic(fmt.Sprintf("bad test ID %q: %v", id, err))
 	}
 
+	typ := TypeFromAbbrev[parts.TypeCode]
+	kind := Kind("")
+	if typ == TypeDecision {
+		kind = KindDirective
+	}
+
 	e := &Entry{
 		ID:      id,
-		Type:    TypeFromAbbrev[parts.TypeCode],
+		Type:    typ,
 		Layer:   LayerFromAbbrev[parts.LayerCode],
+		Kind:    kind,
 		Content: id,
 		Time:    parts.Time,
 	}
@@ -888,7 +895,7 @@ func TestLintSupersedesSameTypeValid(t *testing.T) {
 func TestLintCleanGraph(t *testing.T) {
 	g := NewGraph([]*Entry{
 		entry("20260406-100000-s-stg-aaa"),
-		entry("20260406-100100-d-stg-bbb", withRefs("20260406-100000-s-stg-aaa"), withCloses("20260406-100000-s-stg-aaa")),
+		entry("20260406-100100-d-stg-bbb", withKind(KindDirective), withRefs("20260406-100000-s-stg-aaa"), withCloses("20260406-100000-s-stg-aaa")),
 		entry("20260406-100200-a-tac-ccc", withRefs("20260406-100100-d-stg-bbb"), withCloses("20260406-100100-d-stg-bbb")),
 	})
 
@@ -972,6 +979,50 @@ func TestLintMultipleBrokenAttachmentLinks(t *testing.T) {
 	}
 	if !strings.Contains(lint[0].Warnings[0].Message, "b.png") {
 		t.Errorf("Message = %q, want mention of b.png", lint[0].Warnings[0].Message)
+	}
+}
+
+func TestLintDecisionMissingKind(t *testing.T) {
+	e := entry("20260406-100000-d-stg-aaa", withKind(""))
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	found := false
+	for _, w := range lint[0].Warnings {
+		if w.Field == "kind" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning on 'kind' field for decision without kind")
+	}
+}
+
+func TestLintDecisionWithKindNoWarning(t *testing.T) {
+	e := entry("20260406-100000-d-stg-aaa", withKind(KindDirective))
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 0 {
+		for _, e := range lint {
+			for _, w := range e.Warnings {
+				t.Logf("unexpected warning: %s", w.Message)
+			}
+		}
+		t.Fatalf("Lint() = %d entries, want 0 for decision with kind", len(lint))
+	}
+}
+
+func TestLintSignalWithoutKindNoWarning(t *testing.T) {
+	e := entry("20260406-100000-s-stg-aaa")
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 0 {
+		t.Fatalf("Lint() = %d entries, want 0 for signal without kind", len(lint))
 	}
 }
 

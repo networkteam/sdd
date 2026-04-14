@@ -213,7 +213,7 @@ func formatEntryForPrompt(e *model.Entry) string {
 	fmt.Fprintf(&b, "ID: %s\n", e.ID)
 	fmt.Fprintf(&b, "Type: %s\n", e.Type)
 	fmt.Fprintf(&b, "Layer: %s\n", e.Layer)
-	if e.Kind != "" && e.Kind != model.KindDirective {
+	if e.Type == model.TypeDecision && e.Kind != "" {
 		fmt.Fprintf(&b, "Kind: %s\n", e.Kind)
 	}
 	if len(e.Refs) > 0 {

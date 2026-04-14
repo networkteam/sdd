@@ -6,6 +6,7 @@ package command
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/networkteam/resonance/framework/sdd/model"
@@ -70,6 +71,43 @@ func (c *NewEntryCmd) Validate() error {
 		return fmt.Errorf("kind is only meaningful for decisions (got type %s)", c.Type)
 	}
 	return nil
+}
+
+// BuildEntry constructs a model.Entry from the command fields, applying
+// defaults (Kind → directive for decisions) and resolving attachment paths
+// and content links. The caller provides the generated entry ID.
+func (c *NewEntryCmd) BuildEntry(id string) (*model.Entry, error) {
+	entry := &model.Entry{
+		ID:           id,
+		Type:         c.Type,
+		Layer:        c.Layer,
+		Kind:         c.Kind,
+		Refs:         c.Refs,
+		Supersedes:   c.Supersedes,
+		Closes:       c.Closes,
+		Participants: c.Participants,
+		Confidence:   c.Confidence,
+		Content:      c.Description,
+	}
+
+	// Decisions default to directive when no kind is specified.
+	if entry.Type == model.TypeDecision && entry.Kind == "" {
+		entry.Kind = model.KindDirective
+	}
+
+	if len(c.Attachments) > 0 {
+		attachRel, err := model.AttachDirRelPath(id)
+		if err != nil {
+			return nil, fmt.Errorf("computing attachment dir for %s: %w", id, err)
+		}
+		for _, a := range c.Attachments {
+			entry.Attachments = append(entry.Attachments, filepath.Join(attachRel, a.Target))
+		}
+	}
+
+	entry.Content = model.ResolveAttachmentLinks(entry.Content, id)
+
+	return entry, nil
 }
 
 // StdinAttachment returns the single stdin attachment, or nil if none is
