@@ -378,6 +378,7 @@ func newCmd() *cli.Command {
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
 				Reader:    finder,
+				LLMRunner: &claudeRunner{model: cmd.String("preflight-model")},
 				Committer: gitCommitterFunc(gitCommit),
 			})
 

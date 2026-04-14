@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/networkteam/resonance/framework/sdd/command"
+	"github.com/networkteam/resonance/framework/sdd/llm"
 	"github.com/networkteam/resonance/framework/sdd/model"
 	"github.com/networkteam/resonance/framework/sdd/query"
 )
@@ -111,6 +112,20 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	// Dry-run: stop before writing. The deferred save fires on return.
 	if cmd.DryRun {
 		return nil
+	}
+
+	// Generate summary if an LLM runner is available.
+	if h.llmRunner != nil {
+		sTimeout := 60 * time.Second
+		sctx, scancel := context.WithTimeout(ctx, sTimeout)
+		result, err := llm.Summarize(sctx, h.llmRunner, entry, graph, true)
+		scancel()
+		if err != nil {
+			fmt.Fprintf(h.stderr, "warning: summary generation failed: %v\n", err)
+		} else if result != nil {
+			entry.Summary = result.Summary
+			entry.SummaryHash = result.SummaryHash
+		}
 	}
 
 	// Write entry file.
