@@ -6,7 +6,7 @@ A decision is being created with references but not closing any entries. Verify 
 
 ## Checks
 
-1. **Ref completeness**: Are there open signals in the graph that are clearly related to this decision but not referenced? If so, they may be missing refs.
+1. **Ref completeness**: Two checks: (a) Does this entry duplicate information from existing entries (signals, decisions) that it should reference instead? New entries should be minimal — reference existing information rather than restating it. (b) Does this entry logically build upon or advance existing entries without referencing them? If the entry wouldn't make sense without the context of another entry, or moves that line of thought further, it should ref that entry. Refs represent logical dependency ("builds on"), not topical association — entries that merely touch on the same topic without logical dependency do not need refs.
 2. **Grounding**: The decision content should be grounded in the referenced entries — not introducing commitments from nowhere.
 3. **No scope smuggling**: The decision should not contain undiscussed commitments beyond what the referenced entries support.
 

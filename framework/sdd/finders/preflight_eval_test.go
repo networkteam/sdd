@@ -122,10 +122,11 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{plan})
 
 	proposed := &model.Entry{
-		Type:    model.TypeAction,
-		Layer:   model.LayerTactical,
-		Closes:  []string{plan.ID},
-		Content: "Built the complete user authentication feature: added users table with email/password columns (bcrypt hashed), wrote Express middleware that validates JWT tokens on protected routes, created REST endpoints for all CRUD operations (create user via signup, read user profile, update user settings, delete user account), and added a full integration test suite covering happy paths and error cases for every endpoint.",
+		Type:        model.TypeAction,
+		Layer:       model.LayerTactical,
+		Closes:      []string{plan.ID},
+		Attachments: []string{"2026/04/10-130000-a-tac-xyz/implementation.md"},
+		Content:     "Built the complete user authentication feature: added users table with email/password columns (bcrypt hashed), wrote Express middleware that validates JWT tokens on protected routes, created REST endpoints for all CRUD operations (create user via signup, read user profile, update user settings, delete user account), and added a full integration test suite covering happy paths and error cases for every endpoint.",
 	}
 
 	checkType := selectCheckType(proposed, graph)
@@ -223,7 +224,7 @@ func TestPreflightEval_ValidSignal(t *testing.T) {
 
 	proposed := &model.Entry{
 		Type:       model.TypeSignal,
-		Layer:      model.LayerConceptual,
+		Layer:      model.LayerTactical,
 		Confidence: "medium",
 		Content:    "Three of the last five customer support tickets mention confusion about the billing page layout. The most common complaint is that the 'current plan' and 'upgrade options' sections look too similar, making it hard to tell which plan is currently active.",
 	}

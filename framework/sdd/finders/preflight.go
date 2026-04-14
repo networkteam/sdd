@@ -228,6 +228,9 @@ func formatEntryForPrompt(e *model.Entry) string {
 	if e.Confidence != "" {
 		fmt.Fprintf(&b, "Confidence: %s\n", e.Confidence)
 	}
+	if len(e.Attachments) > 0 {
+		fmt.Fprintf(&b, "Attachments: %s\n", strings.Join(e.Attachments, ", "))
+	}
 	fmt.Fprintf(&b, "\n%s", e.Content)
 	return b.String()
 }
