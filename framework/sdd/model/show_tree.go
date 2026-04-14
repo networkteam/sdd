@@ -11,7 +11,7 @@ type ShowTreeItem struct {
 	ShownAbove     bool     // already rendered earlier — "(see above)" marker
 	ShownBelow     bool     // future primary — "(see below)" marker
 	SummaryOnly    bool     // true for depth > 0
-	TruncatedCount int      // number of children hidden at max-depth boundary
+	TruncatedIDs []string // IDs of children hidden at max-depth boundary
 }
 
 // ShowTree holds the upstream and downstream chains for a single primary entry.
@@ -179,7 +179,7 @@ func (g *Graph) buildUpstream(id string, depth int, relations []string, maxDepth
 
 	children := upstreamChildren(e)
 	if depth >= maxDepth && len(children) > 0 {
-		item.TruncatedCount = countUnvisited(children, visited, rendered)
+		item.TruncatedIDs = unvisitedIDs(children, visited, rendered)
 		return []ShowTreeItem{item}
 	}
 
@@ -220,7 +220,7 @@ func (g *Graph) buildDownstream(id string, depth int, relations []string, maxDep
 
 	children := g.downstreamChildren(id)
 	if depth >= maxDepth && len(children) > 0 {
-		item.TruncatedCount = countUnvisited(children, visited, rendered)
+		item.TruncatedIDs = unvisitedIDs(children, visited, rendered)
 		return []ShowTreeItem{item}
 	}
 
@@ -231,13 +231,13 @@ func (g *Graph) buildDownstream(id string, depth int, relations []string, maxDep
 	return result
 }
 
-// countUnvisited counts children that would be new (not already visited/rendered).
-func countUnvisited(children []childEdge, visited, rendered map[string]bool) int {
-	count := 0
+// unvisitedIDs returns IDs of children that would be new (not already visited/rendered).
+func unvisitedIDs(children []childEdge, visited, rendered map[string]bool) []string {
+	var ids []string
 	for _, c := range children {
 		if !visited[c.id] && !rendered[c.id] {
-			count++
+			ids = append(ids, c.id)
 		}
 	}
-	return count
+	return ids
 }

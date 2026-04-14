@@ -71,8 +71,8 @@ func TestBuildShowTree_MaxDepthTruncation(t *testing.T) {
 	if tree.Upstream[1].Entry.ID != a.ID {
 		t.Errorf("Upstream[1].ID = %q, want %q", tree.Upstream[1].Entry.ID, a.ID)
 	}
-	if tree.Upstream[1].TruncatedCount != 1 {
-		t.Errorf("Upstream[1].TruncatedCount = %d, want 1", tree.Upstream[1].TruncatedCount)
+	if len(tree.Upstream[1].TruncatedIDs) != 1 {
+		t.Errorf("Upstream[1].TruncatedCount = %d, want 1", len(tree.Upstream[1].TruncatedIDs))
 	}
 }
 
@@ -89,8 +89,8 @@ func TestBuildShowTree_MaxDepth1(t *testing.T) {
 	if len(tree.Upstream) != 1 {
 		t.Fatalf("Upstream = %d items, want 1", len(tree.Upstream))
 	}
-	if tree.Upstream[0].TruncatedCount != 1 {
-		t.Errorf("TruncatedCount = %d, want 1", tree.Upstream[0].TruncatedCount)
+	if len(tree.Upstream[0].TruncatedIDs) != 1 {
+		t.Errorf("TruncatedCount = %d, want 1", len(tree.Upstream[0].TruncatedIDs))
 	}
 }
 
@@ -233,8 +233,8 @@ func TestBuildShowTree_DownstreamMaxDepth(t *testing.T) {
 	if len(tree.Downstream) != 1 {
 		t.Fatalf("Downstream = %d, want 1", len(tree.Downstream))
 	}
-	if tree.Downstream[0].TruncatedCount != 1 {
-		t.Errorf("TruncatedCount = %d, want 1", tree.Downstream[0].TruncatedCount)
+	if len(tree.Downstream[0].TruncatedIDs) != 1 {
+		t.Errorf("TruncatedCount = %d, want 1", len(tree.Downstream[0].TruncatedIDs))
 	}
 }
 

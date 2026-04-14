@@ -74,9 +74,9 @@ func renderSummaryItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 		fmt.Fprintf(w, "%s- %s %s: %q\n", indent, relations, idPart, summary)
 	}
 
-	if item.TruncatedCount > 0 {
+	if len(item.TruncatedIDs) > 0 {
 		childIndent := strings.Repeat("  ", item.Depth+1)
-		fmt.Fprintf(w, "%s[%d more entries truncated]\n", childIndent, item.TruncatedCount)
+		fmt.Fprintf(w, "%s[truncated: %s]\n", childIndent, strings.Join(item.TruncatedIDs, ", "))
 	}
 }
 
