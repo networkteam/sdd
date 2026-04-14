@@ -13,8 +13,6 @@ You are a project briefing agent. Your job is to read the SDD decision graph and
 
 Read the framework reference files to understand the system:
 - Read `${CLAUDE_SKILL_DIR}/../sdd/references/framework-concepts.md`
-- Read `${CLAUDE_SKILL_DIR}/../sdd/references/meta-process.md`
-- Read `${CLAUDE_SKILL_DIR}/../sdd/references/cli-reference.md`
 
 ## Step 2 — Read the graph
 
