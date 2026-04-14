@@ -4,18 +4,29 @@ The `sdd` binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just
 
 ## Commands
 
-- `sdd status` — overview of active decisions, open signals, recent actions
-- `sdd show <id>` — full entry with reference chain
-- `sdd show <id> --downstream` — entries that reference, close, or supersede the target
-- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc]` — filtered listing
+- `sdd status` — overview of active decisions, open signals, recent actions (uses summaries)
+- `sdd show <id>` — full entry with upstream summary chain (depth-limited)
+- `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
+- `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
+- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc]` — filtered listing (uses summaries)
 - `sdd list --kind contract` — list active contracts
 - `sdd new <type> <layer> [flags] <description>` — create entries
-- `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links)
+- `sdd summarize [<id> | --all]` — regenerate entry summaries
+- `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, stale summaries)
 - `sdd wip start <entry-id> --exclusive --participant <name> <description>` — create WIP marker
 - `sdd wip start <entry-id> --branch --exclusive --participant <name> <description>` — create WIP marker, create git branch and check out to it
 - `sdd wip done <marker-id>` — remove WIP marker (deletes branch if merged)
 - `sdd wip done <marker-id> --force` — remove WIP marker and force-delete unmerged branch (discard flow)
 - `sdd wip list` — list active WIP markers
+
+## `sdd show` output format
+
+- **Depth 0** (target entry): full content (metadata + description)
+- **Depth 1+** (upstream/downstream): summary lines with relation labels, kind, and entry ID
+- **Dedup**: each entry shown at shallowest occurrence; later encounters show `(see above)`
+- **Truncation**: at max-depth boundary, hidden entries listed as `[truncated: refs <id>, ...]`
+
+Summary line format: `{indent}- {relations} {full-id} ({kind}): "{summary}"`
 
 ## `sdd new` flags
 

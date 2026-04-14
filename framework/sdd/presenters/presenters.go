@@ -16,13 +16,17 @@ import (
 
 // EntryLine writes a single entry summary line — used by status, list, and
 // other surfaces that show entries in a flat list.
-func EntryLine(w io.Writer, e *model.Entry, width int) {
+func EntryLine(w io.Writer, e *model.Entry) {
 	conf := ""
 	if e.Confidence != "" {
 		conf = fmt.Sprintf(" [%s]", e.Confidence)
 	}
+	desc := e.Summary
+	if desc == "" {
+		desc = e.ShortContent(200)
+	}
 	fmt.Fprintf(w, "  %s  %-8s %-12s%s  %s\n",
-		e.ID, e.TypeLabel(), e.LayerLabel(), conf, e.ShortContent(width))
+		e.ID, e.TypeLabel(), e.LayerLabel(), conf, desc)
 }
 
 // LayerOrder returns the display order for layers (strategic → process).

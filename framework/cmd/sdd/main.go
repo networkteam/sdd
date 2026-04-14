@@ -84,13 +84,7 @@ func main() {
 				Usage:   "Path to graph directory",
 				Value:   "docs/framework/graph",
 			},
-			&cli.IntFlag{
-				Name:    "width",
-				Aliases: []string{"w"},
-				Usage:   "Max content width for entry summaries",
-				Value:   160,
 			},
-		},
 		Commands: []*cli.Command{
 			statusCmd(),
 			showCmd(),
@@ -126,7 +120,7 @@ func statusCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			presenters.RenderStatus(os.Stdout, result, int(cmd.Int("width")))
+			presenters.RenderStatus(os.Stdout, result)
 			return nil
 		},
 	}
@@ -240,7 +234,7 @@ func listCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			presenters.RenderList(os.Stdout, result, int(cmd.Int("width")))
+			presenters.RenderList(os.Stdout, result)
 			return nil
 		},
 	}
@@ -428,7 +422,7 @@ func lintCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			presenters.RenderLint(os.Stdout, result, int(cmd.Int("width")))
+			presenters.RenderLint(os.Stdout, result)
 			if result.TotalIssues > 0 {
 				return fmt.Errorf("lint found %d issue(s)", result.TotalIssues)
 			}
@@ -694,7 +688,7 @@ func wipListCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("loading WIP markers: %w", err)
 			}
-			presenters.RenderWIPList(os.Stdout, result, int(cmd.Int("width")))
+			presenters.RenderWIPList(os.Stdout, result)
 			return nil
 		},
 	}

@@ -1,13 +1,13 @@
 ---
 name: sdd-explore
-description: Collect full context for a graph entry — upstream chain, downstream refs, and semantically related entries. Returns raw material for the outer skill to brief and dialogue with.
+description: Collect context for a graph entry — upstream summaries, downstream refs, and semantically related entries. Returns structured material for the outer skill to brief and dialogue with.
 context: fork
 model: sonnet
 user-invocable: false
 allowed-tools: Bash Read Grep Glob
 ---
 
-You are a context collector for the SDD explore mode. Your job is to assemble the full picture around a target graph entry and return it **without summarization**. The outer skill will handle briefing and dialogue — you just gather the raw material.
+You are a context collector for the SDD explore mode. Your job is to assemble the picture around a target graph entry and return it. The outer skill will handle briefing and dialogue — you gather the material.
 
 ## Input
 
@@ -20,21 +20,28 @@ Read the framework reference files to understand entry types, layers, and graph 
 - Read `${CLAUDE_SKILL_DIR}/../sdd/references/meta-process.md`
 - Read `${CLAUDE_SKILL_DIR}/../sdd/references/cli-reference.md`
 
-## Step 2 — Fetch the target and its chains
+## Step 2 — Fetch the target with upstream and downstream
 
 The `sdd` CLI binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just use it. Run from the repo root.
 
-Fetch upstream and downstream chains:
+Fetch the target entry with its full upstream chain and downstream entries in one call:
 ```bash
-./framework/bin/sdd show <target-id>
 ./framework/bin/sdd show --downstream <target-id>
 ```
 
-The first command returns the target entry and everything it transitively references (upstream chain, in dependency order). The second returns entries that reference, close, or supersede the target (downstream).
+This returns:
+- The target entry at full detail (depth 0)
+- Upstream entries as summary lines (depth 1+, with relation labels and kind)
+- Downstream entries as summary lines (with relation labels)
+
+If you need full details for specific upstream or downstream entries (e.g. to understand a key decision in the chain), fetch them individually:
+```bash
+./framework/bin/sdd show --max-depth 0 <id1> <id2>
+```
 
 ## Step 3 — Determine entry status
 
-From the chains, determine the target's current status:
+From the upstream and downstream information, determine the target's current status:
 - **Open signal**: not closed by any downstream entry, not superseded
 - **Active decision (no actions)**: not closed, not superseded, no downstream actions reference it
 - **Active decision (partial progress)**: has some downstream actions but not closed
@@ -47,7 +54,7 @@ Report the status explicitly in your output.
 
 List all open/active entries:
 ```bash
-./framework/bin/sdd list --width 500
+./framework/bin/sdd list
 ```
 
 Read through the list and identify entries that are **conceptually related** to the target — even if not linked via refs. Look for:
@@ -55,9 +62,9 @@ Read through the list and identify entries that are **conceptually related** to 
 - Entries at different layers that address the same underlying question
 - Potential tensions or contradictions with the target
 
-Fetch all related entries in a single call (this deduplicates shared upstream chains automatically):
+For each related entry, fetch full details:
 ```bash
-./framework/bin/sdd show <related-id1> <related-id2> <related-id3>
+./framework/bin/sdd show --max-depth 0 <related-id1> <related-id2> <related-id3>
 ```
 
 ## Step 5 — Return the collected context
@@ -67,26 +74,21 @@ Structure your output exactly like this:
 ```
 ## Target
 
-[Full output from sdd show <target-id> — the entry and its upstream chain]
+[Full output from sdd show --downstream <target-id>]
 
 ## Status
 
 [One line: the entry's current status from Step 3]
 
-## Downstream
-
-[Full output from sdd show --downstream <target-id>, or "No downstream entries" if empty]
-
 ## Related entries
 
-[For each related entry found in Step 4: full output from sdd show, with a one-line note on why it's related]
+[For each related entry found in Step 4: full output from sdd show --max-depth 0, with a one-line note on why it's related]
 
 [If no related entries found: "No semantically related entries found beyond the direct chain."]
 ```
 
 ## Rules
 
-- **No summarization.** Return full entry text, not compressed versions. The outer skill needs the complete information.
 - **No interpretation.** Don't explain what the entries mean or suggest what to do. That's the outer skill's job.
 - **No omission.** If you fetched it, include it. Better to include something marginally related than to miss something important.
 - **Do NOT build the CLI binary.** It is pre-built. Just use it.

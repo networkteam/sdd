@@ -7,9 +7,8 @@ import (
 	"github.com/networkteam/resonance/framework/sdd/query"
 )
 
-// RenderWIPList writes the active WIP markers in the same fixed-width
-// layout the CLI used pre-CQRS.
-func RenderWIPList(w io.Writer, result *query.WIPListResult, width int) {
+// RenderWIPList writes the active WIP markers in a fixed-width layout.
+func RenderWIPList(w io.Writer, result *query.WIPListResult) {
 	if len(result.Markers) == 0 {
 		fmt.Fprintln(w, "No active WIP markers.")
 		return
@@ -24,6 +23,6 @@ func RenderWIPList(w io.Writer, result *query.WIPListResult, width int) {
 			branch = fmt.Sprintf("  branch:%s", m.Branch)
 		}
 		fmt.Fprintf(w, "  %s  %-15s%s  %s%s  %s\n",
-			m.ID, m.Participant, excl, m.Entry, branch, m.ShortContent(width))
+			m.ID, m.Participant, excl, m.Entry, branch, m.ShortContent(200))
 	}
 }

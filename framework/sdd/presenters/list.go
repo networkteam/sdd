@@ -7,8 +7,8 @@ import (
 )
 
 // RenderList writes one EntryLine per matched entry.
-func RenderList(w io.Writer, result *query.ListResult, width int) {
+func RenderList(w io.Writer, result *query.ListResult) {
 	for _, e := range result.Entries {
-		EntryLine(w, e, width)
+		EntryLine(w, e)
 	}
 }

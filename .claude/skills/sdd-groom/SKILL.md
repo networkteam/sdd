@@ -21,21 +21,21 @@ Read the framework reference files to understand entry types, layers, and closur
 The `sdd` CLI binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just use it. Run from the repo root.
 
 ```bash
-./framework/bin/sdd status --width 500
+./framework/bin/sdd status
 ```
 
-This shows open signals and active decisions. Collect all their IDs.
-
-Fetch full content for all open entries in a single call:
-```bash
-./framework/bin/sdd show <id1> <id2> <id3> ...
-```
+This shows open signals and active decisions with summaries. Collect all their IDs.
 
 ## Step 3 — Check each entry for downstream activity
 
-For each open signal and active decision, check for downstream entries:
+For each open signal and active decision, fetch the entry with its upstream and downstream context:
 ```bash
 ./framework/bin/sdd show --downstream <id>
+```
+
+This returns the entry at full detail, upstream entries as summaries, and downstream entries as summaries. If you need full details of a specific downstream entry to assess whether it resolves the target, fetch it:
+```bash
+./framework/bin/sdd show --max-depth 0 <downstream-id>
 ```
 
 Look for these patterns:
