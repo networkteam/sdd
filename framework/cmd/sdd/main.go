@@ -98,6 +98,7 @@ func main() {
 			newCmd(),
 			wipCmd(),
 			lintCmd(),
+			summarizeCmd(),
 		},
 		DefaultCommand: "status",
 	}
@@ -425,6 +426,62 @@ func lintCmd() *cli.Command {
 				return fmt.Errorf("lint found %d issue(s)", result.TotalIssues)
 			}
 			return nil
+		},
+	}
+}
+
+func summarizeCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "summarize",
+		Usage:     "Generate or regenerate entry summaries",
+		ArgsUsage: "[id...]",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "all",
+				Usage: "Summarize all entries (in topological order)",
+			},
+			&cli.BoolFlag{
+				Name:  "force",
+				Usage: "Regenerate even if summary hash matches",
+			},
+			&cli.StringFlag{
+				Name:  "model",
+				Usage: "Model to use for summary generation",
+				Value: "claude-haiku-4-5-20251001",
+			},
+			&cli.IntFlag{
+				Name:  "timeout",
+				Usage: "Timeout in seconds per summary generation",
+				Value: 60,
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ids := cmd.Args().Slice()
+			if len(ids) == 0 && !cmd.Bool("all") {
+				return fmt.Errorf("usage: sdd summarize <id>... or sdd summarize --all")
+			}
+
+			sumCmd := &command.SummarizeCmd{
+				EntryIDs: ids,
+				Force:    cmd.Bool("force"),
+				Model:    cmd.String("model"),
+				Timeout:  time.Duration(cmd.Int("timeout")) * time.Second,
+				OnSummarized: func(id, summary string) {
+					fmt.Fprintf(os.Stderr, "  summarized %s\n", id)
+				},
+				OnSkipped: func(id string) {
+					fmt.Fprintf(os.Stderr, "  skipped %s (hash matches)\n", id)
+				},
+			}
+
+			runner := &claudeRunner{model: cmd.String("model")}
+			handler := handlers.New(handlers.Options{
+				GraphDir:  graphDir(cmd),
+				Reader:    newFinder(cmd.String("model")),
+				LLMRunner: runner,
+				Committer: gitCommitterFunc(gitCommit),
+			})
+			return handler.Summarize(ctx, sumCmd)
 		},
 	}
 }

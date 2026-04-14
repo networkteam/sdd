@@ -91,6 +91,8 @@ type Entry struct {
 	Time         time.Time
 	Preflight    string    // "skipped" or "error" annotation from pre-flight validation
 	Attachments  []string  // filenames discovered from the co-located attachment directory
+	Summary      string    // LLM-generated summary: this entry + direct relationships
+	SummaryHash  string    // hex-encoded hash of the rendered summary prompt inputs
 	Warnings     []Warning // validation issues found during graph construction
 }
 
@@ -115,6 +117,8 @@ type frontmatter struct {
 	Participants []string `yaml:"participants,omitempty"`
 	Confidence   string   `yaml:"confidence,omitempty"`
 	Preflight    string   `yaml:"preflight,omitempty"`
+	Summary      string   `yaml:"summary,omitempty"`
+	SummaryHash  string   `yaml:"summary_hash,omitempty"`
 }
 
 // ParseEntry parses a graph entry from its filename and file content.
@@ -152,6 +156,8 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Participants: fm.Participants,
 		Confidence:   fm.Confidence,
 		Preflight:    fm.Preflight,
+		Summary:      fm.Summary,
+		SummaryHash:  fm.SummaryHash,
 		Content:      strings.TrimSpace(body),
 		Time:         idParts.Time,
 	}, nil
@@ -277,6 +283,8 @@ func FormatFrontmatter(e *Entry) string {
 		Participants: e.Participants,
 		Confidence:   e.Confidence,
 		Preflight:    e.Preflight,
+		Summary:      e.Summary,
+		SummaryHash:  e.SummaryHash,
 	}
 
 	data, _ := yaml.Marshal(&fm)

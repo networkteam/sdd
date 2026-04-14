@@ -283,6 +283,60 @@ func (g *Graph) GraphDir() string {
 	return g.graphDir
 }
 
+// TopologicalOrder returns entries sorted so that every entry appears after
+// all entries it references (refs, closes, supersedes). Entries with no
+// references come first. This is a stable sort — entries at the same depth
+// are ordered by time.
+func (g *Graph) TopologicalOrder() []*Entry {
+	// Compute depth: max distance from any root (entry with no refs/closes/supersedes).
+	depth := make(map[string]int, len(g.Entries))
+	var computeDepth func(id string) int
+	computeDepth = func(id string) int {
+		if d, ok := depth[id]; ok {
+			return d
+		}
+		// Temporarily mark to detect cycles (treat as depth 0).
+		depth[id] = 0
+		e, ok := g.ByID[id]
+		if !ok {
+			return 0
+		}
+		maxDep := 0
+		for _, ref := range e.Refs {
+			if d := computeDepth(ref) + 1; d > maxDep {
+				maxDep = d
+			}
+		}
+		for _, c := range e.Closes {
+			if d := computeDepth(c) + 1; d > maxDep {
+				maxDep = d
+			}
+		}
+		for _, s := range e.Supersedes {
+			if d := computeDepth(s) + 1; d > maxDep {
+				maxDep = d
+			}
+		}
+		depth[id] = maxDep
+		return maxDep
+	}
+	for _, e := range g.Entries {
+		computeDepth(e.ID)
+	}
+
+	// Copy and sort: by depth first, then by time (stable).
+	ordered := make([]*Entry, len(g.Entries))
+	copy(ordered, g.Entries)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		di, dj := depth[ordered[i].ID], depth[ordered[j].ID]
+		if di != dj {
+			return di < dj
+		}
+		return ordered[i].Time.Before(ordered[j].Time)
+	})
+	return ordered
+}
+
 // Lint returns all entries that have validation warnings.
 func (g *Graph) Lint() []*Entry {
 	var result []*Entry

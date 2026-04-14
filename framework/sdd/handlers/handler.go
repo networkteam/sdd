@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/networkteam/resonance/framework/sdd/llm"
 	"github.com/networkteam/resonance/framework/sdd/model"
 	"github.com/networkteam/resonance/framework/sdd/query"
 )
@@ -46,6 +47,7 @@ type Brancher interface {
 type Handler struct {
 	graphDir  string
 	reader    Reader
+	llmRunner llm.Runner
 	committer Committer
 	brancher  Brancher
 	stderr    io.Writer
@@ -56,6 +58,7 @@ type Handler struct {
 type Options struct {
 	GraphDir  string
 	Reader    Reader
+	LLMRunner llm.Runner
 	Committer Committer
 	Brancher  Brancher
 	Stderr    io.Writer
@@ -67,6 +70,7 @@ func New(opts Options) *Handler {
 	h := &Handler{
 		graphDir:  opts.GraphDir,
 		reader:    opts.Reader,
+		llmRunner: opts.LLMRunner,
 		committer: opts.Committer,
 		brancher:  opts.Brancher,
 		stderr:    opts.Stderr,

@@ -38,6 +38,7 @@ func (f *fakeReader) Preflight(ctx context.Context, q query.PreflightQuery) (*qu
 	return f.preflightResult, f.preflightErr
 }
 
+
 // recordingCommitter captures commit calls so tests can assert whether a
 // commit was attempted.
 type recordingCommitter struct {

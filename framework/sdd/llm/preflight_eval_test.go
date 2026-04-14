@@ -1,17 +1,11 @@
 //go:build eval
 
 // This file contains evaluation tests for pre-flight prompt template accuracy.
-// These are NOT deterministic correctness tests — they measure how well the LLM
-// produces expected pass/fail results for known scenarios.
-//
 // Run manually when tuning templates:
 //
-//	go test -tags=eval -run TestPreflightEval ./sdd/... -v
-//
-// Failures mean "template may need tuning" or "LLM was non-deterministic, re-run to confirm".
-// Uses t.Errorf (not t.Fatal) so all cases run even if some fail.
+//	go test -tags=eval -run TestPreflightEval ./sdd/llm/... -v
 
-package finders
+package llm
 
 import (
 	"context"
@@ -24,7 +18,7 @@ import (
 	"github.com/networkteam/resonance/framework/sdd/model"
 )
 
-// liveRunner implements PreflightRunner using the real claude CLI.
+// liveRunner implements Runner using the real claude CLI.
 type liveRunner struct {
 	model string
 }
@@ -40,9 +34,6 @@ func (r *liveRunner) Run(ctx context.Context, prompt string) (string, error) {
 }
 
 func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
-	// True positive: action claims to close a 4-item plan but only covers 2 items.
-	// Expected: FAIL with missing items listed.
-
 	plan := &model.Entry{
 		ID:      "20260410-120000-d-tac-pln",
 		Type:    model.TypeDecision,
@@ -64,9 +55,8 @@ func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
 		Content: "Implemented item 1 (database schema) and item 3 (API endpoints). Items 2 and 4 were not addressed.",
 	}
 
-	// We can't read the plan attachment from disk in this test, so inject it directly
-	checkType := selectCheckType(proposed, graph)
-	pctx, err := assembleContext(proposed, graph, checkType)
+	ct := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, ct)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +69,7 @@ func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
 4. Write integration tests for all endpoints
 `
 
-	prompt, err := renderPrompt(checkType, pctx)
+	prompt, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,23 +83,20 @@ func TestPreflightEval_ClosingAction_MissingPlanItems(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parseResult(output)
+	result, err := parsePreflightResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
 	}
 
 	if result.Pass {
-		t.Errorf("Expected FAIL (action missing 2 of 4 plan items), got PASS. Raw output:\n%s", output)
+		t.Errorf("Expected FAIL, got PASS. Raw output:\n%s", output)
 	} else {
 		t.Logf("Correctly identified gaps. Gaps reported: %v", result.Gaps)
 	}
 }
 
 func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
-	// True negative: action legitimately covers all plan items, even with different wording.
-	// Expected: PASS.
-
 	plan := &model.Entry{
 		ID:      "20260410-120000-d-tac-pln",
 		Type:    model.TypeDecision,
@@ -129,8 +116,8 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 		Content:     "Built the complete user authentication feature: added users table with email/password columns (bcrypt hashed), wrote Express middleware that validates JWT tokens on protected routes, created REST endpoints for all CRUD operations (create user via signup, read user profile, update user settings, delete user account), and added a full integration test suite covering happy paths and error cases for every endpoint.",
 	}
 
-	checkType := selectCheckType(proposed, graph)
-	pctx, err := assembleContext(proposed, graph, checkType)
+	ct := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, ct)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +130,7 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 4. Write integration tests for all endpoints
 `
 
-	prompt, err := renderPrompt(checkType, pctx)
+	prompt, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,23 +144,20 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parseResult(output)
+	result, err := parsePreflightResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
 	}
 
 	if !result.Pass {
-		t.Errorf("Expected PASS (all plan items covered with different wording), got FAIL with gaps: %v\nRaw output:\n%s", result.Gaps, output)
+		t.Errorf("Expected PASS, got FAIL with gaps: %v\nRaw output:\n%s", result.Gaps, output)
 	} else {
-		t.Log("Correctly passed — all items covered despite different wording")
+		t.Log("Correctly passed")
 	}
 }
 
 func TestPreflightEval_SignalSmuggleDecision(t *testing.T) {
-	// True positive: something labeled as a signal actually prescribes action.
-	// Expected: FAIL.
-
 	graph := model.NewGraph(nil)
 
 	proposed := &model.Entry{
@@ -183,13 +167,13 @@ func TestPreflightEval_SignalSmuggleDecision(t *testing.T) {
 		Content:    "We must migrate the database to PostgreSQL by next sprint and deprecate the MongoDB adapter. The team should start immediately with the schema migration scripts.",
 	}
 
-	checkType := selectCheckType(proposed, graph)
-	pctx, err := assembleContext(proposed, graph, checkType)
+	ct := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, ct)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	prompt, err := renderPrompt(checkType, pctx)
+	prompt, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,23 +187,20 @@ func TestPreflightEval_SignalSmuggleDecision(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parseResult(output)
+	result, err := parsePreflightResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
 	}
 
 	if result.Pass {
-		t.Errorf("Expected FAIL (signal contains prescriptive action, should be a decision), got PASS. Raw output:\n%s", output)
+		t.Errorf("Expected FAIL, got PASS. Raw output:\n%s", output)
 	} else {
-		t.Logf("Correctly flagged smuggled decision. Gaps: %v", result.Gaps)
+		t.Logf("Correctly flagged. Gaps: %v", result.Gaps)
 	}
 }
 
 func TestPreflightEval_ValidSignal(t *testing.T) {
-	// True negative: a well-formed signal that is genuinely an observation.
-	// Expected: PASS.
-
 	graph := model.NewGraph(nil)
 
 	proposed := &model.Entry{
@@ -229,13 +210,13 @@ func TestPreflightEval_ValidSignal(t *testing.T) {
 		Content:    "Three of the last five customer support tickets mention confusion about the billing page layout. The most common complaint is that the 'current plan' and 'upgrade options' sections look too similar, making it hard to tell which plan is currently active.",
 	}
 
-	checkType := selectCheckType(proposed, graph)
-	pctx, err := assembleContext(proposed, graph, checkType)
+	ct := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, ct)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	prompt, err := renderPrompt(checkType, pctx)
+	prompt, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,26 +230,20 @@ func TestPreflightEval_ValidSignal(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parseResult(output)
+	result, err := parsePreflightResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
 	}
 
 	if !result.Pass {
-		t.Errorf("Expected PASS (valid observation signal), got FAIL with gaps: %v\nRaw output:\n%s", result.Gaps, output)
+		t.Errorf("Expected PASS, got FAIL with gaps: %v\nRaw output:\n%s", result.Gaps, output)
 	} else {
-		t.Log("Correctly passed valid signal")
+		t.Log("Correctly passed")
 	}
 }
 
 func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
-	// True positive based on real graph history: action a-tac-tsd claimed to close
-	// decision d-tac-kfo but silently dropped the attachment validation requirement.
-	// The decision listed 4 checks including "broken or missing attachment references"
-	// but the action only implemented 3 and noted the omission at the end.
-	// Expected: FAIL — the action should not close the decision with incomplete coverage.
-
 	decision := &model.Entry{
 		ID:      "20260410-122858-d-tac-kfo",
 		Type:    model.TypeDecision,
@@ -288,13 +263,13 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 		Content: "Built sdd lint command with checks for dangling refs (non-existent entries), malformed IDs (short suffixes), type mismatches in closes (signal can't close, action can't be closed, decision can't close decision), and type mismatches in supersedes (must be same type). Warnings are populated during graph construction on the Entry struct so sdd show displays them inline. Running against the live graph found 4 issues in 3 entries. Does NOT yet cover broken or missing attachment references — that requirement from d-tac-kfo remains unimplemented.",
 	}
 
-	checkType := selectCheckType(proposed, graph)
-	pctx, err := assembleContext(proposed, graph, checkType)
+	ct := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, ct)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	prompt, err := renderPrompt(checkType, pctx)
+	prompt, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,23 +283,20 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parseResult(output)
+	result, err := parsePreflightResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
 	}
 
 	if result.Pass {
-		t.Errorf("Expected FAIL (action admits missing attachment validation requirement), got PASS. Raw output:\n%s", output)
+		t.Errorf("Expected FAIL, got PASS. Raw output:\n%s", output)
 	} else {
 		t.Logf("Correctly caught silent scope-out. Gaps: %v", result.Gaps)
 	}
 }
 
 func TestPreflightEval_ContractViolation(t *testing.T) {
-	// True positive: entry violates an active contract.
-	// Expected: FAIL with contract violation noted.
-
 	contract := &model.Entry{
 		ID:      "20260408-120000-d-prc-ccc",
 		Type:    model.TypeDecision,
@@ -342,13 +314,13 @@ func TestPreflightEval_ContractViolation(t *testing.T) {
 		Content: "Switch the logging framework from log4j to slog for better structured logging support.",
 	}
 
-	checkType := selectCheckType(proposed, graph)
-	pctx, err := assembleContext(proposed, graph, checkType)
+	ct := selectCheckType(proposed, graph)
+	pctx, err := assembleContext(proposed, graph, ct)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	prompt, err := renderPrompt(checkType, pctx)
+	prompt, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,15 +334,15 @@ func TestPreflightEval_ContractViolation(t *testing.T) {
 		t.Fatalf("Runner error: %v", err)
 	}
 
-	result, err := parseResult(output)
+	result, err := parsePreflightResult(output)
 	if err != nil {
 		t.Errorf("Parse error (raw output: %q): %v", output, err)
 		return
 	}
 
 	if result.Pass {
-		t.Errorf("Expected FAIL (decision has no refs, violating contract), got PASS. Raw output:\n%s", output)
+		t.Errorf("Expected FAIL, got PASS. Raw output:\n%s", output)
 	} else {
-		t.Logf("Correctly flagged contract violation. Gaps: %v", result.Gaps)
+		t.Logf("Correctly flagged. Gaps: %v", result.Gaps)
 	}
 }

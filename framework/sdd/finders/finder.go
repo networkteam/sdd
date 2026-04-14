@@ -4,22 +4,15 @@
 // may perform IO, e.g. the LLM call behind the pre-flight runner).
 package finders
 
-import "context"
-
-// PreflightRunner executes a rendered prompt and returns the model's raw
-// response. Injected into Finder so production uses the claude CLI and
-// tests can substitute a fake.
-type PreflightRunner interface {
-	Run(ctx context.Context, prompt string) (string, error)
-}
+import "github.com/networkteam/resonance/framework/sdd/llm"
 
 // Finder holds dependencies and config shared across query methods.
 type Finder struct {
-	preflightRunner PreflightRunner
+	preflightRunner llm.Runner
 }
 
 // New constructs a Finder with the given dependencies.
-func New(preflightRunner PreflightRunner) *Finder {
+func New(preflightRunner llm.Runner) *Finder {
 	return &Finder{
 		preflightRunner: preflightRunner,
 	}
