@@ -1,0 +1,17 @@
+# 20260410-100100-a-tac-bbb
+
+ID:     20260410-100100-a-tac-bbb
+Type:   action
+Layer:  tactical
+Refs:   20260410-100000-s-tac-aaa, 20260410-100050-d-tac-ddd, 20260410-100055-d-tac-eee
+Closes: 20260410-100000-s-tac-aaa
+Time:   2026-04-10 10:01:00
+
+Action with combined relations
+
+## upstream:
+  - refs,closes 20260410-100000-s-tac-aaa: "The signal"
+  - refs 20260410-100050-d-tac-ddd (contract): "A contract"
+  - refs 20260410-100055-d-tac-eee (plan): "A plan"
+
+

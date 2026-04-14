@@ -62,6 +62,10 @@ func withAttachments(paths ...string) entryOpt {
 	return func(e *Entry) { e.Attachments = paths }
 }
 
+func withSummary(s string) entryOpt {
+	return func(e *Entry) { e.Summary = s }
+}
+
 
 func TestParseEntry(t *testing.T) {
 	content := `---

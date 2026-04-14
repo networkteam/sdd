@@ -1,0 +1,16 @@
+# 20260410-100300-d-tac-ddd
+
+ID:     20260410-100300-d-tac-ddd
+Type:   decision
+Layer:  tactical
+Refs:   20260410-100200-s-tac-ccc
+Time:   2026-04-10 10:03:00
+
+Primary
+
+## upstream:
+  - refs 20260410-100200-s-tac-ccc: "Level 2"
+    - refs 20260410-100100-s-cpt-bbb: "Level 1"
+      [1 more entries truncated]
+
+

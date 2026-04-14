@@ -13,10 +13,17 @@ func entry(id string, opts ...entryOpt) *model.Entry {
 		panic(fmt.Sprintf("bad test ID %q: %v", id, err))
 	}
 
+	typ := model.TypeFromAbbrev[parts.TypeCode]
+	kind := model.Kind("")
+	if typ == model.TypeDecision {
+		kind = model.KindDirective
+	}
+
 	e := &model.Entry{
 		ID:      id,
-		Type:    model.TypeFromAbbrev[parts.TypeCode],
+		Type:    typ,
 		Layer:   model.LayerFromAbbrev[parts.LayerCode],
+		Kind:    kind,
 		Content: id,
 		Time:    parts.Time,
 	}

@@ -1,0 +1,17 @@
+# 20260410-100300-d-tac-aaa
+
+ID:     20260410-100300-d-tac-aaa
+Type:   decision
+Layer:  tactical
+Refs:   20260410-100100-s-cpt-bbb, 20260410-100200-s-cpt-ccc
+Time:   2026-04-10 10:03:00
+
+Primary with two branches
+
+## upstream:
+  - refs 20260410-100100-s-cpt-bbb: "Branch B"
+    - refs 20260410-100000-s-stg-ddd: "Shared deep ref"
+  - refs 20260410-100200-s-cpt-ccc: "Branch C"
+    - refs 20260410-100000-s-stg-ddd: (see above)
+
+

@@ -1,0 +1,14 @@
+# 20260410-100000-s-stg-aaa
+
+ID:     20260410-100000-s-stg-aaa
+Type:   signal
+Layer:  strategic
+Time:   2026-04-10 10:00:00
+
+Target signal
+
+## downstream:
+  - refd-by 20260410-100100-d-cpt-bbb (directive): "Decision referencing target"
+  - closed-by 20260410-100200-a-tac-ccc: "Action closing target"
+
+

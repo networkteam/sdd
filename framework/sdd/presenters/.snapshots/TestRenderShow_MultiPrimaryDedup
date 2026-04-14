@@ -1,0 +1,29 @@
+# 20260410-100100-d-cpt-bbb
+
+ID:     20260410-100100-d-cpt-bbb
+Type:   decision
+Layer:  conceptual
+Refs:   20260410-100000-s-stg-aaa
+Time:   2026-04-10 10:01:00
+
+First primary
+
+## upstream:
+  - refs 20260410-100000-s-stg-aaa: "Shared ref"
+
+---
+
+# 20260410-100200-d-cpt-ccc
+
+ID:     20260410-100200-d-cpt-ccc
+Type:   decision
+Layer:  conceptual
+Refs:   20260410-100000-s-stg-aaa
+Time:   2026-04-10 10:02:00
+
+Second primary
+
+## upstream:
+  - refs 20260410-100000-s-stg-aaa: (see above)
+
+
