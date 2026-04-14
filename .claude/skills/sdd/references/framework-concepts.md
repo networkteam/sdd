@@ -52,26 +52,3 @@ The `sdd status` view separates contracts from active directives. `sdd list --ki
 
 Contracts are decisions marked `kind: contract`. They define standing constraints — architectural rules, authority boundaries, process agreements. They emerge from working patterns: a directive that hardens into a permanent rule can be reclassified. Contracts define constraints, not participation boundaries — anyone can contribute signals and dialogue.
 
-## Coverage
-
-Coverage tracks where change is unevaluated. Every action (delta-as-change) should be evaluated against its intended gap (delta-as-gap). Open signals without decisions addressing them represent unevaluated areas.
-
-## Evaluation Pattern
-
-Every evaluation follows: decision (what to evaluate against) → action (who reviewed) → signals (what they found). Multiple people/agents can evaluate the same thing — each produces their own action and signals.
-
-## The Graph
-
-All entries are stored as small markdown files with YAML frontmatter in `docs/framework/graph/`. The graph is a DAG (directed acyclic graph) implemented on Git.
-
-### Document ID format
-
-```
-{YYYYMMDD}-{HHmmss}-{type}-{layer}-{suffix}.md
-```
-
-Examples: `20260406-115540-d-stg-0gh.md`, `20260406-232057-s-cpt-cvz.md`
-
-### CLI tool
-
-See [cli-reference.md](cli-reference.md) for full command syntax and flags.
