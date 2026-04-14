@@ -140,12 +140,12 @@ func showCmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.IntFlag{
 				Name:  "max-depth",
-				Usage: "Maximum depth for upstream/downstream expansion (0 = default, -1 = unlimited)",
+				Value: query.DefaultMaxDepth,
+				Usage: "Maximum depth for upstream/downstream expansion (0 = primary only)",
 			},
 			&cli.BoolFlag{
 				Name:  "downstream",
-				Usage: "Deprecated: both directions are now always shown",
-				Hidden: true,
+				Usage: "Include downstream entries (refd-by, closed-by, superseded-by)",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -160,9 +160,10 @@ func showCmd() *cli.Command {
 			}
 
 			result, err := newFinder("").Show(query.ShowQuery{
-				Graph:    g,
-				IDs:      ids,
-				MaxDepth: int(cmd.Int("max-depth")),
+				Graph:      g,
+				IDs:        ids,
+				MaxDepth:   int(cmd.Int("max-depth")),
+				Downstream: cmd.Bool("downstream"),
 			})
 			if err != nil {
 				return err

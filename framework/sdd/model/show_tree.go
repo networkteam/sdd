@@ -28,11 +28,11 @@ type ShowTree struct {
 	Downstream []ShowTreeItem
 }
 
-// BuildShowTree constructs the upstream and downstream traversal trees for
-// a primary entry, respecting max depth, cross-group dedup (rendered), and
-// future-primary dedup (primaries). Both directions use per-direction visited
-// sets. The rendered map is updated with newly-shown entries.
-func (g *Graph) BuildShowTree(id string, maxDepth int, rendered, primaries map[string]bool) *ShowTree {
+// BuildShowTree constructs the upstream and optionally downstream traversal
+// trees for a primary entry, respecting max depth, cross-group dedup
+// (rendered), and future-primary dedup (primaries). Both directions use
+// per-direction visited sets. The rendered map is updated with newly-shown entries.
+func (g *Graph) BuildShowTree(id string, maxDepth int, includeDownstream bool, rendered, primaries map[string]bool) *ShowTree {
 	e := g.ByID[id]
 	if e == nil {
 		return nil
@@ -47,12 +47,14 @@ func (g *Graph) BuildShowTree(id string, maxDepth int, rendered, primaries map[s
 		upstream = append(upstream, g.buildUpstream(child.id, 1, child.relations, maxDepth, upVisited, rendered, primaries)...)
 	}
 
-	// Downstream: expand primary's downstream children directly.
-	downVisited := make(map[string]bool)
-	downVisited[id] = true
+	// Downstream: only when requested.
 	var downstream []ShowTreeItem
-	for _, child := range g.downstreamChildren(id) {
-		downstream = append(downstream, g.buildDownstream(child.id, 1, child.relations, maxDepth, downVisited, rendered, primaries)...)
+	if includeDownstream {
+		downVisited := make(map[string]bool)
+		downVisited[id] = true
+		for _, child := range g.downstreamChildren(id) {
+			downstream = append(downstream, g.buildDownstream(child.id, 1, child.relations, maxDepth, downVisited, rendered, primaries)...)
+		}
 	}
 
 	// Mark items from this tree as rendered for cross-group dedup.

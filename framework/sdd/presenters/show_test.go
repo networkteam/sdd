@@ -13,10 +13,14 @@ import (
 )
 
 // renderShow exercises the finder + presenter together.
-func renderShow(t *testing.T, g *model.Graph, ids []string, maxDepth int) string {
+func renderShow(t *testing.T, g *model.Graph, ids []string, opts ...showOpt) string {
 	t.Helper()
+	q := query.ShowQuery{Graph: g, IDs: ids, MaxDepth: query.DefaultMaxDepth}
+	for _, o := range opts {
+		o(&q)
+	}
 	f := finders.New(nil)
-	result, err := f.Show(query.ShowQuery{Graph: g, IDs: ids, MaxDepth: maxDepth})
+	result, err := f.Show(q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,10 +29,20 @@ func renderShow(t *testing.T, g *model.Graph, ids []string, maxDepth int) string
 	return buf.String()
 }
 
+type showOpt func(*query.ShowQuery)
+
+func withMaxDepth(d int) showOpt {
+	return func(q *query.ShowQuery) { q.MaxDepth = d }
+}
+
+func withDownstream() showOpt {
+	return func(q *query.ShowQuery) { q.Downstream = true }
+}
+
 func TestRenderShow_SingleEntryNoRefs(t *testing.T) {
 	e := entry("20260410-100000-s-tac-aaa", withContent("A signal about something"))
 	g := model.NewGraph([]*model.Entry{e})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{e.ID}, 0))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{e.ID}))
 }
 
 func TestRenderShow_UpstreamChain(t *testing.T) {
@@ -39,7 +53,7 @@ func TestRenderShow_UpstreamChain(t *testing.T) {
 		withRefs("20260410-100100-s-cpt-bbb"))
 
 	g := model.NewGraph([]*model.Entry{root, mid, primary})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}, 0))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}))
 }
 
 func TestRenderShow_DownstreamWithRelations(t *testing.T) {
@@ -50,7 +64,7 @@ func TestRenderShow_DownstreamWithRelations(t *testing.T) {
 		withCloses("20260410-100000-s-stg-aaa"))
 
 	g := model.NewGraph([]*model.Entry{target, refBy, closedBy})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{target.ID}, 0))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{target.ID}, withDownstream()))
 }
 
 func TestRenderShow_MultiPrimaryDedup(t *testing.T) {
@@ -61,7 +75,7 @@ func TestRenderShow_MultiPrimaryDedup(t *testing.T) {
 		withRefs("20260410-100000-s-stg-aaa"))
 
 	g := model.NewGraph([]*model.Entry{shared, first, second})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{first.ID, second.ID}, 0))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{first.ID, second.ID}))
 }
 
 func TestRenderShow_BranchingWithDedup(t *testing.T) {
@@ -72,7 +86,7 @@ func TestRenderShow_BranchingWithDedup(t *testing.T) {
 		withRefs("20260410-100100-s-cpt-bbb", "20260410-100200-s-cpt-ccc"))
 
 	g := model.NewGraph([]*model.Entry{shared, b, c, primary})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}, 0))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}))
 }
 
 func TestRenderShow_CombinedRelationsAndKind(t *testing.T) {
@@ -84,7 +98,7 @@ func TestRenderShow_CombinedRelationsAndKind(t *testing.T) {
 		withCloses("20260410-100000-s-tac-aaa"))
 
 	g := model.NewGraph([]*model.Entry{signal, contract, plan, action})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{action.ID}, 0))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{action.ID}))
 }
 
 func TestRenderShow_MaxDepthTruncation(t *testing.T) {
@@ -95,7 +109,7 @@ func TestRenderShow_MaxDepthTruncation(t *testing.T) {
 		withRefs("20260410-100200-s-tac-ccc"))
 
 	g := model.NewGraph([]*model.Entry{e0, e1, e2, primary})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}, 2))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}, withMaxDepth(2)))
 }
 
 func TestRenderShow_FallbackFirstSentence(t *testing.T) {
@@ -103,7 +117,7 @@ func TestRenderShow_FallbackFirstSentence(t *testing.T) {
 	b := entry("20260410-100100-d-tac-bbb", withContent("Primary"), withRefs("20260410-100000-s-stg-aaa"))
 
 	g := model.NewGraph([]*model.Entry{a, b})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{b.ID}, 0))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{b.ID}))
 }
 
 func TestRenderShow_EntryNotFound(t *testing.T) {
