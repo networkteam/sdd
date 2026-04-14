@@ -47,3 +47,11 @@ func withKind(k model.Kind) entryOpt {
 func withContent(c string) entryOpt {
 	return func(e *model.Entry) { e.Content = c }
 }
+
+func withSummary(s string) entryOpt {
+	return func(e *model.Entry) { e.Summary = s }
+}
+
+func withAttachments(a ...string) entryOpt {
+	return func(e *model.Entry) { e.Attachments = a }
+}

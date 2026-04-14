@@ -9,20 +9,22 @@ import (
 
 // Graph holds all entries and their reference indexes.
 type Graph struct {
-	Entries  []*Entry
-	ByID     map[string]*Entry
-	RefsTo   map[string][]string // reverse index: entry ID -> IDs that reference it
-	ClosedBy map[string][]string // reverse index: entry ID -> IDs that close it
-	graphDir string
+	Entries      []*Entry
+	ByID         map[string]*Entry
+	RefsTo       map[string][]string // reverse index: entry ID -> IDs that reference it
+	ClosedBy     map[string][]string // reverse index: entry ID -> IDs that close it
+	SupersededBy map[string][]string // reverse index: entry ID -> IDs that supersede it
+	graphDir     string
 }
 
 // NewGraph builds a graph from the given entries without touching the filesystem.
 func NewGraph(entries []*Entry) *Graph {
 	g := &Graph{
-		Entries:  entries,
-		ByID:     make(map[string]*Entry, len(entries)),
-		RefsTo:   make(map[string][]string),
-		ClosedBy: make(map[string][]string),
+		Entries:      entries,
+		ByID:         make(map[string]*Entry, len(entries)),
+		RefsTo:       make(map[string][]string),
+		ClosedBy:     make(map[string][]string),
+		SupersededBy: make(map[string][]string),
 	}
 
 	for _, e := range entries {
@@ -36,6 +38,9 @@ func NewGraph(entries []*Entry) *Graph {
 		}
 		for _, c := range e.Closes {
 			g.ClosedBy[c] = append(g.ClosedBy[c], e.ID)
+		}
+		for _, s := range e.Supersedes {
+			g.SupersededBy[s] = append(g.SupersededBy[s], e.ID)
 		}
 	}
 
@@ -263,12 +268,8 @@ func (g *Graph) Downstream(id string) []*Entry {
 	}
 
 	// Entries that supersede this ID
-	for _, e := range g.Entries {
-		for _, s := range e.Supersedes {
-			if s == id {
-				add(e.ID)
-			}
-		}
+	for _, eid := range g.SupersededBy[id] {
+		add(eid)
 	}
 
 	sort.Slice(result, func(i, j int) bool {

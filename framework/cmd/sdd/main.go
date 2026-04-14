@@ -135,12 +135,17 @@ func statusCmd() *cli.Command {
 func showCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "show",
-		Usage:     "Show entries with their reference chains",
+		Usage:     "Show entry with upstream and downstream summary chains",
 		ArgsUsage: "<id> [id2 id3 ...]",
 		Flags: []cli.Flag{
+			&cli.IntFlag{
+				Name:  "max-depth",
+				Usage: "Maximum depth for upstream/downstream expansion (0 = default, -1 = unlimited)",
+			},
 			&cli.BoolFlag{
 				Name:  "downstream",
-				Usage: "Show entries that reference, close, or supersede the target (instead of upstream chain)",
+				Usage: "Deprecated: both directions are now always shown",
+				Hidden: true,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -155,9 +160,9 @@ func showCmd() *cli.Command {
 			}
 
 			result, err := newFinder("").Show(query.ShowQuery{
-				Graph:      g,
-				IDs:        ids,
-				Downstream: cmd.Bool("downstream"),
+				Graph:    g,
+				IDs:      ids,
+				MaxDepth: int(cmd.Int("max-depth")),
 			})
 			if err != nil {
 				return err

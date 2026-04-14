@@ -41,6 +41,7 @@ Unit tests live alongside the code in `sdd/`. Tests should use exported helpers 
 ## Architecture
 
 - **Library first**: Domain logic (parsing, graph construction, querying) lives in the `sdd/` package. The CLI (`cmd/sdd/`) is a thin shell that wires flags to library calls and formats output. Keep business logic out of command actions.
+- **Push logic down**: Finders and handlers are orchestration layers — they wire dependencies and delegate. Graph traversal, tree building, filtering, and any pure computation belongs in `model/` (no I/O, no dependencies). Always question whether code in a finder/handler could live in a lower package.
 - **Single path**: I/O functions (file loading, etc.) should delegate to in-memory constructors. Don't duplicate indexing or initialization logic between production and test code paths.
 
 ## Structure
