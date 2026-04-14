@@ -2,7 +2,7 @@
 name: sdd-catchup
 description: Synthesize a prioritized catch-up summary of the SDD decision graph state. Returns a narrative briefing grouped by project thread.
 context: fork
-model: sonnet
+model: haiku
 user-invocable: false
 allowed-tools: Bash Read Grep Glob
 ---
@@ -12,6 +12,7 @@ You are a project briefing agent. Your job is to read the SDD decision graph and
 ## Step 1 — Load context
 
 Read the framework reference files to understand the system:
+
 - Read `${CLAUDE_SKILL_DIR}/../sdd/references/framework-concepts.md`
 
 ## Step 2 — Read the graph
@@ -24,12 +25,16 @@ The `sdd` CLI binary is pre-built at `./framework/bin/sdd`. Do NOT build it — 
 
 This shows active decisions, open signals, and recent actions with summaries. These are the entries that matter for the catch-up.
 
-Also check for active WIP markers:
+Also check for active WIP markers (these are most certainly from other concurrent sessions / users):
+
 ```bash
 ./framework/bin/sdd wip list
 ```
 
-The summaries in the status output already describe each entry and its direct relationships. Use them to produce the catch-up narrative. If you need full details of specific entries (e.g. to understand a nuanced decision or resolve an ambiguous summary), fetch them all at once in a single call:
+The summaries in the status output already describe each entry and its direct relationships. Use them to produce the catch-up narrative.
+
+If you additionally need full details of specific entries (use sparely!), fetch the respective entries at once:
+
 ```bash
 ./framework/bin/sdd show --max-depth 0 <id1> <id2> <id3> ...
 ```
