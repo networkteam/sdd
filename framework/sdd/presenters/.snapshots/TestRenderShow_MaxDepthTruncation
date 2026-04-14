@@ -11,6 +11,6 @@ Primary
 ## upstream:
   - refs 20260410-100200-s-tac-ccc: "Level 2"
     - refs 20260410-100100-s-cpt-bbb: "Level 1"
-      [truncated: 20260410-100000-s-stg-aaa]
+      [truncated: refs 20260410-100000-s-stg-aaa]
 
 

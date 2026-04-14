@@ -74,9 +74,18 @@ func renderSummaryItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 		fmt.Fprintf(w, "%s- %s %s: %q\n", indent, relations, idPart, summary)
 	}
 
-	if len(item.TruncatedIDs) > 0 {
+	if len(item.Truncated) > 0 {
 		childIndent := strings.Repeat("  ", item.Depth+1)
-		fmt.Fprintf(w, "%s[truncated: %s]\n", childIndent, strings.Join(item.TruncatedIDs, ", "))
+		parts := make([]string, len(item.Truncated))
+		for i, tr := range item.Truncated {
+			rels := strings.Join(tr.Relations, ",")
+			k := ""
+			if tr.Kind != "" {
+				k = " (" + string(tr.Kind) + ")"
+			}
+			parts[i] = rels + " " + tr.ID + k
+		}
+		fmt.Fprintf(w, "%s[truncated: %s]\n", childIndent, strings.Join(parts, ", "))
 	}
 }
 

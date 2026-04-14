@@ -11,7 +11,14 @@ type ShowTreeItem struct {
 	ShownAbove     bool     // already rendered earlier — "(see above)" marker
 	ShownBelow     bool     // future primary — "(see below)" marker
 	SummaryOnly    bool     // true for depth > 0
-	TruncatedIDs []string // IDs of children hidden at max-depth boundary
+	Truncated []TruncatedRef // children hidden at max-depth boundary
+}
+
+// TruncatedRef describes a child entry hidden at the max-depth boundary.
+type TruncatedRef struct {
+	ID        string
+	Relations []string
+	Kind      Kind
 }
 
 // ShowTree holds the upstream and downstream chains for a single primary entry.
@@ -179,7 +186,7 @@ func (g *Graph) buildUpstream(id string, depth int, relations []string, maxDepth
 
 	children := upstreamChildren(e)
 	if depth >= maxDepth && len(children) > 0 {
-		item.TruncatedIDs = unvisitedIDs(children, visited, rendered)
+		item.Truncated = g.unvisitedRefs(children, visited, rendered)
 		return []ShowTreeItem{item}
 	}
 
@@ -220,7 +227,7 @@ func (g *Graph) buildDownstream(id string, depth int, relations []string, maxDep
 
 	children := g.downstreamChildren(id)
 	if depth >= maxDepth && len(children) > 0 {
-		item.TruncatedIDs = unvisitedIDs(children, visited, rendered)
+		item.Truncated = g.unvisitedRefs(children, visited, rendered)
 		return []ShowTreeItem{item}
 	}
 
@@ -231,13 +238,17 @@ func (g *Graph) buildDownstream(id string, depth int, relations []string, maxDep
 	return result
 }
 
-// unvisitedIDs returns IDs of children that would be new (not already visited/rendered).
-func unvisitedIDs(children []childEdge, visited, rendered map[string]bool) []string {
-	var ids []string
+// unvisitedRefs returns truncated refs for children not already visited/rendered.
+func (g *Graph) unvisitedRefs(children []childEdge, visited, rendered map[string]bool) []TruncatedRef {
+	var refs []TruncatedRef
 	for _, c := range children {
 		if !visited[c.id] && !rendered[c.id] {
-			ids = append(ids, c.id)
+			ref := TruncatedRef{ID: c.id, Relations: c.relations}
+			if e, ok := g.ByID[c.id]; ok {
+				ref.Kind = e.Kind
+			}
+			refs = append(refs, ref)
 		}
 	}
-	return ids
+	return refs
 }
