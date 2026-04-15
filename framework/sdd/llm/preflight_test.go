@@ -407,56 +407,96 @@ func Test_renderPreflightPrompt_ConditionalSections(t *testing.T) {
 
 func Test_parsePreflightResult(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantPass bool
-		wantGaps []string
-		wantErr  bool
+		name         string
+		input        string
+		wantFindings []Finding
+		wantErr      bool
 	}{
 		{
-			name:     "PASS",
-			input:    "PASS",
-			wantPass: true,
+			name:         "No findings sentinel",
+			input:        "No findings.",
+			wantFindings: nil,
 		},
 		{
-			name:     "PASS with trailing whitespace",
-			input:    "  PASS  \n",
-			wantPass: true,
+			name:         "No findings without period",
+			input:        "No findings",
+			wantFindings: nil,
 		},
 		{
-			name:     "PASS case insensitive",
-			input:    "Pass",
-			wantPass: true,
+			name:         "No findings case insensitive",
+			input:        "no FINDINGS.",
+			wantFindings: nil,
 		},
 		{
-			name:     "FAIL with gaps",
-			input:    "FAIL\n- Missing coverage for plan item 1\n- Overclaiming on plan item 3",
-			wantPass: false,
-			wantGaps: []string{"Missing coverage for plan item 1", "Overclaiming on plan item 3"},
+			name:         "No findings with surrounding whitespace",
+			input:        "  No findings.  \n",
+			wantFindings: nil,
 		},
 		{
-			name:     "FAIL with indented gaps",
-			input:    "FAIL\n  - Gap one\n  - Gap two\n",
-			wantPass: false,
-			wantGaps: []string{"Gap one", "Gap two"},
+			name:  "single high finding",
+			input: "- [high] type-mismatch: signal contains imperative commitment",
+			wantFindings: []Finding{
+				{Severity: SeverityHigh, Category: "type-mismatch", Observation: "signal contains imperative commitment"},
+			},
 		},
 		{
-			name:     "FAIL case insensitive",
-			input:    "Fail\n- Some gap",
-			wantPass: false,
-			wantGaps: []string{"Some gap"},
+			name:  "mixed severities",
+			input: "- [high] missing-ref: directly-answered signal not referenced\n- [medium] plan-coverage-ambiguity: test behavior unstated\n- [low] opening-reference-dependent: first sentence relies on ref",
+			wantFindings: []Finding{
+				{Severity: SeverityHigh, Category: "missing-ref", Observation: "directly-answered signal not referenced"},
+				{Severity: SeverityMedium, Category: "plan-coverage-ambiguity", Observation: "test behavior unstated"},
+				{Severity: SeverityLow, Category: "opening-reference-dependent", Observation: "first sentence relies on ref"},
+			},
 		},
 		{
-			name:     "FAIL with no gaps",
-			input:    "FAIL",
-			wantPass: false,
-			wantGaps: nil,
+			name:  "severity case insensitive",
+			input: "- [HIGH] type-mismatch: something\n- [Medium] other: thing",
+			wantFindings: []Finding{
+				{Severity: SeverityHigh, Category: "type-mismatch", Observation: "something"},
+				{Severity: SeverityMedium, Category: "other", Observation: "thing"},
+			},
 		},
 		{
-			name:     "FAIL with non-bullet gaps",
-			input:    "FAIL\nSome gap without bullet",
-			wantPass: false,
-			wantGaps: []string{"Some gap without bullet"},
+			name:  "bullet prefix optional",
+			input: "[high] type-mismatch: no leading dash",
+			wantFindings: []Finding{
+				{Severity: SeverityHigh, Category: "type-mismatch", Observation: "no leading dash"},
+			},
+		},
+		{
+			name:  "indented bullet",
+			input: "  - [medium] ac-unaddressed: AC 3 silently omitted",
+			wantFindings: []Finding{
+				{Severity: SeverityMedium, Category: "ac-unaddressed", Observation: "AC 3 silently omitted"},
+			},
+		},
+		{
+			name:  "blank lines between findings",
+			input: "- [high] a: one\n\n- [low] b: two\n",
+			wantFindings: []Finding{
+				{Severity: SeverityHigh, Category: "a", Observation: "one"},
+				{Severity: SeverityLow, Category: "b", Observation: "two"},
+			},
+		},
+		{
+			name:    "unknown severity",
+			input:   "- [critical] type-mismatch: something",
+			wantErr: true,
+		},
+		{
+			name:    "malformed line",
+			input:   "- this is not a finding",
+			wantErr: true,
+		},
+		{
+			name:    "missing category",
+			input:   "- [high]: observation text",
+			wantErr: true,
+		},
+		{
+			name:    "missing observation",
+			input:   "- [high] type-mismatch:",
+			wantErr: true,
 		},
 		{
 			name:    "empty response",
@@ -464,13 +504,18 @@ func Test_parsePreflightResult(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "unexpected format",
-			input:   "The entry looks good to me!",
+			name:    "whitespace only",
+			input:   "   \n  \n  ",
 			wantErr: true,
 		},
 		{
-			name:    "whitespace only",
-			input:   "   \n  \n  ",
+			name:    "legacy PASS output rejected",
+			input:   "PASS",
+			wantErr: true,
+		},
+		{
+			name:    "legacy FAIL output rejected",
+			input:   "FAIL\n- Some gap",
 			wantErr: true,
 		},
 	}
@@ -487,17 +532,44 @@ func Test_parsePreflightResult(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parsePreflightResult() unexpected error: %v", err)
 			}
-			if result.Pass != tt.wantPass {
-				t.Errorf("parsePreflightResult().Pass = %v, want %v", result.Pass, tt.wantPass)
+			if len(result.Findings) != len(tt.wantFindings) {
+				t.Fatalf("parsePreflightResult().Findings len = %d, want %d\ngot: %+v",
+					len(result.Findings), len(tt.wantFindings), result.Findings)
 			}
-			if len(result.Gaps) != len(tt.wantGaps) {
-				t.Fatalf("parsePreflightResult().Gaps = %v (len %d), want %v (len %d)",
-					result.Gaps, len(result.Gaps), tt.wantGaps, len(tt.wantGaps))
-			}
-			for i, gap := range result.Gaps {
-				if gap != tt.wantGaps[i] {
-					t.Errorf("parsePreflightResult().Gaps[%d] = %q, want %q", i, gap, tt.wantGaps[i])
+			for i, f := range result.Findings {
+				want := tt.wantFindings[i]
+				if f.Severity != want.Severity {
+					t.Errorf("finding[%d].Severity = %q, want %q", i, f.Severity, want.Severity)
 				}
+				if f.Category != want.Category {
+					t.Errorf("finding[%d].Category = %q, want %q", i, f.Category, want.Category)
+				}
+				if f.Observation != want.Observation {
+					t.Errorf("finding[%d].Observation = %q, want %q", i, f.Observation, want.Observation)
+				}
+			}
+		})
+	}
+}
+
+func Test_PreflightResult_HasBlocking(t *testing.T) {
+	tests := []struct {
+		name     string
+		findings []Finding
+		want     bool
+	}{
+		{"empty", nil, false},
+		{"only medium", []Finding{{Severity: SeverityMedium}}, false},
+		{"only low", []Finding{{Severity: SeverityLow}}, false},
+		{"medium and low", []Finding{{Severity: SeverityMedium}, {Severity: SeverityLow}}, false},
+		{"single high", []Finding{{Severity: SeverityHigh}}, true},
+		{"high among others", []Finding{{Severity: SeverityLow}, {Severity: SeverityHigh}, {Severity: SeverityMedium}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &PreflightResult{Findings: tt.findings}
+			if got := r.HasBlocking(); got != tt.want {
+				t.Errorf("HasBlocking() = %v, want %v", got, tt.want)
 			}
 		})
 	}

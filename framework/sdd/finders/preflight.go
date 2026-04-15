@@ -9,15 +9,21 @@ import (
 
 // Preflight runs the pre-flight validator against the given query.
 // Delegates to the llm package for prompt rendering, LLM invocation, and
-// result parsing. Returns the parsed result for both pass and fail cases.
-// Returns an error only for infrastructure failures — a FAIL result is not an error.
+// result parsing. Returns the parsed result regardless of finding count or
+// severity; the caller decides what to block on via HasBlocking. Returns
+// an error only for infrastructure failures.
 func (f *Finder) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
 	result, err := llm.Preflight(ctx, f.preflightRunner, q.Entry, q.Graph)
 	if err != nil {
 		return nil, err
 	}
-	return &query.PreflightResult{
-		Pass: result.Pass,
-		Gaps: result.Gaps,
-	}, nil
+	findings := make([]query.Finding, 0, len(result.Findings))
+	for _, f := range result.Findings {
+		findings = append(findings, query.Finding{
+			Severity:    query.Severity(f.Severity),
+			Category:    f.Category,
+			Observation: f.Observation,
+		})
+	}
+	return &query.PreflightResult{Findings: findings}, nil
 }

@@ -27,7 +27,7 @@ func (m *mockRunner) Run(_ context.Context, prompt string) (*llm.RunResult, erro
 	return &llm.RunResult{Text: m.response}, nil
 }
 
-func TestRunPreflight_Pass(t *testing.T) {
+func TestRunPreflight_NoFindings(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
 	graph := model.NewGraph([]*model.Entry{sig})
 
@@ -37,21 +37,24 @@ func TestRunPreflight_Pass(t *testing.T) {
 		Content: "new observation",
 	}
 
-	runner := &mockRunner{response: "PASS"}
+	runner := &mockRunner{response: "No findings."}
 	f := New(runner)
 	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
 		t.Fatalf("Preflight() error: %v", err)
 	}
-	if !result.Pass {
-		t.Error("Preflight() expected pass")
+	if len(result.Findings) != 0 {
+		t.Errorf("Preflight() expected no findings, got %+v", result.Findings)
+	}
+	if result.HasBlocking() {
+		t.Error("Preflight() should not block when no findings")
 	}
 	if runner.lastPrompt == "" {
 		t.Error("Runner should have been called with a prompt")
 	}
 }
 
-func TestRunPreflight_Fail(t *testing.T) {
+func TestRunPreflight_BlockingFinding(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
 	graph := model.NewGraph([]*model.Entry{sig})
 
@@ -62,17 +65,51 @@ func TestRunPreflight_Fail(t *testing.T) {
 		Content: "decision closing signal",
 	}
 
-	runner := &mockRunner{response: "FAIL\n- Signal not genuinely addressed"}
+	runner := &mockRunner{response: "- [high] signal-target-miss: signal not genuinely addressed"}
 	f := New(runner)
 	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
 		t.Fatalf("Preflight() error: %v", err)
 	}
-	if result.Pass {
-		t.Error("Preflight() expected fail")
+	if !result.HasBlocking() {
+		t.Error("Preflight() expected blocking finding")
 	}
-	if len(result.Gaps) != 1 || result.Gaps[0] != "Signal not genuinely addressed" {
-		t.Errorf("Preflight().Gaps = %v, want [Signal not genuinely addressed]", result.Gaps)
+	if len(result.Findings) != 1 {
+		t.Fatalf("Preflight().Findings len = %d, want 1", len(result.Findings))
+	}
+	got := result.Findings[0]
+	if got.Severity != query.SeverityHigh {
+		t.Errorf("Finding severity = %q, want high", got.Severity)
+	}
+	if got.Category != "signal-target-miss" {
+		t.Errorf("Finding category = %q, want signal-target-miss", got.Category)
+	}
+	if got.Observation != "signal not genuinely addressed" {
+		t.Errorf("Finding observation = %q, want %q", got.Observation, "signal not genuinely addressed")
+	}
+}
+
+func TestRunPreflight_NonBlockingFindings(t *testing.T) {
+	sig := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
+	graph := model.NewGraph([]*model.Entry{sig})
+
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerConceptual,
+		Content: "new observation",
+	}
+
+	runner := &mockRunner{response: "- [medium] plan-coverage-ambiguity: could be clearer\n- [low] opening-reference-dependent: stylistic"}
+	f := New(runner)
+	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
+	if err != nil {
+		t.Fatalf("Preflight() error: %v", err)
+	}
+	if result.HasBlocking() {
+		t.Error("Preflight() should not block on medium/low findings")
+	}
+	if len(result.Findings) != 2 {
+		t.Fatalf("Preflight().Findings len = %d, want 2", len(result.Findings))
 	}
 }
 
@@ -128,7 +165,7 @@ func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
 		Content: "implemented everything",
 	}
 
-	runner := &mockRunner{response: "PASS"}
+	runner := &mockRunner{response: "No findings."}
 	f := New(runner)
 	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {

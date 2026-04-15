@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -16,10 +17,38 @@ import (
 //go:embed preflight_templates/*.tmpl
 var preflightTemplates embed.FS
 
-// PreflightResult holds the parsed outcome of a pre-flight validation.
+// Severity classifies a pre-flight finding. Mirrored in the query package;
+// templates describe severity in purely semantic terms.
+type Severity string
+
+const (
+	SeverityHigh   Severity = "high"
+	SeverityMedium Severity = "medium"
+	SeverityLow    Severity = "low"
+)
+
+// Finding is a single observation from pre-flight validation.
+type Finding struct {
+	Severity    Severity
+	Category    string
+	Observation string
+}
+
+// PreflightResult holds the parsed findings from a pre-flight validator run.
+// An empty Findings slice means the validator reported no findings.
 type PreflightResult struct {
-	Pass bool
-	Gaps []string
+	Findings []Finding
+}
+
+// HasBlocking reports whether any finding blocks entry creation. Currently
+// only SeverityHigh blocks.
+func (r *PreflightResult) HasBlocking() bool {
+	for _, f := range r.Findings {
+		if f.Severity == SeverityHigh {
+			return true
+		}
+	}
+	return false
 }
 
 // Preflight runs the pre-flight validator against the given entry and graph.
@@ -238,32 +267,79 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (string, error)
 	return b.String(), nil
 }
 
-// parsePreflightResult parses the validator's raw output into a structured result.
+// findingLineRe matches a finding line: `[severity] category: observation`.
+// Leading `- ` bullet is stripped before matching. Category is a token with
+// no whitespace or colon; observation is the remainder of the line.
+var findingLineRe = regexp.MustCompile(`^\[(?i:(high|medium|low))\]\s+([^\s:]+)\s*:\s*(.+)$`)
+
+// parsePreflightResult parses the validator's raw output into a structured
+// result. Expected format is one finding per line:
+//
+//	- [high] category: observation text
+//	- [medium] category: observation text
+//
+// When the validator reports no findings, the output is the literal
+// `No findings.` (trailing period and case-insensitive). Any other content
+// — unknown severities, malformed lines — returns an error so the tooling
+// layer can surface the infrastructure failure distinctly from findings.
 func parsePreflightResult(output string) (*PreflightResult, error) {
 	output = strings.TrimSpace(output)
 	if output == "" {
 		return nil, fmt.Errorf("empty pre-flight response")
 	}
 
-	lines := strings.Split(output, "\n")
-	first := strings.TrimSpace(lines[0])
-
-	if strings.EqualFold(first, "PASS") {
-		return &PreflightResult{Pass: true}, nil
+	if isNoFindings(output) {
+		return &PreflightResult{}, nil
 	}
 
-	if strings.EqualFold(first, "FAIL") {
-		var gaps []string
-		for _, line := range lines[1:] {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "- ") {
-				gaps = append(gaps, strings.TrimPrefix(line, "- "))
-			} else if line != "" {
-				gaps = append(gaps, line)
-			}
+	var findings []Finding
+	for _, raw := range strings.Split(output, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
 		}
-		return &PreflightResult{Pass: false, Gaps: gaps}, nil
+		if isNoFindings(line) {
+			continue
+		}
+		line = strings.TrimPrefix(line, "- ")
+		line = strings.TrimSpace(line)
+
+		m := findingLineRe.FindStringSubmatch(line)
+		if m == nil {
+			return nil, fmt.Errorf("unexpected finding format: %q", raw)
+		}
+		sev, err := parseSeverity(m[1])
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, Finding{
+			Severity:    sev,
+			Category:    m[2],
+			Observation: strings.TrimSpace(m[3]),
+		})
 	}
 
-	return nil, fmt.Errorf("unexpected pre-flight response: first line must be PASS or FAIL, got %q", first)
+	return &PreflightResult{Findings: findings}, nil
+}
+
+// isNoFindings reports whether s is the sentinel "No findings." line.
+// The trailing period is tolerated as present or absent; comparison is
+// case-insensitive after trimming.
+func isNoFindings(s string) bool {
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, ".")
+	return strings.EqualFold(s, "no findings")
+}
+
+func parseSeverity(s string) (Severity, error) {
+	switch strings.ToLower(s) {
+	case "high":
+		return SeverityHigh, nil
+	case "medium":
+		return SeverityMedium, nil
+	case "low":
+		return SeverityLow, nil
+	default:
+		return "", fmt.Errorf("unknown severity %q", s)
+	}
 }

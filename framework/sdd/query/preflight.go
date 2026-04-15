@@ -18,8 +18,38 @@ type PreflightQuery struct {
 	Timeout time.Duration // hard timeout for the validator call
 }
 
-// PreflightResult holds the parsed validator response.
+// Severity classifies a pre-flight finding. The tooling layer decides what
+// to block on (currently: only SeverityHigh blocks); templates describe
+// severity in purely semantic terms and never name a threshold.
+type Severity string
+
+const (
+	SeverityHigh   Severity = "high"
+	SeverityMedium Severity = "medium"
+	SeverityLow    Severity = "low"
+)
+
+// Finding is a single observation from pre-flight validation.
+type Finding struct {
+	Severity    Severity
+	Category    string
+	Observation string
+}
+
+// PreflightResult holds all findings from a pre-flight validator run.
+// An empty Findings slice means the validator reported no findings.
 type PreflightResult struct {
-	Pass bool
-	Gaps []string
+	Findings []Finding
+}
+
+// HasBlocking reports whether any finding blocks entry creation. Currently
+// only SeverityHigh blocks; this is the single source of truth for the
+// blocking threshold (handler_new_entry uses it; templates do not).
+func (r *PreflightResult) HasBlocking() bool {
+	for _, f := range r.Findings {
+		if f.Severity == SeverityHigh {
+			return true
+		}
+	}
+	return false
 }

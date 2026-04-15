@@ -99,13 +99,19 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		if err != nil {
 			return fmt.Errorf("pre-flight error: %w (use --skip-preflight to bypass)", err)
 		}
-		if !result.Pass {
-			fmt.Fprintf(h.stderr, "pre-flight validation failed:\n")
-			for _, gap := range result.Gaps {
-				fmt.Fprintf(h.stderr, "  - %s\n", gap)
+		// Always display findings — medium/low are informational signal,
+		// not suppressed — but only block when severity warrants it.
+		blocking := 0
+		for _, f := range result.Findings {
+			fmt.Fprintf(h.stderr, "  [%s] %s: %s\n", f.Severity, f.Category, f.Observation)
+			if f.Severity == query.SeverityHigh {
+				blocking++
 			}
+		}
+		if blocking > 0 {
+			fmt.Fprintf(h.stderr, "pre-flight validation blocked: %d high-severity finding(s)\n", blocking)
 			reportSavedStdin("pre-flight rejected")
-			return fmt.Errorf("pre-flight rejected entry: %d gap(s)", len(result.Gaps))
+			return fmt.Errorf("pre-flight rejected entry")
 		}
 	}
 

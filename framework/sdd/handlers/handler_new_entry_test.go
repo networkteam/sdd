@@ -179,7 +179,9 @@ func TestNewEntry_PreflightReject_SavesStdin(t *testing.T) {
 	h := handlers.New(handlers.Options{
 		GraphDir: tmp,
 		Reader: &fakeReader{
-			preflightResult: &query.PreflightResult{Pass: false, Gaps: []string{"missing ref"}},
+			preflightResult: &query.PreflightResult{Findings: []query.Finding{
+				{Severity: query.SeverityHigh, Category: "missing-ref", Observation: "missing ref"},
+			}},
 		},
 		Stderr: stderr,
 	})
