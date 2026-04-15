@@ -90,18 +90,11 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		}
 		pctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		// Stage proposed attachments in memory so the validator can read
-		// the plan's AC section before the files are written to disk.
-		proposedAtt, err := stageProposedAttachments(cmd.Attachments, entry.Attachments)
-		if err != nil {
-			return fmt.Errorf("staging attachments for pre-flight: %w", err)
-		}
 		result, err := h.reader.Preflight(pctx, query.PreflightQuery{
-			Entry:               entry,
-			Graph:               graph,
-			ProposedAttachments: proposedAtt,
-			Model:               cmd.PreflightModel,
-			Timeout:             timeout,
+			Entry:   entry,
+			Graph:   graph,
+			Model:   cmd.PreflightModel,
+			Timeout: timeout,
 		})
 		if err != nil {
 			return fmt.Errorf("pre-flight error: %w (use --skip-preflight to bypass)", err)
@@ -201,31 +194,4 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	return nil
 }
 
-// stageProposedAttachments returns a map from graph-dir-relative attachment
-// paths (matching entry.Attachments) to the attachment content. Stdin
-// attachments read from the in-memory Data field; file attachments read from
-// disk. Returns nil when the command has no attachments. The slices are
-// expected to be parallel — BuildEntry appends entry.Attachments in the
-// same order as cmd.Attachments.
-func stageProposedAttachments(cmdAtts []command.Attachment, entryAttPaths []string) (map[string][]byte, error) {
-	if len(cmdAtts) == 0 {
-		return nil, nil
-	}
-	if len(cmdAtts) != len(entryAttPaths) {
-		return nil, fmt.Errorf("attachment count mismatch: cmd has %d, entry has %d", len(cmdAtts), len(entryAttPaths))
-	}
-	staged := make(map[string][]byte, len(cmdAtts))
-	for i, a := range cmdAtts {
-		if a.Source == "-" {
-			staged[entryAttPaths[i]] = a.Data
-			continue
-		}
-		data, err := os.ReadFile(a.Source)
-		if err != nil {
-			return nil, fmt.Errorf("reading attachment %s: %w", a.Source, err)
-		}
-		staged[entryAttPaths[i]] = data
-	}
-	return staged, nil
-}
 

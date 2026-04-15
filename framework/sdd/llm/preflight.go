@@ -4,7 +4,6 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -52,16 +51,12 @@ func (r *PreflightResult) HasBlocking() bool {
 }
 
 // Preflight runs the pre-flight validator against the given entry and graph.
-// proposedAttachments, when non-nil, supplies the in-memory content of the
-// proposed entry's attachments (keyed by graph-dir-relative path, matching
-// entry.Attachments); the validator uses it to read the proposed plan's own
-// AC section, since attachment files are not on disk at pre-flight time.
 // Returns the parsed result regardless of finding severity. Returns an error
 // only for infrastructure failures (runner error, template error, parse error).
-func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, proposedAttachments map[string][]byte) (*PreflightResult, error) {
+func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph) (*PreflightResult, error) {
 	ct := selectCheckType(entry, graph)
 
-	pctx, err := assembleContext(entry, graph, ct, proposedAttachments)
+	pctx, err := assembleContext(entry, graph, ct)
 	if err != nil {
 		return nil, fmt.Errorf("assembling pre-flight context: %w", err)
 	}
@@ -130,25 +125,16 @@ var checkTypeTemplates = map[checkType]string{
 }
 
 // preflightContext holds all data needed to render a pre-flight prompt template.
+// Acceptance criteria live inline in plan decision descriptions (as a
+// `## Acceptance criteria` markdown section), so they flow through
+// ProposedEntry and ClosedEntries without extra fields.
 type preflightContext struct {
 	ProposedEntry     string
 	ReferencedEntries string
 	ClosedEntries     string
 	SupersededEntries string
 	ActiveContracts   string
-	PlanItems         string
-	// AcceptanceCriteria concatenates the `## Acceptance criteria` section
-	// from each closed plan's attachments. Populated when the proposed entry
-	// closes one or more `kind: plan` decisions; empty otherwise.
-	AcceptanceCriteria string
-	// ProposedIsPlan is true when the proposed entry itself is a
-	// `kind: plan` decision. Templates use this to gate AC-presence checks.
-	ProposedIsPlan bool
-	// ProposedAC is the `## Acceptance criteria` section extracted from the
-	// proposed plan's own attachments. Empty when the proposed entry is not
-	// a plan, has no attachments, or the section is missing.
-	ProposedAC  string
-	OpenSignals string
+	OpenSignals       string
 }
 
 // selectCheckType determines the pre-flight check type from entry properties and graph context.
@@ -178,10 +164,11 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 }
 
 // assembleContext gathers graph data needed for the pre-flight prompt.
-// It reads plan attachment content from disk when the graph was loaded from
-// a directory. proposedAttachments supplies in-memory content for the
-// proposed entry's own attachments (which haven't been written yet).
-func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, proposedAttachments map[string][]byte) (*preflightContext, error) {
+// Attachments are NOT read — AC lives inline in plan descriptions (see
+// preflightContext doc). FormatEntryForPrompt includes each entry's
+// Attachments path list so the validator agent can optionally read them
+// when it deems necessary; pre-flight itself stays prompt-only.
+func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType) (*preflightContext, error) {
 	pctx := &preflightContext{
 		ProposedEntry: FormatEntryForPrompt(entry),
 	}
@@ -199,61 +186,20 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, propo
 		}
 	}
 
-	// Closed entries and plan attachment content.
-	// For closed plans, accumulate the full attachment text in PlanItems
-	// (kept for context) AND the extracted `## Acceptance criteria` section
-	// in AcceptanceCriteria so closing_action templates can evaluate each AC.
+	// Closed entries. The closed entry's description is included in full
+	// via FormatEntryForPrompt — for plans, this carries the AC section
+	// inline, so no separate extraction is needed.
 	if len(entry.Closes) > 0 {
 		var parts []string
-		var acParts []string
 		for _, id := range entry.Closes {
 			e, ok := graph.ByID[id]
 			if !ok {
 				continue
 			}
 			parts = append(parts, FormatEntryForPrompt(e))
-
-			if e.IsPlan() && graph.GraphDir() != "" {
-				for _, att := range e.Attachments {
-					data, err := os.ReadFile(filepath.Join(graph.GraphDir(), att))
-					if err != nil {
-						continue
-					}
-					pctx.PlanItems += fmt.Sprintf("\n### Attachment: %s\n\n%s\n", filepath.Base(att), string(data))
-					if section := extractACSection(string(data)); section != "" {
-						acParts = append(acParts,
-							fmt.Sprintf("### From %s\n\n%s", filepath.Base(att), section))
-					}
-				}
-			}
 		}
 		if len(parts) > 0 {
 			pctx.ClosedEntries = strings.Join(parts, "\n\n---\n\n")
-		}
-		if len(acParts) > 0 {
-			pctx.AcceptanceCriteria = strings.Join(acParts, "\n\n")
-		}
-	}
-
-	// Proposed plan's own attachments — extract AC section so templates can
-	// flag missing AC sections. Read from the in-memory map because the
-	// attachment files have not been written to disk at pre-flight time.
-	if entry.IsPlan() {
-		pctx.ProposedIsPlan = true
-		if len(proposedAttachments) > 0 {
-			var acParts []string
-			for _, att := range entry.Attachments {
-				data, ok := proposedAttachments[att]
-				if !ok {
-					continue
-				}
-				if section := extractACSection(string(data)); section != "" {
-					acParts = append(acParts, section)
-				}
-			}
-			if len(acParts) > 0 {
-				pctx.ProposedAC = strings.Join(acParts, "\n\n")
-			}
 		}
 	}
 
@@ -314,39 +260,6 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (string, error)
 	}
 
 	return b.String(), nil
-}
-
-// extractACSection returns the body of a `## Acceptance criteria` section
-// from a markdown document, or "" if no such section exists. Heading matching
-// is case-insensitive and tolerates a trailing colon. The section extends to
-// the next level-1 or level-2 heading, or end of document.
-func extractACSection(md string) string {
-	lines := strings.Split(md, "\n")
-	start := -1
-	for i, line := range lines {
-		if isACHeading(line) {
-			start = i + 1
-			break
-		}
-	}
-	if start < 0 {
-		return ""
-	}
-	end := len(lines)
-	for i := start; i < len(lines); i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "# ") {
-			end = i
-			break
-		}
-	}
-	return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
-}
-
-func isACHeading(line string) bool {
-	h := strings.TrimSpace(line)
-	h = strings.TrimSuffix(h, ":")
-	return strings.EqualFold(h, "## acceptance criteria")
 }
 
 // findingLineRe matches a finding line: `[severity] category: observation`.

@@ -1,8 +1,6 @@
 package llm
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -200,7 +198,7 @@ func Test_assembleContext_BasicSignal(t *testing.T) {
 		Content: "new signal",
 	}
 
-	pctx, err := assembleContext(proposed, graph, checkSignalCapture, nil)
+	pctx, err := assembleContext(proposed, graph, checkSignalCapture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +226,7 @@ func Test_assembleContext_WithRefs(t *testing.T) {
 		Content: "new decision",
 	}
 
-	pctx, err := assembleContext(proposed, graph, checkDecisionRefs, nil)
+	pctx, err := assembleContext(proposed, graph, checkDecisionRefs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +247,7 @@ func Test_assembleContext_WithCloses(t *testing.T) {
 		Content: "decision closing signal",
 	}
 
-	pctx, err := assembleContext(proposed, graph, checkClosingDecision, nil)
+	pctx, err := assembleContext(proposed, graph, checkClosingDecision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +269,7 @@ func Test_assembleContext_WithContracts(t *testing.T) {
 		Content: "some signal",
 	}
 
-	pctx, err := assembleContext(proposed, graph, checkSignalCapture, nil)
+	pctx, err := assembleContext(proposed, graph, checkSignalCapture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +290,7 @@ func Test_assembleContext_WithSupersedes(t *testing.T) {
 		Content:    "replacement decision",
 	}
 
-	pctx, err := assembleContext(proposed, graph, checkSupersedes, nil)
+	pctx, err := assembleContext(proposed, graph, checkSupersedes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +312,7 @@ func Test_assembleContext_OpenSignalsForDecisionRefs(t *testing.T) {
 		Content: "new decision",
 	}
 
-	pctx, err := assembleContext(proposed, graph, checkDecisionRefs, nil)
+	pctx, err := assembleContext(proposed, graph, checkDecisionRefs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +338,7 @@ func Test_assembleContext_OpenSignalsNotIncludedForOtherChecks(t *testing.T) {
 		Content: "new signal",
 	}
 
-	pctx, err := assembleContext(proposed, graph, checkSignalCapture, nil)
+	pctx, err := assembleContext(proposed, graph, checkSignalCapture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,137 +348,14 @@ func Test_assembleContext_OpenSignalsNotIncludedForOtherChecks(t *testing.T) {
 	}
 }
 
-func Test_extractACSection(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{
-			name: "no heading",
-			in:   "# Plan\n\nSome body.\n",
-			want: "",
-		},
-		{
-			name: "heading followed by checklist to EOF",
-			in:   "# Plan\n\n## Acceptance criteria\n- [ ] one\n- [ ] two\n",
-			want: "- [ ] one\n- [ ] two",
-		},
-		{
-			name: "heading followed by next level-2 section",
-			in:   "## Acceptance criteria\n- [ ] item\n\n## Out of scope\n- detail\n",
-			want: "- [ ] item",
-		},
-		{
-			name: "heading followed by next level-1 section",
-			in:   "## Acceptance criteria\n- [ ] item\n\n# New Part\n",
-			want: "- [ ] item",
-		},
-		{
-			name: "heading mid-document",
-			in:   "# Plan\n\n## Overview\nbody\n\n## Acceptance criteria\n- [ ] thing\n",
-			want: "- [ ] thing",
-		},
-		{
-			name: "heading case-insensitive",
-			in:   "## ACCEPTANCE criteria\n- [ ] x\n",
-			want: "- [ ] x",
-		},
-		{
-			name: "heading with trailing colon",
-			in:   "## Acceptance criteria:\n- [ ] y\n",
-			want: "- [ ] y",
-		},
-		{
-			name: "level-3 subheading does not terminate",
-			in:   "## Acceptance criteria\n### Group\n- [ ] a\n",
-			want: "### Group\n- [ ] a",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractACSection(tt.in)
-			if got != tt.want {
-				t.Errorf("extractACSection() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_assembleContext_ProposedPlanWithAC(t *testing.T) {
-	graph := model.NewGraph(nil)
-	attPath := "2026/04/15/15-113612-d-prc-xyz/plan.md"
-	proposed := &model.Entry{
-		Type:        model.TypeDecision,
-		Layer:       model.LayerProcess,
-		Kind:        model.KindPlan,
-		Content:     "plan for the thing",
-		Attachments: []string{attPath},
-	}
-	planBody := "# Plan\n\n## Overview\nstuff\n\n## Acceptance criteria\n- [ ] deliver X\n- [ ] deliver Y\n"
-
-	pctx, err := assembleContext(proposed, graph, checkDecisionRefs, map[string][]byte{
-		attPath: []byte(planBody),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !pctx.ProposedIsPlan {
-		t.Error("ProposedIsPlan should be true for a kind:plan decision")
-	}
-	if !strings.Contains(pctx.ProposedAC, "deliver X") || !strings.Contains(pctx.ProposedAC, "deliver Y") {
-		t.Errorf("ProposedAC missing checklist items, got %q", pctx.ProposedAC)
-	}
-}
-
-func Test_assembleContext_ProposedPlanMissingAC(t *testing.T) {
-	graph := model.NewGraph(nil)
-	attPath := "2026/04/15/15-113612-d-prc-xyz/plan.md"
-	proposed := &model.Entry{
-		Type:        model.TypeDecision,
-		Layer:       model.LayerProcess,
-		Kind:        model.KindPlan,
-		Content:     "plan for the thing",
-		Attachments: []string{attPath},
-	}
-	planBody := "# Plan\n\n## Overview\nstuff without an AC section\n"
-
-	pctx, err := assembleContext(proposed, graph, checkDecisionRefs, map[string][]byte{
-		attPath: []byte(planBody),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !pctx.ProposedIsPlan {
-		t.Error("ProposedIsPlan should be true even when AC section is absent")
-	}
-	if pctx.ProposedAC != "" {
-		t.Errorf("ProposedAC should be empty when AC section is missing, got %q", pctx.ProposedAC)
-	}
-}
-
-func Test_assembleContext_ClosedPlanACExtracted(t *testing.T) {
-	// Write a plan entry with an attachment on disk, then verify that
-	// closing it populates both PlanItems (full text) and AcceptanceCriteria
-	// (extracted section) in the context.
-	dir := t.TempDir()
-
+func Test_assembleContext_ClosedPlanDescriptionFlowsThrough(t *testing.T) {
+	// Plans carry their AC section inline in the description; closing an
+	// action against a plan flows that description through ClosedEntries
+	// via FormatEntryForPrompt — no attachment extraction needed.
 	plan := entry("20260410-120000-d-tac-pln",
 		withKind(model.KindPlan),
-		withContent("plan body"),
-		withAttachments("2026/04/10/12-0000-d-tac-pln/plan.md"))
-	attRel := plan.Attachments[0]
-	attAbs := filepath.Join(dir, attRel)
-	if err := os.MkdirAll(filepath.Dir(attAbs), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	planBody := "# Plan\n\n## Overview\nstuff\n\n## Acceptance criteria\n- [ ] finish X\n- [ ] finish Y\n"
-	if err := os.WriteFile(attAbs, []byte(planBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
+		withContent("Plan body.\n\n## Acceptance criteria\n- [ ] finish X\n- [ ] finish Y\n"))
 	graph := model.NewGraph([]*model.Entry{plan})
-	graph.SetGraphDir(dir)
 
 	proposed := &model.Entry{
 		Type:    model.TypeAction,
@@ -489,40 +364,15 @@ func Test_assembleContext_ClosedPlanACExtracted(t *testing.T) {
 		Content: "action closing the plan",
 	}
 
-	pctx, err := assembleContext(proposed, graph, checkClosingAction, nil)
+	pctx, err := assembleContext(proposed, graph, checkClosingAction)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(pctx.PlanItems, "finish X") {
-		t.Errorf("PlanItems should contain full plan body, got %q", pctx.PlanItems)
+	if !strings.Contains(pctx.ClosedEntries, "## Acceptance criteria") {
+		t.Errorf("ClosedEntries should contain the plan's AC heading inline, got %q", pctx.ClosedEntries)
 	}
-	if !strings.Contains(pctx.AcceptanceCriteria, "finish X") ||
-		!strings.Contains(pctx.AcceptanceCriteria, "finish Y") {
-		t.Errorf("AcceptanceCriteria should contain checklist items, got %q", pctx.AcceptanceCriteria)
-	}
-	if strings.Contains(pctx.AcceptanceCriteria, "Overview") {
-		t.Errorf("AcceptanceCriteria should not contain other sections, got %q", pctx.AcceptanceCriteria)
-	}
-}
-
-func Test_assembleContext_NonPlanDecisionHasNoProposedAC(t *testing.T) {
-	graph := model.NewGraph(nil)
-	proposed := &model.Entry{
-		Type:    model.TypeDecision,
-		Layer:   model.LayerConceptual,
-		Kind:    model.KindDirective,
-		Content: "a directive",
-	}
-
-	pctx, err := assembleContext(proposed, graph, checkDecisionRefs, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pctx.ProposedIsPlan {
-		t.Error("ProposedIsPlan should be false for a non-plan decision")
-	}
-	if pctx.ProposedAC != "" {
-		t.Errorf("ProposedAC should be empty for non-plan decision, got %q", pctx.ProposedAC)
+	if !strings.Contains(pctx.ClosedEntries, "finish X") || !strings.Contains(pctx.ClosedEntries, "finish Y") {
+		t.Errorf("ClosedEntries should contain checklist items from the plan description")
 	}
 }
 
@@ -533,7 +383,6 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 		ClosedEntries:     "ID: closed\nType: signal\n\nClosed content",
 		SupersededEntries: "ID: old\nType: decision\n\nOld content",
 		ActiveContracts:   "ID: contract\nType: decision\n\nContract content",
-		PlanItems:         "### Attachment: plan.md\n\n1. Do thing\n2. Do other thing",
 		OpenSignals:       "ID: open\nType: signal\n\nOpen signal",
 	}
 
@@ -566,88 +415,35 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 	}
 }
 
-func Test_renderPreflightPrompt_ClosingActionACBlock(t *testing.T) {
-	// When the closed plan has an AC section, closing_action.tmpl renders
-	// the AC-specific calibration block with the criteria listed inline.
-	withAC := &preflightContext{
-		ProposedEntry:      "ID: new\nType: action\n\nclosing the plan",
-		ClosedEntries:      "ID: plan\nType: decision\n\nplan body",
-		AcceptanceCriteria: "- [ ] deliver X\n- [ ] deliver Y",
+func Test_renderPreflightPrompt_DecisionRefsNamesACCheck(t *testing.T) {
+	// decision_refs.tmpl describes the AC-presence check for plan decisions.
+	// The LLM reads kind from .ProposedEntry and applies the check contextually;
+	// the check text is always rendered.
+	pctx := &preflightContext{
+		ProposedEntry: "ID: d\nType: decision\nKind: plan\n\nplan body",
 	}
-	result, err := renderPreflightPrompt(checkClosingAction, withAC)
+	result, err := renderPreflightPrompt(checkDecisionRefs, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "Acceptance criteria from closed plan") {
-		t.Errorf("AC-specific block should render when AcceptanceCriteria is populated")
-	}
-	if !strings.Contains(result, "deliver X") {
-		t.Errorf("AC content should appear in the prompt")
-	}
-	if !strings.Contains(result, "AC coverage calibration") {
-		t.Errorf("AC calibration block should render")
-	}
-
-	// Without AC, the block is skipped.
-	withoutAC := &preflightContext{
-		ProposedEntry: "ID: new\nType: action\n\nclosing a non-plan decision",
-		ClosedEntries: "ID: dec\nType: decision\n\njust a directive",
-	}
-	result, err = renderPreflightPrompt(checkClosingAction, withoutAC)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(result, "Acceptance criteria from closed plan") {
-		t.Errorf("AC block should not render when AcceptanceCriteria is empty")
-	}
-	if strings.Contains(result, "AC coverage calibration") {
-		t.Errorf("AC calibration should not render when AcceptanceCriteria is empty")
+	if !strings.Contains(result, "Acceptance criteria") {
+		t.Errorf("decision_refs template should name the acceptance criteria check")
 	}
 }
 
-func Test_renderPreflightPrompt_DecisionRefsACPresenceCheck(t *testing.T) {
-	// When the proposed entry is a plan, decision_refs.tmpl includes the
-	// AC-presence check and shows the extracted AC content. For non-plan
-	// decisions, neither appears.
-	planWithAC := &preflightContext{
-		ProposedEntry:  "ID: d\nType: decision\nKind: plan\n\nplan body",
-		ProposedIsPlan: true,
-		ProposedAC:     "- [ ] item one\n- [ ] item two",
+func Test_renderPreflightPrompt_ClosingActionNamesACCheck(t *testing.T) {
+	// closing_action.tmpl describes per-AC coverage when the closed entry is
+	// a plan. The LLM reads the closed entry's kind and description.
+	pctx := &preflightContext{
+		ProposedEntry: "ID: a\nType: action\n\nclosing the plan",
+		ClosedEntries: "ID: p\nType: decision\nKind: plan\n\nplan description with AC section",
 	}
-	result, err := renderPreflightPrompt(checkDecisionRefs, planWithAC)
+	result, err := renderPreflightPrompt(checkClosingAction, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "Acceptance criteria presence") {
-		t.Errorf("AC-presence check should appear for plan decisions")
-	}
-	if !strings.Contains(result, "item one") {
-		t.Errorf("extracted AC content should be included")
-	}
-
-	planWithoutAC := &preflightContext{
-		ProposedEntry:  "ID: d\nType: decision\nKind: plan\n\nplan body",
-		ProposedIsPlan: true,
-		ProposedAC:     "",
-	}
-	result, err = renderPreflightPrompt(checkDecisionRefs, planWithoutAC)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(result, "Acceptance criteria presence") {
-		t.Errorf("AC-presence check must still appear even when AC is missing — that's when it matters most")
-	}
-
-	directive := &preflightContext{
-		ProposedEntry:  "ID: d\nType: decision\nKind: directive\n\nshort directive",
-		ProposedIsPlan: false,
-	}
-	result, err = renderPreflightPrompt(checkDecisionRefs, directive)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(result, "Acceptance criteria presence") {
-		t.Errorf("AC-presence check should not appear for non-plan decisions")
+	if !strings.Contains(result, "Acceptance criteria") {
+		t.Errorf("closing_action template should name the acceptance criteria coverage check")
 	}
 }
 

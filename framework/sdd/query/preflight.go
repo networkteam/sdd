@@ -12,16 +12,10 @@ import (
 // the pre-flight LLM validator. Pure read — no side effects of its own; the
 // runner dependency injected into the finder handles the LLM call.
 type PreflightQuery struct {
-	Entry *model.Entry
-	Graph *model.Graph
-	// ProposedAttachments holds the in-memory content of the proposed
-	// entry's attachments keyed by the graph-dir-relative path (matching
-	// Entry.Attachments). These files have not been written to disk yet
-	// at pre-flight time, so the validator reads from this map rather
-	// than the filesystem. Nil when the proposed entry has no attachments.
-	ProposedAttachments map[string][]byte
-	Model               string        // LLM model identifier (e.g. "claude-haiku-4-5-20251001")
-	Timeout             time.Duration // hard timeout for the validator call
+	Entry   *model.Entry
+	Graph   *model.Graph
+	Model   string        // LLM model identifier (e.g. "claude-haiku-4-5-20251001")
+	Timeout time.Duration // hard timeout for the validator call
 }
 
 // Severity classifies a pre-flight finding. The tooling layer decides what

@@ -11,6 +11,7 @@ An action is being created that claims to close (resolve/fulfill) a decision or 
 3. **Explicit deviations are acceptable**: If the action marks an item as an intentional deviation with reasoning (e.g. "Deviation: no X — decided during implementation that Y because Z"), that counts as coverage.
 4. **No overclaiming**: The action must not claim to have done things beyond what its description supports.
 5. **Durability**: The artifacts the action references must be durable in the Git-tracked repository. Accept any of: a prior commit referenced by the action, attachments on this entry (`--attach`), or attachments on a referenced upstream entry already in the graph.
+6. **Acceptance criteria coverage** (applies only when the closed entry is `Kind: plan`): Plan decisions carry a `## Acceptance criteria` section in their description. Each AC item must be addressed by the action — confirmed done with specific evidence, or deviation explained with dialogue reasoning. If the closed entry's kind is not `plan`, skip this check.
 
 ## Calibration
 
@@ -21,21 +22,15 @@ The work lives in commits, attachments, and upstream entries — not necessarily
 - `low` — Deferral is acknowledged in text without an explicit "Deviation: ..." marker format.
 - No finding — Implementation details that live in committed code. Standard "per d-tac-X plan" opening for closing actions. Format specs whose source of truth is the plan attachment or code.
 
-Don't demand prose restatement of work that lives in the code or attachments.
-{{ if .AcceptanceCriteria }}
-## Acceptance criteria from closed plan
-
-{{ .AcceptanceCriteria }}
-
-### AC coverage calibration
-
-Each AC item must be addressed by the action — confirmed done with specific evidence or deviation explained with dialogue reasoning.
+### AC coverage calibration (when closing a plan)
 
 - `high` — AC silently omitted: no mention in action text, no deviation explanation.
 - `medium` — AC named but resolution not evident from the action text (e.g. AC: "sdd show renders depth 0 full, depth 1+ as summary lines"; action: "Depth-limited rendering implemented.").
 - `low` — AC addressed but phrasing thin (e.g. AC: "--max-depth flag with default 4"; action: "Added --max-depth flag." — missing default value).
 - No finding — AC confirmed done with specific evidence, or deviation explained with dialogue reasoning (e.g. "Deviation: single --max-depth instead of per-direction — decided during dialogue that independent depths add complexity without corresponding benefit.").
-{{ end }}
+
+Don't demand prose restatement of work that lives in the code or attachments.
+
 ## Proposed action
 
 {{ .ProposedEntry }}
@@ -43,11 +38,7 @@ Each AC item must be addressed by the action — confirmed done with specific ev
 ## Entry being closed
 
 {{ .ClosedEntries }}
-{{ if .PlanItems }}
-## Plan items (from attachment)
-
-{{ .PlanItems }}
-{{ end }}{{ if .ReferencedEntries }}
+{{ if .ReferencedEntries }}
 ## Referenced entries
 
 {{ .ReferencedEntries }}
