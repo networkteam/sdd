@@ -13,7 +13,7 @@ import (
 // severity; the caller decides what to block on via HasBlocking. Returns
 // an error only for infrastructure failures.
 func (f *Finder) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
-	result, err := llm.Preflight(ctx, f.preflightRunner, q.Entry, q.Graph)
+	result, err := llm.Preflight(ctx, f.preflightRunner, q.Entry, q.Graph, q.ProposedAttachments)
 	if err != nil {
 		return nil, err
 	}
