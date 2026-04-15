@@ -28,7 +28,15 @@ Never silently create graph entries. When capturing anything:
 5. Let the user adjust wording, type, layer, refs, confidence, attachment
 6. Only then run `sdd new`
 
-**If pre-flight rejects an entry**, don't just tweak wording. Read the rejection as a prompt: what dialogue reasoning did we fail to include in the entry text? Revise the content to fold in the missing context, then retry. If the rejection argues with rationale that was dialogued and confirmed, that's a pre-flight over-correction — consider `--skip-preflight` after confirming with the user.
+**Pre-flight findings are scored by severity.** The tool displays all findings and blocks only on `[high]`:
+
+- `[high]` findings block entry creation. Read each one, decide whether to revise the entry or `--skip-preflight` if the finding is wrong.
+- `[medium]` findings are displayed but don't block. They surface observations worth naming — partial coverage, ambiguity that could be intentional, specific proposal worth dialoguing. Don't reflexively ignore them; decide whether to revise, explain, or proceed.
+- `[low]` findings are informational — stylistic, editorial. Read, decide, continue.
+
+Don't reflexively `--skip-preflight` on `medium` findings — they often surface genuine observations worth dialoguing. Only skip when confident the finding is wrong (e.g., the pre-flight argues with rationale that was already dialogued and confirmed — that's over-correction).
+
+When a `high` finding looks legitimate: read it as a prompt. What dialogue reasoning did we fail to include in the entry text? Revise to fold in the missing context, then retry. Don't just tweak wording.
 
 ### Always suggest next steps
 
@@ -63,6 +71,7 @@ See [CLI reference](references/cli-reference.md) for full command syntax and fla
 - **Confidence is honest**: High = strong conviction. Medium = reasonable but unvalidated. Low = hypothesis/experiment.
 - **One idea per entry**: Keep entries digestible. If it needs more detail, split into multiple entries or reference an external file.
 - **Kind for decisions**: Most decisions are directives (default, omit the kind field). Use `--kind contract` only for standing constraints that define rules rather than requesting action. A directive that hardens into a permanent rule can be reclassified later via supersedes + kind: contract.
+- **Acceptance criteria for plan decisions**: `--kind plan` decisions must include an `## Acceptance criteria` section in the description (not the attachment) with `- [ ]` checklist items. Each AC is a single verifiable outcome — not an implementation detail. ACs are the contract between plan author, implementing agent, and pre-flight validator. Pre-flight flags a missing AC section on a plan decision as high.
 
 ### Attachment assessment
 
@@ -226,10 +235,11 @@ When the conversation reaches "let's build this":
 3. Assess whether a plan decision is needed. The test: **will the closing-action pre-flight have enough to validate against without a plan?** If the decision is specific enough on its own (small fix, single change, obvious path from signal to action), skip the plan. If the decision describes a direction but implementation requires decomposition (multiple requirements, design choices, multi-step scope), capture a plan decision first — the pre-flight validates every plan item at closing time, which is where the rigor pays off.
 4. If scope is clear, capture any needed operational sub-decisions
 5. Create an exclusive WIP marker for the entry being implemented (`sdd wip start <entry-id> --exclusive --participant <name> <description>`)
-6. Implementation happens in the same session — the meta-process stays active
-7. If you hit a design choice not covered by existing decisions: **stop implementation**, capture an action recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself.
-8. After implementation, commit the code changes first, then capture the action, then remove the WIP marker (`sdd wip done <marker-id>`)
-9. Prompt for evaluation signals
+6. **If implementing a plan decision**, read its `## Acceptance criteria` section and use it as your work checklist. Each AC is a contract item: the closing action must either confirm it done with specific evidence or explain the deviation with dialogue reasoning.
+7. Implementation happens in the same session — the meta-process stays active
+8. If you hit a design choice not covered by existing decisions: **stop implementation**, capture an action recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself.
+9. After implementation, commit the code changes first, then capture the action (addressing each AC if the plan had one), then remove the WIP marker (`sdd wip done <marker-id>`)
+10. Prompt for evaluation signals
 
 ### Branching for isolated work
 
