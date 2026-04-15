@@ -1,21 +1,21 @@
 {{ define "verdict" }}
 ## Output format
 
-Report each observation on its own line:
+Respond with a single JSON object matching this schema — nothing before or after, no code fences:
 
 ```
-- [high] category: observation text
-- [medium] category: observation text
-- [low] category: observation text
+{
+  "findings": [
+    {
+      "severity": "high" | "medium" | "low",
+      "category": "short-hyphenated-tag",
+      "observation": "one to three sentences describing what you noticed"
+    }
+  ]
+}
 ```
 
-Category is a short hyphenated tag (e.g. `type-mismatch`, `missing-ref`, `plan-coverage-ambiguity`, `ac-unaddressed`).
-
-When you have nothing to report, respond with exactly:
-
-```
-No findings.
-```
+Category is a short hyphenated tag (e.g. `type-mismatch`, `missing-ref`, `plan-coverage-ambiguity`, `ac-unaddressed`). When you have nothing to report, return `{"findings": []}`.
 
 ## Severity
 
@@ -25,7 +25,7 @@ Flag findings at the severity that matches what you observe:
 - **medium** — Observation worth naming for dialogue: deviation, specific proposal, partial coverage, ambiguity that could be intentional
 - **low** — Stylistic, editorial, or suggestion
 
-All three levels are valid outputs. Reporting no findings is also valid. Don't force `high` to name a minor observation, and don't suppress observations to avoid commitment.
+All three levels are valid, and an empty `findings` array is a valid result. Don't force `high` to name a minor observation, and don't suppress observations to avoid commitment.
 
 ## Calibrating against active contracts
 

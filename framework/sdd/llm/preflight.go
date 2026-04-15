@@ -3,9 +3,9 @@ package llm
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"text/template"
 	"time"
@@ -262,72 +262,105 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (string, error)
 	return b.String(), nil
 }
 
-// findingLineRe matches a finding line: `[severity] category: observation`.
-// Leading `- ` bullet is stripped before matching. Category is a token with
-// no whitespace or colon; observation is the remainder of the line.
-var findingLineRe = regexp.MustCompile(`^\[(?i:(high|medium|low))\]\s+([^\s:]+)\s*:\s*(.+)$`)
-
-// parsePreflightResult parses the validator's raw output into a structured
-// result. Expected format is one finding per line:
+// parsePreflightResult parses the validator's JSON response into a
+// structured result. The LLM is asked to respond with:
 //
-//	- [high] category: observation text
-//	- [medium] category: observation text
+//	{"findings": [{"severity": "high|medium|low", "category": "...", "observation": "..."}]}
 //
-// When the validator reports no findings, the output is the literal
-// `No findings.` (trailing period and case-insensitive). Any other content
-// — unknown severities, malformed lines — returns an error so the tooling
-// layer can surface the infrastructure failure distinctly from findings.
+// Empty findings array means "no findings". The parser tolerates prose
+// surrounding the JSON object (LLM preambles, code fences) by scanning for
+// the first balanced {...}. Malformed JSON, missing keys, unknown severity
+// values — all return errors so infrastructure failures stay distinct from
+// findings.
 func parsePreflightResult(output string) (*PreflightResult, error) {
-	output = strings.TrimSpace(output)
-	if output == "" {
-		return nil, fmt.Errorf("empty pre-flight response")
+	jsonText, err := extractJSONObject(output)
+	if err != nil {
+		return nil, err
 	}
 
-	if isNoFindings(output) {
-		return &PreflightResult{}, nil
+	var resp struct {
+		Findings []struct {
+			Severity    string `json:"severity"`
+			Category    string `json:"category"`
+			Observation string `json:"observation"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(jsonText), &resp); err != nil {
+		return nil, fmt.Errorf("parsing pre-flight JSON: %w", err)
 	}
 
-	var findings []Finding
-	for _, raw := range strings.Split(output, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
-		if isNoFindings(line) {
-			continue
-		}
-		line = strings.TrimPrefix(line, "- ")
-		line = strings.TrimSpace(line)
-
-		m := findingLineRe.FindStringSubmatch(line)
-		if m == nil {
-			return nil, fmt.Errorf("unexpected finding format: %q", raw)
-		}
-		sev, err := parseSeverity(m[1])
+	findings := make([]Finding, 0, len(resp.Findings))
+	for i, f := range resp.Findings {
+		sev, err := parseSeverity(f.Severity)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("finding %d: %w", i, err)
+		}
+		if f.Category == "" {
+			return nil, fmt.Errorf("finding %d: category is empty", i)
+		}
+		if f.Observation == "" {
+			return nil, fmt.Errorf("finding %d: observation is empty", i)
 		}
 		findings = append(findings, Finding{
 			Severity:    sev,
-			Category:    m[2],
-			Observation: strings.TrimSpace(m[3]),
+			Category:    f.Category,
+			Observation: f.Observation,
 		})
 	}
 
 	return &PreflightResult{Findings: findings}, nil
 }
 
-// isNoFindings reports whether s is the sentinel "No findings." line.
-// The trailing period is tolerated as present or absent; comparison is
-// case-insensitive after trimming.
-func isNoFindings(s string) bool {
-	s = strings.TrimSpace(s)
-	s = strings.TrimSuffix(s, ".")
-	return strings.EqualFold(s, "no findings")
+// extractJSONObject returns the first balanced {...} in the input, skipping
+// any surrounding prose or code fences. Returns an error if no object is
+// found or braces are unbalanced. String-escape aware so braces inside
+// JSON strings don't confuse the balance counter.
+func extractJSONObject(output string) (string, error) {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return "", fmt.Errorf("empty pre-flight response")
+	}
+
+	start := strings.Index(output, "{")
+	if start < 0 {
+		return "", fmt.Errorf("no JSON object found in pre-flight response: %q", output)
+	}
+
+	depth := 0
+	inString := false
+	escape := false
+	for i := start; i < len(output); i++ {
+		c := output[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if inString {
+			switch c {
+			case '\\':
+				escape = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return output[start : i+1], nil
+			}
+		}
+	}
+	return "", fmt.Errorf("unbalanced JSON braces in pre-flight response: %q", output)
 }
 
 func parseSeverity(s string) (Severity, error) {
-	switch strings.ToLower(s) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "high":
 		return SeverityHigh, nil
 	case "medium":

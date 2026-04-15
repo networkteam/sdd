@@ -50,7 +50,7 @@ func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*Prefligh
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
@@ -85,9 +85,36 @@ func planWithACs(id string, body string, acItems ...string) *model.Entry {
 	}
 }
 
-func TestPreflightEval_ClosingAction_UncoveredACs(t *testing.T) {
-	// Action claims to close a plan but silently omits two of four AC items.
-	// Expected: at least one high finding (AC unaddressed, no deviation).
+func TestPreflightEval_ClosingAction_SilentlyOmittedACs(t *testing.T) {
+	// Action silently omits two of four AC items. Expected: high.
+	plan := planWithACs("20260410-120000-d-tac-pln",
+		"Implementation plan with four items.",
+		"Create database schema for user accounts",
+		"Build authentication middleware",
+		"Implement API endpoints for CRUD operations",
+		"Write integration tests for all endpoints",
+	)
+	graph := model.NewGraph([]*model.Entry{plan})
+
+	proposed := &model.Entry{
+		Type:    model.TypeAction,
+		Layer:   model.LayerTactical,
+		Closes:  []string{plan.ID},
+		Content: "Created the users table with email (unique) and bcrypt-hashed password columns via a new migration. Wired up a /users/:id GET endpoint returning JSON.",
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if !result.HasBlocking() {
+		t.Errorf("Expected at least one high finding (silent AC omission), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly identified silent AC omission. Findings: %+v", result.Findings)
+	}
+}
+
+func TestPreflightEval_ClosingAction_NamedButNoReasoning(t *testing.T) {
+	// Action names the omitted items explicitly but offers NO reasoning.
+	// Per the clarified calibration: uncovered-without-reasoning is high,
+	// whether silent or explicit. Reasoning presence is what gates.
 	plan := planWithACs("20260410-120000-d-tac-pln",
 		"Implementation plan with four items.",
 		"Create database schema for user accounts",
@@ -106,9 +133,37 @@ func TestPreflightEval_ClosingAction_UncoveredACs(t *testing.T) {
 
 	result, raw := runEval(t, graph, proposed)
 	if !result.HasBlocking() {
-		t.Errorf("Expected at least one high finding, got: %+v\nRaw output:\n%s", result.Findings, raw)
+		t.Errorf("Expected at least one high finding (named but no reasoning), got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
-		t.Logf("Correctly identified uncovered ACs. Findings: %+v", result.Findings)
+		t.Logf("Correctly flagged as high. Findings: %+v", result.Findings)
+	}
+}
+
+func TestPreflightEval_ClosingAction_DeviationWithReasoning(t *testing.T) {
+	// Action omits items but supplies brief reasoning for each. Per the
+	// clarified calibration: reasoning presence (not quality) is what
+	// matters — expected: no high finding.
+	plan := planWithACs("20260410-120000-d-tac-pln",
+		"Implementation plan with four items.",
+		"Create database schema for user accounts",
+		"Build authentication middleware",
+		"Implement API endpoints for CRUD operations",
+		"Write integration tests for all endpoints",
+	)
+	graph := model.NewGraph([]*model.Entry{plan})
+
+	proposed := &model.Entry{
+		Type:    model.TypeAction,
+		Layer:   model.LayerTactical,
+		Closes:  []string{plan.ID},
+		Content: "Implemented item 1 (database schema with users table and bcrypt passwords) and item 3 (full CRUD endpoints at /users). Deviation: authentication middleware (item 2) deferred — dialogued that we'd adopt an existing Passport.js library in a follow-up rather than build from scratch. Deviation: integration tests (item 4) deferred to a follow-up action — agreed during implementation that the schema/endpoint work needed smoke testing first, with the full suite as a separate closure.",
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if result.HasBlocking() {
+		t.Errorf("Expected no high finding (reasoning is present for each deviation), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly treated deviation-with-reasoning as non-blocking. Findings: %+v", result.Findings)
 	}
 }
 

@@ -37,7 +37,7 @@ func TestRunPreflight_NoFindings(t *testing.T) {
 		Content: "new observation",
 	}
 
-	runner := &mockRunner{response: "No findings."}
+	runner := &mockRunner{response: `{"findings": []}`}
 	f := New(runner)
 	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
@@ -65,7 +65,7 @@ func TestRunPreflight_BlockingFinding(t *testing.T) {
 		Content: "decision closing signal",
 	}
 
-	runner := &mockRunner{response: "- [high] signal-target-miss: signal not genuinely addressed"}
+	runner := &mockRunner{response: `{"findings": [{"severity": "high", "category": "signal-target-miss", "observation": "signal not genuinely addressed"}]}`}
 	f := New(runner)
 	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
@@ -99,7 +99,7 @@ func TestRunPreflight_NonBlockingFindings(t *testing.T) {
 		Content: "new observation",
 	}
 
-	runner := &mockRunner{response: "- [medium] plan-coverage-ambiguity: could be clearer\n- [low] opening-reference-dependent: stylistic"}
+	runner := &mockRunner{response: `{"findings": [{"severity": "medium", "category": "plan-coverage-ambiguity", "observation": "could be clearer"}, {"severity": "low", "category": "opening-reference-dependent", "observation": "stylistic"}]}`}
 	f := New(runner)
 	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
@@ -165,7 +165,7 @@ func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
 		Content: "implemented everything",
 	}
 
-	runner := &mockRunner{response: "No findings."}
+	runner := &mockRunner{response: `{"findings": []}`}
 	f := New(runner)
 	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {

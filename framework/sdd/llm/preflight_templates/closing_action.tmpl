@@ -24,10 +24,12 @@ The work lives in commits, attachments, and upstream entries — not necessarily
 
 ### AC coverage calibration (when closing a plan)
 
-- `high` — AC silently omitted: no mention in action text, no deviation explanation.
-- `medium` — AC named but resolution not evident from the action text (e.g. AC: "sdd show renders depth 0 full, depth 1+ as summary lines"; action: "Depth-limited rendering implemented.").
+**Core rule**: every AC must either be implemented (with evidence) or carry reasoning for the deviation/omission. Pre-flight checks that reasoning is **present**, not whether the reasoning is valid — that's the author's dialogue-grounded judgment, already confirmed at capture time.
+
+- `high` — AC is not implemented AND no reasoning is present. Includes both silent omission (AC never mentioned) and explicit non-implementation without why (e.g. "Items 2 and 4 were not addressed."). Both fail the core rule equally.
+- `medium` — AC coverage is **ambiguous** — action mentions something related but the specific required behavior isn't evident. Plausibly implemented; worth clarifying. Example: AC "sdd show renders depth 0 full, depth 1+ as summary lines"; action "Depth-limited rendering implemented."
 - `low` — AC addressed but phrasing thin (e.g. AC: "--max-depth flag with default 4"; action: "Added --max-depth flag." — missing default value).
-- No finding — AC confirmed done with specific evidence, or deviation explained with dialogue reasoning (e.g. "Deviation: single --max-depth instead of per-direction — decided during dialogue that independent depths add complexity without corresponding benefit.").
+- No finding — AC confirmed done with specific evidence, OR any form of deviation/omission that carries reasoning (however brief). Do not judge whether the reasoning is convincing — its presence is enough. Example: "Deviation: single --max-depth instead of per-direction — decided during dialogue that independent depths add complexity without corresponding benefit."
 
 Don't demand prose restatement of work that lives in the code or attachments.
 

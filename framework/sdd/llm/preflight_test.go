@@ -398,13 +398,13 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 			if !strings.Contains(result, "Test content") {
 				t.Errorf("renderPreflightPrompt(%s) missing proposed entry content", ct)
 			}
-			// Verdict partial must be embedded — the severity-scored
-			// output format is the single source of truth for all checks.
-			if !strings.Contains(result, "No findings.") {
-				t.Errorf("renderPreflightPrompt(%s) missing verdict output format", ct)
+			// Verdict partial must be embedded — the JSON output format and
+			// severity semantics are the single source of truth for all checks.
+			if !strings.Contains(result, `"findings"`) {
+				t.Errorf("renderPreflightPrompt(%s) missing JSON schema with findings key", ct)
 			}
-			if !strings.Contains(result, "[high]") {
-				t.Errorf("renderPreflightPrompt(%s) missing severity format", ct)
+			if !strings.Contains(result, `"severity"`) {
+				t.Errorf("renderPreflightPrompt(%s) missing severity field in schema", ct)
 			}
 			// PASS/FAIL are the legacy binary verdict — must be gone.
 			if strings.Contains(result, "\"PASS\"") || strings.Contains(result, "\"FAIL\"") {
@@ -481,35 +481,24 @@ func Test_parsePreflightResult(t *testing.T) {
 		wantErr      bool
 	}{
 		{
-			name:         "No findings sentinel",
-			input:        "No findings.",
-			wantFindings: nil,
-		},
-		{
-			name:         "No findings without period",
-			input:        "No findings",
-			wantFindings: nil,
-		},
-		{
-			name:         "No findings case insensitive",
-			input:        "no FINDINGS.",
-			wantFindings: nil,
-		},
-		{
-			name:         "No findings with surrounding whitespace",
-			input:        "  No findings.  \n",
+			name:         "empty findings array",
+			input:        `{"findings": []}`,
 			wantFindings: nil,
 		},
 		{
 			name:  "single high finding",
-			input: "- [high] type-mismatch: signal contains imperative commitment",
+			input: `{"findings": [{"severity": "high", "category": "type-mismatch", "observation": "signal contains imperative commitment"}]}`,
 			wantFindings: []Finding{
 				{Severity: SeverityHigh, Category: "type-mismatch", Observation: "signal contains imperative commitment"},
 			},
 		},
 		{
-			name:  "mixed severities",
-			input: "- [high] missing-ref: directly-answered signal not referenced\n- [medium] plan-coverage-ambiguity: test behavior unstated\n- [low] opening-reference-dependent: first sentence relies on ref",
+			name: "mixed severities",
+			input: `{"findings": [
+				{"severity": "high", "category": "missing-ref", "observation": "directly-answered signal not referenced"},
+				{"severity": "medium", "category": "plan-coverage-ambiguity", "observation": "test behavior unstated"},
+				{"severity": "low", "category": "opening-reference-dependent", "observation": "first sentence relies on ref"}
+			]}`,
 			wantFindings: []Finding{
 				{Severity: SeverityHigh, Category: "missing-ref", Observation: "directly-answered signal not referenced"},
 				{Severity: SeverityMedium, Category: "plan-coverage-ambiguity", Observation: "test behavior unstated"},
@@ -518,72 +507,63 @@ func Test_parsePreflightResult(t *testing.T) {
 		},
 		{
 			name:  "severity case insensitive",
-			input: "- [HIGH] type-mismatch: something\n- [Medium] other: thing",
+			input: `{"findings": [{"severity": "HIGH", "category": "t", "observation": "x"}]}`,
 			wantFindings: []Finding{
-				{Severity: SeverityHigh, Category: "type-mismatch", Observation: "something"},
-				{Severity: SeverityMedium, Category: "other", Observation: "thing"},
+				{Severity: SeverityHigh, Category: "t", Observation: "x"},
 			},
 		},
 		{
-			name:  "bullet prefix optional",
-			input: "[high] type-mismatch: no leading dash",
-			wantFindings: []Finding{
-				{Severity: SeverityHigh, Category: "type-mismatch", Observation: "no leading dash"},
-			},
-		},
-		{
-			name:  "indented bullet",
-			input: "  - [medium] ac-unaddressed: AC 3 silently omitted",
-			wantFindings: []Finding{
-				{Severity: SeverityMedium, Category: "ac-unaddressed", Observation: "AC 3 silently omitted"},
-			},
-		},
-		{
-			name:  "blank lines between findings",
-			input: "- [high] a: one\n\n- [low] b: two\n",
+			name:  "JSON wrapped in code fence",
+			input: "```json\n{\"findings\": [{\"severity\": \"high\", \"category\": \"a\", \"observation\": \"one\"}]}\n```",
 			wantFindings: []Finding{
 				{Severity: SeverityHigh, Category: "a", Observation: "one"},
-				{Severity: SeverityLow, Category: "b", Observation: "two"},
+			},
+		},
+		{
+			name:         "JSON with preamble and postamble prose",
+			input:        "Let me validate this entry:\n\n{\"findings\": []}\n\nThat's my assessment.",
+			wantFindings: nil,
+		},
+		{
+			name:  "braces inside observation string do not confuse balance",
+			input: `{"findings": [{"severity": "high", "category": "a", "observation": "The entry says {x: y} which is odd"}]}`,
+			wantFindings: []Finding{
+				{Severity: SeverityHigh, Category: "a", Observation: "The entry says {x: y} which is odd"},
 			},
 		},
 		{
 			name:    "unknown severity",
-			input:   "- [critical] type-mismatch: something",
-			wantErr: true,
-		},
-		{
-			name:    "malformed line",
-			input:   "- this is not a finding",
+			input:   `{"findings": [{"severity": "critical", "category": "t", "observation": "x"}]}`,
 			wantErr: true,
 		},
 		{
 			name:    "missing category",
-			input:   "- [high]: observation text",
+			input:   `{"findings": [{"severity": "high", "observation": "x"}]}`,
 			wantErr: true,
 		},
 		{
 			name:    "missing observation",
-			input:   "- [high] type-mismatch:",
+			input:   `{"findings": [{"severity": "high", "category": "t"}]}`,
+			wantErr: true,
+		},
+		{
+			name:    "no JSON object",
+			input:   "PASS\nSome prose without JSON.",
+			wantErr: true,
+		},
+		{
+			name:    "unbalanced braces",
+			input:   `{"findings": [{"severity": "high"`,
+			wantErr: true,
+		},
+		{
+			name:    "malformed JSON",
+			input:   `{"findings": [{severity: high}]}`,
 			wantErr: true,
 		},
 		{
 			name:    "empty response",
 			input:   "",
-			wantErr: true,
-		},
-		{
-			name:    "whitespace only",
-			input:   "   \n  \n  ",
-			wantErr: true,
-		},
-		{
-			name:    "legacy PASS output rejected",
-			input:   "PASS",
-			wantErr: true,
-		},
-		{
-			name:    "legacy FAIL output rejected",
-			input:   "FAIL\n- Some gap",
 			wantErr: true,
 		},
 	}
