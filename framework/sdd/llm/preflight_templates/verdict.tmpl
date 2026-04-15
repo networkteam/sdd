@@ -1,0 +1,43 @@
+{{ define "verdict" }}
+## Output format
+
+Report each observation on its own line:
+
+```
+- [high] category: observation text
+- [medium] category: observation text
+- [low] category: observation text
+```
+
+Category is a short hyphenated tag (e.g. `type-mismatch`, `missing-ref`, `plan-coverage-ambiguity`, `ac-unaddressed`).
+
+When you have nothing to report, respond with exactly:
+
+```
+No findings.
+```
+
+## Severity
+
+Flag findings at the severity that matches what you observe:
+
+- **high** — Clear wrong usage, direct contradiction, or structural type error
+- **medium** — Observation worth naming for dialogue: deviation, specific proposal, partial coverage, ambiguity that could be intentional
+- **low** — Stylistic, editorial, or suggestion
+
+All three levels are valid outputs. Reporting no findings is also valid. Don't force `high` to name a minor observation, and don't suppress observations to avoid commitment.
+
+## Calibrating against active contracts
+
+A finding against an active contract is `high` only when the entry **directly contradicts** the contract's core constraint — the spirit, not the letter. Subtle deviations, missing ritual markers, or wording that doesn't precisely echo the contract are `medium` or `low`. Contracts express intent; treating them as literal rules invites find-something behavior. If the entry's reasoning shows the agent considered the contract and made a deliberate choice, that is `low` or no finding.
+
+Test: would a reasonable reader say "this entry breaks the rule" or "this entry is in the spirit of the rule but worded differently"? Only the first is `high`.
+
+## Dialogue context is grounding, not argument
+
+The entry description may contain dialogue-sourced reasoning — references to discussions, trade-offs considered, alternatives rejected. Treat that reasoning as human-confirmed context. Focus on **structural completeness**: missing refs, uncovered requirements, missing evidence, type/layer mismatches, silent omissions. Do not re-evaluate rationale that was already dialogued, argue with how a referenced entry is characterized, or demand rewording of human-confirmed reasoning.
+
+## Immutability as calibration context
+
+Type, layer, and kind are immutable after capture (baked into the entry ID). Catch clear misclassification at capture time. Prose content — first sentences, summaries, descriptions — can be corrected post-capture via supersede or mechanical edits; cap findings about prose form at `medium` and use `supersede` as the remedy for ambiguity rather than expanding the blocking surface.
+{{ end }}

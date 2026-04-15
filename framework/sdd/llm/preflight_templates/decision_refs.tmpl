@@ -1,4 +1,4 @@
-You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. You validate proposed graph entries before creation. Be strict and precise.
+You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
 
 ## Task
 
@@ -6,9 +6,27 @@ A decision is being created with references but not closing any entries. Verify 
 
 ## Checks
 
-1. **Ref completeness**: Two checks: (a) Does this entry duplicate information from existing entries (signals, decisions) that it should reference instead? New entries should be minimal — reference existing information rather than restating it. (b) Does this entry logically build upon or advance existing entries without referencing them? If the entry wouldn't make sense without the context of another entry, or moves that line of thought further, it should ref that entry. Refs represent logical dependency ("builds on"), not topical association — entries that merely touch on the same topic without logical dependency do not need refs.
+1. **Ref completeness**: Does this entry logically build upon or advance existing entries without referencing them? If the entry wouldn't make sense without the context of another entry, or moves that line of thought further, it should ref that entry. Refs represent logical dependency ("builds on"), not topical association.
 2. **Grounding**: The decision content should be grounded in the referenced entries — not introducing commitments from nowhere.
 3. **No scope smuggling**: The decision should not contain undiscussed commitments beyond what the referenced entries support.
+{{ if .ProposedIsPlan }}
+4. **Acceptance criteria presence** (plan decisions only): Plan decisions must include an `## Acceptance criteria` section in the plan attachment with `- [ ]` checklist items. Missing or empty AC section is a `high` finding.
+
+The proposed plan's extracted AC section follows (empty means the section is missing):
+
+```
+{{ .ProposedAC }}
+```
+{{ end }}
+
+## Calibration
+
+A decision must ref the signals or decisions that directly motivated it or that it directly answers. Not every tangentially-related entry needs a ref.
+
+- `high` — Decision answers the specific question raised by an unreferenced signal (e.g. decision prescribes an answer to a distribution question raised in an unreferenced signal that even listed options the decision implicitly rejects).
+- `medium` — A related signal plausibly informs the decision but isn't answered directly; could be intentional scope narrowing.
+- `low` — Style suggestion (dense summary could be split across sentences).
+- No finding — Strategic decisions synthesize direction without every principle being pre-established in a signal; demanding pre-grounding prevents strategic thinking. Presence-of-field checks (missing Kind, missing Confidence) belong to CLI/lint, not LLM judgment.
 
 ## Proposed decision
 
@@ -21,9 +39,4 @@ A decision is being created with references but not closing any entries. Verify 
 ## Open signals in the graph (check for missing refs)
 
 {{ .OpenSignals }}
-{{ end }}{{ template "contracts" . }}{{ template "entry_quality" . }}
-## Output format
-
-Respond with exactly:
-- "PASS" on a single line if ALL checks pass
-- "FAIL" on a single line, followed by one gap per line starting with "- "
+{{ end }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}

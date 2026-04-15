@@ -549,11 +549,105 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 			if !strings.Contains(result, "Test content") {
 				t.Errorf("renderPreflightPrompt(%s) missing proposed entry content", ct)
 			}
-			if !strings.Contains(result, "PASS") || !strings.Contains(result, "FAIL") {
-				t.Errorf("renderPreflightPrompt(%s) missing output format instructions", ct)
+			// Verdict partial must be embedded — the severity-scored
+			// output format is the single source of truth for all checks.
+			if !strings.Contains(result, "No findings.") {
+				t.Errorf("renderPreflightPrompt(%s) missing verdict output format", ct)
+			}
+			if !strings.Contains(result, "[high]") {
+				t.Errorf("renderPreflightPrompt(%s) missing severity format", ct)
+			}
+			// PASS/FAIL are the legacy binary verdict — must be gone.
+			if strings.Contains(result, "\"PASS\"") || strings.Contains(result, "\"FAIL\"") {
+				t.Errorf("renderPreflightPrompt(%s) still contains legacy PASS/FAIL output", ct)
 			}
 			_ = tmplName
 		})
+	}
+}
+
+func Test_renderPreflightPrompt_ClosingActionACBlock(t *testing.T) {
+	// When the closed plan has an AC section, closing_action.tmpl renders
+	// the AC-specific calibration block with the criteria listed inline.
+	withAC := &preflightContext{
+		ProposedEntry:      "ID: new\nType: action\n\nclosing the plan",
+		ClosedEntries:      "ID: plan\nType: decision\n\nplan body",
+		AcceptanceCriteria: "- [ ] deliver X\n- [ ] deliver Y",
+	}
+	result, err := renderPreflightPrompt(checkClosingAction, withAC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "Acceptance criteria from closed plan") {
+		t.Errorf("AC-specific block should render when AcceptanceCriteria is populated")
+	}
+	if !strings.Contains(result, "deliver X") {
+		t.Errorf("AC content should appear in the prompt")
+	}
+	if !strings.Contains(result, "AC coverage calibration") {
+		t.Errorf("AC calibration block should render")
+	}
+
+	// Without AC, the block is skipped.
+	withoutAC := &preflightContext{
+		ProposedEntry: "ID: new\nType: action\n\nclosing a non-plan decision",
+		ClosedEntries: "ID: dec\nType: decision\n\njust a directive",
+	}
+	result, err = renderPreflightPrompt(checkClosingAction, withoutAC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result, "Acceptance criteria from closed plan") {
+		t.Errorf("AC block should not render when AcceptanceCriteria is empty")
+	}
+	if strings.Contains(result, "AC coverage calibration") {
+		t.Errorf("AC calibration should not render when AcceptanceCriteria is empty")
+	}
+}
+
+func Test_renderPreflightPrompt_DecisionRefsACPresenceCheck(t *testing.T) {
+	// When the proposed entry is a plan, decision_refs.tmpl includes the
+	// AC-presence check and shows the extracted AC content. For non-plan
+	// decisions, neither appears.
+	planWithAC := &preflightContext{
+		ProposedEntry:  "ID: d\nType: decision\nKind: plan\n\nplan body",
+		ProposedIsPlan: true,
+		ProposedAC:     "- [ ] item one\n- [ ] item two",
+	}
+	result, err := renderPreflightPrompt(checkDecisionRefs, planWithAC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "Acceptance criteria presence") {
+		t.Errorf("AC-presence check should appear for plan decisions")
+	}
+	if !strings.Contains(result, "item one") {
+		t.Errorf("extracted AC content should be included")
+	}
+
+	planWithoutAC := &preflightContext{
+		ProposedEntry:  "ID: d\nType: decision\nKind: plan\n\nplan body",
+		ProposedIsPlan: true,
+		ProposedAC:     "",
+	}
+	result, err = renderPreflightPrompt(checkDecisionRefs, planWithoutAC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "Acceptance criteria presence") {
+		t.Errorf("AC-presence check must still appear even when AC is missing — that's when it matters most")
+	}
+
+	directive := &preflightContext{
+		ProposedEntry:  "ID: d\nType: decision\nKind: directive\n\nshort directive",
+		ProposedIsPlan: false,
+	}
+	result, err = renderPreflightPrompt(checkDecisionRefs, directive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result, "Acceptance criteria presence") {
+		t.Errorf("AC-presence check should not appear for non-plan decisions")
 	}
 }
 

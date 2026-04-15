@@ -1,7 +1,11 @@
 {{ define "entry_quality" }}
 ## Entry quality (apply to every entry)
 
-- **Self-describing first sentence**: The opening sentence must work as a standalone summary. `sdd status` truncates descriptions, so a reader seeing the opening alone should understand what the entry is about without following references. Openings like "Plan for d-tac-X" or "Closes s-prc-Y" that depend on looking up the referenced entry are a failure — FAIL with a gap noting the first sentence must describe the entry's substance, not just its relationship to another entry.
+**Self-describing first sentence.** The opening sentence should work as a standalone summary — `sdd status` truncates descriptions, so a reader seeing the opening alone should understand what the entry is about. Calibration:
 
-- **Dialogue context is grounding, not argument**: The entry description may contain dialogue-sourced reasoning — references to discussions, trade-offs considered, alternatives rejected, rationale for the closure/decision/commitment. Treat that reasoning as human-confirmed context (the user confirmed it at play-back). Focus your validation on **structural completeness**: missing refs, uncovered requirements, missing evidence, type/layer mismatches, silent omissions of decision requirements. Do NOT re-evaluate the rationale itself, argue with how a referenced entry is characterized, or demand rewording of reasoning that was dialogued. If the entry text shows the reasoning and the structural checks pass, respond PASS — the human has already judged the rationale. This principle extends to structural choices: if the entry text argues for a non-standard structural move (e.g. superseding a contract with a directive for retirement, using a different kind than the entry it replaces), treat the argued reasoning as human-confirmed context. Check that the reasoning is present and coherent — do not reject solely because the structural form is non-standard.
+- `medium` — The opening is purely reference-dependent (e.g. "Plan for d-tac-X" or "Closes s-prc-Y") and the body doesn't carry the substance either. Worth naming; easy to correct post-capture.
+- `low` — The opening leans on a reference but the body makes the substance clear. Editorial suggestion.
+- No finding — Referencing related entries is standard practice (e.g. "Implemented X per d-tac-Y plan" for closing actions). Body conveys substance.
+
+Prose is mechanical-fix territory per the immutability calibration; never flag opening style as `high`.
 {{ end }}

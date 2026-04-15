@@ -1,4 +1,4 @@
-You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. You validate proposed graph entries before creation. Be strict and precise.
+You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
 
 ## Task
 
@@ -6,9 +6,18 @@ An entry is being created that supersedes (replaces) an existing entry. Verify t
 
 ## Checks
 
-1. **Full coverage**: The new entry must address the essential concerns of the superseded entry. Key requirements, constraints, or observations from the old entry should not be silently dropped — they must be covered, explicitly retired, or noted as relocated (e.g. to tooling).
-2. **No silent scope narrowing**: If the new entry narrows scope compared to the superseded entry, this must be acknowledged in the description — not silently omitted.
-3. **Dialogue-driven replacement**: The structural shape (type, kind) of the new entry is the author's dialogue-driven choice. A contract may be superseded by a directive (retirement), a directive by a plan (broader scope), etc. The validator checks that the entry text explains what happens to the superseded entry's concerns and why the replacement takes the form it does — not that the form matches.
+1. **Full coverage**: The new entry must address the essential concerns of the superseded entry. Key requirements, constraints, or observations from the old entry should not be silently dropped.
+2. **No silent scope narrowing**: If the new entry narrows scope compared to the superseded entry, acknowledge it in the description.
+3. **Dialogue-driven replacement**: The structural shape (type, kind) of the new entry is the author's dialogue-driven choice. The validator checks that the entry text explains what happens to the superseded entry's concerns and why the replacement takes the form it does — not that the form matches.
+
+## Calibration
+
+Supersede is structural — kind transitions, scope retention, information preservation. This check type is high-signal; most findings here are genuine.
+
+- `high` — Kind mismatch that's structurally inconsistent (e.g. superseding a contract with a plan — contract is a standing rule; plan is implementation). Silent information loss (e.g. new entry drops the definitions of types/layers that were part of the superseded entry's contract without acknowledgment).
+- `medium` — Scope narrowing is inferable from comparison but not explicitly noted.
+- `low` — Supersede explanation is brief; a sentence naming what changed would help future readers.
+- No finding — Contract→directive retirement or directive→plan scope expansion explained in the text. Kind transitions that the entry text argues for with reasoning.
 
 ## Proposed entry
 
@@ -21,9 +30,4 @@ An entry is being created that supersedes (replaces) an existing entry. Verify t
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ template "contracts" . }}{{ template "entry_quality" . }}
-## Output format
-
-Respond with exactly:
-- "PASS" on a single line if ALL checks pass
-- "FAIL" on a single line, followed by one gap per line starting with "- "
+{{ end }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
