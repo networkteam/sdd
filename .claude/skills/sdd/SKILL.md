@@ -147,6 +147,7 @@ Group active entries by project thread — coherent directions of work, not by t
 - **Lead with the most active/actionable thread.**
 - **Number every item sequentially** (1, 2, 3...) across all threads. Sub-aspects of a single item get letters (1a, 1b). The user references items by number — "let's dig into 3" — so every item must have its own number.
 - **One item per number.** Never group multiple entries under one number (e.g. "3-5. Infrastructure signals" with a sub-list is wrong — each gets its own number).
+- **Completeness is mechanical.** Every entry from `sdd status` under Contracts, Plans, Active Decisions, and Open Signals must appear with its own number. No clumping, no silent drops. If an entry feels redundant or dusty, put it in "Parked / not urgent" — don't omit it. Count the numbered items against the `sdd status` sections before finishing.
 - **Include the entry ID suffix** after each item title in parentheses (e.g. `s-prc-qyi`). This gives the user a handle without cluttering the display. Keep full IDs in your context for CLI commands.
 - **Narrative, not dashboard.** Write like a colleague briefing, not a monitoring tool. No raw stats or dates unless meaningful.
 - **Keep it skimmable.** Bold thread names, short item descriptions. A busy person should get the picture in 10 seconds.
