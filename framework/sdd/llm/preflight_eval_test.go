@@ -265,6 +265,63 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 	}
 }
 
+func TestPreflightEval_ActionClosesSignal_NoDurableArtifact(t *testing.T) {
+	// Action closes a signal claiming work was done but references no durable
+	// artifact — no commit, no attachment, no upstream attachment. This is the
+	// regression case: the durability check was missing from
+	// action_closes_signals.tmpl. Expected: high.
+	signal := &model.Entry{
+		ID:         "20260416-120000-s-prc-aaa",
+		Type:       model.TypeSignal,
+		Layer:      model.LayerProcess,
+		Confidence: "high",
+		Content:    "Catch-up should treat WIP markers as informational context, not continuation suggestions.",
+		Time:       time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{signal})
+
+	proposed := &model.Entry{
+		Type:   model.TypeAction,
+		Layer:  model.LayerProcess,
+		Closes: []string{signal.ID},
+		Content: "Updated the catch-up playbook and catch-up sub-skill to treat WIP markers as informational context. Fresh sessions no longer suggest picking up WIP work.",
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if !result.HasBlocking() {
+		t.Errorf("Expected at least one high finding (no durable artifact referenced), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly flagged missing durability. Findings: %+v", result.Findings)
+	}
+}
+
+func TestPreflightEval_ActionClosesSignal_WithCommitRef(t *testing.T) {
+	// Same action but references a commit. Expected: no high.
+	signal := &model.Entry{
+		ID:         "20260416-120000-s-prc-aaa",
+		Type:       model.TypeSignal,
+		Layer:      model.LayerProcess,
+		Confidence: "high",
+		Content:    "Catch-up should treat WIP markers as informational context, not continuation suggestions.",
+		Time:       time.Date(2026, 4, 16, 12, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{signal})
+
+	proposed := &model.Entry{
+		Type:   model.TypeAction,
+		Layer:  model.LayerProcess,
+		Closes: []string{signal.ID},
+		Content: "Updated the catch-up playbook and catch-up sub-skill to treat WIP markers as informational context. Fresh sessions no longer suggest picking up WIP work. Commit adebd7e.",
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if result.HasBlocking() {
+		t.Errorf("Expected no high findings (commit reference provides durability), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly passed with commit reference. Findings: %+v", result.Findings)
+	}
+}
+
 func TestPreflightEval_ContractViolation(t *testing.T) {
 	// Decision at tactical layer with no refs, while an active contract
 	// requires refs on all tactical-or-below decisions. Per the new
