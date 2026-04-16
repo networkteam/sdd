@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/networkteam/slogutils"
+
 	"github.com/networkteam/resonance/framework/sdd/command"
 	"github.com/networkteam/resonance/framework/sdd/llm"
 	"github.com/networkteam/resonance/framework/sdd/model"
@@ -79,30 +83,66 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		return fmt.Errorf("validation failed: %d issue(s)", len(entry.Warnings))
 	}
 
-	// Pre-flight validation (skipped or dispatched to the finder).
+	// Pre-flight and summary are independent LLM calls. Run them
+	// concurrently via errgroup to save 30-60s of wall time per entry.
+	// The errgroup context cancels the summary if pre-flight errors out
+	// (timeout, LLM failure). Blocking findings are not group errors —
+	// the main goroutine handles display and rejection after Wait.
+	g, gctx := errgroup.WithContext(ctx)
+
+	var pfResult *query.PreflightResult
+	var pfErr error
+
 	if cmd.SkipPreflight {
 		entry.Preflight = "skipped"
-		fmt.Fprintf(h.stderr, "warning: pre-flight validation skipped\n")
 	} else {
-		timeout := cmd.PreflightTimeout
-		if timeout == 0 {
-			timeout = 120 * time.Second
-		}
-		pctx, cancel := context.WithTimeout(ctx, timeout)
-		defer cancel()
-		result, err := h.reader.Preflight(pctx, query.PreflightQuery{
-			Entry:   entry,
-			Graph:   graph,
-			Model:   cmd.PreflightModel,
-			Timeout: timeout,
+		g.Go(func() error {
+			timeout := cmd.PreflightTimeout
+			if timeout == 0 {
+				timeout = 120 * time.Second
+			}
+			pctx, cancel := context.WithTimeout(gctx, timeout)
+			defer cancel()
+			result, err := h.reader.Preflight(pctx, query.PreflightQuery{
+				Entry:   entry,
+				Graph:   graph,
+				Model:   cmd.PreflightModel,
+				Timeout: timeout,
+			})
+			pfResult = result
+			pfErr = err
+			// Propagate hard errors to cancel the group context (and the
+			// summary goroutine). Blocking findings are handled after Wait.
+			return err
 		})
-		if err != nil {
-			return fmt.Errorf("pre-flight error: %w (use --skip-preflight to bypass)", err)
-		}
-		// Always display findings — medium/low are informational signal,
-		// not suppressed — but only block when severity warrants it.
+	}
+
+	var sumResult *llm.SummarizeResult
+
+	if !cmd.DryRun && h.llmRunner != nil {
+		g.Go(func() error {
+			sctx, scancel := context.WithTimeout(gctx, 60*time.Second)
+			defer scancel()
+			result, err := llm.Summarize(sctx, h.llmRunner, entry, graph, true)
+			if err != nil {
+				slogutils.FromContext(gctx).Warn("summary generation failed", "err", err)
+				return nil // non-fatal: entry is valid without a summary
+			}
+			sumResult = result
+			return nil
+		})
+	}
+
+	_ = g.Wait() // error comes from pre-flight; handled below via pfErr
+
+	// Process pre-flight results on the main goroutine (no concurrent stderr writes).
+	if cmd.SkipPreflight {
+		fmt.Fprintf(h.stderr, "warning: pre-flight validation skipped\n")
+	} else if pfErr != nil {
+		return fmt.Errorf("pre-flight error: %w (use --skip-preflight to bypass)", pfErr)
+	} else {
 		blocking := 0
-		for _, f := range result.Findings {
+		for _, f := range pfResult.Findings {
 			fmt.Fprintf(h.stderr, "  [%s] %s: %s\n", f.Severity, f.Category, f.Observation)
 			if f.Severity == query.SeverityHigh {
 				blocking++
@@ -120,18 +160,10 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		return nil
 	}
 
-	// Generate summary if an LLM runner is available.
-	if h.llmRunner != nil {
-		sTimeout := 60 * time.Second
-		sctx, scancel := context.WithTimeout(ctx, sTimeout)
-		result, err := llm.Summarize(sctx, h.llmRunner, entry, graph, true)
-		scancel()
-		if err != nil {
-			fmt.Fprintf(h.stderr, "warning: summary generation failed: %v\n", err)
-		} else if result != nil {
-			entry.Summary = result.Summary
-			entry.SummaryHash = result.SummaryHash
-		}
+	// Apply summary from the concurrent goroutine.
+	if sumResult != nil {
+		entry.Summary = sumResult.Summary
+		entry.SummaryHash = sumResult.SummaryHash
 	}
 
 	// Write entry file.

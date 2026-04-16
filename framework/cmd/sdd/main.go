@@ -313,10 +313,10 @@ func newCmd() *cli.Command {
 				Usage: "Model to use for pre-flight validation",
 				Value: "claude-haiku-4-5-20251001",
 			},
-			&cli.IntFlag{
+			&cli.DurationFlag{
 				Name:  "preflight-timeout",
-				Usage: "Timeout in seconds for pre-flight validation",
-				Value: 120,
+				Usage: "Timeout for pre-flight validation (e.g. 120s, 2m)",
+				Value: 120 * time.Second,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -393,7 +393,7 @@ func newCmd() *cli.Command {
 				SkipPreflight:    cmd.Bool("skip-preflight"),
 				DryRun:           cmd.Bool("dry-run"),
 				PreflightModel:   cmd.String("preflight-model"),
-				PreflightTimeout: time.Duration(cmd.Int("preflight-timeout")) * time.Second,
+				PreflightTimeout: cmd.Duration("preflight-timeout"),
 				OnNewEntry: func(id string) {
 					fmt.Println(id + ".md")
 					if rel, err := model.IDToRelPath(id); err == nil {
@@ -478,10 +478,10 @@ func summarizeCmd() *cli.Command {
 				Usage: "Model to use for summary generation",
 				Value: "claude-haiku-4-5-20251001",
 			},
-			&cli.IntFlag{
+			&cli.DurationFlag{
 				Name:  "timeout",
-				Usage: "Timeout in seconds per summary generation",
-				Value: 60,
+				Usage: "Timeout per summary generation (e.g. 60s, 1m)",
+				Value: 60 * time.Second,
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -496,7 +496,7 @@ func summarizeCmd() *cli.Command {
 				EntryIDs: ids,
 				Force:    cmd.Bool("force"),
 				Model:    cmd.String("model"),
-				Timeout:  time.Duration(cmd.Int("timeout")) * time.Second,
+				Timeout:  cmd.Duration("timeout"),
 				OnSummarized: func(id, summary string) {
 					fmt.Fprintf(os.Stderr, "  summarized %s\n", id)
 				},
