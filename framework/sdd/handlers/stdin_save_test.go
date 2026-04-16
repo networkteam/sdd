@@ -16,10 +16,9 @@ func TestSaveStdinAttachment(t *testing.T) {
 		t.Fatalf("saveStdinAttachment: %v", err)
 	}
 
-	// Path lives under <graph-dir>/.sdd-tmp/
-	wantDir := filepath.Join(tmp, stdinSaveDir)
-	if filepath.Dir(path) != wantDir {
-		t.Errorf("saved under %q, want under %q", filepath.Dir(path), wantDir)
+	// Path lives directly under the provided tmpDir.
+	if filepath.Dir(path) != tmp {
+		t.Errorf("saved under %q, want under %q", filepath.Dir(path), tmp)
 	}
 
 	// Filename: <hash>-<target>, hash is 8 hex chars

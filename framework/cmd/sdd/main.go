@@ -11,10 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/networkteam/resonance/framework/sdd/command"
 	"github.com/networkteam/resonance/framework/sdd/finders"
 	"github.com/networkteam/resonance/framework/sdd/handlers"
 	"github.com/networkteam/resonance/framework/sdd/llm/claude"
+	"github.com/networkteam/resonance/framework/sdd/meta"
 	"github.com/networkteam/resonance/framework/sdd/model"
 	"github.com/networkteam/resonance/framework/sdd/presenters"
 	"github.com/networkteam/resonance/framework/sdd/query"
@@ -83,8 +86,7 @@ func main() {
 			&cli.StringFlag{
 				Name:    "graph-dir",
 				Aliases: []string{"d"},
-				Usage:   "Path to graph directory",
-				Value:   "docs/framework/graph",
+				Usage:   "Override graph directory (auto-discovered from .sdd/config.yaml)",
 			},
 			&cli.BoolFlag{
 				Name:    "verbose",
@@ -111,6 +113,7 @@ func main() {
 			return slogutils.WithLogger(ctx, logger), nil
 		},
 		Commands: []*cli.Command{
+			initCmd(),
 			statusCmd(),
 			showCmd(),
 			listCmd(),
@@ -129,7 +132,11 @@ func main() {
 }
 
 func loadGraph(cmd *cli.Command) (*model.Graph, error) {
-	return newFinder("").LoadGraph(graphDir(cmd))
+	dir, err := resolveGraphDir(cmd)
+	if err != nil {
+		return nil, err
+	}
+	return newFinder("").LoadGraph(dir)
 }
 
 func statusCmd() *cli.Command {
@@ -353,9 +360,13 @@ func newCmd() *cli.Command {
 				description = "[TODO: describe this " + string(typ) + "]"
 			}
 
-			dir := cmd.String("graph-dir")
-			if !filepath.IsAbs(dir) {
-				dir, _ = filepath.Abs(dir)
+			dir, err := resolveGraphDir(cmd)
+			if err != nil {
+				return err
+			}
+			sddDir, err := resolveSDDDir()
+			if err != nil {
+				return err
 			}
 
 			// Parse attachment specs into command.Attachment values. For stdin,
@@ -405,6 +416,7 @@ func newCmd() *cli.Command {
 			finder := newFinder(cmd.String("preflight-model"))
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
+				SDDDir:    sddDir,
 				Reader:    finder,
 				LLMRunner: claude.NewRunner(cmd.String("preflight-model")),
 				Committer: gitCommitterFunc(gitCommit),
@@ -424,6 +436,10 @@ func lintCmd() *cli.Command {
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if cmd.Bool("fix") {
+				dir, err := resolveGraphDir(cmd)
+				if err != nil {
+					return err
+				}
 				fixCmd := &command.LintFixCmd{
 					OnFixed: func(id string, fixes []string) {
 						for _, f := range fixes {
@@ -432,7 +448,7 @@ func lintCmd() *cli.Command {
 					},
 				}
 				handler := handlers.New(handlers.Options{
-					GraphDir:  graphDir(cmd),
+					GraphDir:  dir,
 					Reader:    newFinder(""),
 					Committer: gitCommitterFunc(gitCommit),
 				})
@@ -505,8 +521,12 @@ func summarizeCmd() *cli.Command {
 				},
 			}
 
+			dir, err := resolveGraphDir(cmd)
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
-				GraphDir:  graphDir(cmd),
+				GraphDir:  dir,
 				Reader:    newFinder(cmd.String("model")),
 				LLMRunner: claude.NewRunner(cmd.String("model")),
 				Committer: gitCommitterFunc(gitCommit),
@@ -548,12 +568,173 @@ func isBranchMerged(branch string) bool {
 	return false
 }
 
-func graphDir(cmd *cli.Command) string {
-	dir := cmd.String("graph-dir")
-	if !filepath.IsAbs(dir) {
-		dir, _ = filepath.Abs(dir)
+// resolveGraphDir determines the graph directory from the --graph-dir flag
+// or by discovering .sdd/config.yaml. Errors if neither is available.
+func resolveGraphDir(cmd *cli.Command) (string, error) {
+	// Explicit flag takes priority.
+	if dir := cmd.String("graph-dir"); dir != "" {
+		if !filepath.IsAbs(dir) {
+			dir, _ = filepath.Abs(dir)
+		}
+		return dir, nil
 	}
-	return dir
+
+	// Auto-discover from .sdd/config.yaml.
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getting working directory: %w", err)
+	}
+	repoRoot := meta.DiscoverRoot(cwd)
+	if repoRoot == "" {
+		return "", fmt.Errorf("no .sdd/ directory found; run 'sdd init' first")
+	}
+	sddDir := meta.SDDDir(repoRoot)
+	cfg, err := meta.ReadConfig(sddDir)
+	if err != nil {
+		return "", fmt.Errorf("reading .sdd/config.yaml: %w", err)
+	}
+	return meta.ResolveGraphDir(repoRoot, cfg), nil
+}
+
+// resolveSDDDir discovers the .sdd/ directory by walking up from cwd.
+// Errors if not found.
+func resolveSDDDir() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("getting working directory: %w", err)
+	}
+	repoRoot := meta.DiscoverRoot(cwd)
+	if repoRoot == "" {
+		return "", fmt.Errorf("no .sdd/ directory found; run 'sdd init' first")
+	}
+	return meta.SDDDir(repoRoot), nil
+}
+
+// findRepoRoot returns the git repository root, falling back to cwd.
+func findRepoRoot() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return os.Getwd()
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// graphDirPromptModel is a bubbletea model for the graph directory prompt.
+type graphDirPromptModel struct {
+	textInput textinput.Model
+	done      bool
+}
+
+func newGraphDirPromptModel(defaultValue string) graphDirPromptModel {
+	ti := textinput.New()
+	ti.Placeholder = defaultValue
+	ti.Focus()
+	ti.Width = 60
+	return graphDirPromptModel{textInput: ti}
+}
+
+func (m graphDirPromptModel) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m graphDirPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.done = true
+			return m, tea.Quit
+		case tea.KeyCtrlC, tea.KeyEsc:
+			return m, tea.Quit
+		}
+	}
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m graphDirPromptModel) View() string {
+	return fmt.Sprintf("Graph directory (relative to repo root) [%s]: %s",
+		m.textInput.Placeholder, m.textInput.View())
+}
+
+// promptGraphDir runs an interactive prompt for the graph directory.
+func promptGraphDir(defaultValue string) (string, error) {
+	m := newGraphDirPromptModel(defaultValue)
+	p := tea.NewProgram(m)
+	result, err := p.Run()
+	if err != nil {
+		return "", err
+	}
+	final := result.(graphDirPromptModel)
+	if !final.done {
+		return "", fmt.Errorf("prompt cancelled")
+	}
+	value := strings.TrimSpace(final.textInput.Value())
+	if value == "" {
+		return defaultValue, nil
+	}
+	return value, nil
+}
+
+// isTerminal returns true if the given file descriptor is a terminal.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+func initCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "init",
+		Usage: "Initialize .sdd/ metadata directory",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "graph-dir",
+				Usage: "Graph directory relative to repo root",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			repoRoot, err := findRepoRoot()
+			if err != nil {
+				return fmt.Errorf("finding repo root: %w", err)
+			}
+
+			graphDir := cmd.String("graph-dir")
+			if graphDir == "" && isTerminal(os.Stdin) {
+				prompted, err := promptGraphDir(model.DefaultGraphDir)
+				if err != nil {
+					return fmt.Errorf("prompt: %w", err)
+				}
+				graphDir = prompted
+			}
+			if graphDir == "" {
+				graphDir = model.DefaultGraphDir
+			}
+
+			icmd := &command.InitCmd{
+				RepoRoot: repoRoot,
+				GraphDir: graphDir,
+				OnCreated: func(sddDir, absGraphDir string) {
+					fmt.Printf("created %s\n", sddDir)
+					fmt.Printf("  graph: %s\n", absGraphDir)
+				},
+				OnMigrated: func(count int) {
+					fmt.Fprintf(os.Stderr, "  migrated %d file(s) from .sdd-tmp/\n", count)
+				},
+				OnGitignoreUpdated: func(path string) {
+					fmt.Fprintf(os.Stderr, "  updated %s\n", path)
+				},
+			}
+
+			handler := handlers.New(handlers.Options{
+				Committer: gitCommitterFunc(gitCommit),
+			})
+			return handler.Init(ctx, icmd)
+		},
+	}
 }
 
 func wipCmd() *cli.Command {
@@ -612,8 +793,12 @@ func wipStartCmd() *cli.Command {
 				},
 			}
 
+			dir, err := resolveGraphDir(cmd)
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
-				GraphDir:  graphDir(cmd),
+				GraphDir:  dir,
 				Reader:    newFinder(""),
 				Committer: gitCommitterFunc(gitCommit),
 				Brancher:  gitBrancher{},
@@ -659,8 +844,12 @@ func wipDoneCmd() *cli.Command {
 				},
 			}
 
+			dir, err := resolveGraphDir(cmd)
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
-				GraphDir:  graphDir(cmd),
+				GraphDir:  dir,
 				Reader:    newFinder(""),
 				Committer: gitCommitterFunc(gitRemoveAndCommit),
 				Brancher:  gitBrancher{},
@@ -696,7 +885,11 @@ func wipListCmd() *cli.Command {
 		Name:  "list",
 		Usage: "List all active WIP markers",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			result, err := newFinder("").WIPList(query.WIPListQuery{GraphDir: graphDir(cmd)})
+			dir, err := resolveGraphDir(cmd)
+			if err != nil {
+				return err
+			}
+			result, err := newFinder("").WIPList(query.WIPListQuery{GraphDir: dir})
 			if err != nil {
 				return fmt.Errorf("loading WIP markers: %w", err)
 			}

@@ -57,11 +57,14 @@ func (r *recordingCommitter) Commit(message string, paths ...string) error {
 // the plan's "save on every dry-run (pass or fail)" spec.
 func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	os.MkdirAll(sddDir, 0755)
 	stderr := &bytes.Buffer{}
 	committer := &recordingCommitter{}
 
 	h := handlers.New(handlers.Options{
 		GraphDir:  tmp,
+		SDDDir:    sddDir,
 		Reader:    &fakeReader{},
 		Committer: committer,
 		Stderr:    stderr,
@@ -92,13 +95,13 @@ func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 	}
 
 	// The regression: on dry-run + validation failure, stdin MUST be saved.
-	saveDir := filepath.Join(tmp, ".sdd-tmp")
+	saveDir := filepath.Join(sddDir, "tmp")
 	entries, err := os.ReadDir(saveDir)
 	if err != nil {
-		t.Fatalf(".sdd-tmp/ should exist after dry-run + stdin: %v", err)
+		t.Fatalf(".sdd/tmp/ should exist after dry-run + stdin: %v", err)
 	}
 	if len(entries) != 1 {
-		t.Fatalf(".sdd-tmp/ should contain 1 file, got %d", len(entries))
+		t.Fatalf(".sdd/tmp/ should contain 1 file, got %d", len(entries))
 	}
 
 	saved := entries[0].Name()
@@ -132,10 +135,13 @@ func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 // (the defer + explicit post-pre-flight call are idempotent).
 func TestNewEntry_DryRun_Pass_SavesStdinOnce(t *testing.T) {
 	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	os.MkdirAll(sddDir, 0755)
 	stderr := &bytes.Buffer{}
 
 	h := handlers.New(handlers.Options{
 		GraphDir: tmp,
+		SDDDir:   sddDir,
 		Reader:   &fakeReader{},
 		Stderr:   stderr,
 	})
@@ -155,13 +161,13 @@ func TestNewEntry_DryRun_Pass_SavesStdinOnce(t *testing.T) {
 		t.Fatalf("NewEntry: %v", err)
 	}
 
-	saveDir := filepath.Join(tmp, ".sdd-tmp")
+	saveDir := filepath.Join(sddDir, "tmp")
 	entries, err := os.ReadDir(saveDir)
 	if err != nil {
-		t.Fatalf(".sdd-tmp/ should exist: %v", err)
+		t.Fatalf(".sdd/tmp/ should exist: %v", err)
 	}
 	if len(entries) != 1 {
-		t.Fatalf(".sdd-tmp/ should contain 1 file, got %d", len(entries))
+		t.Fatalf(".sdd/tmp/ should contain 1 file, got %d", len(entries))
 	}
 
 	// The save message should appear exactly once (idempotency).
@@ -174,10 +180,13 @@ func TestNewEntry_DryRun_Pass_SavesStdinOnce(t *testing.T) {
 // stdin gets saved for re-piping even when the user didn't ask for --dry-run.
 func TestNewEntry_PreflightReject_SavesStdin(t *testing.T) {
 	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	os.MkdirAll(sddDir, 0755)
 	stderr := &bytes.Buffer{}
 
 	h := handlers.New(handlers.Options{
 		GraphDir: tmp,
+		SDDDir:   sddDir,
 		Reader: &fakeReader{
 			preflightResult: &query.PreflightResult{Findings: []query.Finding{
 				{Severity: query.SeverityHigh, Category: "missing-ref", Observation: "missing ref"},
@@ -203,13 +212,13 @@ func TestNewEntry_PreflightReject_SavesStdin(t *testing.T) {
 		t.Errorf("error = %v, want pre-flight rejection", err)
 	}
 
-	saveDir := filepath.Join(tmp, ".sdd-tmp")
+	saveDir := filepath.Join(sddDir, "tmp")
 	if _, err := os.Stat(saveDir); err != nil {
-		t.Fatalf(".sdd-tmp/ should exist after rejection: %v", err)
+		t.Fatalf(".sdd/tmp/ should exist after rejection: %v", err)
 	}
 	entries, err := os.ReadDir(saveDir)
 	if err != nil || len(entries) != 1 {
-		t.Fatalf(".sdd-tmp/ should contain 1 file; err=%v, entries=%v", err, entries)
+		t.Fatalf(".sdd/tmp/ should contain 1 file; err=%v, entries=%v", err, entries)
 	}
 	if !strings.Contains(stderr.String(), "stdin attachment saved (pre-flight rejected)") {
 		t.Errorf("stderr should announce the pre-flight save, got:\n%s", stderr.String())

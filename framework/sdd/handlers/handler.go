@@ -46,6 +46,7 @@ type Brancher interface {
 // (handler_new_entry.go, etc.).
 type Handler struct {
 	graphDir  string
+	sddDir    string // path to .sdd/ directory; required for commands that write tmp files
 	reader    Reader
 	llmRunner llm.Runner
 	committer Committer
@@ -57,6 +58,7 @@ type Handler struct {
 // Options configures a new Handler. Zero-valued fields get sensible defaults.
 type Options struct {
 	GraphDir  string
+	SDDDir    string // path to .sdd/ directory; required for commands that write tmp files
 	Reader    Reader
 	LLMRunner llm.Runner
 	Committer Committer
@@ -69,6 +71,7 @@ type Options struct {
 func New(opts Options) *Handler {
 	h := &Handler{
 		graphDir:  opts.GraphDir,
+		sddDir:    opts.SDDDir,
 		reader:    opts.Reader,
 		llmRunner: opts.LLMRunner,
 		committer: opts.Committer,

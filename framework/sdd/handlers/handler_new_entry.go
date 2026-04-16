@@ -41,7 +41,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 			return
 		}
 		stdinSaved = true
-		path, err := saveStdinAttachment(h.graphDir, stdinAtt.Target, stdinAtt.Data)
+		path, err := saveStdinAttachment(h.stdinTmpDir(), stdinAtt.Target, stdinAtt.Data)
 		if err != nil {
 			fmt.Fprintf(h.stderr, "warning: could not save stdin attachment: %v\n", err)
 			return

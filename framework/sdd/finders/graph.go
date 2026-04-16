@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/networkteam/resonance/framework/sdd/meta"
 	"github.com/networkteam/resonance/framework/sdd/model"
 )
 
@@ -19,6 +20,9 @@ func (f *Finder) LoadGraph(dir string) (*model.Graph, error) {
 			return err
 		}
 		if model.IsWIPDir(d) {
+			return fs.SkipDir
+		}
+		if meta.IsSDDMetaDir(d) {
 			return fs.SkipDir
 		}
 		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
