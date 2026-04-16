@@ -13,7 +13,7 @@ If you haven't read the framework reference files in this session, read them now
 - [Meta process](references/meta-process.md) — modes of working, capture guidelines, session protocol
 - [CLI reference](references/cli-reference.md) — command syntax, flags, attachments
 
-Then invoke the `/sdd-catchup` skill to get a synthesized summary of the current graph state. Present it using the Catch-up Playbook and suggest where to start.
+Then run `sdd status` and `sdd wip list` to read the current graph state. Cluster and present using the Catch-up Playbook, then suggest where to start.
 
 ## How you behave
 
@@ -108,7 +108,7 @@ Since you always present proposed entries for confirmation before running `sdd n
 
 You don't ask "which mode?" — you read the situation and act accordingly. These describe how you behave in different contexts:
 
-**Check-in**: User starts a session or says "where are we?" Invoke `/sdd-catchup` for a fresh summary. Present it using the Catch-up Playbook below and suggest where to start. Don't suggest continuing active WIP work — assume it's being handled in another session.
+**Check-in**: User starts a session or says "where are we?" Run `sdd status` and `sdd wip list` to read the graph state. Cluster and present using the Catch-up Playbook below, then suggest where to start. Don't suggest continuing active WIP work — assume it's being handled in another session.
 
 **Capture**: User shares an observation, insight, or finding. Dialogue first — play back what you'd capture, confirm, then record. Could be a signal (observation), decision (commitment), or action (something done).
 
@@ -130,11 +130,19 @@ When running catch-up or status, if you notice several older open entries (3+ en
 
 ## Catch-up Playbook
 
-The `/sdd-catchup` sub-skill returns structured blocks per item, grouped by thread, with full entry IDs and context. Present a skimmable summary for the user:
+For a check-in, use only `sdd status` and `sdd wip list` — do not call `sdd show` or any other lookup. The status output has summaries; the WIP list has active markers. That is the entire input.
+
+### What the CLI gives you
+
+Every entry shown in `sdd status` under Contracts, Plans, Active Decisions, or Open Signals is active/open by construction — the CLI filters out closed and superseded entries. Do not emit a per-entry Status field, lifecycle label, or "closed / in progress / implemented" commentary — membership in a section *is* the status. The only explicit state surfaced in the catch-up is WIP (from `sdd wip list`). Recent Actions are events, not states — use them for context (what just landed, what unblocked what).
+
+### Clustering
+
+Group active entries by project thread — coherent directions of work, not by type or layer. Lead with the thread that has the most recent activity, a live WIP marker, or something the user has been dialoguing about this session. Threads the graph encodes but nothing is moving on go to "Parked."
 
 ### Formatting
 
-- **Keep the thread grouping and narratives** from the sub-skill. Lead with the most active/actionable thread.
+- **Lead with the most active/actionable thread.**
 - **Number every item sequentially** (1, 2, 3...) across all threads. Sub-aspects of a single item get letters (1a, 1b). The user references items by number — "let's dig into 3" — so every item must have its own number.
 - **One item per number.** Never group multiple entries under one number (e.g. "3-5. Infrastructure signals" with a sub-list is wrong — each gets its own number).
 - **Include the entry ID suffix** after each item title in parentheses (e.g. `s-prc-qyi`). This gives the user a handle without cluttering the display. Keep full IDs in your context for CLI commands.
