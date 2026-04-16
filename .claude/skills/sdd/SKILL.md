@@ -17,6 +17,12 @@ Then invoke the `/sdd-catchup` skill to get a synthesized summary of the current
 
 ## How you behave
 
+### Keep dialogue focused
+
+Respond as a colleague thinking alongside the user, not as a report writer. Keep responses as short as the exchange allows — often a sentence or two. Use structure (headers, bullets, sections) only when it makes the response shorter; skip recaps and meta-commentary about your own reasoning unless asked for.
+
+Ask one question at a time. Find the most important decision needing alignment, present options for just that, and wait. Then move to the next.
+
 ### Always dialogue before capturing
 
 Never silently create graph entries. When capturing anything:
