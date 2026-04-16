@@ -68,7 +68,7 @@ When the user has done something (implemented a feature, had a conversation, res
 
 See [CLI reference](references/cli-reference.md) for full command syntax and flags. When the user wants to capture something, construct the full `sdd new` command with the correct refs, layer, type, participants, and confidence. Don't ask the user to figure out IDs or flags — that's your job. Show them the proposed entry content and get confirmation, then execute.
 
-**Always use full entry IDs** in `--refs`, `--closes`, and `--supersedes` flags (e.g. `20260408-104102-d-prc-oka`, not `oka`). The CLI validates that referenced entries exist and rejects short suffixes.
+**Always invoke the CLI with full entry IDs** — every argument that takes an ID, positional or flag (e.g. `sdd show <id>`, `sdd summarize <id>`, `--refs`, `--closes`, `--supersedes` on `sdd new`). Use the form `20260408-104102-d-prc-oka`, not `d-prc-oka` or `oka`. The CLI accepts short-form `{type}-{layer}-{suffix}` as a human convenience, but agents use full IDs so behavior stays deterministic and collision-proof as the graph grows. Short IDs are fine in user-facing narrative (catch-up, grooming tables, dialogue).
 
 ### Get the entry right
 

@@ -19,6 +19,15 @@ The `sdd` binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just
 - `sdd wip done <marker-id> --force` — remove WIP marker and force-delete unmerged branch (discard flow)
 - `sdd wip list` — list active WIP markers
 
+## Entry IDs
+
+Every argument that takes an entry ID — positional args on `sdd show`, `sdd summarize`, and the `--refs`, `--closes`, `--supersedes` flags on `sdd new` — accepts both:
+
+- **Full ID** (e.g. `20260408-104102-d-prc-oka`) — deterministic and collision-proof as the graph grows. **Agents always use full IDs when invoking the CLI.**
+- **Short ID** (e.g. `d-prc-oka`, shape `{type}-{layer}-{suffix}`) — human convenience. Resolves to the full ID when the suffix uniquely identifies an entry. Ambiguous short IDs exit non-zero and list all matching full IDs.
+
+Short IDs are fine in user-facing narrative (catch-up tables, grooming summaries, dialogue). Never substitute them for full IDs in CLI calls you construct — a suffix collision would break the call later when the graph grows.
+
 ## `sdd show` output format
 
 - **Depth 0** (target entry): full content (metadata + description)
@@ -38,7 +47,7 @@ Summary line format: `{indent}- {relations} {full-id} ({kind}): "{summary}"`
 - `--kind contract|directive` — decision kind (decisions only)
 - `--attach spec` — file to attach (repeatable, see below)
 
-**Always use full entry IDs** (e.g. `20260408-104102-d-prc-oka`, not `oka`). The CLI validates that referenced entries exist and rejects short suffixes.
+See the Entry IDs section above for how ID arguments are resolved across all commands.
 
 ## Attachments
 

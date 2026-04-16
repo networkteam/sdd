@@ -16,14 +16,19 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 
 	maxDepth := q.MaxDepth
 
+	resolved, err := q.Graph.ResolveIDs(q.IDs)
+	if err != nil {
+		return nil, err
+	}
+
 	rendered := make(map[string]bool)
-	primaries := make(map[string]bool, len(q.IDs))
-	for _, id := range q.IDs {
+	primaries := make(map[string]bool, len(resolved))
+	for _, id := range resolved {
 		primaries[id] = true
 	}
 
-	groups := make([]query.ShowGroup, 0, len(q.IDs))
-	for _, id := range q.IDs {
+	groups := make([]query.ShowGroup, 0, len(resolved))
+	for _, id := range resolved {
 		if _, ok := q.Graph.ByID[id]; !ok {
 			return nil, fmt.Errorf("entry not found: %s", id)
 		}

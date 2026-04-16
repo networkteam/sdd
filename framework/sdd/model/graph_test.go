@@ -1042,6 +1042,184 @@ func TestLintNoAttachmentLinksNoWarning(t *testing.T) {
 	}
 }
 
+func TestResolveIDFullIDPassesThrough(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+	})
+
+	got, err := g.ResolveID("20260406-100000-s-stg-aaa")
+	if err != nil {
+		t.Fatalf("ResolveID full ID: %v", err)
+	}
+	if got != "20260406-100000-s-stg-aaa" {
+		t.Errorf("ResolveID = %q, want full ID unchanged", got)
+	}
+}
+
+func TestResolveIDFullIDNotInGraphPassesThrough(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+	})
+
+	// Full-shaped ID not present in graph — caller's existence check
+	// is what should surface the not-found error, not ResolveID.
+	got, err := g.ResolveID("20260406-100000-s-stg-zzz")
+	if err != nil {
+		t.Fatalf("ResolveID missing full ID: %v", err)
+	}
+	if got != "20260406-100000-s-stg-zzz" {
+		t.Errorf("ResolveID = %q, want missing full ID passed through", got)
+	}
+}
+
+func TestResolveIDShortFormUniqueMatch(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+		entry("20260406-100100-d-tac-bbb", withKind(KindDirective)),
+	})
+
+	got, err := g.ResolveID("d-tac-bbb")
+	if err != nil {
+		t.Fatalf("ResolveID short unique: %v", err)
+	}
+	if got != "20260406-100100-d-tac-bbb" {
+		t.Errorf("ResolveID = %q, want full ID", got)
+	}
+}
+
+func TestResolveIDShortFormAmbiguousErrors(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-xyz"),
+		entry("20260407-110000-s-stg-xyz"),
+	})
+
+	got, err := g.ResolveID("s-stg-xyz")
+	if err == nil {
+		t.Fatalf("ResolveID ambiguous: want error, got %q", got)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "ambiguous") {
+		t.Errorf("error should mention ambiguous, got: %s", msg)
+	}
+	if !strings.Contains(msg, "20260406-100000-s-stg-xyz") ||
+		!strings.Contains(msg, "20260407-110000-s-stg-xyz") {
+		t.Errorf("error should list all candidates, got: %s", msg)
+	}
+}
+
+func TestResolveIDShortFormNoMatchPassesThrough(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+	})
+
+	got, err := g.ResolveID("s-stg-zzz")
+	if err != nil {
+		t.Fatalf("ResolveID short no-match: %v", err)
+	}
+	if got != "s-stg-zzz" {
+		t.Errorf("ResolveID = %q, want input unchanged for zero matches", got)
+	}
+}
+
+func TestResolveIDShortFormUnknownTypeAbbrev(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+	})
+
+	// 'x' is not a valid type abbrev — treat as unresolvable, pass through.
+	got, err := g.ResolveID("x-stg-aaa")
+	if err != nil {
+		t.Fatalf("ResolveID bad type: %v", err)
+	}
+	if got != "x-stg-aaa" {
+		t.Errorf("ResolveID = %q, want input unchanged for unknown type abbrev", got)
+	}
+}
+
+func TestResolveIDShortFormUnknownLayerAbbrev(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+	})
+
+	got, err := g.ResolveID("s-xxx-aaa")
+	if err != nil {
+		t.Fatalf("ResolveID bad layer: %v", err)
+	}
+	if got != "s-xxx-aaa" {
+		t.Errorf("ResolveID = %q, want input unchanged for unknown layer abbrev", got)
+	}
+}
+
+func TestResolveIDEmptyString(t *testing.T) {
+	g := NewGraph([]*Entry{})
+	got, err := g.ResolveID("")
+	if err != nil {
+		t.Fatalf("ResolveID empty: %v", err)
+	}
+	if got != "" {
+		t.Errorf("ResolveID(\"\") = %q, want empty", got)
+	}
+}
+
+func TestResolveIDSingleSegmentPassesThrough(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+	})
+
+	// "aaa" has no dashes — not a recognized short form; caller surfaces not-found.
+	got, err := g.ResolveID("aaa")
+	if err != nil {
+		t.Fatalf("ResolveID suffix-only: %v", err)
+	}
+	if got != "aaa" {
+		t.Errorf("ResolveID = %q, want input unchanged (suffix-only not supported)", got)
+	}
+}
+
+func TestResolveIDsAllFullIDs(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+		entry("20260406-100100-d-tac-bbb", withKind(KindDirective)),
+	})
+
+	ids := []string{"20260406-100000-s-stg-aaa", "20260406-100100-d-tac-bbb"}
+	got, err := g.ResolveIDs(ids)
+	if err != nil {
+		t.Fatalf("ResolveIDs: %v", err)
+	}
+	if !slices.Equal(got, ids) {
+		t.Errorf("ResolveIDs = %v, want %v", got, ids)
+	}
+}
+
+func TestResolveIDsMixedShortAndFull(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa"),
+		entry("20260406-100100-d-tac-bbb", withKind(KindDirective)),
+	})
+
+	got, err := g.ResolveIDs([]string{"s-stg-aaa", "20260406-100100-d-tac-bbb"})
+	if err != nil {
+		t.Fatalf("ResolveIDs: %v", err)
+	}
+	want := []string{"20260406-100000-s-stg-aaa", "20260406-100100-d-tac-bbb"}
+	if !slices.Equal(got, want) {
+		t.Errorf("ResolveIDs = %v, want %v", got, want)
+	}
+}
+
+func TestResolveIDsPropagatesAmbiguousError(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-xyz"),
+		entry("20260407-110000-s-stg-xyz"),
+	})
+
+	_, err := g.ResolveIDs([]string{"s-stg-xyz"})
+	if err == nil {
+		t.Fatal("ResolveIDs: want error for ambiguous short ID")
+	}
+}
+
 // --- test helpers ---
 
 func entryIDs(entries []*Entry) []string {

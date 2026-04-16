@@ -338,6 +338,72 @@ func (g *Graph) TopologicalOrder() []*Entry {
 	return ordered
 }
 
+// ResolveID resolves a user-supplied ID string (full or short form) to a
+// full entry ID. Full IDs pass through unchanged. Short form
+// {type}-{layer}-{suffix} is matched against entries; a unique match
+// returns the full ID, ambiguous matches return an error listing all
+// candidates (sorted). Inputs that do not recognize as either shape,
+// that use unknown type or layer abbreviations, or that match zero
+// entries pass through unchanged so the caller's existing
+// "entry not found" surface fires against the user's original text.
+func (g *Graph) ResolveID(input string) (string, error) {
+	if input == "" {
+		return "", nil
+	}
+	if _, err := ParseID(input); err == nil {
+		return input, nil
+	}
+	parts := strings.SplitN(input, "-", 3)
+	if len(parts) != 3 || parts[2] == "" {
+		return input, nil
+	}
+	typeCode, layerCode, suffix := parts[0], parts[1], parts[2]
+	if _, ok := TypeFromAbbrev[typeCode]; !ok {
+		return input, nil
+	}
+	if _, ok := LayerFromAbbrev[layerCode]; !ok {
+		return input, nil
+	}
+	var matches []string
+	for _, e := range g.Entries {
+		p, err := ParseID(e.ID)
+		if err != nil {
+			continue
+		}
+		if p.TypeCode == typeCode && p.LayerCode == layerCode && p.Suffix == suffix {
+			matches = append(matches, e.ID)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return input, nil
+	case 1:
+		return matches[0], nil
+	default:
+		sort.Strings(matches)
+		return "", fmt.Errorf("ambiguous short ID %q matches %d entries:\n  %s",
+			input, len(matches), strings.Join(matches, "\n  "))
+	}
+}
+
+// ResolveIDs resolves a slice of user-supplied IDs. Ambiguous inputs
+// stop resolution and return the error; other inputs pass through the
+// same semantics as ResolveID.
+func (g *Graph) ResolveIDs(inputs []string) ([]string, error) {
+	if len(inputs) == 0 {
+		return inputs, nil
+	}
+	out := make([]string, len(inputs))
+	for i, in := range inputs {
+		resolved, err := g.ResolveID(in)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = resolved
+	}
+	return out, nil
+}
+
 // Lint returns all entries that have validation warnings.
 func (g *Graph) Lint() []*Entry {
 	var result []*Entry

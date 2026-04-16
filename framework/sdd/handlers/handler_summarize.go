@@ -25,7 +25,12 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 	// Determine which entries to process.
 	var entries []*model.Entry
 	if len(cmd.EntryIDs) > 0 {
-		for _, id := range cmd.EntryIDs {
+		resolvedIDs, err := graph.ResolveIDs(cmd.EntryIDs)
+		if err != nil {
+			return err
+		}
+		cmd.EntryIDs = resolvedIDs
+		for _, id := range resolvedIDs {
 			e, ok := graph.ByID[id]
 			if !ok {
 				return fmt.Errorf("entry not found: %s", id)

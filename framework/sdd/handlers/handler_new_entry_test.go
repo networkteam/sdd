@@ -224,3 +224,105 @@ func TestNewEntry_PreflightReject_SavesStdin(t *testing.T) {
 		t.Errorf("stderr should announce the pre-flight save, got:\n%s", stderr.String())
 	}
 }
+
+// testEntry is a minimal helper that builds an entry for seeding the test graph.
+// Parses type/layer from the ID so suffix-search resolution works the same way
+// it does against a real graph.
+func testEntry(id string) *model.Entry {
+	parts, err := model.ParseID(id)
+	if err != nil {
+		panic(err)
+	}
+	typ := model.TypeFromAbbrev[parts.TypeCode]
+	layer := model.LayerFromAbbrev[parts.LayerCode]
+	kind := model.Kind("")
+	if typ == model.TypeDecision {
+		kind = model.KindDirective
+	}
+	return &model.Entry{
+		ID:      id,
+		Type:    typ,
+		Layer:   layer,
+		Kind:    kind,
+		Content: id,
+		Time:    parts.Time,
+	}
+}
+
+// TestNewEntry_ResolvesShortRefs verifies that short-form IDs in --refs get
+// resolved to full IDs before validation. Without resolution the dangling-ref
+// check would surface a validation error for the short form; with it, the
+// entry passes validation against the existing full-ID entry.
+func TestNewEntry_ResolvesShortRefs(t *testing.T) {
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	os.MkdirAll(sddDir, 0755)
+	stderr := &bytes.Buffer{}
+
+	existing := testEntry("20260406-100000-s-stg-aaa")
+	graph := model.NewGraph([]*model.Entry{existing})
+
+	h := handlers.New(handlers.Options{
+		GraphDir: tmp,
+		SDDDir:   sddDir,
+		Reader:   &fakeReader{graph: graph},
+		Stderr:   stderr,
+	})
+
+	cmd := &command.NewEntryCmd{
+		Type:          model.TypeDecision,
+		Layer:         model.LayerTactical,
+		Kind:          model.KindDirective,
+		Description:   "new decision referencing short-form ID",
+		Refs:          []string{"s-stg-aaa"},
+		SkipPreflight: true,
+		DryRun:        true, // stop before writing; we only care about resolution + validation
+	}
+
+	if err := h.NewEntry(context.Background(), cmd); err != nil {
+		t.Fatalf("NewEntry: %v (short-form ref should resolve to an existing entry)", err)
+	}
+
+	// Stderr must not contain a validation-failure log about the short ref —
+	// the handler logs each Warning before returning the validation error.
+	if strings.Contains(stderr.String(), "dangling ref") {
+		t.Errorf("stderr reports a dangling ref; resolution did not happen:\n%s", stderr.String())
+	}
+}
+
+// TestNewEntry_AmbiguousShortRefErrors verifies that an ambiguous short-form
+// ref in --refs is surfaced as a hard error (no fallback to "first match").
+func TestNewEntry_AmbiguousShortRefErrors(t *testing.T) {
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	os.MkdirAll(sddDir, 0755)
+
+	graph := model.NewGraph([]*model.Entry{
+		testEntry("20260406-100000-s-stg-xyz"),
+		testEntry("20260407-110000-s-stg-xyz"),
+	})
+
+	h := handlers.New(handlers.Options{
+		GraphDir: tmp,
+		SDDDir:   sddDir,
+		Reader:   &fakeReader{graph: graph},
+	})
+
+	cmd := &command.NewEntryCmd{
+		Type:          model.TypeDecision,
+		Layer:         model.LayerTactical,
+		Kind:          model.KindDirective,
+		Description:   "decision with ambiguous short ref",
+		Refs:          []string{"s-stg-xyz"},
+		SkipPreflight: true,
+		DryRun:        true,
+	}
+
+	err := h.NewEntry(context.Background(), cmd)
+	if err == nil {
+		t.Fatal("NewEntry: want error for ambiguous short ID in refs")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("error = %v, want ambiguous message", err)
+	}
+}
