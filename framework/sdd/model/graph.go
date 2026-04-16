@@ -366,11 +366,14 @@ func (g *Graph) ResolveID(input string) (string, error) {
 	}
 	var matches []string
 	for _, e := range g.Entries {
+		if TypeAbbrev[e.Type] != typeCode || LayerAbbrev[e.Layer] != layerCode {
+			continue
+		}
 		p, err := ParseID(e.ID)
 		if err != nil {
 			continue
 		}
-		if p.TypeCode == typeCode && p.LayerCode == layerCode && p.Suffix == suffix {
+		if p.Suffix == suffix {
 			matches = append(matches, e.ID)
 		}
 	}
