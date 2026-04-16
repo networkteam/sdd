@@ -11,8 +11,12 @@ import (
 )
 
 // stdinTmpDir returns the directory for persisting rejected/dry-run stdin
-// attachments. Requires h.sddDir to be set (enforced at CLI level).
+// attachments. Panics if h.sddDir is not set — the CLI layer must enforce
+// .sdd/ discovery before constructing handlers that write tmp files.
 func (h *Handler) stdinTmpDir() string {
+	if h.sddDir == "" {
+		panic("sddDir not set: CLI must resolve .sdd/ before constructing handler")
+	}
 	return meta.TmpDir(h.sddDir)
 }
 
