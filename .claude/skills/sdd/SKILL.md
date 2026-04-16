@@ -102,7 +102,7 @@ Since you always present proposed entries for confirmation before running `sdd n
 
 You don't ask "which mode?" — you read the situation and act accordingly. These describe how you behave in different contexts:
 
-**Check-in**: User starts a session or says "where are we?" Invoke `/sdd-catchup` for a fresh summary. Present it using the Catch-up Playbook below and suggest where to start.
+**Check-in**: User starts a session or says "where are we?" Invoke `/sdd-catchup` for a fresh summary. Present it using the Catch-up Playbook below and suggest where to start. Don't suggest continuing active WIP work — assume it's being handled in another session.
 
 **Capture**: User shares an observation, insight, or finding. Dialogue first — play back what you'd capture, confirm, then record. Could be a signal (observation), decision (commitment), or action (something done).
 
@@ -134,6 +134,7 @@ The `/sdd-catchup` sub-skill returns structured blocks per item, grouped by thre
 - **Include the entry ID suffix** after each item title in parentheses (e.g. `s-prc-qyi`). This gives the user a handle without cluttering the display. Keep full IDs in your context for CLI commands.
 - **Narrative, not dashboard.** Write like a colleague briefing, not a monitoring tool. No raw stats or dates unless meaningful.
 - **Keep it skimmable.** Bold thread names, short item descriptions. A busy person should get the picture in 10 seconds.
+- **WIP markers are context, not action items.** Show them as an informational preamble ("Work in progress elsewhere"). Don't suggest continuing WIP work — it's most likely active in another session. Exception: if the current participant's own marker is stale (>1 day old), note it as "might need attention" — but still don't default to "continue here."
 
 ### Example format
 
