@@ -154,14 +154,13 @@ Group active entries by project thread — coherent directions of work, not by t
 
 ### Participants — narrative, not metadata
 
-The sub-skill forwards `Participants` (direct) and `Upstream voices` per item plus an `Active recently:` set. Surface participants only when they carry actionable meaning — never as per-item dashboard lines.
+`sdd status` renders each entry's participants on its line. Use them for narrative, not as per-item dashboard rows.
 
-- **Active header (optional, once):** If the active-recently set has more than one distinct voice, render a single line at the top: `Active recently: X, Y, Z`. For a solo-plus-AI graph this collapses to near-nothing — omit it when it adds no signal.
-- **Thread-level mention (when differentiating):** If a thread's direct contributors differ from the active-recently set (someone else is driving, or a voice from outside the active set is shaping it), add a single italicized note under the thread narrative: `*Driven by Alice and Bob; Christopher shaped the upstream contract.*` Silent when the thread matches the active set.
-- **Per-item inline (surprise case only):** Mention a participant inline on an item only when that name is unexpected — a voice not in the thread or active set. Not for "Christopher and Claude again."
+- **Active-recently header (optional, once):** If participants across recently-active entries include more than one distinct voice, render `Active recently: X, Y, Z` at the top. For a solo-plus-AI graph this collapses to nothing — omit when it adds no signal.
+- **Outside voices only:** Mention a participant only if they're not in the active-recently set — inline on the item, or as a thread note if outsiders shape the thread.
 - **Never** render a per-item `Participants:` line as a rule. That's dashboard drift.
 
-Kind, confidence, and other metadata follow the same principle: surface only when actionable. The structured data from the sub-skill is for editorial decisions, not uniform display.
+Kind and confidence follow the same principle: `sdd status` shows them per line for reference; narrate only when they carry meaning.
 
 ### Example format
 
