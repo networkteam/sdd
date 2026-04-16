@@ -447,6 +447,29 @@ func Test_renderPreflightPrompt_ClosingActionNamesACCheck(t *testing.T) {
 	}
 }
 
+func Test_renderPreflightPrompt_ActionTemplatesIncludeDurabilityCheck(t *testing.T) {
+	// Regression: the durability check was present in closing_action.tmpl but
+	// missing from action_closes_signals.tmpl after the severity rewrite split
+	// templates by check type. Both action templates must include the shared
+	// durability partial so the LLM validates artifact durability for any action.
+	pctx := &preflightContext{
+		ProposedEntry: "ID: a\nType: action\n\nclosing something",
+		ClosedEntries: "ID: x\nType: decision\n\nsome decision",
+	}
+
+	for _, ct := range []checkType{checkClosingAction, checkActionClosesSignals} {
+		t.Run(ct.String(), func(t *testing.T) {
+			result, err := renderPreflightPrompt(ct, pctx)
+			if err != nil {
+				t.Fatalf("renderPreflightPrompt(%s) error: %v", ct, err)
+			}
+			if !strings.Contains(result, "Artifact durability") {
+				t.Errorf("renderPreflightPrompt(%s) should include the durability check", ct)
+			}
+		})
+	}
+}
+
 func Test_renderPreflightPrompt_InvalidCheckType(t *testing.T) {
 	pctx := &preflightContext{ProposedEntry: "test"}
 	_, err := renderPreflightPrompt(checkType(99), pctx)

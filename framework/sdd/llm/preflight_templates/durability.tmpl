@@ -1,0 +1,9 @@
+{{ define "durability" }}
+## Artifact durability (apply to every action)
+
+The artifacts an action references must be durable in the Git-tracked repository. Accept any of: a prior commit referenced by the action, attachments on this entry (`--attach`), or attachments on a referenced upstream entry already in the graph.
+
+- `high` — Action claims work was done but references no durable artifact (no commit, no attachment, no upstream attachment). The action description alone is not evidence of durability.
+- `low` — Durable artifacts exist but the action doesn't explicitly name them (e.g. describes changes without citing the commit or attachment).
+- No finding — Action references a commit, carries an attachment, or references an upstream entry that has the relevant attachment.
+{{ end }}

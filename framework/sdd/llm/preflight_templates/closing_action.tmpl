@@ -10,8 +10,7 @@ An action is being created that claims to close (resolve/fulfill) a decision or 
 2. **No silent omissions**: A plan item that is neither implemented nor mentioned is a gap.
 3. **Explicit deviations are acceptable**: If the action marks an item as an intentional deviation with reasoning (e.g. "Deviation: no X — decided during implementation that Y because Z"), that counts as coverage.
 4. **No overclaiming**: The action must not claim to have done things beyond what its description supports.
-5. **Durability**: The artifacts the action references must be durable in the Git-tracked repository. Accept any of: a prior commit referenced by the action, attachments on this entry (`--attach`), or attachments on a referenced upstream entry already in the graph.
-6. **Acceptance criteria coverage** (applies only when the closed entry is `Kind: plan`): Plan decisions carry a `## Acceptance criteria` section in their description. Each AC item must be addressed by the action — confirmed done with specific evidence, or deviation explained with dialogue reasoning. If the closed entry's kind is not `plan`, skip this check.
+5. **Acceptance criteria coverage** (applies only when the closed entry is `Kind: plan`): Plan decisions carry a `## Acceptance criteria` section in their description. Each AC item must be addressed by the action — confirmed done with specific evidence, or deviation explained with dialogue reasoning. If the closed entry's kind is not `plan`, skip this check.
 
 ## Calibration
 
@@ -44,4 +43,4 @@ Don't demand prose restatement of work that lives in the code or attachments.
 ## Referenced entries
 
 {{ .ReferencedEntries }}
-{{ end }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
+{{ end }}{{ template "contracts" . }}{{ template "durability" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
