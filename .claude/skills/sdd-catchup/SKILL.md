@@ -25,6 +25,14 @@ The `sdd` CLI binary is pre-built at `./framework/bin/sdd`. Do NOT build it — 
 
 This shows active decisions, open signals, and recent actions with summaries. These are the entries that matter for the catch-up.
 
+Each entry line is formatted as:
+
+```
+<full-id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) <summary>
+```
+
+`kind` is present on decisions (`directive`, `contract`, `plan`); `confidence` on decisions and signals; `participants` always. Do NOT call `sdd show` for these facts — the status line already has them. Only use `sdd show` when you need the full description body, refs chain content, or attachments.
+
 Also check for active WIP markers (these are most certainly from other concurrent sessions / users):
 
 ```bash
@@ -39,26 +47,41 @@ If you additionally need full details of specific entries (use sparely!), fetch 
 ./framework/bin/sdd show --max-depth 0 <id1> <id2> <id3> ...
 ```
 
+**Computing thread-level voices.** For each open item you include in the catch-up, compute the set of participants across its full upstream ref chain (union, deduped) using `sdd show <id>` and reading participant fields up the chain. Distinguish:
+
+- **Direct participants** — on the featured entry itself (read from status line).
+- **Upstream voices** — the union across upstream entries, excluding the direct set.
+
+Include both in the structured output per item so the outer agent can decide when/how to surface them.
+
 ## Step 3 — Produce the catch-up
 
-Your output is consumed by the outer SDD agent, not shown to the user directly. The outer agent formats it for presentation. Include full entry IDs and enough context that the outer agent can act on any item without additional lookups.
+Your output is consumed by the outer SDD agent, not shown to the user directly. The outer agent formats it for presentation. Include full entry IDs, kind, participants (direct + upstream), and enough context that the outer agent can act on any item without additional lookups.
+
+Include a top-level `Active recently:` line listing the union of participants appearing on recent entries (actions, decisions, signals from roughly the last two weeks). The outer agent uses this to decide whether per-thread participant mentions differentiate from the active set.
 
 Structure your output as one numbered block per open item, grouped by thread:
 
 ```
 ## Catch-up
 
+Active recently: [name1, name2, ...]
+
 ### [Thread name]
 
 [1-2 sentence narrative of where this thread is and what's driving it]
 
 **1. [short title]** (ID: [full-entry-id])
-- Status: [open signal / active decision / contract] | Layer: [layer]
+- Status: [open signal / active decision / contract] | Layer: [layer] | Kind: [kind, if decision]
+- Participants: [direct names]
+- Upstream voices: [upstream-only names, or "none distinct" if the upstream set is a subset of direct]
 - Description: [full entry description from the graph]
 - Context: [what's happened around this — downstream activity, related decisions, current state]
 
 **2. [short title]** (ID: [full-entry-id])
-- Status: ... | Layer: ...
+- Status: ... | Layer: ... | Kind: ...
+- Participants: ...
+- Upstream voices: ...
 - Description: ...
 - Context: ...
 
@@ -74,6 +97,8 @@ Structure your output as one numbered block per open item, grouped by thread:
 **5. [short title]** (ID: [full-entry-id])
 ...
 ```
+
+Kind, participants, and upstream voices are structured facts — always include them as distinct lines, never fold them only into prose. The outer agent uses the structure to decide rendering (most participant mentions will be silent by default; see the Catch-up Playbook for when they surface).
 
 ### WIP markers
 

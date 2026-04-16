@@ -32,12 +32,25 @@ func newFinder(model string) *finders.Finder {
 	return finders.New(claude.NewRunner(model))
 }
 
-// splitCSV returns the comma-split fields of s, or nil if s is empty.
+// splitCSV returns the comma-split fields of s with each element trimmed of
+// surrounding whitespace; empty elements after trimming are dropped. Returns
+// nil if s is empty or contains no non-empty fields.
 func splitCSV(s string) []string {
 	if s == "" {
 		return nil
 	}
-	return strings.Split(s, ",")
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // gitCommitterFunc adapts a plain commit function to the handlers.Committer interface.

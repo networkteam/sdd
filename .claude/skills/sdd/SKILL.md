@@ -136,6 +136,17 @@ The `/sdd-catchup` sub-skill returns structured blocks per item, grouped by thre
 - **Keep it skimmable.** Bold thread names, short item descriptions. A busy person should get the picture in 10 seconds.
 - **WIP markers are context, not action items.** Show them as an informational preamble ("Work in progress elsewhere"). Don't suggest continuing WIP work — it's most likely active in another session. Exception: if the current participant's own marker is stale (>1 day old), note it as "might need attention" — but still don't default to "continue here."
 
+### Participants — narrative, not metadata
+
+The sub-skill forwards `Participants` (direct) and `Upstream voices` per item plus an `Active recently:` set. Surface participants only when they carry actionable meaning — never as per-item dashboard lines.
+
+- **Active header (optional, once):** If the active-recently set has more than one distinct voice, render a single line at the top: `Active recently: X, Y, Z`. For a solo-plus-AI graph this collapses to near-nothing — omit it when it adds no signal.
+- **Thread-level mention (when differentiating):** If a thread's direct contributors differ from the active-recently set (someone else is driving, or a voice from outside the active set is shaping it), add a single italicized note under the thread narrative: `*Driven by Alice and Bob; Christopher shaped the upstream contract.*` Silent when the thread matches the active set.
+- **Per-item inline (surprise case only):** Mention a participant inline on an item only when that name is unexpected — a voice not in the thread or active set. Not for "Christopher and Claude again."
+- **Never** render a per-item `Participants:` line as a rule. That's dashboard drift.
+
+Kind, confidence, and other metadata follow the same principle: surface only when actionable. The structured data from the sub-skill is for editorial decisions, not uniform display.
+
 ### Example format
 
 ```

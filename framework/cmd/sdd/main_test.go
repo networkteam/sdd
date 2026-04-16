@@ -3,9 +3,39 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+// TestSplitCSV_TrimsWhitespaceAndDropsEmpty is the regression test for the
+// CSV whitespace-trim bug (s-prc-omw, d-tac-955) and the d-prc-8vh contract
+// requiring regression tests for bug fixes. Before the fix,
+// `--participants "Christopher, Claude"` stored " Claude" with leading space
+// as a distinct participant identity across ~30 entries in the graph.
+func TestSplitCSV_TrimsWhitespaceAndDropsEmpty(t *testing.T) {
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{"", nil},
+		{"Christopher", []string{"Christopher"}},
+		// The regression case: comma-space-separated input must not leak " Claude".
+		{"Christopher, Claude", []string{"Christopher", "Claude"}},
+		{"  Christopher  ,  Claude  ", []string{"Christopher", "Claude"}},
+		{"Christopher,Claude", []string{"Christopher", "Claude"}},
+		// Empty elements after trim are dropped so stray commas don't produce phantom participants.
+		{"Christopher,,Claude", []string{"Christopher", "Claude"}},
+		{",,", nil},
+		{"   ", nil},
+	}
+	for _, tt := range tests {
+		got := splitCSV(tt.input)
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("splitCSV(%q) = %#v, want %#v", tt.input, got, tt.want)
+		}
+	}
+}
 
 func TestParseAttachSpec(t *testing.T) {
 	tests := []struct {

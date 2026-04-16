@@ -62,3 +62,11 @@ func withSummary(s string) entryOpt {
 func withAttachments(a ...string) entryOpt {
 	return func(e *model.Entry) { e.Attachments = a }
 }
+
+func withConfidence(c string) entryOpt {
+	return func(e *model.Entry) { e.Confidence = c }
+}
+
+func withParticipants(p ...string) entryOpt {
+	return func(e *model.Entry) { e.Participants = p }
+}
