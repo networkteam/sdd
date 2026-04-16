@@ -13,6 +13,8 @@ If you haven't read the framework reference files in this session, read them now
 - [Meta process](references/meta-process.md) — modes of working, capture guidelines, session protocol
 - [CLI reference](references/cli-reference.md) — command syntax, flags, attachments
 
+The `sdd` binary is at `./framework/bin/sdd` — use that path for every CLI call (it is not on `$PATH`).
+
 Then run `sdd status` and `sdd wip list` to read the current graph state. Cluster and present using the Catch-up Playbook, then suggest where to start.
 
 ## How you behave
