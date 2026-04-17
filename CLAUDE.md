@@ -25,9 +25,25 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never com
 
 ## Architecture
 
-- **Library first**: Domain logic (parsing, graph construction, querying) lives in `internal/`. `cmd/sdd/` is a thin shell that wires flags to library calls and formats output. Keep business logic out of command actions.
-- **CQRS separation**: `internal/finders/` (data queries) and `internal/presenters/` (view rendering) are distinct packages; handlers and the CLI wire them together. Don't collapse reads and views.
-- **Push logic down**: Finders and handlers are orchestration layers — they wire dependencies and delegate. Graph traversal, tree building, filtering, and any pure computation belongs in `internal/model/` (no I/O, no dependencies). Always question whether code in a finder/handler could live in a lower package.
+- **Library first**: Domain logic lives in `internal/`. `cmd/sdd/` is a thin shell that parses flags, dispatches commands/queries, and uses presenters to render results. Keep business logic out of CLI actions.
+
+- **CQRS layering** (per d-cpt-l3s, enforced by the planning contract d-cpt-ah1): functionality decomposes across five packages —
+  - `internal/command/` — write-intent structs (e.g. `NewEntryCmd`) with optional result callbacks carrying small identifiers (e.g. `OnNewEntry func(id string)`).
+  - `internal/query/` — read-intent structs.
+  - `internal/handlers/` — one `Handler` per area with methods per command. Holds injected dependencies (graph dir, git committer, pre-flight runner, clock, stdin reader). Returns errors only; richer results flow through callbacks on the command struct.
+  - `internal/finders/` — process queries into results. Pure reads, no side effects. Used by handlers internally and called directly by the CLI.
+  - `internal/model/` — pure domain types, no I/O.
+
+  `internal/presenters/` sits on top of the read side for view rendering — kept distinct from finders so data and rendering stay separable (view-layer concern, not CQRS itself).
+
+- **CQRS rules:**
+  - **Side effects only in handlers.** Model, finders, presenters are pure.
+  - **Handlers return errors only.** For richer data after a write, the caller issues a follow-up query via a finder — handlers are not a query back-door.
+  - **Handlers may use finders internally**; finders never use handlers.
+  - **Pre-flight is a query** (pure read intent at the domain level) despite the LLM runner's side effect — lives in `query/` + `finders/`.
+
+- **Push logic down**: Finders and handlers are orchestration — they wire dependencies and delegate. Graph traversal, tree building, filtering, and any pure computation belongs in `internal/model/`. Always question whether code in a finder/handler could live in a lower package.
+
 - **Single path**: I/O functions (file loading, etc.) should delegate to in-memory constructors. Don't duplicate indexing or initialization logic between production and test code paths.
 
 ## Structure
@@ -36,14 +52,14 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never com
 sdd/
 ├── cmd/sdd/                # CLI entrypoint (main.go)
 ├── internal/
-│   ├── command/            # Command-level types (Init, NewEntry, etc.)
-│   ├── finders/            # Data queries (reads)
-│   ├── handlers/           # Orchestration wiring
+│   ├── command/            # Write-intent structs (CQRS commands)
+│   ├── query/              # Read-intent structs (CQRS queries)
+│   ├── handlers/           # Command execution — side effects live here
+│   ├── finders/            # Query execution — pure reads, no side effects
+│   ├── model/              # Pure domain types (no I/O, no deps)
+│   ├── presenters/         # View rendering of query results
 │   ├── llm/                # Pre-flight + summarization via LLM
-│   ├── meta/               # Config resolution
-│   ├── model/              # Pure graph/entry types (no I/O)
-│   ├── presenters/         # View rendering (writes)
-│   └── query/              # Read query types
+│   └── meta/               # Config resolution
 ├── .claude/skills/         # SDD skills (sdd, sdd-catchup, sdd-explore, sdd-groom)
 ├── .sdd/
 │   ├── config.yaml         # SDD config (graph_dir, etc.)
