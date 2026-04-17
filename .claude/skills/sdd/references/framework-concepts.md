@@ -49,6 +49,7 @@ Decisions have an optional `kind` property:
 
 - **`directive`** (default, omitted): Requests action. Closed when fulfilled by an action.
 - **`contract`**: Standing constraint. Never closed — stays active until superseded. A directive can become a contract via a new decision with `supersedes` + `kind: contract`.
+- **`plan`**: Multi-step scope committed upfront with `## Acceptance criteria` in the description defining verifiable outcomes. The closing action validates against each AC. Use when a decision requires decomposition and a single obvious action can't close it.
 
 The `sdd status` view separates contracts from active directives. `sdd list --kind contract|directive` filters by kind.
 

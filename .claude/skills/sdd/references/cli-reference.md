@@ -8,8 +8,7 @@ The `sdd` binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just
 - `sdd show <id>` — full entry with upstream summary chain (depth-limited)
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
 - `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
-- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc]` — filtered listing (uses summaries)
-- `sdd list --kind contract` — list active contracts
+- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind contract|directive|plan]` — filtered listing (uses summaries)
 - `sdd new <type> <layer> [flags] <description>` — create entries
 - `sdd summarize [<id> | --all]` — regenerate entry summaries
 - `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, stale summaries)
@@ -44,8 +43,11 @@ Summary line format: `{indent}- {relations} {full-id} ({kind}): "{summary}"`
 - `--closes id1,id2` — entry IDs this resolves/fulfills
 - `--participants p1,p2` — participant names
 - `--confidence high|medium|low` — confidence level
-- `--kind contract|directive` — decision kind (decisions only)
+- `--kind contract|directive|plan` — decision kind (decisions only)
 - `--attach spec` — file to attach (repeatable, see below)
+- `--skip-preflight` — skip pre-flight validation (entry is annotated with `preflight: skipped`)
+- `--dry-run` — run validation and pre-flight only, without writing or committing the entry
+- `--preflight-timeout` — timeout for pre-flight validation (default `2m`)
 
 See the Entry IDs section above for how ID arguments are resolved across all commands.
 
@@ -62,3 +64,34 @@ Use `{{attachments}}/filename` in the entry description to link to attachments. 
 ```
 sdd new d tac --attach /tmp/design.md:plan.md "See [plan]({{attachments}}/plan.md) for details."
 ```
+
+## Long descriptions
+
+Descriptions are positional arguments. For multi-line markdown (plan decisions with `## Acceptance criteria`, or decisions with rationale paragraphs), use quoted heredocs assigned to variables — no temp files needed. Pipe the attachment content via stdin with `--attach -:plan.md`:
+
+```
+DESC=$(cat <<'EOF'
+Fork SDD into a standalone repo...
+
+## Acceptance criteria
+
+- [ ] Repository exists with main branch pushed
+- [ ] ...
+EOF
+)
+
+PLAN=$(cat <<'EOF'
+# Fork plan
+
+## Alternatives considered
+...
+EOF
+)
+
+echo "$PLAN" | ./framework/bin/sdd new d tac --kind plan --confidence high \
+  --refs <id> --participants "Name,Claude" \
+  --attach -:plan.md \
+  "$DESC"
+```
+
+Use quoted `'EOF'` so markdown content with `$`, backticks, or backslashes is preserved verbatim. For scratch files you do want on disk, `.sdd/tmp/` is gitignored.
