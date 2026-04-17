@@ -39,6 +39,10 @@ Three fields with distinct semantics:
 
 **Open signal** = not superseded, not closed. **Active decision** = not superseded, not closed.
 
+## Proposals vs Facts
+
+Open entries — signals, unclosed decisions, open plans — describe *where the graph might go*, not where it is. Only a closing action declares what was done, turning proposal into fact.
+
 ## Decision Kinds
 
 Decisions have an optional `kind` property:
