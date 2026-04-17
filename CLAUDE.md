@@ -21,7 +21,10 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never com
 
 - `go vet ./...` — compilation + correctness check (never use `go build` just to verify compilation — it produces no output on success)
 - `go test ./...` — run all tests
+- `golangci-lint run ./...` — lint (must be clean; CI enforces)
 - `./bin/sdd status` — smoke-test the binary against the graph at `.sdd/graph/`
+- `goreleaser check` — validate `.goreleaser.yaml`
+- `binst gen -o install.sh` — regenerate the curl installer from `.config/binstaller.yml`. Run this whenever `.goreleaser.yaml` changes its platform or asset surface, then commit the updated `install.sh`. Install binstaller separately (`go install github.com/binary-install/binstaller/cmd/binst@latest`) — it isn't in devbox's nixpkgs.
 
 ## Architecture
 
