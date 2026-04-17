@@ -6,11 +6,14 @@ Layer:  tactical
 Refs:   20260410-100200-s-tac-ccc
 Time:   2026-04-10 10:03:00
 
+Derived:
+  Status: active
+
 Primary
 
 ## upstream:
-  - refs 20260410-100200-s-tac-ccc: "Level 2"
-    - refs 20260410-100100-s-cpt-bbb: "Level 1"
+  - refs 20260410-100200-s-tac-ccc {status: open}: "Level 2"
+    - refs 20260410-100100-s-cpt-bbb {status: open}: "Level 1"
       [truncated: refs 20260410-100000-s-stg-aaa]
 
 

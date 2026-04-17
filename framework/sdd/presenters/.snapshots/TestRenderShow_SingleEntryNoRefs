@@ -5,6 +5,9 @@ Type:   signal
 Layer:  tactical
 Time:   2026-04-10 10:00:00
 
+Derived:
+  Status: open
+
 A signal about something
 
 

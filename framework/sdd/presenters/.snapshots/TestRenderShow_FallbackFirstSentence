@@ -6,9 +6,12 @@ Layer:  tactical
 Refs:   20260410-100000-s-stg-aaa
 Time:   2026-04-10 10:01:00
 
+Derived:
+  Status: active
+
 Primary
 
 ## upstream:
-  - refs 20260410-100000-s-stg-aaa: "First sentence of content."
+  - refs 20260410-100000-s-stg-aaa {status: open}: "First sentence of content."
 
 

@@ -5,10 +5,13 @@ Type:   signal
 Layer:  strategic
 Time:   2026-04-10 10:00:00
 
+Derived:
+  Status: closed-by 20260410-100200-a-tac-ccc
+
 Target signal
 
 ## downstream:
-  - refd-by 20260410-100100-d-cpt-bbb (directive): "Decision referencing target"
+  - refd-by 20260410-100100-d-cpt-bbb directive {status: active}: "Decision referencing target"
   - closed-by 20260410-100200-a-tac-ccc: "Action closing target"
 
 

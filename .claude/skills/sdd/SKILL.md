@@ -230,7 +230,7 @@ When the user says "let's groom" or you proactively suggest it, invoke `/sdd-gro
 
 ### Presenting results
 
-Build a summary table from the sub-skill's structured data with these columns: #, Entry, Layer, Age, Pattern, Evidence (a short summarizing note), Suggested resolution. The table is the scanning surface — it should be enough for the user to make quick calls on straightforward candidates. When mentioning entry IDs in the evidence column or in dialogue, always follow each ID with a short title in quotes (e.g. `d-cpt-axa` "evaluate explore mode"). The full evidence from the sub-skill stays in your context so you can answer follow-up questions about any candidate without additional lookups.
+Build a summary table from the sub-skill's structured data with these columns: #, Entry, Layer, Age, Pattern, Status, Evidence (a short summarizing note), Suggested resolution. Render the Status column using the derived-status notation — `{status: open}`, `{status: active}`, `{status: closed-by <id>}`, `{status: superseded-by <id>}` — matching what `sdd status` / `sdd list` surface. The table is the scanning surface — it should be enough for the user to make quick calls on straightforward candidates. When mentioning entry IDs in the evidence column or in dialogue, always follow each ID with a short title in quotes (e.g. `d-cpt-axa` "evaluate explore mode"). The full evidence from the sub-skill stays in your context so you can answer follow-up questions about any candidate without additional lookups.
 
 Then: "Let's walk through these. Starting with #1, or pick a number."
 

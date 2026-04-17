@@ -10,5 +10,6 @@ type ListQuery struct {
 
 // ListResult is the structured output of a ListQuery.
 type ListResult struct {
+	Graph   *model.Graph // needed to render derived attributes like status
 	Entries []*model.Entry
 }

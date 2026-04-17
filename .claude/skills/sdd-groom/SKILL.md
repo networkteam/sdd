@@ -89,7 +89,7 @@ Structure your output as one numbered block per candidate. No summary table — 
 
 **1. [short description]** (ID: [full-id])
 - Layer: [layer] | Age: [days old] | Pattern: [A/B/C]
-- Status: [open signal / active decision]
+- Status: `{status: open}` or `{status: active}` — use the derived status notation rendered inline by `sdd status` / `sdd show`
 - Evidence: [summarizing note — a short explanation of why this candidate is flagged, written for a human to understand the situation at a glance]
   - [For Pattern A/B: full description text of each downstream entry that suggests resolution, prefixed with its ID]
   - [For Pattern C with Git evidence: commit hash + full commit message + file stats]

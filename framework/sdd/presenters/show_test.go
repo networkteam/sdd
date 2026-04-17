@@ -145,8 +145,9 @@ func TestWriteEntryFull_KindDisplayed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := entry("20260410-100000-d-tac-aaa", withKind(tt.kind), withContent("Test"))
+			g := model.NewGraph([]*model.Entry{e})
 			var buf bytes.Buffer
-			presenters.WriteEntryFull(&buf, e)
+			presenters.WriteEntryFull(&buf, e, g)
 			cupaloy.SnapshotT(t, buf.String())
 		})
 	}

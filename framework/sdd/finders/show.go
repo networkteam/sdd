@@ -42,5 +42,5 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 		})
 	}
 
-	return &query.ShowResult{Groups: groups}, nil
+	return &query.ShowResult{Graph: q.Graph, Groups: groups}, nil
 }

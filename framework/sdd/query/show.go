@@ -25,5 +25,6 @@ type ShowGroup struct {
 
 // ShowResult is the structured output for a ShowQuery — one group per primary.
 type ShowResult struct {
+	Graph  *model.Graph // needed to render derived attributes like status
 	Groups []ShowGroup
 }

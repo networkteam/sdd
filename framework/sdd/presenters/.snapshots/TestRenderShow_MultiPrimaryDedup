@@ -6,10 +6,13 @@ Layer:  conceptual
 Refs:   20260410-100000-s-stg-aaa
 Time:   2026-04-10 10:01:00
 
+Derived:
+  Status: active
+
 First primary
 
 ## upstream:
-  - refs 20260410-100000-s-stg-aaa: "Shared ref"
+  - refs 20260410-100000-s-stg-aaa {status: open}: "Shared ref"
 
 ---
 
@@ -21,9 +24,12 @@ Layer:  conceptual
 Refs:   20260410-100000-s-stg-aaa
 Time:   2026-04-10 10:02:00
 
+Derived:
+  Status: active
+
 Second primary
 
 ## upstream:
-  - refs 20260410-100000-s-stg-aaa: (see above)
+  - refs 20260410-100000-s-stg-aaa {status: open}: (see above)
 
 

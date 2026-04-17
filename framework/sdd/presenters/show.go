@@ -18,19 +18,19 @@ func RenderShow(w io.Writer, result *query.ShowResult) {
 			fmt.Fprintln(w, "---")
 			fmt.Fprintln(w)
 		}
-		renderShowGroup(w, g)
+		renderShowGroup(w, result.Graph, g)
 	}
 }
 
-func renderShowGroup(w io.Writer, g query.ShowGroup) {
+func renderShowGroup(w io.Writer, graph *model.Graph, g query.ShowGroup) {
 	// Primary entry: full content.
 	fmt.Fprintf(w, "# %s\n\n", g.Primary.ID)
-	WriteEntryFull(w, g.Primary)
+	WriteEntryFull(w, g.Primary, graph)
 
 	if len(g.Upstream) > 0 {
 		fmt.Fprintln(w, "## upstream:")
 		for _, item := range g.Upstream {
-			renderSummaryItem(w, item, g.Primary.ID)
+			renderSummaryItem(w, graph, item, g.Primary.ID)
 		}
 		fmt.Fprintln(w)
 	}
@@ -38,24 +38,30 @@ func renderShowGroup(w io.Writer, g query.ShowGroup) {
 	if len(g.Downstream) > 0 {
 		fmt.Fprintln(w, "## downstream:")
 		for _, item := range g.Downstream {
-			renderSummaryItem(w, item, g.Primary.ID)
+			renderSummaryItem(w, graph, item, g.Primary.ID)
 		}
 		fmt.Fprintln(w)
 	}
 }
 
 // renderSummaryItem renders a single summary line at the appropriate indent.
-func renderSummaryItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
+// Format: `<indent>- <relations> <id> <kind>? {status: S}?: "<summary>"`
+// Kind renders as a plain qualifier after the ID (identity, not attribute).
+func renderSummaryItem(w io.Writer, graph *model.Graph, item model.ShowTreeItem, primaryID string) {
 	indent := strings.Repeat("  ", item.Depth)
 	relations := strings.Join(item.Relations, ",")
-	kindStr := kindLabel(item.Entry)
 
-	var idPart string
-	if kindStr != "" {
-		idPart = fmt.Sprintf("%s (%s)", item.Entry.ID, kindStr)
-	} else {
-		idPart = item.Entry.ID
+	var sb strings.Builder
+	sb.WriteString(item.Entry.ID)
+	if k := kindForDisplay(item.Entry); k != "" {
+		sb.WriteString(" ")
+		sb.WriteString(string(k))
 	}
+	if s := FormatStatus(graph.DerivedStatus(item.Entry)); s != "" {
+		sb.WriteString(" ")
+		sb.WriteString(s)
+	}
+	idPart := sb.String()
 
 	switch {
 	case item.ShownAbove:
@@ -81,7 +87,7 @@ func renderSummaryItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 			rels := strings.Join(tr.Relations, ",")
 			k := ""
 			if tr.Kind != "" {
-				k = " (" + string(tr.Kind) + ")"
+				k = " " + string(tr.Kind)
 			}
 			parts[i] = rels + " " + tr.ID + k
 		}
@@ -89,14 +95,14 @@ func renderSummaryItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 	}
 }
 
-// kindLabel returns the kind for display. Decisions always show their kind
-// (defaulting to "directive" when empty). Non-decisions show kind only if set.
-func kindLabel(e *model.Entry) string {
+// kindForDisplay returns the kind to render for an entry. Decisions always show
+// their kind (defaulting to "directive" when empty). Non-decisions show kind only if set.
+func kindForDisplay(e *model.Entry) model.Kind {
 	if e.Kind != "" {
-		return string(e.Kind)
+		return e.Kind
 	}
 	if e.Type == model.TypeDecision {
-		return string(model.KindDirective)
+		return model.KindDirective
 	}
 	return ""
 }
@@ -116,8 +122,13 @@ func firstSentence(content string) string {
 	return content
 }
 
-// WriteEntryFull writes the full metadata and content of an entry.
-func WriteEntryFull(w io.Writer, e *model.Entry) {
+// WriteEntryFull writes the full metadata and content of an entry. Stored
+// frontmatter fields render first, then a "Derived:" section lists attributes
+// computed from graph relationships (d-tac-3yi). The curly-brace inline
+// notation (`{status: ...}`) is reserved for flat contexts like status, list,
+// and summary chains — the labeled block here keeps the stored/derived split
+// explicit without redundant wrapping.
+func WriteEntryFull(w io.Writer, e *model.Entry, graph *model.Graph) {
 	fmt.Fprintf(w, "ID:     %s\n", e.ID)
 	fmt.Fprintf(w, "Type:   %s\n", e.TypeLabel())
 	fmt.Fprintf(w, "Layer:  %s\n", e.LayerLabel())
@@ -148,7 +159,30 @@ func WriteEntryFull(w io.Writer, e *model.Entry) {
 		}
 	}
 	fmt.Fprintf(w, "Time:   %s\n", e.Time.Format("2006-01-02 15:04:05"))
+	writeDerivedSection(w, e, graph)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, e.Content)
 	fmt.Fprintln(w)
+}
+
+// writeDerivedSection writes a "Derived:" block with graph-computed attributes,
+// omitted entirely when the entry has no derived state (e.g. actions).
+func writeDerivedSection(w io.Writer, e *model.Entry, graph *model.Graph) {
+	status := graph.DerivedStatus(e)
+	if status.Kind == model.StatusNone {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Derived:")
+	fmt.Fprintf(w, "  Status: %s\n", formatStatusValue(status))
+}
+
+// formatStatusValue renders a Status as a plain value (no curly braces) for
+// use inside the labeled "Derived:" block. Compound states use a space
+// separator: "closed-by <id>", "superseded-by <id>".
+func formatStatusValue(s model.Status) string {
+	if s.By != "" {
+		return string(s.Kind) + " " + s.By
+	}
+	return string(s.Kind)
 }

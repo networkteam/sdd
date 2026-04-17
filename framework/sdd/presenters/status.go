@@ -19,14 +19,14 @@ func RenderStatus(w io.Writer, result *query.StatusResult) {
 	fmt.Fprintf(w, "Graph: %d entries (%d decisions, %d signals, %d actions)\n\n",
 		len(g.Entries), len(decisions), len(signals), len(actions))
 
-	renderLayeredSection(w, "Contracts", result.Contracts)
-	renderLayeredSection(w, "Plans", result.Plans)
-	renderLayeredSection(w, "Active Decisions", result.Active)
-	renderFlatSection(w, "Open Signals", result.Open)
-	renderFlatSection(w, "Recent Actions", result.Recent)
+	renderLayeredSection(w, g, "Contracts", result.Contracts)
+	renderLayeredSection(w, g, "Plans", result.Plans)
+	renderLayeredSection(w, g, "Active Decisions", result.Active)
+	renderFlatSection(w, g, "Open Signals", result.Open)
+	renderFlatSection(w, g, "Recent Actions", result.Recent)
 }
 
-func renderLayeredSection(w io.Writer, title string, entries []*model.Entry) {
+func renderLayeredSection(w io.Writer, g *model.Graph, title string, entries []*model.Entry) {
 	if len(entries) == 0 {
 		return
 	}
@@ -39,19 +39,19 @@ func renderLayeredSection(w io.Writer, title string, entries []*model.Entry) {
 		}
 		fmt.Fprintf(w, "### %s\n", layer)
 		for _, e := range group {
-			EntryLine(w, e)
+			EntryLine(w, e, g)
 		}
 		fmt.Fprintln(w)
 	}
 }
 
-func renderFlatSection(w io.Writer, title string, entries []*model.Entry) {
+func renderFlatSection(w io.Writer, g *model.Graph, title string, entries []*model.Entry) {
 	if len(entries) == 0 {
 		return
 	}
 	fmt.Fprintf(w, "## %s\n\n", title)
 	for _, e := range entries {
-		EntryLine(w, e)
+		EntryLine(w, e, g)
 	}
 	fmt.Fprintln(w)
 }

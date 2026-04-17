@@ -6,10 +6,13 @@ Layer:  tactical
 Refs:   20260410-100100-s-cpt-bbb
 Time:   2026-04-10 10:02:00
 
+Derived:
+  Status: active
+
 Decision based on observations
 
 ## upstream:
-  - refs 20260410-100100-s-cpt-bbb: "Middle observation building on root"
-    - refs 20260410-100000-s-stg-aaa: "Root signal about the foundation"
+  - refs 20260410-100100-s-cpt-bbb {status: open}: "Middle observation building on root"
+    - refs 20260410-100000-s-stg-aaa {status: open}: "Root signal about the foundation"
 
 

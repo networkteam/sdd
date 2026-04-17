@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/networkteam/resonance/framework/sdd/model"
 	"github.com/networkteam/resonance/framework/sdd/query"
 )
 
 // RenderLint writes a human-readable lint report to w. Returns nothing —
 // the caller decides what to do about a non-zero issue count (typically
 // returning a non-zero exit code from the CLI).
-func RenderLint(w io.Writer, result *query.LintResult) {
+func RenderLint(w io.Writer, result *query.LintResult, g *model.Graph) {
 	if len(result.Entries) == 0 {
 		fmt.Fprintln(w, "No issues found.")
 		return
@@ -22,7 +23,12 @@ func RenderLint(w io.Writer, result *query.LintResult) {
 		if desc == "" {
 			desc = e.ShortContent(200)
 		}
-		fmt.Fprintf(w, "  %s  %s  %s\n", e.ID, e.TypeLabel(), desc)
+		status := FormatStatus(g.DerivedStatus(e))
+		if status != "" {
+			fmt.Fprintf(w, "  %s  %s  %s  %s\n", e.ID, e.TypeLabel(), status, desc)
+		} else {
+			fmt.Fprintf(w, "  %s  %s  %s\n", e.ID, e.TypeLabel(), desc)
+		}
 		for _, warning := range e.Warnings {
 			fmt.Fprintf(w, "    ⚠ %s\n", warning.Message)
 		}

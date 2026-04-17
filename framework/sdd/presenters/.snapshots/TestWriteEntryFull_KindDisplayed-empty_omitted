@@ -1,7 +1,11 @@
 ID:     20260410-100000-d-tac-aaa
 Type:   decision
 Layer:  tactical
+⚠ decision missing kind field (expected directive, contract, or plan)
 Time:   2026-04-10 10:00:00
+
+Derived:
+  Status: active
 
 Test
 

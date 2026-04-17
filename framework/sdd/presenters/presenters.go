@@ -18,11 +18,14 @@ import (
 // EntryLine writes a single entry summary line — used by status, list, and
 // other surfaces that show entries in a flat list.
 //
-// Format: `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) <summary>`
-// Kind is present only when the entry has one (decisions today; format accommodates
-// other types in the future). Confidence is present only when set (decisions + signals).
-// Participants are always present — empty is rendered as `()`.
-func EntryLine(w io.Writer, e *model.Entry) {
+// Format: `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) {status: <status>}? <summary>`
+// Kind renders as a qualifier alongside layer/type — it's identity, not an
+// attribute (d-cpt-omm's two-type redesign makes every entry carry a kind).
+// Square brackets denote stored attributes (today: confidence); curly braces
+// denote derived attributes computed from graph relationships (d-tac-3yi).
+// Participants are always present — empty is rendered as `()`. Status is
+// present for signals and decisions; omitted for actions.
+func EntryLine(w io.Writer, e *model.Entry, g *model.Graph) {
 	var sb strings.Builder
 	sb.WriteString("  ")
 	sb.WriteString(e.ID)
@@ -35,13 +38,17 @@ func EntryLine(w io.Writer, e *model.Entry) {
 	sb.WriteString(" ")
 	sb.WriteString(e.TypeLabel())
 	if e.Confidence != "" {
-		sb.WriteString(" [confidence: ")
-		sb.WriteString(e.Confidence)
-		sb.WriteString("]")
+		sb.WriteString(" ")
+		sb.WriteString(FormatConfidence(e.Confidence))
 	}
 	sb.WriteString(" (")
 	sb.WriteString(strings.Join(e.Participants, ", "))
-	sb.WriteString(") ")
+	sb.WriteString(")")
+	if s := FormatStatus(g.DerivedStatus(e)); s != "" {
+		sb.WriteString(" ")
+		sb.WriteString(s)
+	}
+	sb.WriteString(" ")
 	desc := e.Summary
 	if desc == "" {
 		desc = e.ShortContent(200)
@@ -49,6 +56,25 @@ func EntryLine(w io.Writer, e *model.Entry) {
 	sb.WriteString(desc)
 	sb.WriteString("\n")
 	fmt.Fprint(w, sb.String())
+}
+
+// FormatConfidence renders a stored confidence attribute in square-bracket notation.
+func FormatConfidence(c string) string {
+	return "[confidence: " + c + "]"
+}
+
+// FormatStatus renders a derived status in curly-brace notation. Returns the
+// empty string for StatusNone (actions) so callers can omit the attribute.
+// Compound states use a space separator in the value (`closed-by <id>`) to
+// avoid ambiguity with the outer `{key: value}` delimiter.
+func FormatStatus(s model.Status) string {
+	if s.Kind == model.StatusNone {
+		return ""
+	}
+	if s.By != "" {
+		return "{status: " + string(s.Kind) + " " + s.By + "}"
+	}
+	return "{status: " + string(s.Kind) + "}"
 }
 
 // LayerOrder returns the display order for layers (strategic → process).

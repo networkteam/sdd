@@ -8,9 +8,11 @@ import (
 	"github.com/networkteam/resonance/framework/sdd/presenters"
 )
 
-// Format contract (d-tac-955):
-// `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) <summary>`
-// Kind present only for decisions today; confidence on decisions + signals; participants always.
+// Format contract (d-tac-3yi, refined during implementation dialogue):
+// `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) {status: <s>}? <summary>`
+// Kind renders as a qualifier alongside layer/type (identity, not attribute).
+// Square brackets = stored attrs (confidence); curly braces = derived attrs.
+// Status is present for signals and decisions, omitted for actions.
 
 func TestEntryLine_DecisionPlan(t *testing.T) {
 	e := entry("20260416-151058-d-tac-n6y",
@@ -18,8 +20,9 @@ func TestEntryLine_DecisionPlan(t *testing.T) {
 		withConfidence("medium"),
 		withParticipants("Christopher", "Claude"),
 		withSummary("Add background sync awareness"))
-	got := renderEntryLine(e)
-	want := "  20260416-151058-d-tac-n6y tactical plan decision [confidence: medium] (Christopher, Claude) Add background sync awareness\n"
+	g := model.NewGraph([]*model.Entry{e})
+	got := renderEntryLine(e, g)
+	want := "  20260416-151058-d-tac-n6y tactical plan decision [confidence: medium] (Christopher, Claude) {status: active} Add background sync awareness\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
@@ -31,8 +34,9 @@ func TestEntryLine_DecisionDirectiveDefault(t *testing.T) {
 		withConfidence("high"),
 		withParticipants("Christopher", "Claude"),
 		withSummary("A directive decision"))
-	got := renderEntryLine(e)
-	want := "  20260416-151058-d-tac-xyz tactical directive decision [confidence: high] (Christopher, Claude) A directive decision\n"
+	g := model.NewGraph([]*model.Entry{e})
+	got := renderEntryLine(e, g)
+	want := "  20260416-151058-d-tac-xyz tactical directive decision [confidence: high] (Christopher, Claude) {status: active} A directive decision\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
@@ -43,8 +47,9 @@ func TestEntryLine_SignalNoKind(t *testing.T) {
 		withConfidence("high"),
 		withParticipants("Christopher", "Claude"),
 		withSummary("Participant names are inconsistent"))
-	got := renderEntryLine(e)
-	want := "  20260416-190732-s-prc-omw process signal [confidence: high] (Christopher, Claude) Participant names are inconsistent\n"
+	g := model.NewGraph([]*model.Entry{e})
+	got := renderEntryLine(e, g)
+	want := "  20260416-190732-s-prc-omw process signal [confidence: high] (Christopher, Claude) {status: open} Participant names are inconsistent\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
@@ -54,7 +59,8 @@ func TestEntryLine_ActionNoKindNoConfidence(t *testing.T) {
 	e := entry("20260407-144751-a-ops-gn0",
 		withParticipants("Christopher", "Claude"),
 		withSummary("Created CLAUDE.md"))
-	got := renderEntryLine(e)
+	g := model.NewGraph([]*model.Entry{e})
+	got := renderEntryLine(e, g)
 	want := "  20260407-144751-a-ops-gn0 operational action (Christopher, Claude) Created CLAUDE.md\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
@@ -65,15 +71,50 @@ func TestEntryLine_EmptyParticipants(t *testing.T) {
 	// Empty participants still render `()` so the field is uniformly present.
 	e := entry("20260407-144751-a-ops-gn0",
 		withSummary("An action with no participants recorded"))
-	got := renderEntryLine(e)
+	g := model.NewGraph([]*model.Entry{e})
+	got := renderEntryLine(e, g)
 	want := "  20260407-144751-a-ops-gn0 operational action () An action with no participants recorded\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
 }
 
-func renderEntryLine(e *model.Entry) string {
+func TestEntryLine_ClosedSignal(t *testing.T) {
+	sig := entry("20260416-190732-s-prc-omw",
+		withConfidence("high"),
+		withParticipants("Christopher", "Claude"),
+		withSummary("A closed signal"))
+	closer := entry("20260417-093934-a-prc-fxn",
+		withCloses(sig.ID),
+		withParticipants("Christopher"),
+		withSummary("The closing action"))
+	g := model.NewGraph([]*model.Entry{sig, closer})
+	got := renderEntryLine(sig, g)
+	want := "  20260416-190732-s-prc-omw process signal [confidence: high] (Christopher, Claude) {status: closed-by 20260417-093934-a-prc-fxn} A closed signal\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestEntryLine_SupersededDecision(t *testing.T) {
+	old := entry("20260410-100000-d-prc-old",
+		withConfidence("medium"),
+		withParticipants("Christopher"),
+		withSummary("A superseded decision"))
+	newer := entry("20260411-100000-d-prc-new",
+		withSupersedes(old.ID),
+		withParticipants("Christopher"),
+		withSummary("The replacement"))
+	g := model.NewGraph([]*model.Entry{old, newer})
+	got := renderEntryLine(old, g)
+	want := "  20260410-100000-d-prc-old process directive decision [confidence: medium] (Christopher) {status: superseded-by 20260411-100000-d-prc-new} A superseded decision\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func renderEntryLine(e *model.Entry, g *model.Graph) string {
 	var buf bytes.Buffer
-	presenters.EntryLine(&buf, e)
+	presenters.EntryLine(&buf, e, g)
 	return buf.String()
 }

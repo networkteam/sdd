@@ -10,8 +10,8 @@ Time:   2026-04-10 10:01:00
 Action with combined relations
 
 ## upstream:
-  - refs,closes 20260410-100000-s-tac-aaa: "The signal"
-  - refs 20260410-100050-d-tac-ddd (contract): "A contract"
-  - refs 20260410-100055-d-tac-eee (plan): "A plan"
+  - refs,closes 20260410-100000-s-tac-aaa {status: closed-by 20260410-100100-a-tac-bbb}: "The signal"
+  - refs 20260410-100050-d-tac-ddd contract {status: active}: "A contract"
+  - refs 20260410-100055-d-tac-eee plan {status: active}: "A plan"
 
 

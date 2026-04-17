@@ -4,6 +4,9 @@ Layer:  tactical
 Kind:   plan
 Time:   2026-04-10 10:00:00
 
+Derived:
+  Status: active
+
 Test
 
 

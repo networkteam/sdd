@@ -56,3 +56,15 @@ The `sdd status` view separates contracts from active directives. `sdd list --ki
 
 Contracts are decisions marked `kind: contract`. They define standing constraints — architectural rules, authority boundaries, process agreements. They emerge from working patterns: a directive that hardens into a permanent rule can be reclassified. Contracts define constraints, not participation boundaries — anyone can contribute signals and dialogue.
 
+## Rendering Conventions
+
+Entry lines in `sdd status`, `sdd list`, and summary chains carry three kinds of information, visually distinguished by notation:
+
+- **Identity (kind, layer, type)** renders as plain qualifiers: `tactical plan decision`, `process signal`. Kind acts like a sub-type — identity, not an attribute.
+- **Stored attributes** live in the entry's YAML frontmatter — written at creation, immutable afterwards. Rendered with square brackets: `[confidence: medium]`.
+- **Derived attributes** are computed from graph relationships on every read — never written on the entry itself. Rendered with curly braces: `{status: active}`, `{status: open}`, `{status: closed-by <full-id>}`, `{status: superseded-by <full-id>}`. Actions don't carry `{status: ...}` — they're facts of execution recorded after the event. A past event has no lifecycle to track; it just happened.
+
+The stored-vs-derived split is what makes the immutability contract practical: state changes as the graph grows (a signal becomes closed when a closing action lands), but the entry file never changes. Reading `{status: ...}` tells you the current computed state; reading stored attrs tells you what was written originally.
+
+Do not edit entries to "update" status — the graph computes it. To change status, add a new entry: an action that `closes`, or a decision/signal that `supersedes`.
+
