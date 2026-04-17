@@ -34,7 +34,40 @@ Dialogue is the work that turns signals into decisions — it isn't recorded dir
 
 See [docs/signal-dialogue-decision.md](docs/signal-dialogue-decision.md) for the full framework model and [docs/story.md](docs/story.md) for a narrative walkthrough (Kōgen Coffee).
 
-## Install from source
+## Install
+
+### Homebrew (recommended)
+
+```bash
+brew install networkteam/sdd/sdd
+```
+
+Works on macOS and Linux (Homebrew on Linux). Updates via `brew upgrade sdd`.
+
+### Curl installer
+
+For environments without Homebrew:
+
+```bash
+curl -sL https://github.com/networkteam/sdd/releases/latest/download/install.sh | sh
+```
+
+Installs to `~/.local/bin/sdd` by default (XDG-compliant, user-scoped — no `sudo`). Re-run to upgrade. Pass `-b <dir>` to change install location, e.g. `curl -sL ... | sh -s -- -b /usr/local/bin`.
+
+### Curl installer — verified (recommended for CI / security-conscious setups)
+
+Build provenance attestations are produced by GitHub Actions on every release. Verify before execution with the `gh` CLI:
+
+```bash
+curl -sL https://github.com/networkteam/sdd/releases/latest/download/install.sh -o install.sh
+gh attestation verify install.sh --repo networkteam/sdd
+sh install.sh
+rm install.sh
+```
+
+This confirms the installer was signed by the `networkteam/sdd` release workflow via GitHub's native artifact attestations (Sigstore-backed).
+
+### From source
 
 Requires Go 1.26.
 
@@ -88,46 +121,86 @@ The skill runs `sdd status` + `sdd wip list`, clusters the graph state by projec
 ### Catch up
 
 ```
-/sdd
+> /sdd
+
+Claude: Fork landed yesterday (a-tac-q94). Two fresh plans today, plus
+        a new process signal. No active WIP.
+
+        Release pipeline — just captured, ready to build
+         1. GitHub Actions release pipeline (d-tac-lg1) — plan, medium. …
+        Participant-name drift — plan waiting for build
+         2. Participant correlation + drift validation (d-tac-q5p) — …
+        Pre-flight refinement — active signal cluster
+         4. Dry-run reflex / retry-hint UX (s-prc-w5r) — captured today. …
+         5. CLI-level validation for Confidence (s-prc-hpa) — …
+         …
+
+        Where I'd start: the release pipeline plan (1) — fork's done,
+        plan is fresh. Want to kick off d-tac-lg1 implementation, dig
+        into the pre-flight cluster, or something else?
+
+> Implement 1.
 ```
 
-Opens every session. The skill presents a numbered list of active contracts, plans, decisions, and open signals, grouped by thread. You reference items by number — "let's dig into 3" — and the skill takes it from there.
-
-### Capture a signal
-
-```
-me:   Pre-flight wastes LLM budget checking for field presence — that
-      should be a CLI-level validation.
-/sdd: [plays back a proposed signal: type, layer, text, refs, confidence]
-me:   Looks right.
-/sdd: [runs sdd new s prc with the description and refs]
-```
-
-The skill always plays back what it would write before running `sdd new`. A pre-flight validator (a second Claude) reviews the draft against the refs and flags contradictions, missing acceptance criteria on plans, unrelated references, and similar calibration gaps. `high` findings block the write; `medium` and `low` are advisory.
-
-### Make a plan decision
-
-Plan decisions (`--kind plan`) carry an `## Acceptance criteria` section — each AC is a verifiable outcome that becomes the contract between plan author, implementing agent, and the pre-flight validator that checks the closing action. The skill helps draft the ACs and can attach a longer design doc via `--attach`.
+Opens every session. Invoking `/sdd` loads the skill; Claude then runs `sdd status` + `sdd wip list`, clusters active entries by project thread, and presents a numbered list. You reference items by number — "implement 1", "dig into 3" — and the dialogue takes it from there.
 
 ### Implement
 
 ```
-me:   Let's build d-tac-lg1.
-/sdd: [sdd wip start 20260417-173310-d-tac-lg1 --exclusive
-       --participant Christopher "release pipeline"]
+> Implement 1.
+
+Claude: [sdd wip start 20260417-173310-d-tac-lg1 --exclusive
+         --participant Christopher "release pipeline"]
 ```
 
-A WIP marker signals the work is in flight and discourages parallel edits to the same entry. During implementation the skill captures operational sub-decisions as you hit them. When you finish, it captures the closing action (addressing each AC if the plan had one) and runs `sdd wip done`.
+A WIP marker signals the work is in flight and discourages parallel edits to the same entry. During implementation Claude captures operational sub-decisions as they come up.
+
+When the work finishes, Claude plays back the closing action and takes the WIP marker down:
+
+```
+> Done. Tests pass, the v0.1.0-rc release went out cleanly.
+
+Claude: [plays back a closing action referencing the final commit
+         and addressing each AC in d-tac-lg1. Confidence high.]
+
+> Looks right.
+
+Claude: [sdd new a tac --closes 20260417-173310-d-tac-lg1 …
+         then sdd wip done <marker-id>]
+```
 
 For exploratory work or multi-participant projects, add `--branch` to isolate the entry chain on a git branch until you decide to merge or discard.
+
+### Capture a signal
+
+Signals usually surface while you're in the work — testing what was just built, noticing a gap, hitting an unexpected trade-off. Capturing keeps the insight durable instead of losing it at session end.
+
+```
+> Testing the release pipeline, the Homebrew formula update didn't
+  trigger automatically. Not blocking the release — worth capturing?
+
+Claude: [plays back a tactical signal refsing the closing action for
+         d-tac-lg1, confidence medium; asks to confirm wording.]
+
+> Looks right.
+
+Claude: [runs sdd new s tac ...]
+```
+
+Before writing, Claude plays back the proposed entry. A pre-flight validator (a second Claude, run by the CLI) then reviews the draft against its refs and flags contradictions, missing acceptance criteria on plans, unrelated references, and similar calibration gaps. `high` findings block the write; `medium` and `low` are advisory.
+
+### Make a plan decision
+
+Plan decisions (`--kind plan`) carry an `## Acceptance criteria` section — each AC is a verifiable outcome that becomes the contract between plan author, implementing agent, and the pre-flight validator that checks the closing action. Claude helps draft the ACs and can attach a longer design doc via `--attach`.
 
 ### Groom
 
 ```
-me:   Let's groom.
-/sdd: [invokes /sdd-groom — returns a table of candidates: stale entries,
-       missing `closes` links, superseded-in-practice relationships —
-       then walks through them one at a time]
+> Let's groom.
+
+Claude: [invokes the /sdd-groom sub-skill — returns a table of candidates:
+         stale entries, missing `closes` links, superseded-in-practice
+         relationships — then walks through them one at a time]
 ```
 
 The goal is to keep `sdd status` reflecting reality.
@@ -135,10 +208,11 @@ The goal is to keep `sdd status` reflecting reality.
 ### Explore
 
 ```
-me:   Dig into s-prc-ljg.
-/sdd: [invokes /sdd-explore — pulls upstream, downstream, and
-       semantically related entries, then dialogues toward the next
-       graph move]
+> Dig into s-prc-ljg.
+
+Claude: [invokes the /sdd-explore sub-skill — pulls upstream, downstream,
+         and semantically related entries, then dialogues toward the next
+         graph move]
 ```
 
 The goal of exploration is always a graph change, not just understanding.

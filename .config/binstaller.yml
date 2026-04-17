@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/binary-install/binstaller/main/schema/InstallSpec.json
+schema: v1
+name: sdd
+repo: networkteam/sdd
+asset:
+  template: ${NAME}_${VERSION}_${OS}_${ARCH}${EXT}
+  default_extension: .tar.gz
+  naming_convention:
+    os: lowercase
+    arch: lowercase
+checksums:
+  algorithm: sha256
+  template: ${NAME}_${VERSION}_checksums.txt
+supported_platforms:
+- os: darwin
+  arch: amd64
+- os: darwin
+  arch: arm64
+- os: linux
+  arch: amd64
+- os: linux
+  arch: arm64

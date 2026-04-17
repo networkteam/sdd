@@ -53,3 +53,5 @@ release:
   github:
     owner: networkteam
     name: sdd
+  extra_files:
+    - glob: install.sh
