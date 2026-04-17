@@ -5,13 +5,13 @@ import "sort"
 // ShowTreeItem represents an entry at a specific depth in a show tree.
 // Depth 0 is the primary entry. Depth 1+ entries are summary-only.
 type ShowTreeItem struct {
-	Entry          *Entry
-	Depth          int
-	Relations      []string // e.g. ["refs"], ["refs", "closes"], ["refd-by"]
-	ShownAbove     bool     // already rendered earlier — "(see above)" marker
-	ShownBelow     bool     // future primary — "(see below)" marker
-	SummaryOnly    bool     // true for depth > 0
-	Truncated []TruncatedRef // children hidden at max-depth boundary
+	Entry       *Entry
+	Depth       int
+	Relations   []string       // e.g. ["refs"], ["refs", "closes"], ["refd-by"]
+	ShownAbove  bool           // already rendered earlier — "(see above)" marker
+	ShownBelow  bool           // future primary — "(see below)" marker
+	SummaryOnly bool           // true for depth > 0
+	Truncated   []TruncatedRef // children hidden at max-depth boundary
 }
 
 // TruncatedRef describes a child entry hidden at the max-depth boundary.

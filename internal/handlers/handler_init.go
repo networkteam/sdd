@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/networkteam/slogutils"
+
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/model"
 )
@@ -18,7 +20,8 @@ import (
 //
 // This handler does NOT use h.graphDir — all paths are derived from
 // cmd.RepoRoot and cmd.GraphDir.
-func (h *Handler) Init(_ context.Context, cmd *command.InitCmd) error {
+func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
+	log := slogutils.FromContext(ctx)
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("invalid command: %w", err)
 	}
@@ -62,7 +65,7 @@ func (h *Handler) Init(_ context.Context, cmd *command.InitCmd) error {
 	// Update .gitignore at repo root.
 	gitignorePath := filepath.Join(cmd.RepoRoot, ".gitignore")
 	if err := ensureGitignoreEntries(gitignorePath, []string{".sdd/tmp/"}); err != nil {
-		fmt.Fprintf(h.stderr, "warning: could not update .gitignore: %v\n", err)
+		log.Warn("could not update .gitignore", "path", gitignorePath, "err", err)
 	} else if cmd.OnGitignoreUpdated != nil {
 		cmd.OnGitignoreUpdated(gitignorePath)
 	}
@@ -81,14 +84,16 @@ func (h *Handler) Init(_ context.Context, cmd *command.InitCmd) error {
 	}
 
 	// Clean old .sdd-tmp/ entry from graph dir .gitignore.
-	cleanOldGraphDirGitignore(absGraphDir)
+	if err := cleanOldGraphDirGitignore(absGraphDir); err != nil {
+		log.Warn("could not clean old graph dir .gitignore", "graphDir", absGraphDir, "err", err)
+	}
 
 	// Commit the new structure.
 	if h.committer != nil {
 		paths := []string{configPath, gitignorePath}
 		msg := "sdd: init .sdd/ metadata directory"
 		if err := h.committer.Commit(msg, paths...); err != nil {
-			fmt.Fprintf(h.stderr, "warning: git commit failed: %v\n", err)
+			log.Warn("git commit failed", "err", err)
 		}
 	}
 
@@ -161,26 +166,30 @@ func migrateOldTmpDir(oldDir, newDir string) int {
 		if err := os.WriteFile(dst, data, 0644); err != nil {
 			continue
 		}
-		os.Remove(src)
+		_ = os.Remove(src) // best-effort; stale source is not fatal
 		count++
 	}
 
 	// Remove old directory if now empty.
 	remaining, _ := os.ReadDir(oldDir)
 	if len(remaining) == 0 {
-		os.Remove(oldDir)
+		_ = os.Remove(oldDir) // best-effort; empty dir is harmless if it lingers
 	}
 
 	return count
 }
 
 // cleanOldGraphDirGitignore removes the .sdd-tmp/ entry from a .gitignore
-// in the graph directory, if present.
-func cleanOldGraphDirGitignore(graphDir string) {
+// in the graph directory, if present. Returns nil when there's nothing to
+// clean (no .gitignore or no matching entry).
+func cleanOldGraphDirGitignore(graphDir string) error {
 	path := filepath.Join(graphDir, ".gitignore")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 
 	var lines []string
@@ -196,7 +205,7 @@ func cleanOldGraphDirGitignore(graphDir string) {
 	}
 
 	if !changed {
-		return
+		return nil
 	}
 
 	var out strings.Builder
@@ -211,6 +220,5 @@ func cleanOldGraphDirGitignore(graphDir string) {
 		out.WriteString("\n")
 	}
 
-	os.WriteFile(path, []byte(out.String()), 0644)
+	return os.WriteFile(path, []byte(out.String()), 0644)
 }
-

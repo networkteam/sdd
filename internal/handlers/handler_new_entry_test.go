@@ -38,7 +38,6 @@ func (f *fakeReader) Preflight(ctx context.Context, q query.PreflightQuery) (*qu
 	return f.preflightResult, f.preflightErr
 }
 
-
 // recordingCommitter captures commit calls so tests can assert whether a
 // commit was attempted.
 type recordingCommitter struct {
@@ -58,7 +57,9 @@ func (r *recordingCommitter) Commit(message string, paths ...string) error {
 func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 	tmp := t.TempDir()
 	sddDir := filepath.Join(tmp, ".sdd")
-	os.MkdirAll(sddDir, 0755)
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	stderr := &bytes.Buffer{}
 	committer := &recordingCommitter{}
 
@@ -136,7 +137,9 @@ func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 func TestNewEntry_DryRun_Pass_SavesStdinOnce(t *testing.T) {
 	tmp := t.TempDir()
 	sddDir := filepath.Join(tmp, ".sdd")
-	os.MkdirAll(sddDir, 0755)
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	stderr := &bytes.Buffer{}
 
 	h := handlers.New(handlers.Options{
@@ -181,7 +184,9 @@ func TestNewEntry_DryRun_Pass_SavesStdinOnce(t *testing.T) {
 func TestNewEntry_PreflightReject_SavesStdin(t *testing.T) {
 	tmp := t.TempDir()
 	sddDir := filepath.Join(tmp, ".sdd")
-	os.MkdirAll(sddDir, 0755)
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	stderr := &bytes.Buffer{}
 
 	h := handlers.New(handlers.Options{
@@ -256,7 +261,9 @@ func testEntry(id string) *model.Entry {
 func TestNewEntry_ResolvesShortRefs(t *testing.T) {
 	tmp := t.TempDir()
 	sddDir := filepath.Join(tmp, ".sdd")
-	os.MkdirAll(sddDir, 0755)
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	stderr := &bytes.Buffer{}
 
 	existing := testEntry("20260406-100000-s-stg-aaa")
@@ -295,7 +302,9 @@ func TestNewEntry_ResolvesShortRefs(t *testing.T) {
 func TestNewEntry_AmbiguousShortRefErrors(t *testing.T) {
 	tmp := t.TempDir()
 	sddDir := filepath.Join(tmp, ".sdd")
-	os.MkdirAll(sddDir, 0755)
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	graph := model.NewGraph([]*model.Entry{
 		testEntry("20260406-100000-s-stg-xyz"),

@@ -1,0 +1,38 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unparam
+  settings:
+    errcheck:
+      exclude-functions:
+        # Ignore stdio writer errors — failure modes are rare and callers
+        # can't sensibly recover from a stdout/stderr write error.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (io.Writer).Write
+        # Standard defer pattern; close errors on read-only handles are noise.
+        - (*os.File).Close
+  exclusions:
+    rules:
+      # Test helper files define builder-pattern options that are intentionally
+      # kept available even if not all are currently used.
+      - path: _test_helpers_test\.go
+        linters:
+          - unused
+      - path: test_helpers_test\.go
+        linters:
+          - unused
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

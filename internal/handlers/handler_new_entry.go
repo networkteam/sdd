@@ -238,5 +238,3 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	}
 	return nil
 }
-
-

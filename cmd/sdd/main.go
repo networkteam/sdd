@@ -25,6 +25,10 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// version is stamped at release time via `-ldflags "-X main.version=..."`.
+// Default "dev" applies to local `go build` and `go run`.
+var version = "dev"
+
 // newFinder constructs a Finder with a production claude runner. The runner
 // model is resolved per-call so flag overrides (--preflight-model on `sdd new`)
 // take effect.
@@ -92,9 +96,17 @@ func (gitBrancher) DeleteBranch(branch string, force bool) error {
 }
 
 func main() {
+	// Drop the default `-v` alias on --version; our root command already uses
+	// -v for --verbose.
+	cli.VersionFlag = &cli.BoolFlag{
+		Name:  "version",
+		Usage: "Print the version",
+	}
+
 	app := &cli.Command{
-		Name:  "sdd",
-		Usage: "Signal-Dialogue-Decision graph tool",
+		Name:    "sdd",
+		Usage:   "Signal-Dialogue-Decision graph tool",
+		Version: version,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "graph-dir",
@@ -548,7 +560,6 @@ func summarizeCmd() *cli.Command {
 		},
 	}
 }
-
 
 func gitCommit(message string, filePaths ...string) error {
 	args := append([]string{"add"}, filePaths...)
