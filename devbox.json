@@ -5,6 +5,9 @@
     "golangci-lint@2.11"
   ],
   "shell": {
-    "init_hook": ["echo 'Welcome to devbox!' > /dev/null"]
+    "init_hook": ["echo 'Welcome to devbox!' > /dev/null"],
+    "scripts": {
+      "gen-installer": "binst gen -o install.sh"
+    }
   }
 }
