@@ -2,4 +2,4 @@
 # See https://github.com/networkteam/sdd for documentation.
 
 # Graph directory relative to repository root.
-graph_dir: docs/framework/graph
+graph_dir: .sdd/graph
