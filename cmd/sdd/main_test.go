@@ -73,7 +73,9 @@ func TestParseAttachSpec(t *testing.T) {
 func TestParseAttachFlags_PlainPath(t *testing.T) {
 	tmp := t.TempDir()
 	f := filepath.Join(tmp, "design.md")
-	os.WriteFile(f, []byte("# Design"), 0644)
+	if err := os.WriteFile(f, []byte("# Design"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	atts, err := parseAttachFlags([]string{f}, nil)
 	if err != nil {
@@ -93,7 +95,9 @@ func TestParseAttachFlags_PlainPath(t *testing.T) {
 func TestParseAttachFlags_SourceTargetMapping(t *testing.T) {
 	tmp := t.TempDir()
 	f := filepath.Join(tmp, "tmpXXX.md")
-	os.WriteFile(f, []byte("content"), 0644)
+	if err := os.WriteFile(f, []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	atts, err := parseAttachFlags([]string{f + ":plan.md"}, nil)
 	if err != nil {
@@ -167,8 +171,12 @@ func TestParseAttachFlags_MultipleAttachments(t *testing.T) {
 	tmp := t.TempDir()
 	f1 := filepath.Join(tmp, "a.md")
 	f2 := filepath.Join(tmp, "b.md")
-	os.WriteFile(f1, []byte("a"), 0644)
-	os.WriteFile(f2, []byte("b"), 0644)
+	if err := os.WriteFile(f1, []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f2, []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	reader := strings.NewReader("from stdin")
 

@@ -41,10 +41,7 @@ func (r *liveRunner) Run(ctx context.Context, prompt string) (*RunResult, error)
 func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*PreflightResult, string) {
 	t.Helper()
 	ct := selectCheckType(proposed, graph)
-	pctx, err := assembleContext(proposed, graph, ct)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pctx := assembleContext(proposed, graph, ct)
 	prompt, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		t.Fatal(err)
@@ -281,9 +278,9 @@ func TestPreflightEval_ActionClosesSignal_NoDurableArtifact(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{signal})
 
 	proposed := &model.Entry{
-		Type:   model.TypeAction,
-		Layer:  model.LayerProcess,
-		Closes: []string{signal.ID},
+		Type:    model.TypeAction,
+		Layer:   model.LayerProcess,
+		Closes:  []string{signal.ID},
 		Content: "Updated the catch-up playbook and catch-up sub-skill to treat WIP markers as informational context. Fresh sessions no longer suggest picking up WIP work.",
 	}
 
@@ -308,9 +305,9 @@ func TestPreflightEval_ActionClosesSignal_WithCommitRef(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{signal})
 
 	proposed := &model.Entry{
-		Type:   model.TypeAction,
-		Layer:  model.LayerProcess,
-		Closes: []string{signal.ID},
+		Type:    model.TypeAction,
+		Layer:   model.LayerProcess,
+		Closes:  []string{signal.ID},
 		Content: "Updated the catch-up playbook and catch-up sub-skill to treat WIP markers as informational context. Fresh sessions no longer suggest picking up WIP work. Commit adebd7e.",
 	}
 

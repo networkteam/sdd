@@ -56,10 +56,7 @@ func (r *PreflightResult) HasBlocking() bool {
 func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph) (*PreflightResult, error) {
 	ct := selectCheckType(entry, graph)
 
-	pctx, err := assembleContext(entry, graph, ct)
-	if err != nil {
-		return nil, fmt.Errorf("assembling pre-flight context: %w", err)
-	}
+	pctx := assembleContext(entry, graph, ct)
 
 	prompt, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
@@ -168,7 +165,7 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 // preflightContext doc). FormatEntryForPrompt includes each entry's
 // Attachments path list so the validator agent can optionally read them
 // when it deems necessary; pre-flight itself stays prompt-only.
-func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType) (*preflightContext, error) {
+func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType) *preflightContext {
 	pctx := &preflightContext{
 		ProposedEntry: FormatEntryForPrompt(entry),
 	}
@@ -238,7 +235,7 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType) (*pre
 		}
 	}
 
-	return pctx, nil
+	return pctx
 }
 
 // renderPreflightPrompt renders the pre-flight prompt for the given check type and context.

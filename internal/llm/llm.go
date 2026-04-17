@@ -24,15 +24,15 @@ type RunResult struct {
 
 // LLMMetadata holds agent-neutral per-call metrics from the LLM provider.
 type LLMMetadata struct {
-	TotalCostUSD  float64
-	InputTokens   int
-	OutputTokens  int
+	TotalCostUSD      float64
+	InputTokens       int
+	OutputTokens      int
 	CacheReadTokens   int
 	CacheCreateTokens int
-	NumTurns    int
-	Duration    time.Duration
-	DurationAPI time.Duration
-	Models      map[string]ModelUsage
+	NumTurns          int
+	Duration          time.Duration
+	DurationAPI       time.Duration
+	Models            map[string]ModelUsage
 }
 
 // ModelUsage holds per-model token and cost metrics.

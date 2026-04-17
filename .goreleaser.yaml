@@ -1,0 +1,55 @@
+version: 2
+
+project_name: sdd
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: sdd
+    main: ./cmd/sdd
+    binary: sdd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - ids:
+      - sdd
+
+homebrew_casks:
+  - name: sdd
+    repository:
+      owner: networkteam
+      name: homebrew-sdd
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/networkteam/sdd
+    description: Signal-Dialogue-Decision graph tool
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/sdd"]
+          end
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: networkteam
+    name: sdd
