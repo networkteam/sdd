@@ -1,6 +1,6 @@
 # SDD CLI Reference
 
-The `sdd` binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just use it. Run from the repo root.
+The `sdd` binary is pre-built at `./bin/sdd`. Do NOT build it — just use it. Run from the repo root.
 
 ## Commands
 
@@ -88,7 +88,7 @@ PLAN=$(cat <<'EOF'
 EOF
 )
 
-echo "$PLAN" | ./framework/bin/sdd new d tac --kind plan --confidence high \
+echo "$PLAN" | ./bin/sdd new d tac --kind plan --confidence high \
   --refs <id> --participants "Name,Claude" \
   --attach -:plan.md \
   "$DESC"

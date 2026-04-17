@@ -16,10 +16,10 @@ Read the framework reference files to understand entry types, layers, and closur
 
 ## Step 2 — Gather all open entries
 
-The `sdd` CLI binary is pre-built at `./framework/bin/sdd`. Do NOT build it — just use it. Run from the repo root.
+The `sdd` CLI binary is pre-built at `./bin/sdd`. Do NOT build it — just use it. Run from the repo root.
 
 ```bash
-./framework/bin/sdd status
+./bin/sdd status
 ```
 
 This shows open signals and active decisions with summaries. Collect all their IDs.
@@ -28,12 +28,12 @@ This shows open signals and active decisions with summaries. Collect all their I
 
 For each open signal and active decision, fetch the entry with its upstream and downstream context:
 ```bash
-./framework/bin/sdd show --downstream <id>
+./bin/sdd show --downstream <id>
 ```
 
 This returns the entry at full detail, upstream entries as summaries, and downstream entries as summaries. If you need full details of a specific downstream entry to assess whether it resolves the target, fetch it:
 ```bash
-./framework/bin/sdd show --max-depth 0 <downstream-id>
+./bin/sdd show --max-depth 0 <downstream-id>
 ```
 
 Look for these patterns:
@@ -50,7 +50,7 @@ No downstream activity at all, and the entry is older than a few days. May still
 ## Step 4 — Check for stale WIP markers
 
 ```bash
-./framework/bin/sdd wip list
+./bin/sdd wip list
 ```
 
 If there are active markers, check whether they look stale — old markers with no recent Git activity on the referenced entry. For each marker, check if recent commits mention the entry ID or related keywords. A marker older than a day with no related activity is a candidate.
