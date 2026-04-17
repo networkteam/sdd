@@ -94,7 +94,7 @@ The entry description is the summary. The attachment is the record. When the con
 
 When in doubt, attach. A one-paragraph entry with a rich attachment preserves the reasoning chain. A compressed summary without attachment loses it permanently.
 
-Use `--attach -:filename.md` to pipe content via stdin — no temp files needed.
+For multi-line content, use shell heredocs assigned to variables (`DESC=$(cat <<'EOF' ... EOF)`) for the positional description and `--attach -:filename.md` with a stdin pipe for the attachment — no temp files needed. Use quoted `'EOF'` so markdown with `$`, backticks, or backslashes is preserved verbatim. See [cli-reference.md](references/cli-reference.md) for the full `sdd new` invocation pattern.
 
 ### Infer participants from session context
 
