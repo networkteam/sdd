@@ -29,7 +29,7 @@ homebrew_casks:
   - name: sdd
     repository:
       owner: networkteam
-      name: homebrew-sdd
+      name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/networkteam/sdd

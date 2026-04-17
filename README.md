@@ -39,7 +39,7 @@ See [docs/signal-dialogue-decision.md](docs/signal-dialogue-decision.md) for the
 ### Homebrew (recommended)
 
 ```bash
-brew install networkteam/sdd/sdd
+brew install networkteam/tap/sdd
 ```
 
 Works on macOS and Linux (Homebrew on Linux). Updates via `brew upgrade sdd`.
