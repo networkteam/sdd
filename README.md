@@ -1,120 +1,24 @@
 # SDD
 
-**Signal-Dialogue-Decision** — a framework for building and traversing decision graphs through human-agent dialogue.
+**Keep humans and AI agents aligned across parallel work.**
 
-SDD records the reasoning chain behind your project: observations (signals), commitments (decisions), and facts of execution (actions), linked together in an immutable Git-based graph. The `sdd` CLI provides the plumbing; a set of Claude Code skills (`/sdd`, `/sdd-catchup`, `/sdd-explore`, `/sdd-groom`) turn it into a collaboration surface you drive through conversation.
+SDD records your project's reasoning as an immutable decision graph — signals (what you noticed), decisions (what you committed to), actions (what you did). At any moment, anyone (human or agent) can see what's in flight, which decisions are active, and what's still open. Built for developers and teams shipping with AI agents.
 
-## Concepts in a minute
+**Why SDD**
 
-**The loop**: Signal → Dialogue → Decision → Action → Signal...
+**Without SDD:** insights and decisions from each agent session get lost or hard to discover once the session ends.
 
-Dialogue is the work that turns signals into decisions — it isn't recorded directly. Everything else lives in the graph as an immutable markdown entry with YAML frontmatter.
+**Most other systems:** scatter state across separate static artifacts — docs, plans, phases, roadmaps, trackers, specs, tickets — that duplicate across layers, go stale, and resist new insight.
 
-**Entry types**:
-- **Signal** (`s`) — an observation, a gap, a question raised.
-- **Decision** (`d`) — a commitment to a direction. Kinds: `directive` (default), `contract` (standing rule), `plan` (multi-step scope with acceptance criteria).
-- **Action** (`a`) — a fact of execution. Actions `close` the decisions and signals they fulfil.
+**With SDD:** an append-only graph where new insight → new entry (`refs`, `supersedes`, `closes`). State is *derived from the graph*, never maintained in parallel docs. Tracked in Git, so humans and agents work against the same graph — each session runs independently, and signals, decisions, and actions are captured by the work itself.
 
-**Layers** describe depth of thinking, not org level:
+---
 
-| Layer | Abbrev | Thinking |
-|-------|--------|----------|
-| Strategic | `stg` | Why does this exist? |
-| Conceptual | `cpt` | What approach? |
-| Tactical | `tac` | Structure and trade-offs |
-| Operational | `ops` | Individual steps |
-| Process | `prc` | How we work |
+You start in Claude Code with the `/sdd` skill. It shows the current state of the graph and carries the playbook moves for taking it forward — capture, decide, implement, explore, groom — all through conversation. The `sdd` CLI underneath stores entries and derives current state from the graph — the same view humans and agents both read. You rarely invoke it directly.
 
-**Links between entries**:
-- `refs` — builds on / depends on (no status effect)
-- `supersedes` — replaces; older entry no longer active
-- `closes` — resolves / fulfils; signal or decision now closed
+## Philosophy
 
-**Immutability**: entries are never edited. State is derived by traversing the graph, not by mutating files. To change direction, add a new entry that supersedes an old one.
-
-See [docs/signal-dialogue-decision.md](docs/signal-dialogue-decision.md) for the full framework model and [docs/story.md](docs/story.md) for a narrative walkthrough (Kōgen Coffee).
-
-## Install
-
-### Homebrew (recommended)
-
-```bash
-brew install networkteam/tap/sdd
-```
-
-Works on macOS and Linux (Homebrew on Linux). Updates via `brew upgrade sdd`.
-
-### Curl installer
-
-For environments without Homebrew:
-
-```bash
-curl -sL https://github.com/networkteam/sdd/releases/latest/download/install.sh | sh
-```
-
-Installs to `~/.local/bin/sdd` by default (XDG-compliant, user-scoped — no `sudo`). Re-run to upgrade. Pass `-b <dir>` to change install location, e.g. `curl -sL ... | sh -s -- -b /usr/local/bin`.
-
-### Curl installer — verified (recommended for CI / security-conscious setups)
-
-Build provenance attestations are produced by GitHub Actions on every release. Verify before execution with the `gh` CLI:
-
-```bash
-curl -sL https://github.com/networkteam/sdd/releases/latest/download/install.sh -o install.sh
-gh attestation verify install.sh --repo networkteam/sdd
-sh install.sh
-rm install.sh
-```
-
-This confirms the installer was signed by the `networkteam/sdd` release workflow via GitHub's native artifact attestations (Sigstore-backed).
-
-### From source
-
-Requires Go 1.26.
-
-```bash
-git clone https://github.com/networkteam/sdd.git
-cd sdd
-direnv allow                    # loads Go via Devbox (optional)
-go build -o bin/sdd ./cmd/sdd
-```
-
-The binary ends up at `./bin/sdd`. Add it to your `$PATH`, or reference it by absolute path from other projects.
-
-## Quickstart
-
-### 1. Initialize a graph in your project
-
-```bash
-cd your-project
-/path/to/sdd/bin/sdd init
-```
-
-`sdd init` prompts for the graph directory (default `.sdd/graph`), writes `.sdd/config.yaml`, creates the graph directory, and adds `.sdd/tmp/` to `.gitignore`.
-
-### 2. Install the Claude Code skills
-
-There is no `sdd install` yet. For now, copy the four skills from this repo to one of the standard Claude Code skill locations:
-
-- **User-global** (available in every project): `~/.claude/skills/`
-- **Project-level** (scoped to one repo): `.claude/skills/` in the project
-
-```bash
-cp -r /path/to/sdd/.claude/skills/sdd*  ~/.claude/skills/
-# or
-mkdir -p .claude/skills && cp -r /path/to/sdd/.claude/skills/sdd*  .claude/skills/
-```
-
-The skills invoke the binary at `./bin/sdd` relative to the working directory — convenient for dogfooding inside this repo, but not portable. Until a proper install story lands, using the skills from another project means editing the binary path in each `SKILL.md` (and `sdd/references/cli-reference.md`) to wherever your `sdd` binary lives, or putting it on `$PATH` and doing the same edit to drop the `./bin/` prefix.
-
-### 3. Start a session
-
-Open Claude Code in your project and run:
-
-```
-/sdd
-```
-
-The skill runs `sdd status` + `sdd wip list`, clusters the graph state by project thread, and suggests where to start. Everything after that is dialogue — you don't run the CLI directly in normal use.
+SDD lets each party do what they're good at. Agents work with information and run autonomously where they can — reading the graph, synthesizing context, drafting entries, running operational steps. Humans make decisions, provide taste, and raise observations data can't surface. Dialogue, not bureaucracy, moves the graph forward.
 
 ## What a session looks like
 
@@ -217,6 +121,118 @@ Claude: [invokes the /sdd-explore sub-skill — pulls upstream, downstream,
 
 The goal of exploration is always a graph change, not just understanding.
 
+## Install
+
+### Homebrew (recommended)
+
+```bash
+brew install networkteam/tap/sdd
+```
+
+Works on macOS and Linux (Homebrew on Linux). Updates via `brew upgrade sdd`.
+
+### Curl installer
+
+For environments without Homebrew:
+
+```bash
+curl -sL https://github.com/networkteam/sdd/releases/latest/download/install.sh | sh
+```
+
+Installs to `~/.local/bin/sdd` by default (XDG-compliant, user-scoped — no `sudo`). Re-run to upgrade. Pass `-b <dir>` to change install location, e.g. `curl -sL ... | sh -s -- -b /usr/local/bin`.
+
+### Curl installer — verified (recommended for CI / security-conscious setups)
+
+Build provenance attestations are produced by GitHub Actions on every release. Verify before execution with the `gh` CLI:
+
+```bash
+curl -sL https://github.com/networkteam/sdd/releases/latest/download/install.sh -o install.sh
+gh attestation verify install.sh --repo networkteam/sdd
+sh install.sh
+rm install.sh
+```
+
+This confirms the installer was signed by the `networkteam/sdd` release workflow via GitHub's native artifact attestations (Sigstore-backed).
+
+### From source
+
+Requires Go 1.26.
+
+```bash
+git clone https://github.com/networkteam/sdd.git
+cd sdd
+direnv allow                    # loads Go via Devbox (optional)
+go build -o bin/sdd ./cmd/sdd
+```
+
+The binary ends up at `./bin/sdd`. Add it to your `$PATH`, or reference it by absolute path from other projects.
+
+## Quickstart
+
+### 1. Initialize a graph in your project
+
+```bash
+cd your-project
+sdd init
+```
+
+`sdd init` prompts for the graph directory (default `.sdd/graph`), writes `.sdd/config.yaml`, creates the graph directory, and adds `.sdd/tmp/` to `.gitignore`.
+
+### 2. Install the Claude Code skills
+
+There is no `sdd install` yet. For now, copy the four skills from this repo to one of the standard Claude Code skill locations:
+
+- **User-global** (available in every project): `~/.claude/skills/`
+- **Project-level** (scoped to one repo): `.claude/skills/` in the project
+
+```bash
+cp -r /path/to/sdd/.claude/skills/sdd*  ~/.claude/skills/
+# or
+mkdir -p .claude/skills && cp -r /path/to/sdd/.claude/skills/sdd*  .claude/skills/
+```
+
+The skills invoke the binary at `./bin/sdd` relative to the working directory — convenient for dogfooding inside this repo, but not portable. Until a proper install story lands, using the skills from another project means editing the binary path in each `SKILL.md` (and `sdd/references/cli-reference.md`) to wherever your `sdd` binary lives, or putting it on `$PATH` and doing the same edit to drop the `./bin/` prefix.
+
+### 3. Start a session
+
+Open Claude Code in your project and run:
+
+```
+/sdd
+```
+
+The skill runs `sdd status` + `sdd wip list`, clusters the graph state by project thread, and suggests where to start. Everything after that is dialogue.
+
+## Concepts in a minute
+
+**The loop**: Signal → Dialogue → Decision → Action → Signal...
+
+Dialogue is the work that turns signals into decisions — it isn't recorded directly. Everything else lives in the graph as an immutable markdown entry with YAML frontmatter.
+
+**Entry types**:
+- **Signal** (`s`) — an observation, a gap, a question raised.
+- **Decision** (`d`) — a commitment to a direction. Kinds: `directive` (default), `contract` (standing rule), `plan` (multi-step scope with acceptance criteria).
+- **Action** (`a`) — a fact of execution. Actions `close` the decisions and signals they fulfil.
+
+**Layers** describe depth of thinking, not org level:
+
+| Layer | Abbrev | Thinking |
+|-------|--------|----------|
+| Strategic | `stg` | Why does this exist? |
+| Conceptual | `cpt` | What approach? |
+| Tactical | `tac` | Structure and trade-offs |
+| Operational | `ops` | Individual steps |
+| Process | `prc` | How we work |
+
+**Links between entries**:
+- `refs` — builds on / depends on (no status effect)
+- `supersedes` — replaces; older entry no longer active
+- `closes` — resolves / fulfils; signal or decision now closed
+
+**Immutability**: entries are never edited. State is derived by traversing the graph, not by mutating files. To change direction, add a new entry that supersedes an old one.
+
+See [docs/signal-dialogue-decision.md](docs/signal-dialogue-decision.md) for the full framework model and [docs/story.md](docs/story.md) for a story of how SDD could work in the future.
+
 ## CLI cheat sheet
 
 Day to day you rarely run these directly — the skill does. Useful to know:
@@ -255,9 +271,13 @@ your-project/
 ## Docs
 
 - [docs/signal-dialogue-decision.md](docs/signal-dialogue-decision.md) — framework model
-- [docs/story.md](docs/story.md) — narrative walkthrough of SDD in use
+- [docs/story.md](docs/story.md) — a fictional story (Kōgen Coffee) of what SDD could become; the vision that sparked the design
 - [docs/signals.md](docs/signals.md) — open design signals for the framework itself
 - [CLAUDE.md](CLAUDE.md) — guidance for Claude Code working on SDD itself
+
+## Star the repo
+
+If SDD resonates — or if you're curious how the graph evolves — starring the repo helps others find it and lets you follow progress.
 
 ## License
 
