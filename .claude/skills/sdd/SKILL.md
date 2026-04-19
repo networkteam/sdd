@@ -1,7 +1,8 @@
 ---
+allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate actions. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 3b79b67f5009ddd2b64927326b1afa5b812fa68e0096addab5e5328375e7076d
+sdd-content-hash: 040ad0199421e4ccab11e19be7c5189227dca165261a38edf5890599802579c8
 sdd-version: dev
 ---
 
@@ -14,8 +15,6 @@ If you haven't read the framework reference files in this session, read them now
 - [Framework concepts](references/framework-concepts.md) — the loop, entry types, layers, immutability, refs vs supersedes
 - [Meta process](references/meta-process.md) — modes of working, capture guidelines, session protocol
 - [CLI reference](references/cli-reference.md) — command syntax, flags, attachments
-
-The `sdd` binary is at `./bin/sdd` — use that path for every CLI call (it is not on `$PATH`).
 
 Then run `sdd status` and `sdd wip list` to read the current graph state. Cluster and present using the Catch-up Playbook, then suggest where to start.
 

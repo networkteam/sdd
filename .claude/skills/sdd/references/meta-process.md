@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 6f0cda82e553ac917db2266b4a239fb3e20f9fa1444501ebacc7c48a32ec797a
+sdd-content-hash: da0f87606e6a5e2ab69862aa124c208b65a858a501085846d9f3c9ce5bc96c4f
 sdd-version: dev
 ---
 # SDD Meta Process
@@ -8,7 +8,7 @@ Guidelines for how to work with the decision graph in a session.
 
 ## Starting a Session
 
-1. Run `sdd status` to see the current graph state (binary is pre-built at `bin/sdd`)
+1. Run `sdd status` to see the current graph state
 3. Based on the state, suggest what's next — don't wait for the user to figure it out
 
 ## Modes of Working
