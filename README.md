@@ -12,6 +12,8 @@ SDD records your project's reasoning as an immutable decision graph — signals 
 
 **With SDD:** an append-only graph where new insight → new entry (`refs`, `supersedes`, `closes`). State is *derived from the graph*, never maintained in parallel docs. Tracked in Git, so humans and agents work against the same graph — each session runs independently, and signals, decisions, and actions are captured by the work itself.
 
+![SDD in action — parallel feature work without losing context](docs/assets/screencast.gif)
+
 ---
 
 You start in Claude Code with the `/sdd` skill. It shows the current state of the graph and carries the playbook moves for taking it forward — capture, decide, implement, explore, groom — all through conversation. The `sdd` CLI underneath stores entries and derives current state from the graph — the same view humans and agents both read. You rarely invoke it directly.
