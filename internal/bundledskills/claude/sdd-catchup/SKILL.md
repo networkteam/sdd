@@ -17,10 +17,8 @@ Read the framework reference files to understand the system:
 
 ## Step 2 — Read the graph
 
-The `sdd` CLI binary is pre-built at `./bin/sdd`. Do NOT build it — just use it. Run from the repo root:
-
 ```bash
-./bin/sdd status
+sdd status
 ```
 
 This shows active decisions, open signals, and recent actions with summaries. These are the entries that matter for the catch-up.
@@ -36,7 +34,7 @@ Each entry line is formatted as:
 Also check for active WIP markers (these are most certainly from other concurrent sessions / users):
 
 ```bash
-./bin/sdd wip list
+sdd wip list
 ```
 
 The summaries in the status output already describe each entry and its direct relationships. Use them to produce the catch-up narrative.
@@ -44,7 +42,7 @@ The summaries in the status output already describe each entry and its direct re
 If you additionally need full details of specific entries (use sparely!), fetch the respective entries at once:
 
 ```bash
-./bin/sdd show --max-depth 0 <id1> <id2> <id3> ...
+sdd show --max-depth 0 <id1> <id2> <id3> ...
 ```
 
 **Computing thread-level voices.** For each open item you include in the catch-up, compute the set of participants across its full upstream ref chain (union, deduped) using `sdd show <id>` and reading participant fields up the chain. Distinguish:

@@ -20,11 +20,9 @@ Read the framework reference files to understand entry types, layers, and graph 
 
 ## Step 2 — Fetch the target with upstream and downstream
 
-The `sdd` CLI binary is pre-built at `./bin/sdd`. Do NOT build it — just use it. Run from the repo root.
-
 Fetch the target entry with its full upstream chain and downstream entries in one call:
 ```bash
-./bin/sdd show --downstream <target-id>
+sdd show --downstream <target-id>
 ```
 
 This returns:
@@ -34,7 +32,7 @@ This returns:
 
 If you need full details for specific upstream or downstream entries (e.g. to understand a key decision in the chain), fetch them individually:
 ```bash
-./bin/sdd show --max-depth 0 <id1> <id2>
+sdd show --max-depth 0 <id1> <id2>
 ```
 
 ## Step 3 — Determine entry status
@@ -52,7 +50,7 @@ Report the status explicitly in your output.
 
 List all open/active entries:
 ```bash
-./bin/sdd list
+sdd list
 ```
 
 Read through the list and identify entries that are **conceptually related** to the target — even if not linked via refs. Look for:
@@ -62,7 +60,7 @@ Read through the list and identify entries that are **conceptually related** to 
 
 For each related entry, fetch full details:
 ```bash
-./bin/sdd show --max-depth 0 <related-id1> <related-id2> <related-id3>
+sdd show --max-depth 0 <related-id1> <related-id2> <related-id3>
 ```
 
 ## Step 5 — Return the collected context

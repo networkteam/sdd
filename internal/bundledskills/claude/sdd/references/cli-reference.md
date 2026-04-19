@@ -1,7 +1,5 @@
 # SDD CLI Reference
 
-The `sdd` binary is pre-built at `./bin/sdd`. Do NOT build it — just use it. Run from the repo root.
-
 ## Commands
 
 - `sdd status` — overview of active decisions, open signals, recent actions (uses summaries)
@@ -88,7 +86,7 @@ PLAN=$(cat <<'EOF'
 EOF
 )
 
-echo "$PLAN" | ./bin/sdd new d tac --kind plan --confidence high \
+echo "$PLAN" | sdd new d tac --kind plan --confidence high \
   --refs <id> --participants "Name,Claude" \
   --attach -:plan.md \
   "$DESC"
