@@ -3,7 +3,9 @@ package handlers
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,12 +16,19 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-// Init executes an InitCmd: creates .sdd/ directory structure at cmd.RepoRoot,
-// writes config.yaml from the template, creates the graph directory, adds
-// .sdd/tmp to .gitignore, and optionally migrates legacy .sdd-tmp/ contents.
+// Init executes an InitCmd. The operation is idempotent:
 //
-// This handler does NOT use h.graphDir — all paths are derived from
-// cmd.RepoRoot and cmd.GraphDir.
+//   - On an empty tree, it creates .sdd/, writes config.yaml and meta.json,
+//     creates the graph dir, updates .gitignore, and installs the embedded
+//     skill bundle.
+//   - On an existing tree, it leaves config.yaml and meta.json alone,
+//     ensures the expected directories are in place, and runs the skill
+//     install pass to refresh whatever's drifted (user-modified files are
+//     routed through cmd.PromptOverwrite).
+//
+// The skill install step and the meta-write step are implemented as nested
+// commands (h.InstallSkills and h.WriteSchemaMeta), keeping each side
+// effect in its own handler method.
 func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	log := slogutils.FromContext(ctx)
 	if err := cmd.Validate(); err != nil {
@@ -34,70 +43,173 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	sddDir := filepath.Join(cmd.RepoRoot, model.SDDDirName)
 	absGraphDir := filepath.Join(cmd.RepoRoot, graphDir)
 	tmpDir := filepath.Join(sddDir, "tmp")
-
-	// Guard against double-init.
-	if _, err := os.Stat(sddDir); err == nil {
-		return fmt.Errorf(".sdd/ already exists at %s; remove it first to reinitialize", sddDir)
-	}
-
-	// Create .sdd/ directory.
-	if err := os.MkdirAll(sddDir, 0755); err != nil {
-		return fmt.Errorf("creating %s: %w", sddDir, err)
-	}
-
-	// Write config.yaml.
-	configContent := model.FormatConfig(model.Config{GraphDir: graphDir})
 	configPath := filepath.Join(sddDir, "config.yaml")
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", configPath, err)
-	}
-
-	// Create graph directory.
-	if err := os.MkdirAll(absGraphDir, 0755); err != nil {
-		return fmt.Errorf("creating graph dir %s: %w", absGraphDir, err)
-	}
-
-	// Create .sdd/tmp/ directory.
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
-		return fmt.Errorf("creating tmp dir %s: %w", tmpDir, err)
-	}
-
-	// Update .gitignore at repo root.
 	gitignorePath := filepath.Join(cmd.RepoRoot, ".gitignore")
-	if err := ensureGitignoreEntries(gitignorePath, []string{".sdd/tmp/"}); err != nil {
-		log.Warn("could not update .gitignore", "path", gitignorePath, "err", err)
-	} else if cmd.OnGitignoreUpdated != nil {
-		cmd.OnGitignoreUpdated(gitignorePath)
+
+	sddExisted, err := pathExists(sddDir)
+	if err != nil {
+		return err
 	}
 
-	if cmd.OnCreated != nil {
-		cmd.OnCreated(sddDir, absGraphDir)
-	}
+	// Tracks paths we touch so the final git commit covers exactly what
+	// changed. A repeat init that changes nothing yields no commit.
+	var touched []string
 
-	// Migrate legacy .sdd-tmp/ from old graph dir location.
-	oldTmpDir := filepath.Join(absGraphDir, ".sdd-tmp")
-	migrated := migrateOldTmpDir(oldTmpDir, tmpDir)
-	if migrated > 0 {
-		if cmd.OnMigrated != nil {
-			cmd.OnMigrated(migrated)
+	if !sddExisted {
+		if err := os.MkdirAll(sddDir, 0o755); err != nil {
+			return fmt.Errorf("creating %s: %w", sddDir, err)
+		}
+		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.Config{GraphDir: graphDir})), 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", configPath, err)
+		}
+		touched = append(touched, configPath)
+
+		if err := os.MkdirAll(absGraphDir, 0o755); err != nil {
+			return fmt.Errorf("creating graph dir %s: %w", absGraphDir, err)
+		}
+		if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+			return fmt.Errorf("creating tmp dir %s: %w", tmpDir, err)
+		}
+
+		if err := ensureGitignoreEntries(gitignorePath, []string{".sdd/tmp/"}); err != nil {
+			log.Warn("could not update .gitignore", "path", gitignorePath, "err", err)
+		} else {
+			touched = append(touched, gitignorePath)
+			if cmd.OnGitignoreUpdated != nil {
+				cmd.OnGitignoreUpdated(gitignorePath)
+			}
+		}
+
+		if cmd.OnCreated != nil {
+			cmd.OnCreated(sddDir, absGraphDir)
+		}
+
+		// Best-effort migration from the pre-.sdd/ tmp location; harmless
+		// no-op when the legacy directory doesn't exist.
+		oldTmpDir := filepath.Join(absGraphDir, ".sdd-tmp")
+		if migrated := migrateOldTmpDir(oldTmpDir, tmpDir); migrated > 0 {
+			if cmd.OnMigrated != nil {
+				cmd.OnMigrated(migrated)
+			}
+		}
+		if err := cleanOldGraphDirGitignore(absGraphDir); err != nil {
+			log.Warn("could not clean old graph dir .gitignore", "graphDir", absGraphDir, "err", err)
+		}
+	} else {
+		// Existing .sdd/: ensure the directory tree is intact but preserve
+		// user-edited config.yaml as-is.
+		if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+			return fmt.Errorf("creating tmp dir %s: %w", tmpDir, err)
+		}
+		if err := os.MkdirAll(absGraphDir, 0o755); err != nil {
+			return fmt.Errorf("creating graph dir %s: %w", absGraphDir, err)
 		}
 	}
 
-	// Clean old .sdd-tmp/ entry from graph dir .gitignore.
-	if err := cleanOldGraphDirGitignore(absGraphDir); err != nil {
-		log.Warn("could not clean old graph dir .gitignore", "graphDir", absGraphDir, "err", err)
+	// Write .sdd/meta.json when absent. MinimumVersion is populated only on
+	// a released-version binary — dev builds leave the field empty so local
+	// development doesn't pin a floor the graph's owner didn't choose.
+	var minVersion *string
+	if !model.IsDevVersion(cmd.BinaryVersion) {
+		v := cmd.BinaryVersion
+		minVersion = &v
+	}
+	err = h.WriteSchemaMeta(ctx, &command.WriteSchemaMetaCmd{
+		SDDDir:         sddDir,
+		SchemaVersion:  model.CurrentGraphSchemaVersion,
+		MinimumVersion: minVersion,
+		OnWritten: func(path string) {
+			touched = append(touched, path)
+			if cmd.OnMetaWritten != nil {
+				cmd.OnMetaWritten(path)
+			}
+		},
+		OnPreserved: func(path string) {
+			if cmd.OnMetaPreserved != nil {
+				cmd.OnMetaPreserved(path)
+			}
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("writing schema meta: %w", err)
 	}
 
-	// Commit the new structure.
+	// Install (or refresh) the embedded skill bundle. Track every written
+	// file for the eventual commit.
+	err = h.InstallSkills(ctx, &command.InstallSkillsCmd{
+		Target:          cmd.Target,
+		Scope:           cmd.Scope,
+		RepoRoot:        cmd.RepoRoot,
+		UserHome:        cmd.UserHome,
+		BinaryVersion:   cmd.BinaryVersion,
+		Force:           cmd.Force,
+		PromptOverwrite: cmd.PromptOverwrite,
+		OnInstalled: func(r command.SkillInstallResult) {
+			touched = append(touched, r.Installed...)
+			touched = append(touched, r.Refreshed...)
+			touched = append(touched, r.Overwritten...)
+			if cmd.OnSkillsInstalled != nil {
+				cmd.OnSkillsInstalled(r)
+			}
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("installing skills: %w", err)
+	}
+
+	// Commit anything touched. Skill files installed under the user-global
+	// scope (outside the repo) are filtered out — they aren't part of the
+	// repo's git tree.
 	if h.committer != nil {
-		paths := []string{configPath, gitignorePath}
-		msg := "sdd: init .sdd/ metadata directory"
-		if err := h.committer.Commit(msg, paths...); err != nil {
-			log.Warn("git commit failed", "err", err)
+		commitPaths := filterRepoPaths(cmd.RepoRoot, touched)
+		if len(commitPaths) > 0 {
+			msg := initCommitMessage(sddExisted)
+			if err := h.committer.Commit(msg, commitPaths...); err != nil {
+				log.Warn("git commit failed", "err", err)
+			}
 		}
 	}
 
 	return nil
+}
+
+// pathExists reports whether path is accessible. A non-existence error is
+// distinguished from other stat failures.
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("stat %s: %w", path, err)
+}
+
+// filterRepoPaths drops any absolute paths that don't live under repoRoot.
+// Used to keep the init commit scoped to the repo's own tree — skills
+// installed under ~/.claude/skills/ are real filesystem writes but not
+// tracked in the repo.
+func filterRepoPaths(repoRoot string, paths []string) []string {
+	abs, err := filepath.Abs(repoRoot)
+	if err != nil {
+		abs = repoRoot
+	}
+	prefix := abs + string(filepath.Separator)
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if strings.HasPrefix(p, prefix) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func initCommitMessage(sddExisted bool) string {
+	if sddExisted {
+		return "sdd: refresh installed skills and metadata"
+	}
+	return "sdd: init .sdd/ metadata directory"
 }
 
 // ensureGitignoreEntries appends entries to .gitignore that are not already
@@ -126,7 +238,7 @@ func ensureGitignoreEntries(path string, entries []string) error {
 		return nil
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
 	}
@@ -163,7 +275,7 @@ func migrateOldTmpDir(oldDir, newDir string) int {
 		if err != nil {
 			continue
 		}
-		if err := os.WriteFile(dst, data, 0644); err != nil {
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
 			continue
 		}
 		_ = os.Remove(src) // best-effort; stale source is not fatal
@@ -215,10 +327,9 @@ func cleanOldGraphDirGitignore(graphDir string) error {
 			out.WriteString("\n")
 		}
 	}
-	// Preserve trailing newline.
 	if len(lines) > 0 {
 		out.WriteString("\n")
 	}
 
-	return os.WriteFile(path, []byte(out.String()), 0644)
+	return os.WriteFile(path, []byte(out.String()), 0o644)
 }

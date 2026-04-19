@@ -169,31 +169,18 @@ The binary ends up at `./bin/sdd`. Add it to your `$PATH`, or reference it by ab
 
 ## Quickstart
 
-### 1. Initialize a graph in your project
+### 1. Initialize the project
 
 ```bash
 cd your-project
 sdd init
 ```
 
-`sdd init` prompts for the graph directory (default `.sdd/graph`), writes `.sdd/config.yaml`, creates the graph directory, and adds `.sdd/tmp/` to `.gitignore`.
+One idempotent command. On a fresh tree it prompts for the graph directory (default `.sdd/graph`), writes `.sdd/config.yaml` and `.sdd/meta.json`, adds `.sdd/tmp/` to `.gitignore`, and installs the Claude Code skills under `~/.claude/skills/` (the default, user-global scope). Pass `--scope project` to install into this repo's `.claude/skills/` instead.
 
-### 2. Install the Claude Code skills
+Run `sdd init` again after a binary upgrade to refresh drifted skill files. Pristine files update silently; files you've edited yourself are preserved (add `--force` to overwrite them, or `--scope project` + `--force` to rebuild a repo-local installation).
 
-There is no `sdd install` yet. For now, copy the four skills from this repo to one of the standard Claude Code skill locations:
-
-- **User-global** (available in every project): `~/.claude/skills/`
-- **Project-level** (scoped to one repo): `.claude/skills/` in the project
-
-```bash
-cp -r /path/to/sdd/.claude/skills/sdd*  ~/.claude/skills/
-# or
-mkdir -p .claude/skills && cp -r /path/to/sdd/.claude/skills/sdd*  .claude/skills/
-```
-
-The skills invoke the binary at `./bin/sdd` relative to the working directory — convenient for dogfooding inside this repo, but not portable. Until a proper install story lands, using the skills from another project means editing the binary path in each `SKILL.md` (and `sdd/references/cli-reference.md`) to wherever your `sdd` binary lives, or putting it on `$PATH` and doing the same edit to drop the `./bin/` prefix.
-
-### 3. Start a session
+### 2. Start a session
 
 Open Claude Code in your project and run:
 
@@ -255,18 +242,16 @@ IDs accept both full form (`20260408-104102-d-prc-oka`) and short form (`d-prc-o
 
 ```
 your-project/
-├── .sdd/
-│   ├── config.yaml               # graph_dir, etc.
-│   ├── graph/
-│   │   ├── YYYY/MM/              # entries, e.g. 08-104102-d-prc-oka.md
-│   │   └── wip/                  # active WIP markers
-│   └── tmp/                      # scratch files (gitignored)
-└── .claude/skills/               # if using project-level skills
-    ├── sdd/
-    ├── sdd-catchup/
-    ├── sdd-explore/
-    └── sdd-groom/
+└── .sdd/
+    ├── config.yaml               # graph_dir, etc.
+    ├── meta.json                 # graph_schema_version, minimum_version
+    ├── graph/
+    │   ├── YYYY/MM/              # entries, e.g. 08-104102-d-prc-oka.md
+    │   └── wip/                  # active WIP markers
+    └── tmp/                      # scratch files (gitignored)
 ```
+
+`sdd init` also extracts the Claude Code skills to the agent's skill directory (defaults to `~/.claude/skills/`, or `.claude/skills/` with `--scope project`). Those paths are an implementation detail of the target agent — inspect them if you're curious, but they aren't part of your project's source tree.
 
 ## Docs
 

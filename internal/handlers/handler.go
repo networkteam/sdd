@@ -17,14 +17,15 @@ import (
 )
 
 // Reader is the handler-side view of the finder. It bundles every read
-// operation handlers need (graph loading, pre-flight, WIP markers). Defined
-// here (rather than imported as the concrete *finders.Finder) so consumers
-// can substitute fakes in tests — standard "accept interfaces, return
-// structs" Go pattern. *finders.Finder satisfies this interface.
+// operation handlers need (graph loading, pre-flight, WIP markers, install
+// state). Defined here (rather than imported as the concrete *finders.Finder)
+// so consumers can substitute fakes in tests — standard "accept interfaces,
+// return structs" Go pattern. *finders.Finder satisfies this interface.
 type Reader interface {
 	LoadGraph(dir string) (*model.Graph, error)
 	LoadWIPMarkers(graphDir string) ([]*model.WIPMarker, error)
 	Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error)
+	SkillStatus(ctx context.Context, q query.SkillStatusQuery) (*query.SkillStatusResult, error)
 }
 
 // Committer performs a git commit of the given paths with the given message.
