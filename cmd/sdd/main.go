@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/term"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
@@ -351,7 +352,7 @@ func newCmd() *cli.Command {
 				Value: 120 * time.Second,
 			},
 		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
 			ctx = slogutils.WithLogger(ctx, slogutils.FromContext(ctx).With("command", "new"))
 
 			args := cmd.Args()
@@ -448,7 +449,7 @@ func newCmd() *cli.Command {
 			})
 
 			return handler.NewEntry(ctx, ncmd)
-		},
+		}),
 	}
 }
 
@@ -525,7 +526,7 @@ func summarizeCmd() *cli.Command {
 				Value: 60 * time.Second,
 			},
 		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
 			ctx = slogutils.WithLogger(ctx, slogutils.FromContext(ctx).With("command", "summarize"))
 
 			ids := cmd.Args().Slice()
@@ -557,7 +558,7 @@ func summarizeCmd() *cli.Command {
 				Committer: gitCommitterFunc(gitCommit),
 			})
 			return handler.Summarize(ctx, sumCmd)
-		},
+		}),
 	}
 }
 
@@ -701,23 +702,90 @@ func promptGraphDir(defaultValue string) (string, error) {
 	return value, nil
 }
 
-// isTerminal returns true if the given file descriptor is a terminal.
+// isTerminal returns true if f is attached to an interactive terminal. Uses
+// term.IsTerminal rather than os.FileMode checks because special devices
+// like /dev/null are character devices but not terminals — the distinction
+// matters when stdin is redirected, since bubbletea opens /dev/tty directly
+// and fails in non-interactive contexts.
 func isTerminal(f *os.File) bool {
-	fi, err := f.Stat()
-	if err != nil {
-		return false
+	return term.IsTerminal(f.Fd())
+}
+
+// confirmPromptModel is a bubbletea model for a single-char [y/N]
+// confirmation. Reuses the same textinput.Model infrastructure as
+// graphDirPromptModel for stylistic consistency with the d-tac-s2g flow.
+type confirmPromptModel struct {
+	textInput textinput.Model
+	prompt    string
+	done      bool
+}
+
+func newConfirmPromptModel(prompt string) confirmPromptModel {
+	ti := textinput.New()
+	ti.Placeholder = "N"
+	ti.CharLimit = 1
+	ti.Width = 3
+	ti.Focus()
+	return confirmPromptModel{textInput: ti, prompt: prompt}
+}
+
+func (m confirmPromptModel) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m confirmPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.Type {
+		case tea.KeyEnter:
+			m.done = true
+			return m, tea.Quit
+		case tea.KeyCtrlC, tea.KeyEsc:
+			return m, tea.Quit
+		}
 	}
-	return fi.Mode()&os.ModeCharDevice != 0
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m confirmPromptModel) View() string {
+	return fmt.Sprintf("%s [y/N]: %s", m.prompt, m.textInput.View())
+}
+
+// promptOverwriteModified asks the user whether to overwrite a user-edited
+// skill file during sdd init. Default N (preserve). Returns false on empty
+// input, EOF, or cancellation — the safe side is always "leave it alone."
+func promptOverwriteModified(absPath string) (bool, error) {
+	m := newConfirmPromptModel(fmt.Sprintf("Overwrite user-edited %s?", absPath))
+	result, err := tea.NewProgram(m).Run()
+	if err != nil {
+		return false, err
+	}
+	final := result.(confirmPromptModel)
+	if !final.done {
+		return false, nil
+	}
+	v := strings.ToLower(strings.TrimSpace(final.textInput.Value()))
+	return v == "y" || v == "yes", nil
 }
 
 func initCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "init",
-		Usage: "Initialize .sdd/ metadata directory",
+		Usage: "Initialize or refresh the SDD project (idempotent)",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "graph-dir",
-				Usage: "Graph directory relative to repo root",
+				Usage: "Graph directory relative to repo root (prompted interactively on fresh init)",
+			},
+			&cli.StringFlag{
+				Name:  "scope",
+				Usage: "Where to install skills: user (~/.claude/skills) or project (.claude/skills)",
+				Value: string(model.DefaultScope),
+			},
+			&cli.BoolFlag{
+				Name:  "force",
+				Usage: "Overwrite user-modified skill files without prompting",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -726,8 +794,14 @@ func initCmd() *cli.Command {
 				return fmt.Errorf("finding repo root: %w", err)
 			}
 
+			sddDir := filepath.Join(repoRoot, model.SDDDirName)
+			sddExists := false
+			if _, err := os.Stat(sddDir); err == nil {
+				sddExists = true
+			}
+
 			graphDir := cmd.String("graph-dir")
-			if graphDir == "" && isTerminal(os.Stdin) {
+			if graphDir == "" && !sddExists && isTerminal(os.Stdin) {
 				prompted, err := promptGraphDir(model.DefaultGraphDir)
 				if err != nil {
 					return fmt.Errorf("prompt: %w", err)
@@ -738,9 +812,26 @@ func initCmd() *cli.Command {
 				graphDir = model.DefaultGraphDir
 			}
 
+			scope := model.Scope(cmd.String("scope"))
+			if scope != model.ScopeUser && scope != model.ScopeProject {
+				return fmt.Errorf("invalid --scope: %s (use user or project)", scope)
+			}
+			userHome, _ := os.UserHomeDir()
+
 			icmd := &command.InitCmd{
-				RepoRoot: repoRoot,
-				GraphDir: graphDir,
+				RepoRoot:      repoRoot,
+				GraphDir:      graphDir,
+				BinaryVersion: version,
+				Target:        model.DefaultAgentTarget,
+				Scope:         scope,
+				UserHome:      userHome,
+				Force:         cmd.Bool("force"),
+				PromptOverwrite: func(path string) (bool, error) {
+					if !isTerminal(os.Stdin) {
+						return false, nil
+					}
+					return promptOverwriteModified(path)
+				},
 				OnCreated: func(sddDir, absGraphDir string) {
 					fmt.Printf("created %s\n", sddDir)
 					fmt.Printf("  graph: %s\n", absGraphDir)
@@ -751,14 +842,33 @@ func initCmd() *cli.Command {
 				OnGitignoreUpdated: func(path string) {
 					fmt.Fprintf(os.Stderr, "  updated %s\n", path)
 				},
+				OnMetaWritten: func(path string) {
+					fmt.Printf("  meta: %s\n", path)
+				},
+				OnSkillsInstalled: func(result command.SkillInstallResult) {
+					installDir := scopeInstallDir(repoRoot, userHome, scope)
+					presenters.RenderInitSkills(os.Stdout, installDir, result)
+				},
 			}
 
 			handler := handlers.New(handlers.Options{
+				Reader:    newFinder(""),
 				Committer: gitCommitterFunc(gitCommit),
 			})
 			return handler.Init(ctx, icmd)
 		},
 	}
+}
+
+// scopeInstallDir resolves the install directory for the selected scope.
+// Errors are swallowed because this is a display-only derivation — the
+// handler already validated the scope.
+func scopeInstallDir(repoRoot, userHome string, scope model.Scope) string {
+	d, err := model.SkillInstallDir(model.DefaultAgentTarget, scope, repoRoot, userHome)
+	if err != nil {
+		return ""
+	}
+	return d
 }
 
 func wipCmd() *cli.Command {
@@ -792,7 +902,7 @@ func wipStartCmd() *cli.Command {
 				Usage: "Create a git branch and check out to it",
 			},
 		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
 			args := cmd.Args()
 			if args.Len() < 1 {
 				return fmt.Errorf("usage: sdd wip start <entry-id> [description]")
@@ -828,7 +938,7 @@ func wipStartCmd() *cli.Command {
 				Brancher:  gitBrancher{},
 			})
 			return handler.StartWIP(ctx, startCmd)
-		},
+		}),
 	}
 }
 
@@ -843,7 +953,7 @@ func wipDoneCmd() *cli.Command {
 				Usage: "Force-delete unmerged branch (discard flow)",
 			},
 		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
 			args := cmd.Args()
 			if args.Len() < 1 {
 				return fmt.Errorf("usage: sdd wip done <marker-id>")
@@ -879,7 +989,7 @@ func wipDoneCmd() *cli.Command {
 				Brancher:  gitBrancher{},
 			})
 			return handler.FinishWIP(ctx, doneCmd)
-		},
+		}),
 	}
 }
 
