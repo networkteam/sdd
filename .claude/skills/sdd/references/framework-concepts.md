@@ -1,3 +1,7 @@
+---
+sdd-content-hash: 7f4364215a38c10af96eb68636046787187d6075ec3a592ba6d789bbc49ca7fd
+sdd-version: dev
+---
 # SDD Framework Concepts
 
 ## The Loop
