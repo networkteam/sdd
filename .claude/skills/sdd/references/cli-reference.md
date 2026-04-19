@@ -1,10 +1,8 @@
 ---
-sdd-content-hash: ceeca4df115d3737300f3aec02606f835f7d33196b8d5dcf12af833083b42374
+sdd-content-hash: 39ae39251e1cee94473ddd21a2d6635db04f1e91083912a07f8592dd74e2607a
 sdd-version: dev
 ---
 # SDD CLI Reference
-
-The `sdd` binary is pre-built at `./bin/sdd`. Do NOT build it — just use it. Run from the repo root.
 
 ## Commands
 
@@ -92,7 +90,7 @@ PLAN=$(cat <<'EOF'
 EOF
 )
 
-echo "$PLAN" | ./bin/sdd new d tac --kind plan --confidence high \
+echo "$PLAN" | sdd new d tac --kind plan --confidence high \
   --refs <id> --participants "Name,Claude" \
   --attach -:plan.md \
   "$DESC"
