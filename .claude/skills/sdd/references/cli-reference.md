@@ -1,3 +1,7 @@
+---
+sdd-content-hash: ceeca4df115d3737300f3aec02606f835f7d33196b8d5dcf12af833083b42374
+sdd-version: dev
+---
 # SDD CLI Reference
 
 The `sdd` binary is pre-built at `./bin/sdd`. Do NOT build it — just use it. Run from the repo root.

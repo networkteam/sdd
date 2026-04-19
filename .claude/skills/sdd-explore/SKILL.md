@@ -1,10 +1,12 @@
 ---
-name: sdd-explore
-description: Collect context for a graph entry — upstream summaries, downstream refs, and semantically related entries. Returns structured material for the outer skill to brief and dialogue with.
-context: fork
-model: sonnet
-user-invocable: false
 allowed-tools: Bash Read Grep Glob
+context: fork
+description: Collect context for a graph entry — upstream summaries, downstream refs, and semantically related entries. Returns structured material for the outer skill to brief and dialogue with.
+model: sonnet
+name: sdd-explore
+sdd-content-hash: acecfe3153cd8332c4275c389253aff5f1b09dccc6c1d965fe889010cfe48bb3
+sdd-version: dev
+user-invocable: false
 ---
 
 You are a context collector for the SDD explore mode. Your job is to assemble the picture around a target graph entry and return it. The outer skill will handle briefing and dialogue — you gather the material.

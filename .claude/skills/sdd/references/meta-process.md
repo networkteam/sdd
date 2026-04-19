@@ -1,3 +1,7 @@
+---
+sdd-content-hash: 6f0cda82e553ac917db2266b4a239fb3e20f9fa1444501ebacc7c48a32ec797a
+sdd-version: dev
+---
 # SDD Meta Process
 
 Guidelines for how to work with the decision graph in a session.

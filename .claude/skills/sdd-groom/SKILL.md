@@ -1,10 +1,12 @@
 ---
-name: sdd-groom
-description: Scan for grooming candidates — open entries that may already be resolved (by graph activity or Git commits) but lack proper closure. Returns a numbered table for the outer skill to walk through with the user.
-context: fork
-model: sonnet
-user-invocable: false
 allowed-tools: Bash Read Grep Glob
+context: fork
+description: Scan for grooming candidates — open entries that may already be resolved (by graph activity or Git commits) but lack proper closure. Returns a numbered table for the outer skill to walk through with the user.
+model: sonnet
+name: sdd-groom
+sdd-content-hash: b8f7354a33865b227309f7e4f6724391c5a8418087a739eb73a1ad955bc4f4b1
+sdd-version: dev
+user-invocable: false
 ---
 
 You are a grooming scanner for the SDD decision graph. Your job is to find entries that appear open/active but may already be resolved — either by downstream graph entries missing `closes` fields, or by Git activity that was never captured as an action. Return a numbered list of candidates with evidence and suggested resolutions. The outer skill handles the dialogue.
