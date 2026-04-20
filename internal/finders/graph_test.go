@@ -21,6 +21,7 @@ Signal one.`)
 	writeGraphEntry(t, dir, "20260406-115540-d-stg-0gh", `---
 type: decision
 layer: strategic
+kind: directive
 refs:
   - 20260406-115516-s-stg-beh
 closes:
@@ -58,9 +59,9 @@ Done signal closing decision.`)
 	}
 
 	// Decision is closed by done signal
-	active := g.ActiveDecisions()
-	if len(active) != 0 {
-		t.Errorf("ActiveDecisions = %d, want 0", len(active))
+	directives := g.Directives()
+	if len(directives) != 0 {
+		t.Errorf("Directives = %d, want 0", len(directives))
 	}
 
 	// Recent done signals
