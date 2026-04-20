@@ -248,8 +248,10 @@ type GraphFilter struct {
 	OpenOnly    bool // when true, exclude closed/superseded signals and decisions
 }
 
-// Filter returns entries matching the given filter criteria. Zero-value fields match all.
-// When Kind is specified, only decisions are returned (kind is meaningless for other types).
+// Filter returns entries matching the given filter criteria. Zero-value
+// fields match all. Kind matches across both signal and decision kinds —
+// the two sets are disjoint, so `Kind: KindGap` selects signals and
+// `Kind: KindPlan` selects decisions without further narrowing.
 func (g *Graph) Filter(f GraphFilter) []*Entry {
 	var closed, superseded map[string]bool
 	if f.OpenOnly {
@@ -268,17 +270,8 @@ func (g *Graph) Filter(f GraphFilter) []*Entry {
 		if f.MissingKind && e.Kind != "" {
 			continue
 		}
-		if f.Kind != "" {
-			if e.Type != TypeDecision {
-				continue
-			}
-			effective := e.Kind
-			if effective == "" {
-				effective = KindDirective
-			}
-			if effective != f.Kind {
-				continue
-			}
+		if f.Kind != "" && e.Kind != f.Kind {
+			continue
 		}
 		if f.OpenOnly {
 			switch e.Type {

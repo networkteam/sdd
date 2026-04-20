@@ -260,7 +260,7 @@ func listCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:    "kind",
 				Aliases: []string{"k"},
-				Usage:   "Filter decisions by kind (contract, directive, plan)",
+				Usage:   "Filter by kind — signals: gap, fact, question, insight, done; decisions: directive, activity, plan, contract, aspiration",
 			},
 			&cli.BoolFlag{
 				Name:  "missing-kind",

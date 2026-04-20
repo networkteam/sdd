@@ -626,42 +626,61 @@ func TestAspirations(t *testing.T) {
 func TestFilterWithKind(t *testing.T) {
 	g := NewGraph([]*Entry{
 		entry("20260406-100000-d-cpt-aaa", withKind(KindContract)),
-		entry("20260406-100100-d-tac-bbb"),
+		entry("20260406-100100-d-tac-bbb", withKind(KindDirective)),
 		entry("20260406-100150-d-tac-ppp", withKind(KindPlan)),
-		entry("20260406-100200-s-tac-ccc"),
+		entry("20260406-100155-d-tac-act", withKind(KindActivity)),
+		entry("20260406-100158-d-stg-asp", withKind(KindAspiration)),
+		entry("20260406-100200-s-tac-gap", withKind(KindGap)),
+		entry("20260406-100220-s-stg-ins", withKind(KindInsight)),
+		entry("20260406-100240-s-tac-fct", withKind(KindFact)),
 	})
 
 	// Kind=contract: only contract decisions
 	contracts := g.Filter(GraphFilter{Kind: KindContract, OpenOnly: true})
-	if len(contracts) != 1 {
-		t.Fatalf("Filter(contract, OpenOnly) = %d, want 1", len(contracts))
-	}
-	if contracts[0].ID != "20260406-100000-d-cpt-aaa" {
-		t.Errorf("Got %q, want aaa", contracts[0].ID)
+	if len(contracts) != 1 || contracts[0].ID != "20260406-100000-d-cpt-aaa" {
+		t.Fatalf("Filter(contract) = %v, want [aaa]", entryIDs(contracts))
 	}
 
-	// Kind=directive: only directive decisions (excludes contracts and plans)
+	// Kind=directive: only directive decisions
 	directives := g.Filter(GraphFilter{Kind: KindDirective, OpenOnly: true})
-	if len(directives) != 1 {
-		t.Fatalf("Filter(directive, OpenOnly) = %d, want 1", len(directives))
-	}
-	if directives[0].ID != "20260406-100100-d-tac-bbb" {
-		t.Errorf("Got %q, want bbb", directives[0].ID)
+	if len(directives) != 1 || directives[0].ID != "20260406-100100-d-tac-bbb" {
+		t.Fatalf("Filter(directive) = %v, want [bbb]", entryIDs(directives))
 	}
 
 	// Kind=plan: only plan decisions
 	plans := g.Filter(GraphFilter{Kind: KindPlan, OpenOnly: true})
-	if len(plans) != 1 {
-		t.Fatalf("Filter(plan, OpenOnly) = %d, want 1", len(plans))
-	}
-	if plans[0].ID != "20260406-100150-d-tac-ppp" {
-		t.Errorf("Got %q, want ppp", plans[0].ID)
+	if len(plans) != 1 || plans[0].ID != "20260406-100150-d-tac-ppp" {
+		t.Fatalf("Filter(plan) = %v, want [ppp]", entryIDs(plans))
 	}
 
-	// Kind filter excludes non-decisions (signals, actions)
-	contractOnly := g.Filter(GraphFilter{Kind: KindContract})
-	if len(contractOnly) != 1 {
-		t.Errorf("Filter(contract) = %d, want 1 (only contract, no signal)", len(contractOnly))
+	// Kind=activity: only activity decisions
+	activities := g.Filter(GraphFilter{Kind: KindActivity, OpenOnly: true})
+	if len(activities) != 1 || activities[0].ID != "20260406-100155-d-tac-act" {
+		t.Fatalf("Filter(activity) = %v, want [act]", entryIDs(activities))
+	}
+
+	// Kind=aspiration: only aspiration decisions
+	aspirations := g.Filter(GraphFilter{Kind: KindAspiration, OpenOnly: true})
+	if len(aspirations) != 1 || aspirations[0].ID != "20260406-100158-d-stg-asp" {
+		t.Fatalf("Filter(aspiration) = %v, want [asp]", entryIDs(aspirations))
+	}
+
+	// Kind=gap: signal kinds now filter too (two-type system — both types carry kind).
+	gaps := g.Filter(GraphFilter{Kind: KindGap, OpenOnly: true})
+	if len(gaps) != 1 || gaps[0].ID != "20260406-100200-s-tac-gap" {
+		t.Fatalf("Filter(gap) = %v, want [gap]", entryIDs(gaps))
+	}
+
+	// Kind=insight
+	insights := g.Filter(GraphFilter{Kind: KindInsight, OpenOnly: true})
+	if len(insights) != 1 || insights[0].ID != "20260406-100220-s-stg-ins" {
+		t.Fatalf("Filter(insight) = %v, want [ins]", entryIDs(insights))
+	}
+
+	// Kind=fact
+	facts := g.Filter(GraphFilter{Kind: KindFact, OpenOnly: true})
+	if len(facts) != 1 || facts[0].ID != "20260406-100240-s-tac-fct" {
+		t.Fatalf("Filter(fact) = %v, want [fct]", entryIDs(facts))
 	}
 }
 
