@@ -4,7 +4,7 @@ context: fork
 description: Scan for grooming candidates — open entries that may already be resolved (by graph activity or Git commits) but lack proper closure. Returns a numbered table for the outer skill to walk through with the user.
 model: sonnet
 name: sdd-groom
-sdd-content-hash: 9c9dba300df751598bb2811e00b3b4528ef5d27d8b746cda9ad65df83b5da087
+sdd-content-hash: 50111cfc75946c6fad7ae8474e02c02458573d004c78a198e2b168d40221a9a6
 sdd-version: dev
 user-invocable: false
 ---
@@ -22,11 +22,11 @@ Read the framework reference files to understand entry types, layers, and closur
 sdd status
 ```
 
-This shows open signals and active decisions with summaries. Collect all their IDs.
+This shows the current graph grouped by section (Aspirations, Contracts, Plans, Activities, Directives, Gaps and Questions, Recent Insights, Recent Done Signals). For grooming, collect the IDs of entries that can still be closed or superseded — Plans, Activities, Directives, and Gaps and Questions. Aspirations and Contracts are durable (retired by directive close, not resolved), so they're groom candidates only when explicitly stale. Recent Insights and Recent Done Signals aren't groom candidates — insights are stable observations, done signals are terminal facts.
 
 ## Step 3 — Check each entry for downstream activity
 
-For each open signal and active decision, fetch the entry with its upstream and downstream context:
+For each candidate entry, fetch it with its upstream and downstream context:
 ```bash
 sdd show --downstream <id>
 ```

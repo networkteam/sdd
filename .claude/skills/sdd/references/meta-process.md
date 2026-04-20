@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: da0f87606e6a5e2ab69862aa124c208b65a858a501085846d9f3c9ce5bc96c4f
+sdd-content-hash: b2960b79f26709b7c39a36b937dfb7623cb8c228a26e40317901d10828ef8437
 sdd-version: dev
 ---
 # SDD Meta Process
@@ -15,7 +15,7 @@ Guidelines for how to work with the decision graph in a session.
 
 A session can move fluidly between these modes:
 
-**Check in**: "Where are we?" Run `sdd status`. Summarize: active decisions, open signals, recent actions. Suggest what deserves attention.
+**Check in**: "Where are we?" Run `sdd status`. Summarize what the graph holds right now — plans, activities, directives, gaps and questions, recent insights, recent done signals — and use aspirations/contracts as context. Suggest what deserves attention.
 
 **Capture**: Something happened — a user observation, market signal, idea, implementation finding. Always dialogue before recording: play back what you'd capture, ask if it's right, adjust. Never silently create entries.
 
@@ -43,7 +43,7 @@ Ask: "The last action was [X]. Any signals from it? Did it meet the target? What
 ## Suggesting Next Steps
 
 Always end an interaction by offering concrete options:
-- "You have N open signals. Want to address [specific one]?"
+- "You have N open gaps and questions. Want to address [specific one]?"
 - "The last action was [X]. Want to evaluate it?"
 - "There's a tension between [signal A] and [decision B]. Worth discussing?"
 - "Or capture something new — what's on your mind?"
