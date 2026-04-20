@@ -1,0 +1,22 @@
+{{ define "unusual_close" }}{{ if .ClosedEntries }}
+## Unusual close-pattern check
+
+`closes` means "this entry resolves the closed entry's purpose". Standard patterns are:
+
+- decision closes signal (a directive/plan/activity addressing a gap)
+- `kind: done` signal closes a decision (completion record)
+- `kind: done` signal closes a `kind: gap` signal (short-loop)
+- `kind: fact` or `kind: insight` signal closes a `kind: question` signal (dissolution)
+- `kind: directive` decision closes a stable-kind entry (`fact` / `insight` / `contract` / `aspiration`) — retirement with rationale
+
+Anything outside this matrix — same-kind close where supersede would fit, or an atypical cross-kind close — is unusual. Unusual patterns are **allowed-and-flagged**: severity is gated by whether the narrative captures rationale for using `closes` in this specific shape.
+
+- `high` — Close pattern is unusual AND narrative lacks clear rationale explaining the intent. Examples:
+  - `fact` closes `fact` with narrative only describing the new fact, no mention of why retiring without supersede
+  - `insight` closes `fact` with narrative describing the insight but never explaining why the old fact is being closed
+  - `gap` closes `gap` with no rationale for not superseding with a refined gap
+- `low` — Close pattern is unusual BUT rationale is clear in prose. The close is valid; surface the atypical pattern for reader awareness. Examples:
+  - `insight` closes `fact` with "Retiring this fact because the measurement was taken pre-launch and no longer applies post-market-shift"
+  - `fact` closes `fact` with "Not superseding — no updated measurement available; just retiring the stale value"
+- No finding — Standard patterns from the matrix above. A decision closing a signal, a done signal closing a decision, short-loop, dissolution, and directive-retires-stable-kind are all normal and need no surfacing.
+{{ end }}{{ end }}

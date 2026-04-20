@@ -95,9 +95,11 @@ func (g *Graph) Plans() []*Entry {
 	return plans
 }
 
-// Contracts returns active contract decisions (not superseded).
-// Contracts are never closed — they stay active until superseded.
+// Contracts returns active contract decisions (not superseded, not closed).
+// Contracts retire via a same-kind supersede or a directive-kind decision
+// closing them with rationale (universal retirement rule).
 func (g *Graph) Contracts() []*Entry {
+	closed := g.closedSet()
 	superseded := g.supersededSet()
 
 	var contracts []*Entry
@@ -105,11 +107,30 @@ func (g *Graph) Contracts() []*Entry {
 		if e.Type != TypeDecision || !e.IsContract() {
 			continue
 		}
-		if !superseded[e.ID] {
+		if !closed[e.ID] && !superseded[e.ID] {
 			contracts = append(contracts, e)
 		}
 	}
 	return contracts
+}
+
+// Aspirations returns active aspiration decisions (not superseded, not closed).
+// Like contracts, aspirations are durable — they retire via supersede or
+// close-by-directive with rationale (see dissolution/retirement calibration).
+func (g *Graph) Aspirations() []*Entry {
+	closed := g.closedSet()
+	superseded := g.supersededSet()
+
+	var aspirations []*Entry
+	for _, e := range g.Entries {
+		if e.Type != TypeDecision || !e.IsAspiration() {
+			continue
+		}
+		if !closed[e.ID] && !superseded[e.ID] {
+			aspirations = append(aspirations, e)
+		}
+	}
+	return aspirations
 }
 
 // OpenSignals returns signals that are not closed and not superseded.
@@ -459,8 +480,11 @@ func validateIDRefs(e *Entry, g *Graph, field string, ids []string) {
 }
 
 // validateCloses checks type constraints on closes references.
-// Valid: decision closes signal, action closes decision, action closes signal.
-// Invalid: anything closes action, signal closes anything, decision closes decision.
+// Valid: decision closes signal; done-kind signal closes decision or signal;
+// kind: directive decision closes a stable-kind decision (contract or
+// aspiration) as retirement.
+// Invalid: anything closes action; non-done signal closes anything; any
+// decision-closes-decision other than directive→{contract|aspiration}.
 func validateCloses(e *Entry, g *Graph) {
 	for _, id := range e.Closes {
 		target, ok := g.ByID[id]
@@ -482,6 +506,12 @@ func validateCloses(e *Entry, g *Graph) {
 				Message: fmt.Sprintf("actions cannot be closed (closes action %s)", id),
 			})
 		case e.Type == TypeDecision && target.Type == TypeDecision:
+			// Retirement exception: a kind: directive decision may close a
+			// kind: contract or kind: aspiration decision with rationale.
+			// Every other decision-closes-decision pattern uses supersedes.
+			if e.Kind == KindDirective && (target.Kind == KindContract || target.Kind == KindAspiration) {
+				continue
+			}
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "closes",
 				Value:   id,

@@ -2,13 +2,14 @@ You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision g
 
 ## Task
 
-A decision is being created that claims to close (resolve) one or more signals. Verify that the decision genuinely addresses each signal it closes.
+A decision is being created that claims to close one or more entries. Most commonly this is a decision closing signals (the standard pattern: directive/activity/plan/contract addressing a gap). A `kind: directive` decision may also close stable-kind entries (`fact` / `insight` / `contract` / `aspiration`) as a retirement. Verify that the decision genuinely addresses each closed entry, and that retirement cases carry rationale.
 
 ## Checks
 
 1. **Genuine resolution**: Each closed signal must be genuinely addressed by the decision content — not just referenced as context.
 2. **No silent additions**: The decision must not introduce commitments not grounded in the referenced signals. Strategic synthesis is allowed; unrelated scope is not.
 3. **Layer appropriateness**: The decision's layer should match the scope of commitment being made.
+4. **Retirement rationale** (applies only when the closed target's kind is `fact`, `insight`, `contract`, or `aspiration`): The decision narrative must state **why** the target is being retired — not whether the reasoning is correct, just that it's present.
 
 ## Calibration
 
@@ -19,15 +20,24 @@ A decision closing a signal must address what the signal identifies. Apply contr
 - `low` — Rationale is present but thin; a sentence explaining why would help future readers.
 - No finding — Plan omits a structural ritual (e.g. explicit CQRS decomposition table) required by an active contract — contracts express intent, not rigid form; small tactical plans don't need decomposition tables. Decision introduces synthesized design direction (e.g. "agent-neutral abstraction") beyond what the signal literally requested — decisions synthesize, the grounding test is "does the signal motivate a response?" not "is the exact direction pre-established?".
 
+### Retirement-rationale calibration (when closing a stable-kind entry)
+
+Stable-kind entries (`fact`, `insight`, `contract`, `aspiration`) have nothing intrinsic to resolve — they're retired, not fulfilled. Pre-flight checks that the narrative states **what changed** to warrant retirement; it does not adjudicate whether the reasoning is compelling.
+
+- `high` — Retirement claim with no why-retired statement. Example: closing a contract with narrative "No longer relevant." and nothing more; closing an aspiration with only "Retiring this."
+- `medium` — Reasoning restates what was closed without naming what changed. Example: "Retiring the immutability contract. It said documents don't change." (recaps the contract but never explains what shifted to make retirement appropriate).
+- `low` — Reasoning present but thin; a sentence would sharpen. Example: "New evidence made this outdated." — directionally correct, but the specific evidence or shift isn't named.
+- No finding — Narrative cites a specific reason: new evidence with specifics, a scope change with what's changed, an explicit handoff to a new entry ("superseded effectively by the aspiration `d-cpt-xyz`"), a concrete context shift, or a reclassification ("reclassifying this directive as a contract"). The reason's *correctness* is not evaluated; *presence* is.
+
 ## Proposed decision
 
 {{ .ProposedEntry }}
 
-## Signals being closed
+## Entries being closed
 
 {{ .ClosedEntries }}
 {{ if .ReferencedEntries }}
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
+{{ end }}{{ template "unrelated_refs" . }}{{ template "unusual_close" . }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}

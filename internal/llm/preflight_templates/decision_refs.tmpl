@@ -2,7 +2,7 @@ You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision g
 
 ## Task
 
-A decision is being created with references but not closing any entries. Verify that the decision is well-grounded and complete.
+A decision is being created with references but not closing any entries. Verify that the decision is well-grounded, complete, and — for directive-kind decisions — that it reads as a bounded commitment rather than a perpetual pull (which would be an aspiration).
 
 ## Checks
 
@@ -10,6 +10,7 @@ A decision is being created with references but not closing any entries. Verify 
 2. **Grounding**: The decision content should be grounded in the referenced entries — not introducing commitments from nowhere.
 3. **No scope smuggling**: The decision should not contain undiscussed commitments beyond what the referenced entries support.
 4. **Acceptance criteria presence** (applies only when the proposed entry is `Kind: plan`): Plan decisions must include an `## Acceptance criteria` section in the description with `- [ ]` checklist items. Missing AC section on a plan decision is a `high` finding. If the proposed kind is not `plan`, skip this check.
+5. **Directive shape check** (applies only when the proposed entry is `Kind: directive` at `stg` or `cpt` layer): A directive commits to a bounded choice. A commitment with no plausible completion criterion — perpetual pull, orientation, stance — reads as an aspiration, not a directive. If the proposed kind is not directive, or the layer is `tac` / `ops` / `prc`, skip this check.
 
 ## Calibration
 
@@ -19,6 +20,14 @@ A decision must ref the signals or decisions that directly motivated it or that 
 - `medium` — A related signal plausibly informs the decision but isn't answered directly; could be intentional scope narrowing.
 - `low` — Style suggestion (dense summary could be split across sentences).
 - No finding — Strategic decisions synthesize direction without every principle being pre-established in a signal; demanding pre-grounding prevents strategic thinking. Presence-of-field checks (missing Kind, missing Confidence) belong to CLI/lint, not LLM judgment.
+
+### Directive-reads-aspiration-shaped calibration (stg / cpt directives only)
+
+A directive at strategic or conceptual layer with perpetual framing and no "done when" condition is aspiration-shaped. The check flags the mismatch between claimed kind and narrative shape.
+
+- `medium` — Strategic or conceptual directive with perpetual framing and no bounded completion criterion. Narrative uses phrases like "ongoing pull toward X", "we orient around Y", "always favoring Z", with no "done when" or "closed by" horizon. Example: `kind: directive` at `stg` with content "We commit to prioritizing user trust over short-term growth as an enduring stance." — reads as an aspiration.
+- `low` — Directive at any layer where the commitment could read as a perpetual pull rather than a bounded choice; narrative is ambiguous. Example: directive at `cpt` "Favor simplicity in API design" — could be bounded (applied to current design work) or perpetual (a standing orientation); a sentence naming the horizon would clarify.
+- No finding — Directive with a clear bounded choice, even if high-level. Examples: "We will pursue direct-to-consumer distribution over wholesale" (bounded despite strategic); "Use Postgres for the new service" (concrete commitment). Bounded directives have a "done when" shape: a specific change lands, a path is taken, or the commitment is fulfilled by action.
 
 ## Proposed decision
 
@@ -31,4 +40,4 @@ A decision must ref the signals or decisions that directly motivated it or that 
 ## Open signals in the graph (check for missing refs)
 
 {{ .OpenSignals }}
-{{ end }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
+{{ end }}{{ template "unrelated_refs" . }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}

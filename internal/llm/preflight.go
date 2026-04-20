@@ -81,28 +81,36 @@ func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *mo
 
 // --- internal helpers ---
 
-// checkType identifies which pre-flight check to run.
+// checkType identifies which pre-flight check to run. Templates organize per
+// check transaction, not per kind — dispatch is kind-aware but the rendered
+// prompt stays scoped to the shape of the operation.
 type checkType int
 
 const (
-	checkClosingAction       checkType = iota // action closing a decision/plan
-	checkClosingDecision                      // decision closing signals
-	checkDecisionRefs                         // decision with refs, no closes
-	checkActionClosesSignals                  // action closing signals directly
-	checkSignalCapture                        // signal validation
-	checkSupersedes                           // supersedes operation
+	checkClosingDone       checkType = iota // done signal (or legacy action) closing a decision
+	checkClosingDecision                    // decision closing signals or stable-kind entries
+	checkDecisionRefs                       // decision with refs, no closes
+	checkShortLoop                          // done signal (or legacy action) closing a signal directly
+	checkDissolution                        // fact/insight signal closing a question
+	checkAspirationCapture                  // aspiration decision captured without closes
+	checkSignalCapture                      // signal validation
+	checkSupersedes                         // supersedes operation
 )
 
 func (c checkType) String() string {
 	switch c {
-	case checkClosingAction:
-		return "closing-action"
+	case checkClosingDone:
+		return "closing-done"
 	case checkClosingDecision:
 		return "closing-decision"
 	case checkDecisionRefs:
 		return "decision-refs"
-	case checkActionClosesSignals:
-		return "action-closes-signals"
+	case checkShortLoop:
+		return "short-loop"
+	case checkDissolution:
+		return "dissolution"
+	case checkAspirationCapture:
+		return "aspiration-capture"
 	case checkSignalCapture:
 		return "signal-capture"
 	case checkSupersedes:
@@ -113,12 +121,14 @@ func (c checkType) String() string {
 }
 
 var checkTypeTemplates = map[checkType]string{
-	checkClosingAction:       "preflight_templates/closing_action.tmpl",
-	checkClosingDecision:     "preflight_templates/closing_decision.tmpl",
-	checkDecisionRefs:        "preflight_templates/decision_refs.tmpl",
-	checkActionClosesSignals: "preflight_templates/action_closes_signals.tmpl",
-	checkSignalCapture:       "preflight_templates/signal_capture.tmpl",
-	checkSupersedes:          "preflight_templates/supersedes.tmpl",
+	checkClosingDone:       "preflight_templates/closing_done.tmpl",
+	checkClosingDecision:   "preflight_templates/closing_decision.tmpl",
+	checkDecisionRefs:      "preflight_templates/decision_refs.tmpl",
+	checkShortLoop:         "preflight_templates/short_loop.tmpl",
+	checkDissolution:       "preflight_templates/dissolution.tmpl",
+	checkAspirationCapture: "preflight_templates/aspiration_capture.tmpl",
+	checkSignalCapture:     "preflight_templates/signal_capture.tmpl",
+	checkSupersedes:        "preflight_templates/supersedes.tmpl",
 }
 
 // preflightContext holds all data needed to render a pre-flight prompt template.
@@ -131,22 +141,39 @@ type preflightContext struct {
 	ClosedEntries     string
 	SupersededEntries string
 	ActiveContracts   string
+	ActiveAspirations string
 	OpenSignals       string
 }
 
 // selectCheckType determines the pre-flight check type from entry properties and graph context.
+// Dispatch is kind-aware: the same structural shape (signal with closes) routes to different
+// templates based on the entry's kind and the closed target's kind.
 func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 	if len(entry.Supersedes) > 0 {
 		return checkSupersedes
 	}
 
-	if entry.Type == model.TypeAction && len(entry.Closes) > 0 {
+	// Completion records — done-kind signals and legacy actions — closing entries.
+	// Route by whether the closure targets a decision (closing_done) or a signal (short_loop).
+	// Unusual close patterns within signal closures get flagged by the unusual_close partial.
+	isCompletionRecord := entry.Type == model.TypeAction ||
+		(entry.Type == model.TypeSignal && entry.Kind == model.KindDone)
+	if isCompletionRecord && len(entry.Closes) > 0 {
 		for _, id := range entry.Closes {
 			if target, ok := graph.ByID[id]; ok && target.Type == model.TypeDecision {
-				return checkClosingAction
+				return checkClosingDone
 			}
 		}
-		return checkActionClosesSignals
+		return checkShortLoop
+	}
+
+	// Fact or insight closing an entry — dissolution. The dissolution template
+	// targets question closures; non-question targets are flagged as unusual
+	// close patterns by the shared partial.
+	if entry.Type == model.TypeSignal &&
+		(entry.Kind == model.KindFact || entry.Kind == model.KindInsight) &&
+		len(entry.Closes) > 0 {
+		return checkDissolution
 	}
 
 	if entry.Type == model.TypeDecision && len(entry.Closes) > 0 {
@@ -154,6 +181,9 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 	}
 
 	if entry.Type == model.TypeDecision {
+		if entry.Kind == model.KindAspiration {
+			return checkAspirationCapture
+		}
 		return checkDecisionRefs
 	}
 
@@ -221,6 +251,19 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType) *pref
 			parts = append(parts, FormatEntryForPrompt(c))
 		}
 		pctx.ActiveContracts = strings.Join(parts, "\n\n---\n\n")
+	}
+
+	// Active aspirations (for aspiration-capture check — the constellation
+	// the new aspiration is joining, used to detect tensions).
+	if ct == checkAspirationCapture {
+		aspirations := graph.Aspirations()
+		if len(aspirations) > 0 {
+			var parts []string
+			for _, a := range aspirations {
+				parts = append(parts, FormatEntryForPrompt(a))
+			}
+			pctx.ActiveAspirations = strings.Join(parts, "\n\n---\n\n")
+		}
 	}
 
 	// Open signals (for decision-refs check)

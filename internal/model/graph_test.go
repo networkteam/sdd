@@ -445,6 +445,8 @@ func TestContracts(t *testing.T) {
 		entry("20260406-100200-d-cpt-ccc", withKind(KindContract)),
 		entry("20260406-100300-d-cpt-ddd", withKind(KindContract), withContent("Superseded contract")),
 		entry("20260406-100400-d-cpt-eee", withKind(KindContract), withSupersedes("20260406-100300-d-cpt-ddd")),
+		entry("20260406-100500-d-cpt-fff", withKind(KindContract), withContent("Closed contract")),
+		entry("20260406-100600-d-prc-ggg", withKind(KindDirective), withCloses("20260406-100500-d-cpt-fff")),
 	})
 
 	contracts := g.Contracts()
@@ -457,6 +459,31 @@ func TestContracts(t *testing.T) {
 	assertContains(t, ids, "20260406-100400-d-cpt-eee", "superseding contract")
 	assertNotContains(t, ids, "20260406-100100-d-tac-bbb", "directive")
 	assertNotContains(t, ids, "20260406-100300-d-cpt-ddd", "superseded contract")
+	assertNotContains(t, ids, "20260406-100500-d-cpt-fff", "contract closed by directive retirement")
+}
+
+func TestAspirations(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-stg-aaa", withKind(KindAspiration)),
+		entry("20260406-100100-d-tac-bbb"),
+		entry("20260406-100200-d-cpt-ccc", withKind(KindContract)),
+		entry("20260406-100300-d-stg-ddd", withKind(KindAspiration), withContent("Evolved aspiration")),
+		entry("20260406-100400-d-stg-eee", withKind(KindAspiration), withSupersedes("20260406-100300-d-stg-ddd")),
+		entry("20260406-100500-d-stg-fff", withKind(KindAspiration), withContent("Retired aspiration")),
+		entry("20260406-100600-d-stg-ggg", withKind(KindDirective), withCloses("20260406-100500-d-stg-fff")),
+	})
+
+	aspirations := g.Aspirations()
+	ids := entryIDs(aspirations)
+	if len(aspirations) != 2 {
+		t.Fatalf("Aspirations = %v (len %d), want 2", ids, len(aspirations))
+	}
+	assertContains(t, ids, "20260406-100000-d-stg-aaa", "aspiration")
+	assertContains(t, ids, "20260406-100400-d-stg-eee", "superseding aspiration")
+	assertNotContains(t, ids, "20260406-100100-d-tac-bbb", "directive")
+	assertNotContains(t, ids, "20260406-100200-d-cpt-ccc", "contract")
+	assertNotContains(t, ids, "20260406-100300-d-stg-ddd", "superseded aspiration")
+	assertNotContains(t, ids, "20260406-100500-d-stg-fff", "aspiration closed by directive retirement")
 }
 
 func TestFilterWithKind(t *testing.T) {
@@ -797,7 +824,7 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 			wantMsg:   "actions cannot be closed",
 		},
 		{
-			name: "decision cannot close decision",
+			name: "decision cannot close decision (same kind)",
 			entries: []*Entry{
 				entry("20260406-100000-d-tac-aaa"),
 				func() *Entry {
@@ -808,6 +835,35 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 			},
 			wantWarns: 1,
 			wantMsg:   "decision cannot close another decision",
+		},
+		{
+			name: "plan decision cannot close contract",
+			entries: []*Entry{
+				entry("20260406-100000-d-prc-ctr", withKind(KindContract)),
+				func() *Entry {
+					e := entry("20260406-100100-d-tac-pln", withKind(KindPlan))
+					e.Closes = []string{"20260406-100000-d-prc-ctr"}
+					return e
+				}(),
+			},
+			wantWarns: 1,
+			wantMsg:   "decision cannot close another decision",
+		},
+		{
+			name: "valid: directive closes contract (retirement)",
+			entries: []*Entry{
+				entry("20260406-100000-d-prc-ctr", withKind(KindContract)),
+				entry("20260406-100100-d-prc-ret", withKind(KindDirective), withCloses("20260406-100000-d-prc-ctr")),
+			},
+			wantWarns: 0,
+		},
+		{
+			name: "valid: directive closes aspiration (retirement)",
+			entries: []*Entry{
+				entry("20260406-100000-d-stg-asp", withKind(KindAspiration)),
+				entry("20260406-100100-d-stg-ret", withKind(KindDirective), withCloses("20260406-100000-d-stg-asp")),
+			},
+			wantWarns: 0,
 		},
 		{
 			name: "valid: decision closes signal",
