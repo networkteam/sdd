@@ -243,18 +243,18 @@ func TestNewGraph(t *testing.T) {
 	}
 }
 
-func TestActiveDecisionsSuperseded(t *testing.T) {
+func TestDirectivesSuperseded(t *testing.T) {
 	g := NewGraph([]*Entry{
-		entry("20260406-100000-d-tac-aaa"),
-		entry("20260406-110000-d-tac-bbb", withSupersedes("20260406-100000-d-tac-aaa")),
+		entry("20260406-100000-d-tac-aaa", withKind(KindDirective)),
+		entry("20260406-110000-d-tac-bbb", withKind(KindDirective), withSupersedes("20260406-100000-d-tac-aaa")),
 	})
 
-	active := g.ActiveDecisions()
-	if len(active) != 1 {
-		t.Fatalf("ActiveDecisions = %d, want 1", len(active))
+	directives := g.Directives()
+	if len(directives) != 1 {
+		t.Fatalf("Directives = %d, want 1", len(directives))
 	}
-	if active[0].ID != "20260406-110000-d-tac-bbb" {
-		t.Errorf("Active decision = %q, want the superseding one", active[0].ID)
+	if directives[0].ID != "20260406-110000-d-tac-bbb" {
+		t.Errorf("Directive = %q, want the superseding one", directives[0].ID)
 	}
 }
 
@@ -286,6 +286,30 @@ func TestOpenSignalsExcludesDone(t *testing.T) {
 	}
 	if open[0].ID != "20260406-100000-s-tac-aaa" {
 		t.Errorf("Open signal = %q, want aaa (bbb is kind:done)", open[0].ID)
+	}
+}
+
+func TestOpenSignalsOnlyGapAndQuestion(t *testing.T) {
+	// Per s-tac-2bw: Open Signals is the closure-gated attention set.
+	// Gaps and questions belong; insights, facts, and done do not.
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-tac-gap", withKind(KindGap)),
+		entry("20260406-100100-s-tac-que", withKind(KindQuestion)),
+		entry("20260406-100200-s-stg-ins", withKind(KindInsight)),
+		entry("20260406-100300-s-tac-fct", withKind(KindFact)),
+		entry("20260406-100400-s-ops-don", withKind(KindDone)),
+	})
+
+	open := g.OpenSignals()
+	if len(open) != 2 {
+		t.Fatalf("OpenSignals = %d, want 2 (only gap and question)", len(open))
+	}
+	gotKinds := map[Kind]bool{}
+	for _, e := range open {
+		gotKinds[e.Kind] = true
+	}
+	if !gotKinds[KindGap] || !gotKinds[KindQuestion] {
+		t.Errorf("OpenSignals should contain gap and question, got kinds %v", gotKinds)
 	}
 }
 
@@ -335,6 +359,44 @@ func TestRecentDoneIgnoresNonDoneSignals(t *testing.T) {
 	}
 	if done[0].Kind != KindDone {
 		t.Errorf("Expected only kind:done entries, got %q", done[0].Kind)
+	}
+}
+
+func TestRecentInsightsTruncation(t *testing.T) {
+	var entries []*Entry
+	for i := range 5 {
+		id := fmt.Sprintf("20260406-10%02d00-s-stg-i%02d", i, i)
+		entries = append(entries, entry(id, withKind(KindInsight)))
+	}
+
+	g := NewGraph(entries)
+
+	insights := g.RecentInsights(3)
+	if len(insights) != 3 {
+		t.Fatalf("RecentInsights(3) = %d, want 3", len(insights))
+	}
+	if insights[0].ID != "20260406-100200-s-stg-i02" {
+		t.Errorf("First insight = %q, want i02", insights[0].ID)
+	}
+	if insights[2].ID != "20260406-100400-s-stg-i04" {
+		t.Errorf("Last insight = %q, want i04", insights[2].ID)
+	}
+}
+
+func TestRecentInsightsIgnoresNonInsightSignals(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-tac-aaa", withKind(KindGap)),
+		entry("20260406-100100-s-stg-bbb", withKind(KindInsight)),
+		entry("20260406-100200-s-tac-ccc", withKind(KindDone)),
+		entry("20260406-100300-s-tac-ddd", withKind(KindFact)),
+	})
+
+	insights := g.RecentInsights(10)
+	if len(insights) != 1 {
+		t.Fatalf("RecentInsights = %d, want 1", len(insights))
+	}
+	if insights[0].Kind != KindInsight {
+		t.Errorf("Expected only kind:insight entries, got %q", insights[0].Kind)
 	}
 }
 
@@ -454,36 +516,63 @@ func TestFilterOpenOnlyWithLayerFilter(t *testing.T) {
 	}
 }
 
-func TestActiveDecisionsExcludesContracts(t *testing.T) {
+func TestDirectivesAllowListOnly(t *testing.T) {
+	// Directives() is an allow-list: only kind: directive decisions. Other
+	// kinds surface in their own sections and must not leak here.
 	g := NewGraph([]*Entry{
-		entry("20260406-100000-d-cpt-aaa", withKind(KindContract)),
-		entry("20260406-100100-d-tac-bbb"),
+		entry("20260406-100000-d-cpt-ctr", withKind(KindContract)),
+		entry("20260406-100100-d-stg-asp", withKind(KindAspiration)),
+		entry("20260406-100200-d-cpt-pln", withKind(KindPlan)),
+		entry("20260406-100300-d-tac-act", withKind(KindActivity)),
+		entry("20260406-100400-d-tac-dir", withKind(KindDirective)),
 	})
 
-	active := g.ActiveDecisions()
-	if len(active) != 1 {
-		t.Fatalf("ActiveDecisions = %d, want 1 (contract excluded)", len(active))
+	directives := g.Directives()
+	if len(directives) != 1 {
+		t.Fatalf("Directives = %d, want 1 (only kind:directive)", len(directives))
 	}
-	if active[0].ID != "20260406-100100-d-tac-bbb" {
-		t.Errorf("Active = %q, want bbb", active[0].ID)
+	if directives[0].ID != "20260406-100400-d-tac-dir" {
+		t.Errorf("Directive = %q, want dir", directives[0].ID)
 	}
 }
 
-func TestActiveDecisionsExcludesAspirations(t *testing.T) {
+func TestActivitiesAllowListOnly(t *testing.T) {
+	// Activities() mirrors Directives() — allow-list of kind: activity only.
 	g := NewGraph([]*Entry{
-		entry("20260406-100000-d-stg-asp", withKind(KindAspiration)),
-		entry("20260406-100100-d-tac-dir"),
-		entry("20260406-100200-d-tac-act", withKind(KindActivity)),
+		entry("20260406-100000-d-cpt-ctr", withKind(KindContract)),
+		entry("20260406-100100-d-stg-asp", withKind(KindAspiration)),
+		entry("20260406-100200-d-cpt-pln", withKind(KindPlan)),
+		entry("20260406-100300-d-tac-dir", withKind(KindDirective)),
+		entry("20260406-100400-d-tac-act", withKind(KindActivity)),
 	})
 
-	active := g.ActiveDecisions()
-	ids := entryIDs(active)
-	if len(active) != 2 {
-		t.Fatalf("ActiveDecisions = %v (len %d), want 2 (aspiration excluded, activity included)", ids, len(active))
+	activities := g.Activities()
+	if len(activities) != 1 {
+		t.Fatalf("Activities = %d, want 1 (only kind:activity)", len(activities))
 	}
-	assertContains(t, ids, "20260406-100100-d-tac-dir", "directive")
-	assertContains(t, ids, "20260406-100200-d-tac-act", "activity")
-	assertNotContains(t, ids, "20260406-100000-d-stg-asp", "aspiration")
+	if activities[0].ID != "20260406-100400-d-tac-act" {
+		t.Errorf("Activity = %q, want act", activities[0].ID)
+	}
+}
+
+func TestDirectivesExcludeClosedAndSuperseded(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-tac-active", withKind(KindDirective)),
+		entry("20260406-100100-d-tac-closed", withKind(KindDirective)),
+		entry("20260406-100200-s-tac-done", withKind(KindDone), withCloses("20260406-100100-d-tac-closed")),
+		entry("20260406-100300-d-tac-sup1", withKind(KindDirective)),
+		entry("20260406-100400-d-tac-sup2", withKind(KindDirective), withSupersedes("20260406-100300-d-tac-sup1")),
+	})
+
+	directives := g.Directives()
+	ids := entryIDs(directives)
+	if len(directives) != 2 {
+		t.Fatalf("Directives = %v (len %d), want 2 (active + superseding)", ids, len(directives))
+	}
+	assertContains(t, ids, "20260406-100000-d-tac-active", "active")
+	assertContains(t, ids, "20260406-100400-d-tac-sup2", "superseding")
+	assertNotContains(t, ids, "20260406-100100-d-tac-closed", "closed")
+	assertNotContains(t, ids, "20260406-100300-d-tac-sup1", "superseded")
 }
 
 func TestContracts(t *testing.T) {
@@ -603,22 +692,6 @@ func TestFilterMissingKind(t *testing.T) {
 	}
 	if missingSignals[0].ID != "20260406-100000-s-stg-aaa" {
 		t.Errorf("Got %q, want aaa", missingSignals[0].ID)
-	}
-}
-
-func TestActiveDecisionsExcludesPlans(t *testing.T) {
-	g := NewGraph([]*Entry{
-		entry("20260406-100000-d-cpt-aaa", withKind(KindContract)),
-		entry("20260406-100100-d-tac-bbb"),
-		entry("20260406-100200-d-tac-ccc", withKind(KindPlan)),
-	})
-
-	active := g.ActiveDecisions()
-	if len(active) != 1 {
-		t.Fatalf("ActiveDecisions = %d, want 1 (contract and plan excluded)", len(active))
-	}
-	if active[0].ID != "20260406-100100-d-tac-bbb" {
-		t.Errorf("Active = %q, want bbb", active[0].ID)
 	}
 }
 

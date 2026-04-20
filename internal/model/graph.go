@@ -61,25 +61,42 @@ func (g *Graph) SetGraphDir(dir string) {
 	g.graphDir = dir
 }
 
-// ActiveDecisions returns active directive and activity decisions — i.e.,
-// decisions that are neither durable (contract, aspiration) nor
-// plan-structured. Contracts, plans, and aspirations each surface in their
-// own status section, so this excludes those three kinds to avoid duplicate
-// listings.
-func (g *Graph) ActiveDecisions() []*Entry {
+// Directives returns active directive decisions (not closed, not superseded).
+// Allow-list shape keeps future decision kinds from silently flooding this
+// set — each kind gets surfaced deliberately with its own accessor.
+func (g *Graph) Directives() []*Entry {
 	closed := g.closedSet()
 	superseded := g.supersededSet()
 
-	var active []*Entry
+	var directives []*Entry
 	for _, e := range g.Entries {
-		if e.Type != TypeDecision || e.IsContract() || e.IsPlan() || e.IsAspiration() {
+		if e.Type != TypeDecision || e.Kind != KindDirective {
 			continue
 		}
 		if !closed[e.ID] && !superseded[e.ID] {
-			active = append(active, e)
+			directives = append(directives, e)
 		}
 	}
-	return active
+	return directives
+}
+
+// Activities returns active activity decisions (not closed, not superseded).
+// Activities are THAT-shaped commitments — capturing that specific work
+// happens, independent of the directive-style choice of *what* to do.
+func (g *Graph) Activities() []*Entry {
+	closed := g.closedSet()
+	superseded := g.supersededSet()
+
+	var activities []*Entry
+	for _, e := range g.Entries {
+		if e.Type != TypeDecision || e.Kind != KindActivity {
+			continue
+		}
+		if !closed[e.ID] && !superseded[e.ID] {
+			activities = append(activities, e)
+		}
+	}
+	return activities
 }
 
 // Plans returns active plan decisions (not closed, not superseded).
@@ -137,10 +154,13 @@ func (g *Graph) Aspirations() []*Entry {
 	return aspirations
 }
 
-// OpenSignals returns signals that are not closed, not superseded, and not
-// kind: done. Done signals are terminal facts of execution — they live in the
-// graph forever but are never "attention items," so they belong in the recent-
-// activity stream rather than the open-signals set.
+// OpenSignals returns signals that are closure-gated attention items — gaps
+// awaiting a decision/done and questions awaiting dissolution. Facts,
+// insights, and done signals are deliberately excluded: facts and insights
+// are stable observational records (retired via directive close, not
+// resolved), and done signals are terminal facts of execution. The
+// allow-list shape means new signal kinds default to "not an attention
+// item" rather than silently flooding the open set.
 func (g *Graph) OpenSignals() []*Entry {
 	closed := g.closedSet()
 	superseded := g.supersededSet()
@@ -150,7 +170,7 @@ func (g *Graph) OpenSignals() []*Entry {
 		if e.Type != TypeSignal {
 			continue
 		}
-		if e.Kind == KindDone {
+		if e.Kind != KindGap && e.Kind != KindQuestion {
 			continue
 		}
 		if !closed[e.ID] && !superseded[e.ID] {
@@ -174,6 +194,24 @@ func (g *Graph) RecentDone(n int) []*Entry {
 		done = done[len(done)-n:]
 	}
 	return done
+}
+
+// RecentInsights returns the last n kind: insight signals by timestamp —
+// observational records that inform current thinking. Insights have no
+// closure gate (they're retired via directive-close, not resolved), so they
+// surface as their own stream rather than mixing into the actionable Open
+// Signals view.
+func (g *Graph) RecentInsights(n int) []*Entry {
+	var insights []*Entry
+	for _, e := range g.Entries {
+		if e.Type == TypeSignal && e.Kind == KindInsight {
+			insights = append(insights, e)
+		}
+	}
+	if len(insights) > n {
+		insights = insights[len(insights)-n:]
+	}
+	return insights
 }
 
 // RefChain returns the entry and all entries it transitively references, in dependency order.

@@ -205,17 +205,24 @@ func Test_FormatEntryForPrompt_ShowsKindForDecisions(t *testing.T) {
 	}
 }
 
-func Test_FormatEntryForPrompt_OmitsKindForSignals(t *testing.T) {
+func Test_FormatEntryForPrompt_ShowsKindForSignals(t *testing.T) {
+	// Regression for s-prc-y0e: pre-flight reported `missing-explicit-kind`
+	// as a medium finding on insight signals that carried an explicit kind,
+	// because FormatEntryForPrompt gated the Kind line on type == decision.
+	// The LLM was telling the truth — the prompt genuinely didn't contain the
+	// field. Under the two-type system (d-cpt-ydf), kind is structural on
+	// signals too and must flow into the pre-flight prompt.
 	e := &model.Entry{
-		ID:      "20260410-120000-s-tac-xyz",
+		ID:      "20260420-163043-s-stg-ljq",
 		Type:    model.TypeSignal,
-		Layer:   model.LayerTactical,
-		Content: "Observed something.",
+		Layer:   model.LayerStrategic,
+		Kind:    model.KindInsight,
+		Content: "Some insight.",
 	}
 
 	result := FormatEntryForPrompt(e)
-	if strings.Contains(result, "Kind:") {
-		t.Errorf("FormatEntryForPrompt() should omit Kind for signals, got:\n%s", result)
+	if !strings.Contains(result, "Kind: insight") {
+		t.Errorf("FormatEntryForPrompt() should show explicit Kind for signals, got:\n%s", result)
 	}
 }
 
@@ -333,8 +340,8 @@ func Test_assembleContext_WithSupersedes(t *testing.T) {
 }
 
 func Test_assembleContext_OpenSignalsForDecisionRefs(t *testing.T) {
-	sig1 := entry("20260410-120000-s-cpt-aaa", withContent("open signal one"))
-	sig2 := entry("20260410-120100-s-tac-bbb", withContent("open signal two"))
+	sig1 := entry("20260410-120000-s-cpt-aaa", withKind(model.KindGap), withContent("open signal one"))
+	sig2 := entry("20260410-120100-s-tac-bbb", withKind(model.KindGap), withContent("open signal two"))
 	graph := model.NewGraph([]*model.Entry{sig1, sig2})
 
 	proposed := &model.Entry{

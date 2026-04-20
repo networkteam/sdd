@@ -80,9 +80,17 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (string, error)
 			if !ok {
 				continue
 			}
-			// Use summary if available, otherwise full content.
+			// Use summary if available, otherwise full content. Render the
+			// layer/kind/type triple (e.g. "strategic insight signal") so the
+			// LLM can route on kind — carrying only the bare type would hide
+			// whether a referenced signal is a gap, insight, question, etc.
 			if e.Summary != "" {
-				parts = append(parts, fmt.Sprintf("[%s] %s (ID: %s)\nSummary: %s", relation, e.Type, e.ID, e.Summary))
+				triple := e.LayerLabel()
+				if e.Kind != "" {
+					triple += " " + string(e.Kind)
+				}
+				triple += " " + e.TypeLabel()
+				parts = append(parts, fmt.Sprintf("[%s] %s (ID: %s)\nSummary: %s", relation, triple, e.ID, e.Summary))
 			} else {
 				parts = append(parts, fmt.Sprintf("[%s] %s", relation, FormatEntryForPrompt(e)))
 			}
@@ -116,7 +124,7 @@ func FormatEntryForPrompt(e *model.Entry) string {
 	fmt.Fprintf(&b, "ID: %s\n", e.ID)
 	fmt.Fprintf(&b, "Type: %s\n", e.Type)
 	fmt.Fprintf(&b, "Layer: %s\n", e.Layer)
-	if e.Type == model.TypeDecision && e.Kind != "" {
+	if e.Kind != "" {
 		fmt.Fprintf(&b, "Kind: %s\n", e.Kind)
 	}
 	if len(e.Refs) > 0 {

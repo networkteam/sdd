@@ -8,9 +8,13 @@ import (
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// RenderStatus writes the status view: top-line counts, then sections for
-// contracts, plans, active decisions, open signals, and recent done signals.
-// Each section is grouped by layer using LayerOrder.
+// RenderStatus writes the status view: top-line counts, then one section per
+// decision kind (Aspirations, Contracts, Plans, Activities, Directives),
+// followed by the signal sections (Gaps and Questions, Recent Insights,
+// Recent Done Signals). Decision-kind sections are grouped by layer; signal
+// sections are flat activity streams. Empty sections are suppressed — the
+// section header implies membership, so "open" / "active" prefixes are not
+// needed on the headers.
 func RenderStatus(w io.Writer, result *query.StatusResult) {
 	g := result.Graph
 	decisions := g.Filter(model.GraphFilter{Type: model.TypeDecision})
@@ -18,11 +22,13 @@ func RenderStatus(w io.Writer, result *query.StatusResult) {
 	fmt.Fprintf(w, "Graph: %d entries (%d decisions, %d signals)\n\n",
 		len(g.Entries), len(decisions), len(signals))
 
-	renderLayeredSection(w, g, "Contracts", result.Contracts)
 	renderLayeredSection(w, g, "Aspirations", result.Aspirations)
+	renderLayeredSection(w, g, "Contracts", result.Contracts)
 	renderLayeredSection(w, g, "Plans", result.Plans)
-	renderLayeredSection(w, g, "Active Decisions", result.Active)
-	renderFlatSection(w, g, "Open Signals", result.Open)
+	renderLayeredSection(w, g, "Activities", result.Activities)
+	renderLayeredSection(w, g, "Directives", result.Directives)
+	renderFlatSection(w, g, "Gaps and Questions", result.Open)
+	renderFlatSection(w, g, "Recent Insights", result.Insights)
 	renderFlatSection(w, g, "Recent Done Signals", result.Recent)
 }
 
