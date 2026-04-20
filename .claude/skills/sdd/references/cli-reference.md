@@ -1,12 +1,12 @@
 ---
-sdd-content-hash: 39ae39251e1cee94473ddd21a2d6635db04f1e91083912a07f8592dd74e2607a
+sdd-content-hash: 54bdb32f024095fd805fb20755b8a5703da722939152a9e01b7642c21a3bd9a5
 sdd-version: dev
 ---
 # SDD CLI Reference
 
 ## Commands
 
-- `sdd status` — overview of active decisions, open signals, recent actions (uses summaries)
+- `sdd status` — overview grouped by decision kind (Aspirations, Contracts, Plans, Activities, Directives), plus Gaps and Questions, Recent Insights, and Recent Done Signals (uses summaries)
 - `sdd show <id>` — full entry with upstream summary chain (depth-limited)
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
 - `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)

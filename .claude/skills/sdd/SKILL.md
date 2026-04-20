@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate actions. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 040ad0199421e4ccab11e19be7c5189227dca165261a38edf5890599802579c8
+sdd-content-hash: 9c31262dd5b01e57808816077a71e190b9bc71f141639cf4398adaad64d02fb9
 sdd-version: dev
 ---
 
@@ -137,7 +137,7 @@ For a check-in, use only `sdd status` and `sdd wip list` — do not call `sdd sh
 
 ### What the CLI gives you
 
-Every entry shown in `sdd status` under Contracts, Plans, Active Decisions, or Open Signals is active/open by construction — the CLI filters out closed and superseded entries. Do not emit a per-entry Status field, lifecycle label, or "closed / in progress / implemented" commentary — membership in a section *is* the status. The only explicit state surfaced in the catch-up is WIP (from `sdd wip list`). Recent Actions are events, not states — use them for context (what just landed, what unblocked what).
+Every entry shown in `sdd status` — under Aspirations, Contracts, Plans, Activities, Directives, Gaps and Questions, Recent Insights, or Recent Done Signals — is active/open by construction. The CLI filters out closed and superseded entries. Do not emit a per-entry Status field, lifecycle label, or "closed / in progress / implemented" commentary — membership in a section *is* the status. The only explicit state surfaced in the catch-up is WIP (from `sdd wip list`). Recent Done Signals are events, not states — use them for context (what just landed, what unblocked what).
 
 ### Clustering
 
@@ -148,8 +148,8 @@ Group active entries by project thread — coherent directions of work, not by t
 - **Lead with the most active/actionable thread.**
 - **Number every item sequentially** (1, 2, 3...) across all threads. Sub-aspects of a single item get letters (1a, 1b). The user references items by number — "let's dig into 3" — so every item must have its own number.
 - **One item per number.** Never group multiple entries under one number (e.g. "3-5. Infrastructure signals" with a sub-list is wrong — each gets its own number).
-- **Completeness is mechanical.** Every entry from `sdd status` under Plans, Active Decisions, and Open Signals must appear with its own number. No clumping, no silent drops. If an entry feels redundant or dusty, put it in "Parked / not urgent" — don't omit it.
-- **Contracts are context, not items.** Don't number contracts. Mention one inline only if a current signal or decision is pushing against it; otherwise silent.
+- **Completeness is mechanical.** Every entry from `sdd status` under Plans, Activities, Directives, Gaps and Questions, and Recent Insights must appear with its own number. No clumping, no silent drops. If an entry feels redundant or dusty, put it in "Parked / not urgent" — don't omit it.
+- **Aspirations, Contracts, and Recent Done Signals are context, not items.** Don't number them. Mention an aspiration or contract inline only if a current signal or decision is pushing against it; reference recent done signals when they explain what just unblocked something. Otherwise silent.
 - **Include the entry ID suffix** after each item title in parentheses (e.g. `s-prc-qyi`). This gives the user a handle without cluttering the display. Keep full IDs in your context for CLI commands.
 - **Narrative, not dashboard.** Write like a colleague briefing, not a monitoring tool. No raw stats or dates unless meaningful.
 - **Keep it skimmable.** Bold thread names, short item descriptions. A busy person should get the picture in 10 seconds.
