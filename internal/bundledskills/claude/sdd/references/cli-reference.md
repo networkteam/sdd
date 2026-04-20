@@ -6,7 +6,7 @@
 - `sdd show <id>` — full entry with upstream summary chain (depth-limited)
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
 - `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
-- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind contract|directive|plan]` — filtered listing (uses summaries)
+- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind <kind>]` — filtered listing. `--kind` accepts any signal kind (gap, fact, question, insight, done) or decision kind (directive, activity, plan, contract, aspiration); the two sets are disjoint. Uses summaries.
 - `sdd new <type> <layer> [flags] <description>` — create entries
 - `sdd summarize [<id> | --all]` — regenerate entry summaries
 - `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, stale summaries)
