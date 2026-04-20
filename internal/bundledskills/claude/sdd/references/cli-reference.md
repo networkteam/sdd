@@ -2,7 +2,7 @@
 
 ## Commands
 
-- `sdd status` — overview of active decisions, open signals, recent actions (uses summaries)
+- `sdd status` — overview grouped by decision kind (Aspirations, Contracts, Plans, Activities, Directives), plus Gaps and Questions, Recent Insights, and Recent Done Signals (uses summaries)
 - `sdd show <id>` — full entry with upstream summary chain (depth-limited)
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
 - `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
