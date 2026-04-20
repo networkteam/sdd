@@ -22,6 +22,7 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never com
 
 - `go vet ./...` — compilation + correctness check (never use `go build` just to verify compilation — it produces no output on success)
 - `go test ./...` — run all tests
+- `go fmt ./...` — format code
 - `golangci-lint run ./...` — lint (must be clean; CI enforces)
 - `./bin/sdd status` — smoke-test the binary against the graph at `.sdd/graph/`
 - `goreleaser check` — validate `.goreleaser.yaml`
