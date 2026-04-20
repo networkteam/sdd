@@ -21,15 +21,15 @@ Read the framework reference files to understand the system:
 sdd status
 ```
 
-This shows active decisions, open signals, and recent actions with summaries. These are the entries that matter for the catch-up.
+This shows the current graph grouped by section: Aspirations, Contracts, Plans, Activities, Directives, Gaps and Questions, Recent Insights, and Recent Done Signals. These are the entries that matter for the catch-up.
 
 Each entry line is formatted as:
 
 ```
-<full-id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) <summary>
+<full-id> <layer> <kind> <type> [confidence: <conf>]? (<participants>) <summary>
 ```
 
-`kind` is present on decisions (`directive`, `contract`, `plan`); `confidence` on decisions and signals; `participants` always. Do NOT call `sdd show` for these facts — the status line already has them. Only use `sdd show` when you need the full description body, refs chain content, or attachments.
+`kind` is present on both signals (`gap`, `fact`, `question`, `insight`, `done`) and decisions (`directive`, `activity`, `plan`, `contract`, `aspiration`); `confidence` on both; `participants` always. Do NOT call `sdd show` for these facts — the status line already has them. Only use `sdd show` when you need the full description body, refs chain content, or attachments.
 
 Also check for active WIP markers (these are most certainly from other concurrent sessions / users):
 

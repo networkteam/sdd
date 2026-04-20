@@ -20,11 +20,11 @@ Read the framework reference files to understand entry types, layers, and closur
 sdd status
 ```
 
-This shows open signals and active decisions with summaries. Collect all their IDs.
+This shows the current graph grouped by section (Aspirations, Contracts, Plans, Activities, Directives, Gaps and Questions, Recent Insights, Recent Done Signals). For grooming, collect the IDs of entries that can still be closed or superseded — Plans, Activities, Directives, and Gaps and Questions. Aspirations and Contracts are durable (retired by directive close, not resolved), so they're groom candidates only when explicitly stale. Recent Insights and Recent Done Signals aren't groom candidates — insights are stable observations, done signals are terminal facts.
 
 ## Step 3 — Check each entry for downstream activity
 
-For each open signal and active decision, fetch the entry with its upstream and downstream context:
+For each candidate entry, fetch it with its upstream and downstream context:
 ```bash
 sdd show --downstream <id>
 ```
