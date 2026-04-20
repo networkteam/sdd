@@ -95,8 +95,10 @@ func renderSummaryItem(w io.Writer, graph *model.Graph, item model.ShowTreeItem,
 	}
 }
 
-// kindForDisplay returns the kind to render for an entry. Decisions always show
-// their kind (defaulting to "directive" when empty). Non-decisions show kind only if set.
+// kindForDisplay returns the kind to render for an entry. Decisions fall back
+// to "directive" when Kind is empty (legacy default); other types show kind
+// only when explicitly set. Presenter expansion for the full kind vocabulary
+// lands in a later session.
 func kindForDisplay(e *model.Entry) model.Kind {
 	if e.Kind != "" {
 		return e.Kind

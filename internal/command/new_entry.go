@@ -30,7 +30,7 @@ type Attachment struct {
 type NewEntryCmd struct {
 	Type         model.EntryType
 	Layer        model.Layer
-	Kind         model.Kind // only meaningful for decisions
+	Kind         model.Kind // empty is replaced by the type's default in BuildEntry
 	Description  string
 	Refs         []string
 	Supersedes   []string
@@ -67,8 +67,8 @@ func (c *NewEntryCmd) Validate() error {
 	if _, ok := model.LayerAbbrev[c.Layer]; !ok {
 		return fmt.Errorf("invalid layer: %s", c.Layer)
 	}
-	if c.Kind != "" && c.Type != model.TypeDecision {
-		return fmt.Errorf("kind is only meaningful for decisions (got type %s)", c.Type)
+	if c.Kind != "" && !model.IsValidKindForType(c.Type, c.Kind) {
+		return fmt.Errorf("invalid kind %q for type %s", c.Kind, c.Type)
 	}
 	return nil
 }
@@ -90,9 +90,9 @@ func (c *NewEntryCmd) BuildEntry(id string) (*model.Entry, error) {
 		Content:      c.Description,
 	}
 
-	// Decisions default to directive when no kind is specified.
-	if entry.Type == model.TypeDecision && entry.Kind == "" {
-		entry.Kind = model.KindDirective
+	// Apply per-type default when no kind is specified.
+	if entry.Kind == "" {
+		entry.Kind = model.DefaultKindForType(entry.Type)
 	}
 
 	if len(c.Attachments) > 0 {

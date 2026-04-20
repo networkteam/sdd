@@ -327,7 +327,7 @@ func newCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:  "kind",
-				Usage: "Decision kind (contract, directive, plan). Only applies to decisions.",
+				Usage: "Entry kind: signals — gap (default), fact, question, insight, done; decisions — directive (default), activity, plan, contract, aspiration",
 			},
 			&cli.StringSliceFlag{
 				Name:  "attach",

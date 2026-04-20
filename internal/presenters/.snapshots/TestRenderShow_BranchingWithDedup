@@ -12,9 +12,9 @@ Derived:
 Primary with two branches
 
 ## upstream:
-  - refs 20260410-100100-s-cpt-bbb {status: open}: "Branch B"
-    - refs 20260410-100000-s-stg-ddd {status: open}: "Shared deep ref"
-  - refs 20260410-100200-s-cpt-ccc {status: open}: "Branch C"
-    - refs 20260410-100000-s-stg-ddd {status: open}: (see above)
+  - refs 20260410-100100-s-cpt-bbb gap {status: open}: "Branch B"
+    - refs 20260410-100000-s-stg-ddd gap {status: open}: "Shared deep ref"
+  - refs 20260410-100200-s-cpt-ccc gap {status: open}: "Branch C"
+    - refs 20260410-100000-s-stg-ddd gap {status: open}: (see above)
 
 
