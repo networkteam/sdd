@@ -8,11 +8,16 @@ import (
 )
 
 func Test_selectCheckType(t *testing.T) {
-	signal := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
+	signal := entry("20260410-120000-s-cpt-aaa", withContent("some signal")) // default kind: empty, treated as gap
+	gapSignal := entry("20260410-120100-s-cpt-gap", withKind(model.KindGap), withContent("gap signal"))
+	questionSignal := entry("20260410-120200-s-cpt-qst", withKind(model.KindQuestion), withContent("question signal"))
+	factSignal := entry("20260410-120300-s-cpt-fct", withKind(model.KindFact), withContent("fact signal"))
 	decision := entry("20260410-120000-d-tac-bbb", withContent("some decision"))
 	plan := entry("20260410-120000-d-tac-ccc", withKind(model.KindPlan), withContent("some plan"))
+	contract := entry("20260410-120000-d-prc-ctr", withKind(model.KindContract), withContent("some contract"))
+	aspiration := entry("20260410-120000-d-stg-asp", withKind(model.KindAspiration), withContent("some aspiration"))
 
-	graph := model.NewGraph([]*model.Entry{signal, decision, plan})
+	graph := model.NewGraph([]*model.Entry{signal, gapSignal, questionSignal, factSignal, decision, plan, contract, aspiration})
 
 	tests := []struct {
 		name     string
@@ -20,29 +25,69 @@ func Test_selectCheckType(t *testing.T) {
 		expected checkType
 	}{
 		{
-			name:     "action closing decision",
+			name:     "done signal closing decision",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindDone, Closes: []string{decision.ID}},
+			expected: checkClosingDone,
+		},
+		{
+			name:     "done signal closing plan",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindDone, Closes: []string{plan.ID}},
+			expected: checkClosingDone,
+		},
+		{
+			name:     "done signal closing gap signal (short-loop)",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindDone, Closes: []string{gapSignal.ID}},
+			expected: checkShortLoop,
+		},
+		{
+			name:     "done signal closing both decision and signal routes to closing-done",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindDone, Closes: []string{decision.ID, gapSignal.ID}},
+			expected: checkClosingDone,
+		},
+		{
+			name:     "legacy action closing decision routes to closing-done",
 			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{decision.ID}},
-			expected: checkClosingAction,
+			expected: checkClosingDone,
 		},
 		{
-			name:     "action closing plan",
-			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{plan.ID}},
-			expected: checkClosingAction,
-		},
-		{
-			name:     "action closing signal",
+			name:     "legacy action closing signal routes to short-loop",
 			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{signal.ID}},
-			expected: checkActionClosesSignals,
+			expected: checkShortLoop,
 		},
 		{
-			name:     "action closing both decision and signal picks closing-action",
-			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{decision.ID, signal.ID}},
-			expected: checkClosingAction,
+			name:     "fact signal closing question (dissolution)",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindFact, Closes: []string{questionSignal.ID}},
+			expected: checkDissolution,
+		},
+		{
+			name:     "insight signal closing question (dissolution)",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindInsight, Closes: []string{questionSignal.ID}},
+			expected: checkDissolution,
+		},
+		{
+			name:     "fact signal closing non-question routes to dissolution (unusual pattern)",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindFact, Closes: []string{factSignal.ID}},
+			expected: checkDissolution,
 		},
 		{
 			name:     "decision closing signal",
 			entry:    &model.Entry{Type: model.TypeDecision, Closes: []string{signal.ID}},
 			expected: checkClosingDecision,
+		},
+		{
+			name:     "directive closing contract (retirement)",
+			entry:    &model.Entry{Type: model.TypeDecision, Kind: model.KindDirective, Closes: []string{contract.ID}},
+			expected: checkClosingDecision,
+		},
+		{
+			name:     "aspiration decision with refs routes to aspiration-capture",
+			entry:    &model.Entry{Type: model.TypeDecision, Kind: model.KindAspiration, Refs: []string{signal.ID}},
+			expected: checkAspirationCapture,
+		},
+		{
+			name:     "aspiration decision with no refs routes to aspiration-capture",
+			entry:    &model.Entry{Type: model.TypeDecision, Kind: model.KindAspiration},
+			expected: checkAspirationCapture,
 		},
 		{
 			name:     "decision with refs only",
@@ -96,10 +141,12 @@ func Test_checkTypeString(t *testing.T) {
 		ct   checkType
 		want string
 	}{
-		{checkClosingAction, "closing-action"},
+		{checkClosingDone, "closing-done"},
 		{checkClosingDecision, "closing-decision"},
 		{checkDecisionRefs, "decision-refs"},
-		{checkActionClosesSignals, "action-closes-signals"},
+		{checkShortLoop, "short-loop"},
+		{checkDissolution, "dissolution"},
+		{checkAspirationCapture, "aspiration-capture"},
 		{checkSignalCapture, "signal-capture"},
 		{checkSupersedes, "supersedes"},
 		{checkType(99), "unknown(99)"},
@@ -343,7 +390,7 @@ func Test_assembleContext_ClosedPlanDescriptionFlowsThrough(t *testing.T) {
 		Content: "action closing the plan",
 	}
 
-	pctx := assembleContext(proposed, graph, checkClosingAction)
+	pctx := assembleContext(proposed, graph, checkClosingDone)
 	if !strings.Contains(pctx.ClosedEntries, "## Acceptance criteria") {
 		t.Errorf("ClosedEntries should contain the plan's AC heading inline, got %q", pctx.ClosedEntries)
 	}
@@ -407,33 +454,32 @@ func Test_renderPreflightPrompt_DecisionRefsNamesACCheck(t *testing.T) {
 	}
 }
 
-func Test_renderPreflightPrompt_ClosingActionNamesACCheck(t *testing.T) {
-	// closing_action.tmpl describes per-AC coverage when the closed entry is
+func Test_renderPreflightPrompt_ClosingDoneNamesACCheck(t *testing.T) {
+	// closing_done.tmpl describes per-AC coverage when the closed entry is
 	// a plan. The LLM reads the closed entry's kind and description.
 	pctx := &preflightContext{
-		ProposedEntry: "ID: a\nType: action\n\nclosing the plan",
+		ProposedEntry: "ID: s\nType: signal\nKind: done\n\nclosing the plan",
 		ClosedEntries: "ID: p\nType: decision\nKind: plan\n\nplan description with AC section",
 	}
-	result, err := renderPreflightPrompt(checkClosingAction, pctx)
+	result, err := renderPreflightPrompt(checkClosingDone, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(result, "Acceptance criteria") {
-		t.Errorf("closing_action template should name the acceptance criteria coverage check")
+		t.Errorf("closing_done template should name the acceptance criteria coverage check")
 	}
 }
 
-func Test_renderPreflightPrompt_ActionTemplatesIncludeDurabilityCheck(t *testing.T) {
-	// Regression: the durability check was present in closing_action.tmpl but
-	// missing from action_closes_signals.tmpl after the severity rewrite split
-	// templates by check type. Both action templates must include the shared
-	// durability partial so the LLM validates artifact durability for any action.
+func Test_renderPreflightPrompt_CompletionTemplatesIncludeDurabilityCheck(t *testing.T) {
+	// Regression: the durability check must be present on every completion-record
+	// template (closing_done, short_loop) so the LLM validates artifact durability
+	// for any entry claiming completion.
 	pctx := &preflightContext{
-		ProposedEntry: "ID: a\nType: action\n\nclosing something",
+		ProposedEntry: "ID: s\nType: signal\nKind: done\n\nclosing something",
 		ClosedEntries: "ID: x\nType: decision\n\nsome decision",
 	}
 
-	for _, ct := range []checkType{checkClosingAction, checkActionClosesSignals} {
+	for _, ct := range []checkType{checkClosingDone, checkShortLoop} {
 		t.Run(ct.String(), func(t *testing.T) {
 			result, err := renderPreflightPrompt(ct, pctx)
 			if err != nil {
@@ -443,6 +489,122 @@ func Test_renderPreflightPrompt_ActionTemplatesIncludeDurabilityCheck(t *testing
 				t.Errorf("renderPreflightPrompt(%s) should include the durability check", ct)
 			}
 		})
+	}
+}
+
+func Test_renderPreflightPrompt_CapturesIncludeUnrelatedRefsCheck(t *testing.T) {
+	// Every capture template must invoke the shared unrelated_refs partial so
+	// topically-disconnected refs get surfaced regardless of transaction type.
+	pctx := &preflightContext{
+		ProposedEntry:     "ID: test\n\nproposed",
+		ReferencedEntries: "ID: ref\n\nreferenced entry",
+		ClosedEntries:     "ID: closed\n\nclosed entry",
+	}
+
+	captureTypes := []checkType{
+		checkSignalCapture,
+		checkDecisionRefs,
+		checkAspirationCapture,
+		checkClosingDecision,
+		checkClosingDone,
+		checkShortLoop,
+		checkDissolution,
+	}
+	for _, ct := range captureTypes {
+		t.Run(ct.String(), func(t *testing.T) {
+			result, err := renderPreflightPrompt(ct, pctx)
+			if err != nil {
+				t.Fatalf("renderPreflightPrompt(%s) error: %v", ct, err)
+			}
+			if !strings.Contains(result, "Unrelated references check") {
+				t.Errorf("renderPreflightPrompt(%s) should include the unrelated_refs partial", ct)
+			}
+		})
+	}
+}
+
+func Test_renderPreflightPrompt_CloseCarryingTemplatesIncludeUnusualClose(t *testing.T) {
+	// Every close-carrying template must invoke the shared unusual_close partial.
+	pctx := &preflightContext{
+		ProposedEntry: "ID: test\n\nproposed",
+		ClosedEntries: "ID: closed\n\nclosed entry",
+	}
+
+	closeTypes := []checkType{
+		checkClosingDecision,
+		checkClosingDone,
+		checkShortLoop,
+		checkDissolution,
+	}
+	for _, ct := range closeTypes {
+		t.Run(ct.String(), func(t *testing.T) {
+			result, err := renderPreflightPrompt(ct, pctx)
+			if err != nil {
+				t.Fatalf("renderPreflightPrompt(%s) error: %v", ct, err)
+			}
+			if !strings.Contains(result, "Unusual close-pattern check") {
+				t.Errorf("renderPreflightPrompt(%s) should include the unusual_close partial", ct)
+			}
+		})
+	}
+}
+
+func Test_renderPreflightPrompt_ClosingDecisionNamesRetirementRationale(t *testing.T) {
+	// closing_decision.tmpl carries the retirement-rationale check for stable-kind targets.
+	pctx := &preflightContext{
+		ProposedEntry: "ID: d\nType: decision\nKind: directive\n\nretiring the old contract",
+		ClosedEntries: "ID: c\nType: decision\nKind: contract\n\ncontract to retire",
+	}
+	result, err := renderPreflightPrompt(checkClosingDecision, pctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "Retirement-rationale calibration") {
+		t.Errorf("closing_decision template should name the retirement-rationale calibration")
+	}
+}
+
+func Test_renderPreflightPrompt_DecisionRefsNamesDirectiveShapeCheck(t *testing.T) {
+	// decision_refs.tmpl flags directives at stg/cpt that read as aspirations.
+	pctx := &preflightContext{
+		ProposedEntry: "ID: d\nType: decision\nKind: directive\nLayer: strategic\n\nperpetual pull toward X",
+	}
+	result, err := renderPreflightPrompt(checkDecisionRefs, pctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "Directive-reads-aspiration-shaped") {
+		t.Errorf("decision_refs template should name the directive-reads-aspiration-shaped calibration")
+	}
+}
+
+func Test_renderPreflightPrompt_AspirationCaptureNeverHigh(t *testing.T) {
+	// aspiration_capture.tmpl must state that findings are never high severity.
+	pctx := &preflightContext{
+		ProposedEntry: "ID: d\nType: decision\nKind: aspiration\nLayer: strategic\n\nperpetual pull toward X",
+	}
+	result, err := renderPreflightPrompt(checkAspirationCapture, pctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "Never `high`") && !strings.Contains(result, "never `high`") {
+		t.Errorf("aspiration_capture template should state findings are never high severity")
+	}
+}
+
+func Test_renderPreflightPrompt_DissolutionNamesContextPresence(t *testing.T) {
+	// dissolution.tmpl checks for dialogue-captured context connecting the closing entry
+	// to the question, not the correctness of the reasoning.
+	pctx := &preflightContext{
+		ProposedEntry: "ID: s\nType: signal\nKind: fact\n\nfact resolving a question",
+		ClosedEntries: "ID: q\nType: signal\nKind: question\n\nthe question being resolved",
+	}
+	result, err := renderPreflightPrompt(checkDissolution, pctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "dialogue-captured context") {
+		t.Errorf("dissolution template should name dialogue-captured context as the test")
 	}
 }
 

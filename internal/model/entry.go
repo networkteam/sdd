@@ -171,6 +171,11 @@ func (e *Entry) IsPlan() bool {
 	return e.Kind == KindPlan
 }
 
+// IsAspiration returns true if this decision is a perpetual direction.
+func (e *Entry) IsAspiration() bool {
+	return e.Kind == KindAspiration
+}
+
 // frontmatter is the YAML structure in the file header.
 type frontmatter struct {
 	Type         string   `yaml:"type"`

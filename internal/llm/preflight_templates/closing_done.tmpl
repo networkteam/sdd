@@ -2,37 +2,37 @@ You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision g
 
 ## Task
 
-An action is being created that claims to close (resolve/fulfill) a decision or plan. Verify that the action genuinely covers everything the decision/plan requires.
+A completion entry (a `kind: done` signal) is being created that claims to close (resolve/fulfill) a decision. Verify that the closing entry genuinely covers everything the decision requires.
 
 ## Checks
 
-1. **Coverage**: Every requirement or plan item in the closed entry must be accounted for in the action description — either implemented or explicitly deviated from.
+1. **Coverage**: Every requirement or plan item in the closed entry must be accounted for in the closing entry's description — either implemented or explicitly deviated from.
 2. **No silent omissions**: A plan item that is neither implemented nor mentioned is a gap.
-3. **Explicit deviations are acceptable**: If the action marks an item as an intentional deviation with reasoning (e.g. "Deviation: no X — decided during implementation that Y because Z"), that counts as coverage.
-4. **No overclaiming**: The action must not claim to have done things beyond what its description supports.
-5. **Acceptance criteria coverage** (applies only when the closed entry is `Kind: plan`): Plan decisions carry a `## Acceptance criteria` section in their description. Each AC item must be addressed by the action — confirmed done with specific evidence, or deviation explained with dialogue reasoning. If the closed entry's kind is not `plan`, skip this check.
+3. **Explicit deviations are acceptable**: If the closing entry marks an item as an intentional deviation with reasoning (e.g. "Deviation: no X — decided during implementation that Y because Z"), that counts as coverage.
+4. **No overclaiming**: The closing entry must not claim to have done things beyond what its description supports.
+5. **Acceptance criteria coverage** (applies only when the closed entry is `Kind: plan`): Plan decisions carry a `## Acceptance criteria` section in their description. Each AC item must be addressed by the closing entry — confirmed done with specific evidence, or deviation explained with dialogue reasoning. If the closed entry's kind is not `plan`, skip this check.
 
 ## Calibration
 
-The work lives in commits, attachments, and upstream entries — not necessarily restated in action prose.
+The work lives in commits, attachments, and upstream entries — not necessarily restated in the closing entry's prose.
 
-- `high` — Action cites evidence that contradicts its own claim (e.g. citing a reference that refutes the closure). Plan has a specific requirement (e.g. "test moved or added in the correct package") and the action explicitly contradicts it without explanation.
-- `medium` — Plan item has specific behavior and action prose leaves it ambiguous (e.g. plan says "no automatic cleanup — agent handles removal manually"; action mentions cleanup only at a high level).
+- `high` — Closing entry cites evidence that contradicts its own claim (e.g. citing a reference that refutes the closure). Plan has a specific requirement (e.g. "test moved or added in the correct package") and the closing entry explicitly contradicts it without explanation.
+- `medium` — Plan item has specific behavior and the closing prose leaves it ambiguous (e.g. plan says "no automatic cleanup — agent handles removal manually"; closing entry mentions cleanup only at a high level).
 - `low` — Deferral is acknowledged in text without an explicit "Deviation: ..." marker format.
-- No finding — Implementation details that live in committed code. Standard "per d-tac-X plan" opening for closing actions. Format specs whose source of truth is the plan attachment or code.
+- No finding — Implementation details that live in committed code. Standard "per d-tac-X plan" opening for closing entries. Format specs whose source of truth is the plan attachment or code.
 
 ### AC coverage calibration (when closing a plan)
 
 **Core rule**: every AC must either be implemented (with evidence) or carry reasoning for the deviation/omission. Pre-flight checks that reasoning is **present**, not whether the reasoning is valid — that's the author's dialogue-grounded judgment, already confirmed at capture time.
 
 - `high` — AC is not implemented AND no reasoning is present. Includes both silent omission (AC never mentioned) and explicit non-implementation without why (e.g. "Items 2 and 4 were not addressed."). Both fail the core rule equally.
-- `medium` — AC coverage is **ambiguous** — action mentions something related but the specific required behavior isn't evident. Plausibly implemented; worth clarifying. Example: AC "sdd show renders depth 0 full, depth 1+ as summary lines"; action "Depth-limited rendering implemented."
-- `low` — AC addressed but phrasing thin (e.g. AC: "--max-depth flag with default 4"; action: "Added --max-depth flag." — missing default value).
+- `medium` — AC coverage is **ambiguous** — closing entry mentions something related but the specific required behavior isn't evident. Plausibly implemented; worth clarifying. Example: AC "sdd show renders depth 0 full, depth 1+ as summary lines"; closing entry "Depth-limited rendering implemented."
+- `low` — AC addressed but phrasing thin (e.g. AC: "--max-depth flag with default 4"; closing entry: "Added --max-depth flag." — missing default value).
 - No finding — AC confirmed done with specific evidence, OR any form of deviation/omission that carries reasoning (however brief). Do not judge whether the reasoning is convincing — its presence is enough. Example: "Deviation: single --max-depth instead of per-direction — decided during dialogue that independent depths add complexity without corresponding benefit."
 
 Don't demand prose restatement of work that lives in the code or attachments.
 
-## Proposed action
+## Proposed entry
 
 {{ .ProposedEntry }}
 
@@ -43,4 +43,4 @@ Don't demand prose restatement of work that lives in the code or attachments.
 ## Referenced entries
 
 {{ .ReferencedEntries }}
-{{ end }}{{ template "contracts" . }}{{ template "durability" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
+{{ end }}{{ template "unrelated_refs" . }}{{ template "unusual_close" . }}{{ template "contracts" . }}{{ template "durability" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
