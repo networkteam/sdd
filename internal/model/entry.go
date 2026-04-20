@@ -366,6 +366,22 @@ func GenerateID(typ EntryType, layer Layer, suffix string) string {
 	return GenerateIDAt(typ, layer, suffix, time.Now())
 }
 
+// RewriteID returns the id with its type abbreviation replaced by newType's
+// abbreviation. Timestamp, layer, and suffix are preserved. Used by the
+// sdd rewrite command when retyping a legacy action to signal+done, or any
+// other mechanical type change.
+func RewriteID(id string, newType EntryType) (string, error) {
+	parts, err := ParseID(id)
+	if err != nil {
+		return "", err
+	}
+	newAbbrev, ok := TypeAbbrev[newType]
+	if !ok {
+		return "", fmt.Errorf("unknown type: %s", newType)
+	}
+	return fmt.Sprintf("%s-%s-%s-%s", parts.Timestamp, newAbbrev, parts.LayerCode, parts.Suffix), nil
+}
+
 // GenerateIDAt creates a new document ID with the given timestamp and a random suffix.
 // Accepts the time explicitly so callers can inject a clock for testability.
 func GenerateIDAt(typ EntryType, layer Layer, suffix string, t time.Time) string {
