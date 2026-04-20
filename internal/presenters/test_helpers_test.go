@@ -14,10 +14,7 @@ func entry(id string, opts ...entryOpt) *model.Entry {
 	}
 
 	typ := model.TypeFromAbbrev[parts.TypeCode]
-	kind := model.Kind("")
-	if typ == model.TypeDecision {
-		kind = model.KindDirective
-	}
+	kind := model.DefaultKindForType(typ)
 
 	e := &model.Entry{
 		ID:      id,

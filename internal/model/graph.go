@@ -198,13 +198,11 @@ func (g *Graph) Filter(f GraphFilter) []*Entry {
 			if e.Type != TypeDecision {
 				continue
 			}
-			if f.Kind == KindDirective && (e.IsContract() || e.IsPlan()) {
-				continue
+			effective := e.Kind
+			if effective == "" {
+				effective = KindDirective
 			}
-			if f.Kind == KindContract && !e.IsContract() {
-				continue
-			}
-			if f.Kind == KindPlan && !e.IsPlan() {
+			if effective != f.Kind {
 				continue
 			}
 		}
@@ -434,6 +432,7 @@ func ValidateEntry(e *Entry, g *Graph) {
 	validateCloses(e, g)
 	validateSupersedes(e, g)
 	validateKind(e)
+	validateDoneSignalRefs(e)
 	validateAttachmentLinks(e)
 }
 
@@ -470,11 +469,11 @@ func validateCloses(e *Entry, g *Graph) {
 		}
 
 		switch {
-		case e.Type == TypeSignal:
+		case e.Type == TypeSignal && e.Kind != KindDone:
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "closes",
 				Value:   id,
-				Message: fmt.Sprintf("signal cannot close entries (closes %s %s)", target.Type, id),
+				Message: fmt.Sprintf("only done-kind signals may close entries (got %s signal closing %s %s)", e.Kind, target.Type, id),
 			})
 		case target.Type == TypeAction:
 			e.Warnings = append(e.Warnings, Warning{
@@ -510,12 +509,55 @@ func validateSupersedes(e *Entry, g *Graph) {
 	}
 }
 
-// validateKind checks that decisions have an explicit Kind field.
+// validateKind checks that signals and decisions have a kind consistent with
+// their type. Action-type entries are left alone (legacy, no kind vocabulary).
 func validateKind(e *Entry) {
-	if e.Type == TypeDecision && e.Kind == "" {
+	switch e.Type {
+	case TypeSignal:
+		if e.Kind == "" {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "kind",
+				Message: "signal missing kind field (expected gap, fact, question, insight, or done)",
+			})
+			return
+		}
+		if !IsValidKindForType(TypeSignal, e.Kind) {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "kind",
+				Value:   string(e.Kind),
+				Message: fmt.Sprintf("invalid signal kind %q (expected gap, fact, question, insight, or done)", e.Kind),
+			})
+		}
+	case TypeDecision:
+		if e.Kind == "" {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "kind",
+				Message: "decision missing kind field (expected directive, activity, plan, contract, or aspiration)",
+			})
+			return
+		}
+		if !IsValidKindForType(TypeDecision, e.Kind) {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "kind",
+				Value:   string(e.Kind),
+				Message: fmt.Sprintf("invalid decision kind %q (expected directive, activity, plan, contract, or aspiration)", e.Kind),
+			})
+		}
+	}
+}
+
+// validateDoneSignalRefs checks that a done-kind signal carries at least one
+// closes or refs entry. Required structurally because a done signal is a
+// fact-of-completion pointing at the commitment it fulfills — a target is the
+// minimum anchor for the claim.
+func validateDoneSignalRefs(e *Entry) {
+	if e.Type != TypeSignal || e.Kind != KindDone {
+		return
+	}
+	if len(e.Closes) == 0 && len(e.Refs) == 0 {
 		e.Warnings = append(e.Warnings, Warning{
-			Field:   "kind",
-			Message: "decision missing kind field (expected directive, contract, or plan)",
+			Field:   "closes",
+			Message: "done signal must carry at least one closes or refs (target of the completion claim)",
 		})
 	}
 }

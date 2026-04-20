@@ -12,6 +12,6 @@ Derived:
 Primary
 
 ## upstream:
-  - refs 20260410-100000-s-stg-aaa {status: open}: "First sentence of content."
+  - refs 20260410-100000-s-stg-aaa gap {status: open}: "First sentence of content."
 
 

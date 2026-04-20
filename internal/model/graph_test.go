@@ -17,10 +17,7 @@ func entry(id string, opts ...entryOpt) *Entry {
 	}
 
 	typ := TypeFromAbbrev[parts.TypeCode]
-	kind := Kind("")
-	if typ == TypeDecision {
-		kind = KindDirective
-	}
+	kind := DefaultKindForType(typ)
 
 	e := &Entry{
 		ID:      id,
@@ -766,7 +763,7 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 		wantMsg   string
 	}{
 		{
-			name: "signal cannot close",
+			name: "non-done signal cannot close",
 			entries: []*Entry{
 				entry("20260406-100000-d-stg-aaa"),
 				func() *Entry {
@@ -776,7 +773,15 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 				}(),
 			},
 			wantWarns: 1,
-			wantMsg:   "signal cannot close entries",
+			wantMsg:   "only done-kind signals may close entries",
+		},
+		{
+			name: "done signal may close decision",
+			entries: []*Entry{
+				entry("20260406-100000-d-stg-aaa"),
+				entry("20260406-100100-s-stg-bbb", withKind(KindDone), withCloses("20260406-100000-d-stg-aaa")),
+			},
+			wantWarns: 0,
 		},
 		{
 			name: "cannot close action",
@@ -1019,13 +1024,86 @@ func TestLintDecisionWithKindNoWarning(t *testing.T) {
 	}
 }
 
-func TestLintSignalWithoutKindNoWarning(t *testing.T) {
-	e := entry("20260406-100000-s-stg-aaa")
+func TestLintSignalMissingKind(t *testing.T) {
+	e := entry("20260406-100000-s-stg-aaa", withKind(""))
 	g := NewGraph([]*Entry{e})
 
 	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	found := false
+	for _, w := range lint[0].Warnings {
+		if w.Field == "kind" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected warning on 'kind' field for signal without kind")
+	}
+}
+
+func TestLintSignalInvalidKind(t *testing.T) {
+	e := entry("20260406-100000-s-stg-aaa", withKind(KindContract))
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	w := lint[0].Warnings[0]
+	if w.Field != "kind" || !strings.Contains(w.Message, "invalid signal kind") {
+		t.Errorf("unexpected warning: %+v", w)
+	}
+}
+
+func TestLintDecisionInvalidKind(t *testing.T) {
+	e := entry("20260406-100000-d-stg-aaa", withKind(KindGap))
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	w := lint[0].Warnings[0]
+	if w.Field != "kind" || !strings.Contains(w.Message, "invalid decision kind") {
+		t.Errorf("unexpected warning: %+v", w)
+	}
+}
+
+func TestLintDoneSignalMissingRefs(t *testing.T) {
+	e := entry("20260406-100000-s-ops-aaa", withKind(KindDone))
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	found := false
+	for _, w := range lint[0].Warnings {
+		if strings.Contains(w.Message, "done signal must carry at least one") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected done-signal warning, got %+v", lint[0].Warnings)
+	}
+}
+
+func TestLintDoneSignalWithClosesNoWarning(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-tac-aaa"),
+		entry("20260406-100100-s-tac-bbb", withKind(KindDone), withCloses("20260406-100000-d-tac-aaa")),
+	})
+
+	lint := g.Lint()
 	if len(lint) != 0 {
-		t.Fatalf("Lint() = %d entries, want 0 for signal without kind", len(lint))
+		for _, e := range lint {
+			for _, w := range e.Warnings {
+				t.Logf("unexpected warning on %s: %s", e.ID, w.Message)
+			}
+		}
+		t.Fatalf("Lint() = %d entries, want 0 for done signal with closes", len(lint))
 	}
 }
 

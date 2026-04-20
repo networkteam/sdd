@@ -60,15 +60,80 @@ var LayerFromAbbrev = map[string]Layer{
 	"prc": LayerProcess,
 }
 
-// Kind distinguishes directive decisions (need action), contract decisions (standing constraints),
-// and plan decisions (implementation plans that need action to close).
+// Kind is a sub-type classifier carried on signals and decisions. Its allowed
+// values depend on the entry's Type:
+//
+//   - Signal kinds: gap (default), fact, question, insight, done
+//   - Decision kinds: directive (default), activity, plan, contract, aspiration
+//
+// Empty Kind on a new entry is replaced by the type's default during capture.
 type Kind string
 
 const (
-	KindDirective Kind = "directive"
-	KindContract  Kind = "contract"
-	KindPlan      Kind = "plan"
+	// Signal kinds.
+	KindGap      Kind = "gap"
+	KindFact     Kind = "fact"
+	KindQuestion Kind = "question"
+	KindInsight  Kind = "insight"
+	KindDone     Kind = "done"
+
+	// Decision kinds.
+	KindDirective  Kind = "directive"
+	KindActivity   Kind = "activity"
+	KindPlan       Kind = "plan"
+	KindContract   Kind = "contract"
+	KindAspiration Kind = "aspiration"
 )
+
+// signalKinds is the set of kinds valid on type: signal entries.
+var signalKinds = map[Kind]bool{
+	KindGap:      true,
+	KindFact:     true,
+	KindQuestion: true,
+	KindInsight:  true,
+	KindDone:     true,
+}
+
+// decisionKinds is the set of kinds valid on type: decision entries.
+var decisionKinds = map[Kind]bool{
+	KindDirective:  true,
+	KindActivity:   true,
+	KindPlan:       true,
+	KindContract:   true,
+	KindAspiration: true,
+}
+
+// IsValidKindForType reports whether k is an allowed kind for the given type.
+// Empty kind is allowed at this layer — defaults are applied separately during
+// entry construction (see DefaultKindForType).
+func IsValidKindForType(t EntryType, k Kind) bool {
+	if k == "" {
+		return true
+	}
+	switch t {
+	case TypeSignal:
+		return signalKinds[k]
+	case TypeDecision:
+		return decisionKinds[k]
+	default:
+		// Legacy types (action) have no kind vocabulary.
+		return false
+	}
+}
+
+// DefaultKindForType returns the kind applied when a new entry of type t is
+// captured without an explicit --kind. Signals default to gap; decisions to
+// directive. Other types have no default (empty).
+func DefaultKindForType(t EntryType) Kind {
+	switch t {
+	case TypeSignal:
+		return KindGap
+	case TypeDecision:
+		return KindDirective
+	default:
+		return ""
+	}
+}
 
 // Warning represents a validation issue found on a graph entry.
 type Warning struct {

@@ -40,7 +40,7 @@ func TestBuildEntry_PreservesExplicitKind(t *testing.T) {
 	}
 }
 
-func TestBuildEntry_NoKindForSignals(t *testing.T) {
+func TestBuildEntry_DefaultsKindForSignals(t *testing.T) {
 	cmd := &command.NewEntryCmd{
 		Type:        model.TypeSignal,
 		Layer:       model.LayerTactical,
@@ -51,8 +51,30 @@ func TestBuildEntry_NoKindForSignals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildEntry: %v", err)
 	}
-	if entry.Kind != "" {
-		t.Errorf("Kind = %q, want empty for signals", entry.Kind)
+	if entry.Kind != model.KindGap {
+		t.Errorf("Kind = %q, want %q", entry.Kind, model.KindGap)
+	}
+}
+
+func TestValidate_RejectsInvalidKindForType(t *testing.T) {
+	cmd := &command.NewEntryCmd{
+		Type:  model.TypeSignal,
+		Layer: model.LayerTactical,
+		Kind:  model.KindContract, // decision kind on a signal
+	}
+	if err := cmd.Validate(); err == nil {
+		t.Error("Validate() = nil, want error for decision kind on signal")
+	}
+}
+
+func TestValidate_AcceptsSignalKind(t *testing.T) {
+	cmd := &command.NewEntryCmd{
+		Type:  model.TypeSignal,
+		Layer: model.LayerTactical,
+		Kind:  model.KindInsight,
+	}
+	if err := cmd.Validate(); err != nil {
+		t.Errorf("Validate() = %v, want nil", err)
 	}
 }
 

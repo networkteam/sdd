@@ -42,14 +42,15 @@ func TestEntryLine_DecisionDirectiveDefault(t *testing.T) {
 	}
 }
 
-func TestEntryLine_SignalNoKind(t *testing.T) {
+func TestEntryLine_SignalGapDefault(t *testing.T) {
+	// entry() helper defaults signals to KindGap.
 	e := entry("20260416-190732-s-prc-omw",
 		withConfidence("high"),
 		withParticipants("Christopher", "Claude"),
 		withSummary("Participant names are inconsistent"))
 	g := model.NewGraph([]*model.Entry{e})
 	got := renderEntryLine(e, g)
-	want := "  20260416-190732-s-prc-omw process signal [confidence: high] (Christopher, Claude) {status: open} Participant names are inconsistent\n"
+	want := "  20260416-190732-s-prc-omw process gap signal [confidence: high] (Christopher, Claude) {status: open} Participant names are inconsistent\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
@@ -90,7 +91,7 @@ func TestEntryLine_ClosedSignal(t *testing.T) {
 		withSummary("The closing action"))
 	g := model.NewGraph([]*model.Entry{sig, closer})
 	got := renderEntryLine(sig, g)
-	want := "  20260416-190732-s-prc-omw process signal [confidence: high] (Christopher, Claude) {status: closed-by 20260417-093934-a-prc-fxn} A closed signal\n"
+	want := "  20260416-190732-s-prc-omw process gap signal [confidence: high] (Christopher, Claude) {status: closed-by 20260417-093934-a-prc-fxn} A closed signal\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}

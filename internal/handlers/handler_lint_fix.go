@@ -61,10 +61,12 @@ func (h *Handler) LintFix(ctx context.Context, cmd *command.LintFixCmd) error {
 func applyFixes(e *model.Entry) []string {
 	var fixes []string
 
-	// Decisions must have an explicit kind field.
-	if e.Type == model.TypeDecision && e.Kind == "" {
-		e.Kind = model.KindDirective
-		fixes = append(fixes, "set kind to directive")
+	// Signals and decisions must carry a kind; fall back to the type default.
+	if e.Kind == "" {
+		if def := model.DefaultKindForType(e.Type); def != "" {
+			e.Kind = def
+			fixes = append(fixes, fmt.Sprintf("set kind to %s", def))
+		}
 	}
 
 	return fixes

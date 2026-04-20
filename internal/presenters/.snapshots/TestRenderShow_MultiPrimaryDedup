@@ -12,7 +12,7 @@ Derived:
 First primary
 
 ## upstream:
-  - refs 20260410-100000-s-stg-aaa {status: open}: "Shared ref"
+  - refs 20260410-100000-s-stg-aaa gap {status: open}: "Shared ref"
 
 ---
 
@@ -30,6 +30,6 @@ Derived:
 Second primary
 
 ## upstream:
-  - refs 20260410-100000-s-stg-aaa {status: open}: (see above)
+  - refs 20260410-100000-s-stg-aaa gap {status: open}: (see above)
 
 

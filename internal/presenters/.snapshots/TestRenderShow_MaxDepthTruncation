@@ -12,8 +12,8 @@ Derived:
 Primary
 
 ## upstream:
-  - refs 20260410-100200-s-tac-ccc {status: open}: "Level 2"
-    - refs 20260410-100100-s-cpt-bbb {status: open}: "Level 1"
-      [truncated: refs 20260410-100000-s-stg-aaa]
+  - refs 20260410-100200-s-tac-ccc gap {status: open}: "Level 2"
+    - refs 20260410-100100-s-cpt-bbb gap {status: open}: "Level 1"
+      [truncated: refs 20260410-100000-s-stg-aaa gap]
 
 
