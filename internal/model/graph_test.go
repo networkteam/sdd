@@ -274,6 +274,21 @@ func TestOpenSignalsWithOpenAndAddressed(t *testing.T) {
 	}
 }
 
+func TestOpenSignalsExcludesDone(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-tac-aaa"),
+		entry("20260406-100100-s-tac-bbb", withKind(KindDone)),
+	})
+
+	open := g.OpenSignals()
+	if len(open) != 1 {
+		t.Fatalf("OpenSignals = %d, want 1 (done signal should be excluded)", len(open))
+	}
+	if open[0].ID != "20260406-100000-s-tac-aaa" {
+		t.Errorf("Open signal = %q, want aaa (bbb is kind:done)", open[0].ID)
+	}
+}
+
 func TestRefsDoNotClose(t *testing.T) {
 	g := NewGraph([]*Entry{
 		entry("20260406-100000-s-ops-aaa"),
@@ -286,24 +301,40 @@ func TestRefsDoNotClose(t *testing.T) {
 	}
 }
 
-func TestRecentActionsTruncation(t *testing.T) {
+func TestRecentDoneTruncation(t *testing.T) {
 	var entries []*Entry
 	for i := range 5 {
-		id := fmt.Sprintf("20260406-10%02d00-a-ops-%03d", i, i)
-		entries = append(entries, entry(id))
+		id := fmt.Sprintf("20260406-10%02d00-s-ops-%03d", i, i)
+		entries = append(entries, entry(id, withKind(KindDone)))
 	}
 
 	g := NewGraph(entries)
 
-	actions := g.RecentActions(3)
-	if len(actions) != 3 {
-		t.Fatalf("RecentActions(3) = %d, want 3", len(actions))
+	done := g.RecentDone(3)
+	if len(done) != 3 {
+		t.Fatalf("RecentDone(3) = %d, want 3", len(done))
 	}
-	if actions[0].ID != "20260406-100200-a-ops-002" {
-		t.Errorf("First action = %q, want 002", actions[0].ID)
+	if done[0].ID != "20260406-100200-s-ops-002" {
+		t.Errorf("First done = %q, want 002", done[0].ID)
 	}
-	if actions[2].ID != "20260406-100400-a-ops-004" {
-		t.Errorf("Last action = %q, want 004", actions[2].ID)
+	if done[2].ID != "20260406-100400-s-ops-004" {
+		t.Errorf("Last done = %q, want 004", done[2].ID)
+	}
+}
+
+func TestRecentDoneIgnoresNonDoneSignals(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-tac-aaa", withKind(KindGap)),
+		entry("20260406-100100-s-tac-bbb", withKind(KindDone)),
+		entry("20260406-100200-s-tac-ccc", withKind(KindFact)),
+	})
+
+	done := g.RecentDone(10)
+	if len(done) != 1 {
+		t.Fatalf("RecentDone = %d, want 1", len(done))
+	}
+	if done[0].Kind != KindDone {
+		t.Errorf("Expected only kind:done entries, got %q", done[0].Kind)
 	}
 }
 

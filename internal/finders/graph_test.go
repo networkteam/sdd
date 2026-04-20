@@ -29,16 +29,17 @@ closes:
 
 Decision closing signal.`)
 
-	writeGraphEntry(t, dir, "20260406-115559-a-cpt-f8v", `---
-type: action
+	writeGraphEntry(t, dir, "20260406-115559-s-cpt-f8v", `---
+type: signal
 layer: conceptual
+kind: done
 refs:
   - 20260406-115540-d-stg-0gh
 closes:
   - 20260406-115540-d-stg-0gh
 ---
 
-Action closing decision.`)
+Done signal closing decision.`)
 
 	f := New(nil)
 	g, err := f.LoadGraph(dir)
@@ -56,20 +57,20 @@ Action closing decision.`)
 		t.Errorf("OpenSignals = %d, want 0", len(open))
 	}
 
-	// Decision is closed by action
+	// Decision is closed by done signal
 	active := g.ActiveDecisions()
 	if len(active) != 0 {
 		t.Errorf("ActiveDecisions = %d, want 0", len(active))
 	}
 
-	// Recent actions
-	actions := g.RecentActions(10)
-	if len(actions) != 1 {
-		t.Errorf("RecentActions = %d, want 1", len(actions))
+	// Recent done signals
+	done := g.RecentDone(10)
+	if len(done) != 1 {
+		t.Errorf("RecentDone = %d, want 1", len(done))
 	}
 
-	// Ref chain from action should include all three
-	chain := g.RefChain("20260406-115559-a-cpt-f8v")
+	// Ref chain from done signal should include all three
+	chain := g.RefChain("20260406-115559-s-cpt-f8v")
 	if len(chain) != 3 {
 		t.Errorf("RefChain = %d, want 3", len(chain))
 	}
