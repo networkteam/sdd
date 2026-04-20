@@ -12,9 +12,9 @@ func (f *Finder) Status(q query.StatusQuery) (*query.StatusResult, error) {
 	if q.Graph == nil {
 		return nil, fmt.Errorf("graph is required")
 	}
-	n := q.RecentActions
+	n := q.RecentDone
 	if n <= 0 {
-		n = 5
+		n = 10
 	}
 	return &query.StatusResult{
 		Graph:       q.Graph,
@@ -23,6 +23,6 @@ func (f *Finder) Status(q query.StatusQuery) (*query.StatusResult, error) {
 		Plans:       q.Graph.Plans(),
 		Active:      q.Graph.ActiveDecisions(),
 		Open:        q.Graph.OpenSignals(),
-		Recent:      q.Graph.RecentActions(n),
+		Recent:      q.Graph.RecentDone(n),
 	}, nil
 }

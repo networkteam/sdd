@@ -137,7 +137,10 @@ func (g *Graph) Aspirations() []*Entry {
 	return aspirations
 }
 
-// OpenSignals returns signals that are not closed and not superseded.
+// OpenSignals returns signals that are not closed, not superseded, and not
+// kind: done. Done signals are terminal facts of execution — they live in the
+// graph forever but are never "attention items," so they belong in the recent-
+// activity stream rather than the open-signals set.
 func (g *Graph) OpenSignals() []*Entry {
 	closed := g.closedSet()
 	superseded := g.supersededSet()
@@ -147,6 +150,9 @@ func (g *Graph) OpenSignals() []*Entry {
 		if e.Type != TypeSignal {
 			continue
 		}
+		if e.Kind == KindDone {
+			continue
+		}
 		if !closed[e.ID] && !superseded[e.ID] {
 			open = append(open, e)
 		}
@@ -154,19 +160,20 @@ func (g *Graph) OpenSignals() []*Entry {
 	return open
 }
 
-// RecentActions returns the last n actions by timestamp.
-func (g *Graph) RecentActions(n int) []*Entry {
-	var actions []*Entry
+// RecentDone returns the last n kind: done signals by timestamp — the activity
+// stream of what was recently accomplished. Replaces the pre-two-type
+// RecentActions; actions no longer exist in the two-type model.
+func (g *Graph) RecentDone(n int) []*Entry {
+	var done []*Entry
 	for _, e := range g.Entries {
-		if e.Type == TypeAction {
-			actions = append(actions, e)
+		if e.Type == TypeSignal && e.Kind == KindDone {
+			done = append(done, e)
 		}
 	}
-	// Entries are already sorted by time, take last n
-	if len(actions) > n {
-		actions = actions[len(actions)-n:]
+	if len(done) > n {
+		done = done[len(done)-n:]
 	}
-	return actions
+	return done
 }
 
 // RefChain returns the entry and all entries it transitively references, in dependency order.
