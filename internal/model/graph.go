@@ -61,14 +61,18 @@ func (g *Graph) SetGraphDir(dir string) {
 	g.graphDir = dir
 }
 
-// ActiveDecisions returns active directive decisions (not closed, not superseded, not contracts).
+// ActiveDecisions returns active directive and activity decisions — i.e.,
+// decisions that are neither durable (contract, aspiration) nor
+// plan-structured. Contracts, plans, and aspirations each surface in their
+// own status section, so this excludes those three kinds to avoid duplicate
+// listings.
 func (g *Graph) ActiveDecisions() []*Entry {
 	closed := g.closedSet()
 	superseded := g.supersededSet()
 
 	var active []*Entry
 	for _, e := range g.Entries {
-		if e.Type != TypeDecision || e.IsContract() || e.IsPlan() {
+		if e.Type != TypeDecision || e.IsContract() || e.IsPlan() || e.IsAspiration() {
 			continue
 		}
 		if !closed[e.ID] && !superseded[e.ID] {
@@ -192,10 +196,11 @@ func (g *Graph) RefChain(id string) []*Entry {
 
 // GraphFilter specifies criteria for filtering graph entries.
 type GraphFilter struct {
-	Type     EntryType
-	Layer    Layer
-	Kind     Kind
-	OpenOnly bool // when true, exclude closed/superseded signals and decisions
+	Type        EntryType
+	Layer       Layer
+	Kind        Kind
+	MissingKind bool // when true, only include entries whose stored kind field is empty
+	OpenOnly    bool // when true, exclude closed/superseded signals and decisions
 }
 
 // Filter returns entries matching the given filter criteria. Zero-value fields match all.
@@ -213,6 +218,9 @@ func (g *Graph) Filter(f GraphFilter) []*Entry {
 			continue
 		}
 		if f.Layer != "" && e.Layer != f.Layer {
+			continue
+		}
+		if f.MissingKind && e.Kind != "" {
 			continue
 		}
 		if f.Kind != "" {

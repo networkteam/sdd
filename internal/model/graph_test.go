@@ -438,6 +438,23 @@ func TestActiveDecisionsExcludesContracts(t *testing.T) {
 	}
 }
 
+func TestActiveDecisionsExcludesAspirations(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-d-stg-asp", withKind(KindAspiration)),
+		entry("20260406-100100-d-tac-dir"),
+		entry("20260406-100200-d-tac-act", withKind(KindActivity)),
+	})
+
+	active := g.ActiveDecisions()
+	ids := entryIDs(active)
+	if len(active) != 2 {
+		t.Fatalf("ActiveDecisions = %v (len %d), want 2 (aspiration excluded, activity included)", ids, len(active))
+	}
+	assertContains(t, ids, "20260406-100100-d-tac-dir", "directive")
+	assertContains(t, ids, "20260406-100200-d-tac-act", "activity")
+	assertNotContains(t, ids, "20260406-100000-d-stg-asp", "aspiration")
+}
+
 func TestContracts(t *testing.T) {
 	g := NewGraph([]*Entry{
 		entry("20260406-100000-d-cpt-aaa", withKind(KindContract)),
@@ -525,6 +542,36 @@ func TestFilterWithKind(t *testing.T) {
 	contractOnly := g.Filter(GraphFilter{Kind: KindContract})
 	if len(contractOnly) != 1 {
 		t.Errorf("Filter(contract) = %d, want 1 (only contract, no signal)", len(contractOnly))
+	}
+}
+
+func TestFilterMissingKind(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260406-100000-s-stg-aaa", withKind("")),       // missing kind
+		entry("20260406-100100-s-stg-bbb", withKind(KindGap)),  // has kind
+		entry("20260406-100200-d-tac-ccc", withKind("")),       // missing kind
+		entry("20260406-100300-d-tac-ddd", withKind(KindPlan)), // has kind
+		entry("20260406-100400-a-tac-eee", withKind("")),       // legacy action (no kind — picked up too)
+	})
+
+	missing := g.Filter(GraphFilter{MissingKind: true})
+	ids := entryIDs(missing)
+	if len(missing) != 3 {
+		t.Fatalf("Filter(MissingKind) = %v (len %d), want 3", ids, len(missing))
+	}
+	assertContains(t, ids, "20260406-100000-s-stg-aaa", "signal without kind")
+	assertContains(t, ids, "20260406-100200-d-tac-ccc", "decision without kind")
+	assertContains(t, ids, "20260406-100400-a-tac-eee", "action without kind")
+	assertNotContains(t, ids, "20260406-100100-s-stg-bbb", "signal with kind")
+	assertNotContains(t, ids, "20260406-100300-d-tac-ddd", "decision with kind")
+
+	// Compose with type filter.
+	missingSignals := g.Filter(GraphFilter{Type: TypeSignal, MissingKind: true})
+	if len(missingSignals) != 1 {
+		t.Fatalf("Filter(signal, MissingKind) = %d, want 1", len(missingSignals))
+	}
+	if missingSignals[0].ID != "20260406-100000-s-stg-aaa" {
+		t.Errorf("Got %q, want aaa", missingSignals[0].ID)
 	}
 }
 

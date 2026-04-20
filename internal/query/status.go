@@ -9,11 +9,15 @@ type StatusQuery struct {
 }
 
 // StatusResult is the structured snapshot of graph state for the status view.
+// Aspirations surface separately from Contracts — both are durable decisions,
+// but aspirations are "pull toward" attractors while contracts are "must hold"
+// constraints, and the reader benefits from seeing them apart.
 type StatusResult struct {
-	Graph     *model.Graph // for top-line counts (entries, decisions, signals, actions)
-	Contracts []*model.Entry
-	Plans     []*model.Entry
-	Active    []*model.Entry // active directive decisions
-	Open      []*model.Entry // open signals
-	Recent    []*model.Entry // recent actions
+	Graph       *model.Graph // for top-line counts (entries, decisions, signals, actions)
+	Contracts   []*model.Entry
+	Aspirations []*model.Entry
+	Plans       []*model.Entry
+	Active      []*model.Entry // active directive & activity decisions
+	Open        []*model.Entry // open signals
+	Recent      []*model.Entry // recent actions
 }

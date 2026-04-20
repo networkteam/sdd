@@ -17,11 +17,12 @@ func (f *Finder) Status(q query.StatusQuery) (*query.StatusResult, error) {
 		n = 5
 	}
 	return &query.StatusResult{
-		Graph:     q.Graph,
-		Contracts: q.Graph.Contracts(),
-		Plans:     q.Graph.Plans(),
-		Active:    q.Graph.ActiveDecisions(),
-		Open:      q.Graph.OpenSignals(),
-		Recent:    q.Graph.RecentActions(n),
+		Graph:       q.Graph,
+		Contracts:   q.Graph.Contracts(),
+		Aspirations: q.Graph.Aspirations(),
+		Plans:       q.Graph.Plans(),
+		Active:      q.Graph.ActiveDecisions(),
+		Open:        q.Graph.OpenSignals(),
+		Recent:      q.Graph.RecentActions(n),
 	}, nil
 }

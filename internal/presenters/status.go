@@ -20,6 +20,7 @@ func RenderStatus(w io.Writer, result *query.StatusResult) {
 		len(g.Entries), len(decisions), len(signals), len(actions))
 
 	renderLayeredSection(w, g, "Contracts", result.Contracts)
+	renderLayeredSection(w, g, "Aspirations", result.Aspirations)
 	renderLayeredSection(w, g, "Plans", result.Plans)
 	renderLayeredSection(w, g, "Active Decisions", result.Active)
 	renderFlatSection(w, g, "Open Signals", result.Open)

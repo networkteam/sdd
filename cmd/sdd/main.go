@@ -65,6 +65,20 @@ func (f gitCommitterFunc) Commit(message string, paths ...string) error {
 	return f(message, paths...)
 }
 
+// gitMover is the production handlers.Mover: shells out to `git mv` so the
+// rename is recorded in the git index atomically with the working-tree change.
+type gitMover struct{}
+
+func (gitMover) Move(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return fmt.Errorf("creating destination directory: %w", err)
+	}
+	if out, err := exec.Command("git", "mv", src, dst).CombinedOutput(); err != nil {
+		return fmt.Errorf("git mv %s %s: %s (%w)", src, dst, out, err)
+	}
+	return nil
+}
+
 // gitBrancher is the production handlers.Brancher: shells out to git for
 // checkout, merge-status check, and branch deletion.
 type gitBrancher struct{}
@@ -144,6 +158,7 @@ func main() {
 			showCmd(),
 			listCmd(),
 			newCmd(),
+			rewriteCmd(),
 			wipCmd(),
 			lintCmd(),
 			summarizeCmd(),
@@ -248,6 +263,10 @@ func listCmd() *cli.Command {
 				Usage:   "Filter decisions by kind (contract, directive, plan)",
 			},
 			&cli.BoolFlag{
+				Name:  "missing-kind",
+				Usage: "Show only entries without an explicit kind field (migration helper)",
+			},
+			&cli.BoolFlag{
 				Name:  "all",
 				Usage: "Show all entries including addressed signals and superseded decisions",
 			},
@@ -284,10 +303,11 @@ func listCmd() *cli.Command {
 			result, err := newFinder("").List(query.ListQuery{
 				Graph: g,
 				Filter: model.GraphFilter{
-					Type:     typ,
-					Layer:    layer,
-					Kind:     kind,
-					OpenOnly: !cmd.Bool("all"),
+					Type:        typ,
+					Layer:       layer,
+					Kind:        kind,
+					MissingKind: cmd.Bool("missing-kind"),
+					OpenOnly:    !cmd.Bool("all"),
 				},
 			})
 			if err != nil {
@@ -449,6 +469,92 @@ func newCmd() *cli.Command {
 			})
 
 			return handler.NewEntry(ctx, ncmd)
+		}),
+	}
+}
+
+func rewriteCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "rewrite",
+		Usage:     "Rewrite an entry's type and kind, updating inbound references",
+		ArgsUsage: "<id>",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "type",
+				Aliases:  []string{"t"},
+				Usage:    "New entry type (s, d)",
+				Required: true,
+			},
+			&cli.StringFlag{
+				Name:     "kind",
+				Aliases:  []string{"k"},
+				Usage:    "New entry kind",
+				Required: true,
+			},
+			&cli.StringFlag{
+				Name:    "message",
+				Aliases: []string{"m"},
+				Usage:   "Override the default commit message",
+			},
+			&cli.BoolFlag{
+				Name:  "dry-run",
+				Usage: "Report intended changes without writing or committing",
+			},
+			&cli.BoolFlag{
+				Name:  "no-commit",
+				Usage: "Write changes to disk but skip the git commit",
+			},
+		},
+		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
+			ctx = slogutils.WithLogger(ctx, slogutils.FromContext(ctx).With("command", "rewrite"))
+
+			args := cmd.Args()
+			if args.Len() < 1 {
+				return fmt.Errorf("usage: sdd rewrite <id> --type <t> --kind <k>")
+			}
+
+			typeArg := cmd.String("type")
+			typ, ok := model.TypeFromAbbrev[typeArg]
+			if !ok {
+				typ = model.EntryType(typeArg)
+				if _, exists := model.TypeAbbrev[typ]; !exists {
+					return fmt.Errorf("invalid type: %s (use d, s, or a)", typeArg)
+				}
+			}
+
+			rcmd := &command.RewriteEntryCmd{
+				EntryID:  args.Get(0),
+				NewType:  typ,
+				NewKind:  model.Kind(cmd.String("kind")),
+				Message:  cmd.String("message"),
+				DryRun:   cmd.Bool("dry-run"),
+				NoCommit: cmd.Bool("no-commit"),
+				OnRewritten: func(oldID, newID string, inbound []string) {
+					if cmd.Bool("dry-run") {
+						fmt.Printf("would rewrite %s → %s\n", oldID, newID)
+					} else {
+						fmt.Printf("%s → %s\n", oldID, newID)
+					}
+					if len(inbound) > 0 {
+						fmt.Printf("  inbound updates: %d\n", len(inbound))
+						for _, id := range inbound {
+							fmt.Printf("    %s\n", id)
+						}
+					}
+				},
+			}
+
+			dir, err := resolveGraphDir(cmd)
+			if err != nil {
+				return err
+			}
+			handler := handlers.New(handlers.Options{
+				GraphDir:  dir,
+				Reader:    newFinder(""),
+				Committer: gitCommitterFunc(gitCommit),
+				Mover:     gitMover{},
+			})
+			return handler.RewriteEntry(ctx, rcmd)
 		}),
 	}
 }

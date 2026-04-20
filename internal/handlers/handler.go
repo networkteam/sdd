@@ -42,6 +42,14 @@ type Brancher interface {
 	DeleteBranch(branch string, force bool) error
 }
 
+// Mover renames a path in the working tree and the git index as one operation
+// — the semantics of `git mv`. Injected so tests can fake moves without
+// shelling out. Used by the rewrite handler when the target entry changes
+// type and its file needs a new on-disk location.
+type Mover interface {
+	Move(src, dst string) error
+}
+
 // Handler holds injected dependencies shared across command methods.
 // Each public method corresponds to one command and lives in its own file
 // (handler_new_entry.go, etc.).
@@ -52,6 +60,7 @@ type Handler struct {
 	llmRunner llm.Runner
 	committer Committer
 	brancher  Brancher
+	mover     Mover
 	stderr    io.Writer
 	now       func() time.Time
 }
@@ -64,6 +73,7 @@ type Options struct {
 	LLMRunner llm.Runner
 	Committer Committer
 	Brancher  Brancher
+	Mover     Mover
 	Stderr    io.Writer
 	Now       func() time.Time
 }
@@ -77,6 +87,7 @@ func New(opts Options) *Handler {
 		llmRunner: opts.LLMRunner,
 		committer: opts.Committer,
 		brancher:  opts.Brancher,
+		mover:     opts.Mover,
 		stderr:    opts.Stderr,
 		now:       opts.Now,
 	}
