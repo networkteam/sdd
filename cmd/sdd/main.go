@@ -67,6 +67,22 @@ func newRunner(cmd *cli.Command) (llm.Runner, error) {
 	return factory.New(resolveLLMConfig(cmd))
 }
 
+// resolveTimeout returns the per-call LLM timeout for the given flag name,
+// preferring the user's explicit --<flag> over the llm.timeout field in
+// config. Falls back to the flag's default Value when neither is set.
+func resolveTimeout(cmd *cli.Command, flagName string) time.Duration {
+	if cmd.IsSet(flagName) {
+		return cmd.Duration(flagName)
+	}
+	cfg := resolveLLMConfig(cmd)
+	if cfg.Timeout != "" {
+		if d, err := time.ParseDuration(cfg.Timeout); err == nil && d > 0 {
+			return d
+		}
+	}
+	return cmd.Duration(flagName)
+}
+
 // readOnlyRunner satisfies llm.Runner but always errors on Run. Used by
 // read-only CLI commands (status, list, show, lint, wip list) so they
 // don't need LLM configuration to operate.
@@ -503,7 +519,7 @@ func newCmd() *cli.Command {
 				SkipPreflight:    cmd.Bool("skip-preflight"),
 				DryRun:           cmd.Bool("dry-run"),
 				PreflightModel:   cmd.String("preflight-model"),
-				PreflightTimeout: cmd.Duration("preflight-timeout"),
+				PreflightTimeout: resolveTimeout(cmd, "preflight-timeout"),
 				OnNewEntry: func(id string) {
 					fmt.Println(id + ".md")
 					if rel, err := model.IDToRelPath(id); err == nil {
@@ -707,7 +723,7 @@ func summarizeCmd() *cli.Command {
 				EntryIDs:    ids,
 				Force:       cmd.Bool("force"),
 				Model:       cmd.String("model"),
-				Timeout:     cmd.Duration("timeout"),
+				Timeout:     resolveTimeout(cmd, "timeout"),
 				Concurrency: int(cmd.Int("concurrency")),
 				OnSummarized: func(id, summary string) {
 					fmt.Fprintf(os.Stderr, "  summarized %s\n", id)

@@ -63,7 +63,10 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 		commitPaths []string
 	)
 
-	g, gctx := errgroup.WithContext(ctx)
+	// Plain errgroup (not WithContext): a single entry's timeout must not
+	// cancel the siblings. g.Wait still returns the first error, but
+	// in-flight workers complete or time out individually using ctx.
+	var g errgroup.Group
 	g.SetLimit(concurrency)
 
 	for _, entry := range entries {
@@ -90,7 +93,7 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			}
 
 			// LLM call without the graph lock.
-			ectx, cancel := context.WithTimeout(gctx, timeout)
+			ectx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			output, err := llm.Run(ectx, h.llmRunner, req, "summarize")
 			if err != nil {

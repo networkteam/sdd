@@ -42,6 +42,16 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 	opts := []upstream.ConfigOption{
 		upstream.SetProvider(cfg.Provider),
 		upstream.SetModel(cfg.Model),
+		// Gollm defaults to 3 internal retries. For a batch summarize over
+		// hundreds of entries, a single cancelled context triggers 3
+		// retry WARNs per worker and floods the log. We prefer one shot per
+		// call and let the SDD caller decide higher-level retry policy.
+		upstream.SetMaxRetries(0),
+		// Gollm's default MaxTokens (256) truncates longer summaries and
+		// pre-flight JSON responses mid-sentence. 4096 covers summaries
+		// (~150 tokens), pre-flight findings arrays, and has headroom for
+		// richer prompts without being wasteful.
+		upstream.SetMaxTokens(4096),
 	}
 
 	// API key is required for remote providers. Ollama uses a local endpoint
