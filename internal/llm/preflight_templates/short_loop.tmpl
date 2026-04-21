@@ -1,3 +1,4 @@
+{{ define "short_loop_system" -}}
 You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
 
 ## Task
@@ -48,7 +49,15 @@ Bands:
   - Standard short-loop fix at low layers — observation → fix
   - Example: gap "catch-up cites superseded decision" closed by done "Updated skill example to reference current decision"
   - Deferral explicitly acknowledged ("minimal fix; deeper rework deferred") — trust the author's dialogue-grounded judgment
+{{ template "unrelated_refs" . -}}
+{{ template "unusual_close" . -}}
+{{ template "contracts" . -}}
+{{ template "durability" . -}}
+{{ template "entry_quality" . -}}
+{{ template "verdict" . -}}
+{{- end }}
 
+{{ define "short_loop_user" -}}
 ## Proposed entry
 
 {{ .ProposedEntry }}
@@ -60,4 +69,5 @@ Bands:
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ template "unrelated_refs" . }}{{ template "unusual_close" . }}{{ template "contracts" . }}{{ template "durability" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
+{{ end -}}
+{{- end }}

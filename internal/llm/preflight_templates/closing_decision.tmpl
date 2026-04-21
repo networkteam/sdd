@@ -1,3 +1,4 @@
+{{ define "closing_decision_system" -}}
 You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
 
 ## Task
@@ -28,7 +29,14 @@ Stable-kind entries (`fact`, `insight`, `contract`, `aspiration`) have nothing i
 - `medium` — Reasoning restates what was closed without naming what changed. Example: "Retiring the immutability contract. It said documents don't change." (recaps the contract but never explains what shifted to make retirement appropriate).
 - `low` — Reasoning present but thin; a sentence would sharpen. Example: "New evidence made this outdated." — directionally correct, but the specific evidence or shift isn't named.
 - No finding — Narrative cites a specific reason: new evidence with specifics, a scope change with what's changed, an explicit handoff to a new entry ("superseded effectively by the aspiration `d-cpt-xyz`"), a concrete context shift, or a reclassification ("reclassifying this directive as a contract"). The reason's *correctness* is not evaluated; *presence* is.
+{{ template "unrelated_refs" . -}}
+{{ template "unusual_close" . -}}
+{{ template "contracts" . -}}
+{{ template "entry_quality" . -}}
+{{ template "verdict" . -}}
+{{- end }}
 
+{{ define "closing_decision_user" -}}
 ## Proposed decision
 
 {{ .ProposedEntry }}
@@ -40,4 +48,5 @@ Stable-kind entries (`fact`, `insight`, `contract`, `aspiration`) have nothing i
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ template "unrelated_refs" . }}{{ template "unusual_close" . }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
+{{ end -}}
+{{- end }}

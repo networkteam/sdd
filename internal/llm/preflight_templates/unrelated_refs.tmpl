@@ -1,4 +1,4 @@
-{{ define "unrelated_refs" }}{{ if .ReferencedEntries }}
+{{ define "unrelated_refs" }}
 ## Unrelated references check
 
 `refs` represent a "builds on / depends on" relationship — the entry's reasoning should be grounded in the referenced entries. Flag references that don't topically connect to the proposed entry's concern, and whose "builds on" relationship isn't evident from the narrative.
@@ -6,5 +6,5 @@
 - `high` — Ref points at an entry with no topical connection to this entry's concern, AND the narrative does not explain the link. Example: a plan about CSV parsing refs a WIP-marker-improvement signal; the narrative never mentions coordination or WIP marker behavior, so the ref looks accidental or cargo-culted.
 - `medium` — Ref is tangentially related but the "builds on" relationship isn't evident — the referenced entry is in the same area but the proposed entry doesn't explain how it depends on or builds from the ref.
 - `low` — Ref is related but a one-sentence note would sharpen the connection for future readers.
-- No finding — Refs are upstream context the entry genuinely builds on (e.g., the plan operationalizes a ref'd directive; the signal observes against a ref'd contract). Conceptual grounding (e.g., a decision refs a contract it's honoring) doesn't require a connective sentence — the link is structural.
-{{ end }}{{ end }}
+- No finding — The proposed entry has no refs, OR refs are upstream context the entry genuinely builds on (e.g., the plan operationalizes a ref'd directive; the signal observes against a ref'd contract). Conceptual grounding (e.g., a decision refs a contract it's honoring) doesn't require a connective sentence — the link is structural.
+{{ end }}

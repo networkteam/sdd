@@ -1,3 +1,4 @@
+{{ define "decision_refs_system" -}}
 You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
 
 ## Task
@@ -28,7 +29,18 @@ A directive at strategic or conceptual layer with perpetual framing and no "done
 - `medium` — Strategic or conceptual directive with perpetual framing and no bounded completion criterion. Narrative uses phrases like "ongoing pull toward X", "we orient around Y", "always favoring Z", with no "done when" or "closed by" horizon. Example: `kind: directive` at `stg` with content "We commit to prioritizing user trust over short-term growth as an enduring stance." — reads as an aspiration.
 - `low` — Directive at any layer where the commitment could read as a perpetual pull rather than a bounded choice; narrative is ambiguous. Example: directive at `cpt` "Favor simplicity in API design" — could be bounded (applied to current design work) or perpetual (a standing orientation); a sentence naming the horizon would clarify.
 - No finding — Directive with a clear bounded choice, even if high-level. Examples: "We will pursue direct-to-consumer distribution over wholesale" (bounded despite strategic); "Use Postgres for the new service" (concrete commitment). Bounded directives have a "done when" shape: a specific change lands, a path is taken, or the commitment is fulfilled by action.
+{{ template "unrelated_refs" . -}}
+{{ if .OpenSignals }}
+## Open signals in the graph (check for missing refs)
 
+{{ .OpenSignals }}
+{{ end -}}
+{{ template "contracts" . -}}
+{{ template "entry_quality" . -}}
+{{ template "verdict" . -}}
+{{- end }}
+
+{{ define "decision_refs_user" -}}
 ## Proposed decision
 
 {{ .ProposedEntry }}
@@ -36,8 +48,5 @@ A directive at strategic or conceptual layer with perpetual framing and no "done
 ## Referenced entries
 
 {{ .ReferencedEntries }}
-{{ end }}{{ if .OpenSignals }}
-## Open signals in the graph (check for missing refs)
-
-{{ .OpenSignals }}
-{{ end }}{{ template "unrelated_refs" . }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
+{{ end -}}
+{{- end }}

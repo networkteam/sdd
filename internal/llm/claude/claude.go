@@ -24,9 +24,12 @@ func NewRunner(model string) llm.Runner {
 }
 
 // Run executes claude -p --output-format json and parses the JSON response.
-func (r *Runner) Run(ctx context.Context, prompt string) (*llm.RunResult, error) {
+// The claude CLI accepts a single stdin payload, so SystemPrompt and
+// UserPrompt are concatenated — prompt caching is not available through this
+// transport.
+func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, error) {
 	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", r.model, "--output-format", "json")
-	cmd.Stdin = strings.NewReader(prompt)
+	cmd.Stdin = strings.NewReader(req.Combined())
 	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
