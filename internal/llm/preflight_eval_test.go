@@ -26,9 +26,9 @@ type liveRunner struct {
 	model string
 }
 
-func (r *liveRunner) Run(ctx context.Context, prompt string) (*RunResult, error) {
+func (r *liveRunner) Run(ctx context.Context, req Request) (*RunResult, error) {
 	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", r.model)
-	cmd.Stdin = strings.NewReader(prompt)
+	cmd.Stdin = strings.NewReader(req.Combined())
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("claude -p: %w", err)
@@ -42,7 +42,7 @@ func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*Prefligh
 	t.Helper()
 	ct := selectCheckType(proposed, graph)
 	pctx := assembleContext(proposed, graph, ct)
-	prompt, err := renderPreflightPrompt(ct, pctx)
+	req, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*Prefligh
 	defer cancel()
 
 	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
-	runResult, err := runner.Run(ctx, prompt)
+	runResult, err := runner.Run(ctx, req)
 	if err != nil {
 		t.Fatalf("Runner error: %v", err)
 	}

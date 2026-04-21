@@ -1,3 +1,4 @@
+{{ define "signal_capture_system" -}}
 You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
 
 ## Task
@@ -20,7 +21,13 @@ Signals are dialogue material. Focus on clear cases.
 - No finding — "Should either X or Y" offering alternatives, "should treat X as a valid outcome" proposing direction, or confidence the author deliberately set. These are dialogue material.
 
 Trust the structural layer for type discipline: kinds on signals (gap/fact/question/insight/done) are structural metadata and may evolve; prose-level type policing belongs to the kind system, not pre-flight.
+{{ template "unrelated_refs" . -}}
+{{ template "contracts" . -}}
+{{ template "entry_quality" . -}}
+{{ template "verdict" . -}}
+{{- end }}
 
+{{ define "signal_capture_user" -}}
 ## Proposed signal
 
 {{ .ProposedEntry }}
@@ -28,4 +35,5 @@ Trust the structural layer for type discipline: kinds on signals (gap/fact/quest
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ template "unrelated_refs" . }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
+{{ end -}}
+{{- end }}
