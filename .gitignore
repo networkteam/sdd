@@ -2,3 +2,4 @@
 /bin
 /dist
 .sdd/tmp/
+.sdd/config.local.yaml

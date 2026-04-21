@@ -15,12 +15,12 @@ import (
 type mockRunner struct {
 	response string
 	err      error
-	// captured prompt for inspection
+	// captured prompt for inspection (combined System + User).
 	lastPrompt string
 }
 
-func (m *mockRunner) Run(_ context.Context, prompt string) (*llm.RunResult, error) {
-	m.lastPrompt = prompt
+func (m *mockRunner) Run(_ context.Context, req llm.Request) (*llm.RunResult, error) {
+	m.lastPrompt = req.Combined()
 	if m.err != nil {
 		return nil, m.err
 	}

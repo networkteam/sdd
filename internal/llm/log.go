@@ -9,33 +9,30 @@ import (
 )
 
 // logCallResult emits a single debug-level log line for an LLM call under a
-// slog.Group("llm") with per-model sub-groups. Call sites (Preflight,
-// Summarize) invoke this after runner.Run returns.
+// slog.Group("llm"). Per-model sub-groups are added only when the runner
+// provided metadata (claude-cli populates this; the gollm adapter doesn't
+// yet). The op + duration line fires regardless so -vv always shows
+// progress across providers.
 func logCallResult(ctx context.Context, meta *LLMMetadata, op string, elapsed time.Duration) {
-	if meta == nil {
-		return
-	}
-
 	logger := slogutils.FromContext(ctx)
-
-	// Build per-model attrs as sub-groups.
-	var modelAttrs []any
-	for name, usage := range meta.Models {
-		attrs := []any{
-			slog.Int("tokens.in", usage.InputTokens),
-			slog.Int("tokens.out", usage.OutputTokens),
-		}
-		if usage.CostUSD > 0 {
-			attrs = append(attrs, slog.Float64("cost", usage.CostUSD))
-		}
-		modelAttrs = append(modelAttrs, slog.Group(name, attrs...))
-	}
 
 	llmAttrs := []any{
 		slog.String("op", op),
 		slog.Duration("duration", elapsed),
 	}
-	llmAttrs = append(llmAttrs, modelAttrs...)
+
+	if meta != nil {
+		for name, usage := range meta.Models {
+			attrs := []any{
+				slog.Int("tokens.in", usage.InputTokens),
+				slog.Int("tokens.out", usage.OutputTokens),
+			}
+			if usage.CostUSD > 0 {
+				attrs = append(attrs, slog.Float64("cost", usage.CostUSD))
+			}
+			llmAttrs = append(llmAttrs, slog.Group(name, attrs...))
+		}
+	}
 
 	logger.Debug("llm call", slog.Group("llm", llmAttrs...))
 }
