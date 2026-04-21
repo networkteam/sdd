@@ -49,11 +49,11 @@ func validateSummaryHashes(graph *model.Graph) {
 		}
 
 		// Recompute hash and compare.
-		prompt, err := llm.RenderSummaryPrompt(entry, graph)
+		req, err := llm.RenderSummaryPrompt(entry, graph)
 		if err != nil {
 			continue // skip entries where prompt rendering fails
 		}
-		currentHash := llm.ComputePromptHash(prompt)
+		currentHash := llm.ComputePromptHash(req.Combined())
 		if entry.SummaryHash != currentHash {
 			entry.Warnings = append(entry.Warnings, model.Warning{
 				Field:   "summary_hash",

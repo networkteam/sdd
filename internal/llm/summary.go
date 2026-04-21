@@ -25,12 +25,12 @@ type SummarizeResult struct {
 // Returns nil if the entry's stored SummaryHash matches the computed hash
 // (skip). Set force to regenerate regardless.
 func Summarize(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, force bool) (*SummarizeResult, error) {
-	prompt, err := RenderSummaryPrompt(entry, graph)
+	req, err := RenderSummaryPrompt(entry, graph)
 	if err != nil {
 		return nil, fmt.Errorf("rendering summary prompt: %w", err)
 	}
 
-	hash := ComputePromptHash(prompt)
+	hash := ComputePromptHash(req.Combined())
 
 	// Skip if hash matches — summary is current.
 	if !force && entry.SummaryHash == hash {
@@ -38,7 +38,7 @@ func Summarize(ctx context.Context, runner Runner, entry *model.Entry, graph *mo
 	}
 
 	start := time.Now()
-	output, err := runner.Run(ctx, prompt)
+	output, err := runner.Run(ctx, req)
 	elapsed := time.Since(start)
 	if err != nil {
 		return nil, fmt.Errorf("running summary generator: %w", err)
@@ -60,8 +60,10 @@ type summaryContext struct {
 	RelatedEntries string
 }
 
-// RenderSummaryPrompt renders the summary prompt for an entry.
-func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (string, error) {
+// RenderSummaryPrompt renders the summary prompt for an entry. Returns a
+// Request with the full rendered prompt in UserPrompt; the system/user split
+// is introduced when templates are refactored (see the plan decision).
+func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error) {
 	sctx := &summaryContext{
 		EntryContent: FormatEntryForPrompt(entry),
 	}
@@ -107,15 +109,21 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (string, error)
 
 	tmpl, err := template.ParseFS(summaryTemplates, "summary_templates/*.tmpl")
 	if err != nil {
-		return "", fmt.Errorf("parsing summary templates: %w", err)
+		return Request{}, fmt.Errorf("parsing summary templates: %w", err)
 	}
 
-	var b strings.Builder
-	if err := tmpl.ExecuteTemplate(&b, "summary.tmpl", sctx); err != nil {
-		return "", fmt.Errorf("executing summary template: %w", err)
+	var sysB, userB strings.Builder
+	if err := tmpl.ExecuteTemplate(&sysB, "summary_system", sctx); err != nil {
+		return Request{}, fmt.Errorf("executing summary_system template: %w", err)
+	}
+	if err := tmpl.ExecuteTemplate(&userB, "summary_user", sctx); err != nil {
+		return Request{}, fmt.Errorf("executing summary_user template: %w", err)
 	}
 
-	return b.String(), nil
+	return Request{
+		SystemPrompt: strings.TrimSpace(sysB.String()),
+		UserPrompt:   strings.TrimSpace(userB.String()),
+	}, nil
 }
 
 // FormatEntryForPrompt formats an entry as readable text for inclusion in a prompt.

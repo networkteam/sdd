@@ -9,11 +9,51 @@ import (
 	"time"
 )
 
-// Runner executes a rendered prompt string against an LLM and returns the
-// response with metadata. The implementation decides which model and transport
-// to use. Injected so tests can substitute fakes.
+// Runner executes a structured LLM request and returns the response with
+// metadata. The implementation decides which model and transport to use.
+// Injected so tests can substitute fakes.
 type Runner interface {
-	Run(ctx context.Context, prompt string) (*RunResult, error)
+	Run(ctx context.Context, req Request) (*RunResult, error)
+}
+
+// Request carries the two-part prompt submitted to a Runner. SystemPrompt
+// holds the stable portion (instructions, structural rules) — providers that
+// support prompt caching treat this as the cacheable prefix. UserPrompt holds
+// the per-call variable portion (entry content, refs). Runners that can't
+// distinguish system from user concatenate them with SystemPrompt first.
+type Request struct {
+	SystemPrompt string
+	UserPrompt   string
+}
+
+// Combined returns SystemPrompt followed by UserPrompt separated by a blank
+// line when both are non-empty. Runners without native system-prompt support
+// use this to flatten the Request into a single payload. The hash used for
+// summary-skip detection is computed over this combined form so changes to
+// either half invalidate the cached summary.
+func (r Request) Combined() string {
+	if r.SystemPrompt == "" {
+		return r.UserPrompt
+	}
+	if r.UserPrompt == "" {
+		return r.SystemPrompt
+	}
+	return r.SystemPrompt + "\n\n" + r.UserPrompt
+}
+
+// Run executes a pre-rendered Request against the Runner and emits the
+// standard debug log entry. Callers that orchestrate prompt rendering
+// themselves (e.g. the parallel summarize handler) use this instead of
+// Runner.Run directly so logging stays uniform across call sites.
+func Run(ctx context.Context, runner Runner, req Request, op string) (*RunResult, error) {
+	start := time.Now()
+	output, err := runner.Run(ctx, req)
+	elapsed := time.Since(start)
+	if err != nil {
+		return nil, err
+	}
+	logCallResult(ctx, output.Meta, op, elapsed)
+	return output, nil
 }
 
 // RunResult holds the LLM response text and optional metadata.

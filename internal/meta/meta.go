@@ -38,10 +38,26 @@ func SDDDir(repoRoot string) string {
 	return filepath.Join(repoRoot, model.SDDDirName)
 }
 
-// ReadConfig reads and parses .sdd/config.yaml from the given .sdd directory.
-// Returns nil config with nil error if the config file does not exist.
+// ReadConfig reads and parses .sdd/config.yaml from the given .sdd directory,
+// then overlays any .sdd/config.local.yaml present. Returns nil config with
+// nil error if neither file exists. The local file is gitignored and carries
+// per-machine overrides (API keys, Ollama endpoint, participant name).
 func ReadConfig(sddDir string) (*model.Config, error) {
-	path := filepath.Join(sddDir, "config.yaml")
+	base, err := readConfigFile(filepath.Join(sddDir, "config.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	overlay, err := readConfigFile(filepath.Join(sddDir, "config.local.yaml"))
+	if err != nil {
+		return nil, err
+	}
+	if base == nil && overlay == nil {
+		return nil, nil
+	}
+	return model.MergeConfig(base, overlay), nil
+}
+
+func readConfigFile(path string) (*model.Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

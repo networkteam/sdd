@@ -1,4 +1,4 @@
-{{ define "unusual_close" }}{{ if .ClosedEntries }}
+{{ define "unusual_close" }}
 ## Unusual close-pattern check
 
 `closes` means "this entry resolves the closed entry's purpose". Standard patterns are:
@@ -18,5 +18,5 @@ Anything outside this matrix — same-kind close where supersede would fit, or a
 - `low` — Close pattern is unusual BUT rationale is clear in prose. The close is valid; surface the atypical pattern for reader awareness. Examples:
   - `insight` closes `fact` with "Retiring this fact because the measurement was taken pre-launch and no longer applies post-market-shift"
   - `fact` closes `fact` with "Not superseding — no updated measurement available; just retiring the stale value"
-- No finding — Standard patterns from the matrix above. A decision closing a signal, a done signal closing a decision, short-loop, dissolution, and directive-retires-stable-kind are all normal and need no surfacing.
-{{ end }}{{ end }}
+- No finding — The proposed entry carries no `closes`, OR the close uses a standard pattern from the matrix above. A decision closing a signal, a done signal closing a decision, short-loop, dissolution, and directive-retires-stable-kind are all normal and need no surfacing.
+{{ end }}

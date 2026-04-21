@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd/internal/bundledskills"
@@ -71,6 +72,51 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 	}
 	if len(skills.Refreshed)+len(skills.Overwritten)+len(skills.SkippedModified)+len(skills.Current) != 0 {
 		t.Errorf("unexpected non-installed categories on fresh init: %+v", skills)
+	}
+
+	// .gitignore should contain both the tmp directory and the local config
+	// file so API keys stored locally don't get committed.
+	gitignore := filepath.Join(tmp, ".gitignore")
+	data, err = os.ReadFile(gitignore)
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf(".gitignore missing %q, got:\n%s", want, data)
+		}
+	}
+}
+
+// TestInit_GitignoreIdempotent verifies re-running init against an
+// already-configured .gitignore does not duplicate entries. Regression guard
+// for the housekeeping pass that now runs on every init (not just fresh).
+func TestInit_GitignoreIdempotent(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+
+	run := func() {
+		if err := h.Init(context.Background(), &command.InitCmd{
+			RepoRoot:      tmp,
+			BinaryVersion: "v0.2.0",
+			Scope:         model.ScopeProject,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run()
+	run()
+
+	data, err := os.ReadFile(filepath.Join(tmp, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	for _, entry := range []string{".sdd/tmp/", ".sdd/config.local.yaml"} {
+		count := strings.Count(string(data), entry)
+		if count != 1 {
+			t.Errorf("%q appears %d times in .gitignore; want exactly 1\n%s", entry, count, data)
+		}
 	}
 }
 

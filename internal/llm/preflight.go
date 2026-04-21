@@ -5,7 +5,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
@@ -58,13 +57,13 @@ func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *mo
 
 	pctx := assembleContext(entry, graph, ct)
 
-	prompt, err := renderPreflightPrompt(ct, pctx)
+	req, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		return nil, fmt.Errorf("rendering pre-flight prompt: %w", err)
 	}
 
 	start := time.Now()
-	output, err := runner.Run(ctx, prompt)
+	output, err := runner.Run(ctx, req)
 	elapsed := time.Since(start)
 	if err != nil {
 		return nil, fmt.Errorf("running pre-flight validator: %w", err)
@@ -120,15 +119,18 @@ func (c checkType) String() string {
 	}
 }
 
+// checkTypeTemplates maps each check type to its template basename. The render
+// function derives the system and user template names by appending _system and
+// _user. Each check-template file defines both blocks.
 var checkTypeTemplates = map[checkType]string{
-	checkClosingDone:       "preflight_templates/closing_done.tmpl",
-	checkClosingDecision:   "preflight_templates/closing_decision.tmpl",
-	checkDecisionRefs:      "preflight_templates/decision_refs.tmpl",
-	checkShortLoop:         "preflight_templates/short_loop.tmpl",
-	checkDissolution:       "preflight_templates/dissolution.tmpl",
-	checkAspirationCapture: "preflight_templates/aspiration_capture.tmpl",
-	checkSignalCapture:     "preflight_templates/signal_capture.tmpl",
-	checkSupersedes:        "preflight_templates/supersedes.tmpl",
+	checkClosingDone:       "closing_done",
+	checkClosingDecision:   "closing_decision",
+	checkDecisionRefs:      "decision_refs",
+	checkShortLoop:         "short_loop",
+	checkDissolution:       "dissolution",
+	checkAspirationCapture: "aspiration_capture",
+	checkSignalCapture:     "signal_capture",
+	checkSupersedes:        "supersedes",
 }
 
 // preflightContext holds all data needed to render a pre-flight prompt template.
@@ -281,25 +283,36 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType) *pref
 	return pctx
 }
 
-// renderPreflightPrompt renders the pre-flight prompt for the given check type and context.
-// All templates are parsed together so partials (e.g. contracts.tmpl) are available.
-func renderPreflightPrompt(ct checkType, pctx *preflightContext) (string, error) {
-	tmplName, ok := checkTypeTemplates[ct]
+// renderPreflightPrompt renders the pre-flight prompt for the given check type
+// and context as a two-part Request. The _system block carries the stable
+// instructions, calibration, and graph-scoped context (contracts, open signals);
+// the _user block carries the proposed entry and its direct refs/closes.
+// Splitting the prompt this way lets providers that support prompt caching
+// (Anthropic) treat the system portion as a cacheable prefix. All templates
+// are parsed together so partials (contracts, verdict, etc.) are available.
+func renderPreflightPrompt(ct checkType, pctx *preflightContext) (Request, error) {
+	base, ok := checkTypeTemplates[ct]
 	if !ok {
-		return "", fmt.Errorf("no template for check type %s", ct)
+		return Request{}, fmt.Errorf("no template for check type %s", ct)
 	}
 
 	tmpl, err := template.ParseFS(preflightTemplates, "preflight_templates/*.tmpl")
 	if err != nil {
-		return "", fmt.Errorf("parsing templates: %w", err)
+		return Request{}, fmt.Errorf("parsing templates: %w", err)
 	}
 
-	var b strings.Builder
-	if err := tmpl.ExecuteTemplate(&b, filepath.Base(tmplName), pctx); err != nil {
-		return "", fmt.Errorf("executing template %s: %w", tmplName, err)
+	var sysB, userB strings.Builder
+	if err := tmpl.ExecuteTemplate(&sysB, base+"_system", pctx); err != nil {
+		return Request{}, fmt.Errorf("executing template %s_system: %w", base, err)
+	}
+	if err := tmpl.ExecuteTemplate(&userB, base+"_user", pctx); err != nil {
+		return Request{}, fmt.Errorf("executing template %s_user: %w", base, err)
 	}
 
-	return b.String(), nil
+	return Request{
+		SystemPrompt: strings.TrimSpace(sysB.String()),
+		UserPrompt:   strings.TrimSpace(userB.String()),
+	}, nil
 }
 
 // parsePreflightResult parses the validator's JSON response into a

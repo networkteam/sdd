@@ -1,3 +1,4 @@
+{{ define "aspiration_capture_system" -}}
 You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
 
 ## Task
@@ -17,7 +18,18 @@ Aspirations form a constellation; multiple active aspirations coexist and shape 
 - `low` — Aspiration is neutral or partially aligned with the active set; surfacing for dialogue without blocking. Example: a new aspiration pulling toward "broad accessibility" when an active aspiration pulls toward "deep specialist tooling" — related axes, some tension but not a direct contradiction.
 - No finding — Aspiration moves toward an active aspiration (reinforcement), explores an orthogonal axis (e.g., technical excellence vs. user accessibility as distinct pulls), or the narrative explicitly acknowledges the tension with another aspiration and argues for why both can coexist.
 - **Never `high`** — aspirations are gradient. If an aspiration looks genuinely incompatible, that's `medium` and a dialogue prompt, not a block.
+{{ if .ActiveAspirations }}
+## Active aspirations (current constellation — check for tensions)
 
+{{ .ActiveAspirations }}
+{{ end -}}
+{{ template "unrelated_refs" . -}}
+{{ template "contracts" . -}}
+{{ template "entry_quality" . -}}
+{{ template "verdict" . -}}
+{{- end }}
+
+{{ define "aspiration_capture_user" -}}
 ## Proposed entry
 
 {{ .ProposedEntry }}
@@ -25,8 +37,5 @@ Aspirations form a constellation; multiple active aspirations coexist and shape 
 ## Referenced entries (context)
 
 {{ .ReferencedEntries }}
-{{ end }}{{ if .ActiveAspirations }}
-## Active aspirations (current constellation — check for tensions)
-
-{{ .ActiveAspirations }}
-{{ end }}{{ template "unrelated_refs" . }}{{ template "contracts" . }}{{ template "entry_quality" . }}{{ template "verdict" . }}
+{{ end -}}
+{{- end }}
