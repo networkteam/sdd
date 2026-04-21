@@ -13,20 +13,121 @@ const (
 
 	// SDDDirName is the metadata directory name at the repository root.
 	SDDDirName = ".sdd"
+
+	// DefaultLLMProvider is the provider used when none is configured. The
+	// claude CLI bridge runs via the user's logged-in Claude Code session, so
+	// no API key is required for first-run usage.
+	DefaultLLMProvider = "claude-cli"
+
+	// DefaultLLMModel is the claude model used when none is configured.
+	DefaultLLMModel = "claude-haiku-4-5-20251001"
+
+	// DefaultLLMConcurrency is the default worker count for concurrent
+	// LLM calls (e.g. sdd summarize --all).
+	DefaultLLMConcurrency = 4
 )
 
-// Config represents the contents of .sdd/config.yaml.
+// Config represents the contents of .sdd/config.yaml (shared, committed) or
+// .sdd/config.local.yaml (gitignored, per-machine). Both files unmarshal into
+// the same struct; the local file overlays the shared file via MergeConfig.
+// Empty / zero-valued fields in the local file mean "inherit from shared",
+// so any subset of fields can appear in either file.
 type Config struct {
-	GraphDir string `yaml:"graph_dir"`
+	GraphDir string    `yaml:"graph_dir,omitempty"`
+	LLM      LLMConfig `yaml:"llm,omitempty"`
 }
 
-// ParseConfig unmarshals YAML bytes into a Config struct.
+// LLMConfig holds settings for LLM provider selection, model choice, and
+// concurrency/rate-limit behavior. API keys and per-machine endpoints
+// typically live in .sdd/config.local.yaml; defaults (provider, model,
+// timeout, concurrency) are safe to commit in .sdd/config.yaml.
+type LLMConfig struct {
+	// Provider selects the runner implementation: "claude-cli" (default, uses
+	// the logged-in Claude Code session) or a gollm-supported provider name
+	// such as "anthropic", "openai", "ollama".
+	Provider string `yaml:"provider,omitempty"`
+	// Model is the provider-specific model identifier.
+	Model string `yaml:"model,omitempty"`
+	// Timeout is a Go duration string (e.g. "2m") applied per LLM call.
+	Timeout string `yaml:"timeout,omitempty"`
+	// Concurrency bounds the worker pool for batch operations. Zero means
+	// "use DefaultLLMConcurrency".
+	Concurrency int `yaml:"concurrency,omitempty"`
+	// OllamaEndpoint overrides the default Ollama URL for the gollm adapter.
+	OllamaEndpoint string `yaml:"ollama_endpoint,omitempty"`
+	// APIKeys maps provider name to API key. Typically lives in
+	// config.local.yaml so keys stay out of version control.
+	APIKeys map[string]string `yaml:"api_keys,omitempty"`
+	// RateLimitRPS caps remote-provider requests per second (0 = uncapped).
+	// The claude-cli and ollama providers ignore this.
+	RateLimitRPS float64 `yaml:"rate_limit_rps,omitempty"`
+}
+
+// ParseConfig unmarshals YAML bytes into a Config struct. Empty input is
+// valid and yields a zero-valued Config.
 func ParseConfig(data []byte) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 	return &cfg, nil
+}
+
+// MergeConfig returns a new Config with fields from overlay overriding base
+// wherever the overlay value is non-empty/non-zero. APIKeys are merged
+// key-by-key so overlay entries replace individual providers without
+// clobbering the full map. A nil overlay returns a copy of base.
+func MergeConfig(base, overlay *Config) *Config {
+	if base == nil {
+		base = &Config{}
+	}
+	out := *base
+	if overlay == nil {
+		return &out
+	}
+	if overlay.GraphDir != "" {
+		out.GraphDir = overlay.GraphDir
+	}
+	out.LLM = mergeLLMConfig(base.LLM, overlay.LLM)
+	return &out
+}
+
+func mergeLLMConfig(base, overlay LLMConfig) LLMConfig {
+	out := base
+	if overlay.Provider != "" {
+		out.Provider = overlay.Provider
+	}
+	if overlay.Model != "" {
+		out.Model = overlay.Model
+	}
+	if overlay.Timeout != "" {
+		out.Timeout = overlay.Timeout
+	}
+	if overlay.Concurrency != 0 {
+		out.Concurrency = overlay.Concurrency
+	}
+	if overlay.OllamaEndpoint != "" {
+		out.OllamaEndpoint = overlay.OllamaEndpoint
+	}
+	if overlay.RateLimitRPS != 0 {
+		out.RateLimitRPS = overlay.RateLimitRPS
+	}
+	if len(overlay.APIKeys) > 0 {
+		if out.APIKeys == nil {
+			out.APIKeys = make(map[string]string, len(overlay.APIKeys))
+		} else {
+			// Copy-on-write so the merge doesn't mutate base.
+			copied := make(map[string]string, len(out.APIKeys)+len(overlay.APIKeys))
+			for k, v := range out.APIKeys {
+				copied[k] = v
+			}
+			out.APIKeys = copied
+		}
+		for k, v := range overlay.APIKeys {
+			out.APIKeys[k] = v
+		}
+	}
+	return out
 }
 
 // FormatConfig returns a commented YAML config template with the given graph dir.
@@ -39,5 +140,12 @@ func FormatConfig(cfg Config) string {
 		"# See https://github.com/networkteam/sdd for documentation.\n" +
 		"\n" +
 		"# Graph directory relative to repository root.\n" +
-		"graph_dir: " + graphDir + "\n"
+		"graph_dir: " + graphDir + "\n" +
+		"\n" +
+		"# LLM provider settings (defaults shown — override here or in config.local.yaml).\n" +
+		"# llm:\n" +
+		"#   provider: " + DefaultLLMProvider + "\n" +
+		"#   model: " + DefaultLLMModel + "\n" +
+		"#   timeout: 2m\n" +
+		"#   concurrency: 4\n"
 }
