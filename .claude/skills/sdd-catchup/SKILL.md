@@ -4,7 +4,7 @@ context: fork
 description: Synthesize a prioritized catch-up summary of the SDD decision graph state. Returns a narrative briefing grouped by project thread.
 model: haiku
 name: sdd-catchup
-sdd-content-hash: aee91af00af0159e1e06830c4c7c0c5cbdd6242ecd90d649e8f593dbc53be3aa
+sdd-content-hash: 19e96095a9231b973edcae8e041ec22be9812a7101c637fde71d39596e5364d6
 sdd-version: dev
 user-invocable: false
 ---
@@ -58,7 +58,7 @@ Include both in the structured output per item so the outer agent can decide whe
 
 Your output is consumed by the outer SDD agent, not shown to the user directly. The outer agent formats it for presentation. Include full entry IDs, kind, participants (direct + upstream), and enough context that the outer agent can act on any item without additional lookups.
 
-Include a top-level `Active recently:` line listing the union of participants appearing on recent entries (actions, decisions, signals from roughly the last two weeks). The outer agent uses this to decide whether per-thread participant mentions differentiate from the active set.
+Include a top-level `Active recently:` line listing the union of participants appearing on recent entries (done signals, decisions, other signals from roughly the last two weeks). The outer agent uses this to decide whether per-thread participant mentions differentiate from the active set.
 
 Structure your output as one numbered block per open item, grouped by thread:
 
