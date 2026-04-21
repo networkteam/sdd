@@ -7,6 +7,7 @@ package gollm
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	upstream "github.com/teilomillet/gollm"
@@ -76,6 +77,16 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 
 	client, err := upstream.NewLLM(opts...)
 	if err != nil {
+		// gollm validates ollama by probing the endpoint; on failure it
+		// reports a generic apikey validation error. Rewrap as a targeted
+		// "unreachable" message so users see the actionable hint.
+		if cfg.Provider == "ollama" && strings.Contains(err.Error(), "apikey") {
+			endpoint := cfg.OllamaEndpoint
+			if endpoint == "" {
+				endpoint = "http://localhost:11434"
+			}
+			return nil, fmt.Errorf("gollm ollama: provider unreachable at %s (is Ollama running?)", endpoint)
+		}
 		return nil, fmt.Errorf("gollm: creating client: %w", err)
 	}
 
