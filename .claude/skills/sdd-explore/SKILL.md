@@ -4,7 +4,7 @@ context: fork
 description: Collect context for a graph entry — upstream summaries, downstream refs, and semantically related entries. Returns structured material for the outer skill to brief and dialogue with.
 model: sonnet
 name: sdd-explore
-sdd-content-hash: 7a32ef17435b8768f5efbc2baeb00d4c6e57d619fdbd2a08b45e0529b534a342
+sdd-content-hash: 5e44ed6cd3ee35b0c07106f78385f10e43414bd33758e4de3d4a6b4cc5cb4fe5
 sdd-version: dev
 user-invocable: false
 ---
@@ -41,8 +41,8 @@ sdd show --max-depth 0 <id1> <id2>
 
 From the upstream and downstream information, determine the target's current status:
 - **Open signal**: not closed by any downstream entry, not superseded
-- **Active decision (no actions)**: not closed, not superseded, no downstream actions reference it
-- **Active decision (partial progress)**: has some downstream actions but not closed
+- **Active decision (no completions)**: not closed, not superseded, no downstream done signals reference it
+- **Active decision (partial progress)**: has some downstream done signals but not closed
 - **Closed/superseded**: a downstream entry closes or supersedes it
 - **Stale candidate**: old entry with no downstream activity — flag the date
 
