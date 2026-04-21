@@ -21,10 +21,9 @@ import (
 // window — a significant speedup for batch operations like
 // sdd summarize --all.
 type Runner struct {
-	client    upstream.LLM
-	provider  string
-	useCache  bool
-	maxTokens int
+	client   upstream.LLM
+	provider string
+	useCache bool
 }
 
 // NewRunner constructs a gollm-backed Runner from an LLMConfig. Provider

@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/llm"
@@ -14,8 +18,10 @@ import (
 
 // Summarize executes a SummarizeCmd: loads the graph, determines which
 // entries need summaries, generates them via the LLM, and writes updated
-// frontmatter back to disk. Entries are processed in topological (DAG)
-// order so that ref summaries are available before downstream entries.
+// frontmatter back to disk. Batch runs (--all or multiple entries) use an
+// errgroup with SetLimit(concurrency) — for remote providers the factory
+// applies a rate limiter on top. A short-lived mutex guards graph reads
+// and writes; the LLM call itself runs without the lock.
 func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) error {
 	graph, err := h.reader.LoadGraph(h.graphDir)
 	if err != nil {
@@ -42,49 +48,90 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 		entries = graph.TopologicalOrder()
 	}
 
-	var commitPaths []string
-
 	timeout := cmd.Timeout
 	if timeout == 0 {
 		timeout = 60 * time.Second
 	}
+	concurrency := cmd.Concurrency
+	if concurrency < 1 {
+		concurrency = model.DefaultLLMConcurrency
+	}
+
+	var (
+		graphMu     sync.RWMutex
+		pathsMu     sync.Mutex
+		commitPaths []string
+	)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(concurrency)
 
 	for _, entry := range entries {
-		ectx, cancel := context.WithTimeout(ctx, timeout)
-		result, err := llm.Summarize(ectx, h.llmRunner, entry, graph, cmd.Force)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("summarizing %s: %w", entry.ID, err)
-		}
-
-		if result == nil {
-			// Skipped — hash matched.
-			if cmd.OnSkipped != nil {
-				cmd.OnSkipped(entry.ID)
+		g.Go(func() error {
+			// Render prompt and check hash under read lock — other workers
+			// may be writing their own entries concurrently.
+			graphMu.RLock()
+			req, renderErr := llm.RenderSummaryPrompt(entry, graph)
+			var currentHash string
+			if renderErr == nil {
+				currentHash = llm.ComputePromptHash(req.Combined())
 			}
-			continue
-		}
+			existingHash := entry.SummaryHash
+			graphMu.RUnlock()
+			if renderErr != nil {
+				return fmt.Errorf("rendering summary for %s: %w", entry.ID, renderErr)
+			}
 
-		// Update the in-memory entry so downstream entries see the new summary.
-		entry.Summary = result.Summary
-		entry.SummaryHash = result.SummaryHash
+			if !cmd.Force && existingHash == currentHash {
+				if cmd.OnSkipped != nil {
+					cmd.OnSkipped(entry.ID)
+				}
+				return nil
+			}
 
-		// Write updated file to disk.
-		relPath, err := model.IDToRelPath(entry.ID)
-		if err != nil {
-			return fmt.Errorf("computing path for %s: %w", entry.ID, err)
-		}
-		filePath := filepath.Join(h.graphDir, relPath)
-		fileContent := model.FormatFrontmatter(entry) + "\n" + entry.Content + "\n"
+			// LLM call without the graph lock.
+			ectx, cancel := context.WithTimeout(gctx, timeout)
+			defer cancel()
+			output, err := llm.Run(ectx, h.llmRunner, req, "summarize")
+			if err != nil {
+				return fmt.Errorf("summarizing %s: %w", entry.ID, err)
+			}
+			summary := strings.TrimSpace(output.Text)
 
-		if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {
-			return fmt.Errorf("writing %s: %w", filePath, err)
-		}
-		commitPaths = append(commitPaths, filePath)
+			// Apply summary under write lock, then format and write file
+			// under read lock so FormatFrontmatter sees a consistent entry.
+			graphMu.Lock()
+			entry.Summary = summary
+			entry.SummaryHash = currentHash
+			graphMu.Unlock()
 
-		if cmd.OnSummarized != nil {
-			cmd.OnSummarized(entry.ID, result.Summary)
-		}
+			relPath, err := model.IDToRelPath(entry.ID)
+			if err != nil {
+				return fmt.Errorf("computing path for %s: %w", entry.ID, err)
+			}
+			filePath := filepath.Join(h.graphDir, relPath)
+
+			graphMu.RLock()
+			fileContent := model.FormatFrontmatter(entry) + "\n" + entry.Content + "\n"
+			graphMu.RUnlock()
+
+			if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {
+				return fmt.Errorf("writing %s: %w", filePath, err)
+			}
+
+			pathsMu.Lock()
+			commitPaths = append(commitPaths, filePath)
+			pathsMu.Unlock()
+
+			if cmd.OnSummarized != nil {
+				cmd.OnSummarized(entry.ID, summary)
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
 	}
 
 	// Commit all changes in one batch.
