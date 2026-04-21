@@ -35,7 +35,7 @@ func withWriteGate(action cli.ActionFunc) cli.ActionFunc {
 			return action(ctx, cmd)
 		}
 
-		f := newFinder("")
+		f := newReadFinder()
 		res, err := f.SchemaStatus(ctx, query.SchemaStatusQuery{
 			SDDDir:              sddDir,
 			BinaryVersion:       version,

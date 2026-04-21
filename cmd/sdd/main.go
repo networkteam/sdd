@@ -17,7 +17,8 @@ import (
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
-	"github.com/networkteam/sdd/internal/llm/claude"
+	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llm/factory"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
@@ -30,11 +31,56 @@ import (
 // Default "dev" applies to local `go build` and `go run`.
 var version = "dev"
 
-// newFinder constructs a Finder with a production claude runner. The runner
-// model is resolved per-call so flag overrides (--preflight-model on `sdd new`)
-// take effect.
-func newFinder(model string) *finders.Finder {
-	return finders.New(claude.NewRunner(model))
+// resolveLLMConfig builds the effective LLMConfig for a command by merging
+// .sdd/config.yaml + .sdd/config.local.yaml and applying CLI flag overrides.
+// Missing .sdd/ or missing config files yield a zero-value config — the
+// factory supplies defaults (claude-cli provider, default model). Flags that
+// were not explicitly set by the user are skipped so defaults from file
+// config remain in effect.
+func resolveLLMConfig(cmd *cli.Command) model.LLMConfig {
+	var cfg model.LLMConfig
+	if sddDir, err := resolveSDDDir(); err == nil {
+		if fileCfg, err := meta.ReadConfig(sddDir); err == nil && fileCfg != nil {
+			cfg = fileCfg.LLM
+		}
+	}
+	if cmd.IsSet("provider") {
+		cfg.Provider = cmd.String("provider")
+	}
+	if cmd.IsSet("model") {
+		cfg.Model = cmd.String("model")
+	}
+	// preflight-model is a legacy alias for --model in the `sdd new` context.
+	if cmd.IsSet("preflight-model") {
+		cfg.Model = cmd.String("preflight-model")
+	}
+	if cmd.IsSet("concurrency") {
+		cfg.Concurrency = int(cmd.Int("concurrency"))
+	}
+	return cfg
+}
+
+// newRunner builds a llm.Runner from the resolved LLMConfig. Errors surface
+// misconfiguration (unknown provider, missing API key) at CLI entry so
+// failures are visible before graph work begins.
+func newRunner(cmd *cli.Command) (llm.Runner, error) {
+	return factory.New(resolveLLMConfig(cmd))
+}
+
+// readOnlyRunner satisfies llm.Runner but always errors on Run. Used by
+// read-only CLI commands (status, list, show, lint, wip list) so they
+// don't need LLM configuration to operate.
+type readOnlyRunner struct{}
+
+func (readOnlyRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) {
+	return nil, fmt.Errorf("no llm runner configured for this command")
+}
+
+// newReadFinder builds a Finder suitable for read-only operations. The
+// runner errors on invocation so accidental use in a code path that does
+// call Preflight is loud.
+func newReadFinder() *finders.Finder {
+	return finders.New(readOnlyRunner{})
 }
 
 // splitCSV returns the comma-split fields of s with each element trimmed of
@@ -177,7 +223,7 @@ func loadGraph(cmd *cli.Command) (*model.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newFinder("").LoadGraph(dir)
+	return newReadFinder().LoadGraph(dir)
 }
 
 func statusCmd() *cli.Command {
@@ -190,7 +236,7 @@ func statusCmd() *cli.Command {
 				return err
 			}
 
-			result, err := newFinder("").Status(query.StatusQuery{Graph: g})
+			result, err := newReadFinder().Status(query.StatusQuery{Graph: g})
 			if err != nil {
 				return err
 			}
@@ -227,7 +273,7 @@ func showCmd() *cli.Command {
 				return err
 			}
 
-			result, err := newFinder("").Show(query.ShowQuery{
+			result, err := newReadFinder().Show(query.ShowQuery{
 				Graph:      g,
 				IDs:        ids,
 				MaxDepth:   int(cmd.Int("max-depth")),
@@ -300,7 +346,7 @@ func listCmd() *cli.Command {
 				kind = model.Kind(k)
 			}
 
-			result, err := newFinder("").List(query.ListQuery{
+			result, err := newReadFinder().List(query.ListQuery{
 				Graph: g,
 				Filter: model.GraphFilter{
 					Type:        typ,
@@ -362,9 +408,16 @@ func newCmd() *cli.Command {
 				Usage: "Run validation and pre-flight only, without writing or committing the entry",
 			},
 			&cli.StringFlag{
+				Name:  "provider",
+				Usage: "LLM provider (claude-cli, anthropic, openai, ollama) — overrides config",
+			},
+			&cli.StringFlag{
+				Name:  "model",
+				Usage: "LLM model identifier — overrides config",
+			},
+			&cli.StringFlag{
 				Name:  "preflight-model",
-				Usage: "Model to use for pre-flight validation",
-				Value: "claude-haiku-4-5-20251001",
+				Usage: "Legacy alias for --model in the pre-flight context",
 			},
 			&cli.DurationFlag{
 				Name:  "preflight-timeout",
@@ -459,12 +512,15 @@ func newCmd() *cli.Command {
 				},
 			}
 
-			finder := newFinder(cmd.String("preflight-model"))
+			runner, err := newRunner(cmd)
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
 				SDDDir:    sddDir,
-				Reader:    finder,
-				LLMRunner: claude.NewRunner(cmd.String("preflight-model")),
+				Reader:    finders.New(runner),
+				LLMRunner: runner,
 				Committer: gitCommitterFunc(gitCommit),
 			})
 
@@ -550,7 +606,7 @@ func rewriteCmd() *cli.Command {
 			}
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
-				Reader:    newFinder(""),
+				Reader:    newReadFinder(),
 				Committer: gitCommitterFunc(gitCommit),
 				Mover:     gitMover{},
 			})
@@ -581,7 +637,7 @@ func lintCmd() *cli.Command {
 				}
 				handler := handlers.New(handlers.Options{
 					GraphDir:  dir,
-					Reader:    newFinder(""),
+					Reader:    newReadFinder(),
 					Committer: gitCommitterFunc(gitCommit),
 				})
 				if err := handler.LintFix(ctx, fixCmd); err != nil {
@@ -594,7 +650,7 @@ func lintCmd() *cli.Command {
 				return err
 			}
 
-			result, err := newFinder("").Lint(query.LintQuery{Graph: g})
+			result, err := newReadFinder().Lint(query.LintQuery{Graph: g})
 			if err != nil {
 				return err
 			}
@@ -622,9 +678,16 @@ func summarizeCmd() *cli.Command {
 				Usage: "Regenerate even if summary hash matches",
 			},
 			&cli.StringFlag{
+				Name:  "provider",
+				Usage: "LLM provider (claude-cli, anthropic, openai, ollama) — overrides config",
+			},
+			&cli.StringFlag{
 				Name:  "model",
-				Usage: "Model to use for summary generation",
-				Value: "claude-haiku-4-5-20251001",
+				Usage: "LLM model identifier — overrides config",
+			},
+			&cli.IntFlag{
+				Name:  "concurrency",
+				Usage: "Worker pool size for batch summarize — overrides config",
 			},
 			&cli.DurationFlag{
 				Name:  "timeout",
@@ -641,10 +704,11 @@ func summarizeCmd() *cli.Command {
 			}
 
 			sumCmd := &command.SummarizeCmd{
-				EntryIDs: ids,
-				Force:    cmd.Bool("force"),
-				Model:    cmd.String("model"),
-				Timeout:  cmd.Duration("timeout"),
+				EntryIDs:    ids,
+				Force:       cmd.Bool("force"),
+				Model:       cmd.String("model"),
+				Timeout:     cmd.Duration("timeout"),
+				Concurrency: int(cmd.Int("concurrency")),
 				OnSummarized: func(id, summary string) {
 					fmt.Fprintf(os.Stderr, "  summarized %s\n", id)
 				},
@@ -657,10 +721,14 @@ func summarizeCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			runner, err := newRunner(cmd)
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
-				Reader:    newFinder(cmd.String("model")),
-				LLMRunner: claude.NewRunner(cmd.String("model")),
+				Reader:    finders.New(runner),
+				LLMRunner: runner,
 				Committer: gitCommitterFunc(gitCommit),
 			})
 			return handler.Summarize(ctx, sumCmd)
@@ -958,7 +1026,7 @@ func initCmd() *cli.Command {
 			}
 
 			handler := handlers.New(handlers.Options{
-				Reader:    newFinder(""),
+				Reader:    newReadFinder(),
 				Committer: gitCommitterFunc(gitCommit),
 			})
 			return handler.Init(ctx, icmd)
@@ -1039,7 +1107,7 @@ func wipStartCmd() *cli.Command {
 			}
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
-				Reader:    newFinder(""),
+				Reader:    newReadFinder(),
 				Committer: gitCommitterFunc(gitCommit),
 				Brancher:  gitBrancher{},
 			})
@@ -1090,7 +1158,7 @@ func wipDoneCmd() *cli.Command {
 			}
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
-				Reader:    newFinder(""),
+				Reader:    newReadFinder(),
 				Committer: gitCommitterFunc(gitRemoveAndCommit),
 				Brancher:  gitBrancher{},
 			})
@@ -1129,7 +1197,7 @@ func wipListCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			result, err := newFinder("").WIPList(query.WIPListQuery{GraphDir: dir})
+			result, err := newReadFinder().WIPList(query.WIPListQuery{GraphDir: dir})
 			if err != nil {
 				return fmt.Errorf("loading WIP markers: %w", err)
 			}

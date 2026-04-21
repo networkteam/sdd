@@ -425,19 +425,19 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 			if result.Combined() == "" {
 				t.Errorf("renderPreflightPrompt(%s) returned empty string", ct)
 			}
-			if !strings.Contains(result.Combined(),"Test content") {
+			if !strings.Contains(result.Combined(), "Test content") {
 				t.Errorf("renderPreflightPrompt(%s) missing proposed entry content", ct)
 			}
 			// Verdict partial must be embedded — the JSON output format and
 			// severity semantics are the single source of truth for all checks.
-			if !strings.Contains(result.Combined(),`"findings"`) {
+			if !strings.Contains(result.Combined(), `"findings"`) {
 				t.Errorf("renderPreflightPrompt(%s) missing JSON schema with findings key", ct)
 			}
-			if !strings.Contains(result.Combined(),`"severity"`) {
+			if !strings.Contains(result.Combined(), `"severity"`) {
 				t.Errorf("renderPreflightPrompt(%s) missing severity field in schema", ct)
 			}
 			// PASS/FAIL are the legacy binary verdict — must be gone.
-			if strings.Contains(result.Combined(),"\"PASS\"") || strings.Contains(result.Combined(),"\"FAIL\"") {
+			if strings.Contains(result.Combined(), "\"PASS\"") || strings.Contains(result.Combined(), "\"FAIL\"") {
 				t.Errorf("renderPreflightPrompt(%s) still contains legacy PASS/FAIL output", ct)
 			}
 			_ = tmplName
@@ -456,7 +456,7 @@ func Test_renderPreflightPrompt_DecisionRefsNamesACCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Combined(),"Acceptance criteria") {
+	if !strings.Contains(result.Combined(), "Acceptance criteria") {
 		t.Errorf("decision_refs template should name the acceptance criteria check")
 	}
 }
@@ -472,7 +472,7 @@ func Test_renderPreflightPrompt_ClosingDoneNamesACCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Combined(),"Acceptance criteria") {
+	if !strings.Contains(result.Combined(), "Acceptance criteria") {
 		t.Errorf("closing_done template should name the acceptance criteria coverage check")
 	}
 }
@@ -492,7 +492,7 @@ func Test_renderPreflightPrompt_CompletionTemplatesIncludeDurabilityCheck(t *tes
 			if err != nil {
 				t.Fatalf("renderPreflightPrompt(%s) error: %v", ct, err)
 			}
-			if !strings.Contains(result.Combined(),"Artifact durability") {
+			if !strings.Contains(result.Combined(), "Artifact durability") {
 				t.Errorf("renderPreflightPrompt(%s) should include the durability check", ct)
 			}
 		})
@@ -523,7 +523,7 @@ func Test_renderPreflightPrompt_CapturesIncludeUnrelatedRefsCheck(t *testing.T) 
 			if err != nil {
 				t.Fatalf("renderPreflightPrompt(%s) error: %v", ct, err)
 			}
-			if !strings.Contains(result.Combined(),"Unrelated references check") {
+			if !strings.Contains(result.Combined(), "Unrelated references check") {
 				t.Errorf("renderPreflightPrompt(%s) should include the unrelated_refs partial", ct)
 			}
 		})
@@ -549,7 +549,7 @@ func Test_renderPreflightPrompt_CloseCarryingTemplatesIncludeUnusualClose(t *tes
 			if err != nil {
 				t.Fatalf("renderPreflightPrompt(%s) error: %v", ct, err)
 			}
-			if !strings.Contains(result.Combined(),"Unusual close-pattern check") {
+			if !strings.Contains(result.Combined(), "Unusual close-pattern check") {
 				t.Errorf("renderPreflightPrompt(%s) should include the unusual_close partial", ct)
 			}
 		})
@@ -566,7 +566,7 @@ func Test_renderPreflightPrompt_ClosingDecisionNamesRetirementRationale(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Combined(),"Retirement-rationale calibration") {
+	if !strings.Contains(result.Combined(), "Retirement-rationale calibration") {
 		t.Errorf("closing_decision template should name the retirement-rationale calibration")
 	}
 }
@@ -580,7 +580,7 @@ func Test_renderPreflightPrompt_DecisionRefsNamesDirectiveShapeCheck(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Combined(),"Directive-reads-aspiration-shaped") {
+	if !strings.Contains(result.Combined(), "Directive-reads-aspiration-shaped") {
 		t.Errorf("decision_refs template should name the directive-reads-aspiration-shaped calibration")
 	}
 }
@@ -594,7 +594,7 @@ func Test_renderPreflightPrompt_AspirationCaptureNeverHigh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Combined(),"Never `high`") && !strings.Contains(result.Combined(),"never `high`") {
+	if !strings.Contains(result.Combined(), "Never `high`") && !strings.Contains(result.Combined(), "never `high`") {
 		t.Errorf("aspiration_capture template should state findings are never high severity")
 	}
 }
@@ -610,7 +610,7 @@ func Test_renderPreflightPrompt_DissolutionNamesContextPresence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.Combined(),"dialogue-captured context") {
+	if !strings.Contains(result.Combined(), "dialogue-captured context") {
 		t.Errorf("dissolution template should name dialogue-captured context as the test")
 	}
 }
@@ -633,10 +633,10 @@ func Test_renderPreflightPrompt_ConditionalSections(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if strings.Contains(result.Combined(),"## Referenced entries") {
+	if strings.Contains(result.Combined(), "## Referenced entries") {
 		t.Error("Should not include Referenced entries section when empty")
 	}
-	if strings.Contains(result.Combined(),"## Active contracts") {
+	if strings.Contains(result.Combined(), "## Active contracts") {
 		t.Error("Should not include Active contracts section when empty")
 	}
 }
