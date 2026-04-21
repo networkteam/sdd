@@ -71,15 +71,6 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 			return fmt.Errorf("creating tmp dir %s: %w", tmpDir, err)
 		}
 
-		if err := ensureGitignoreEntries(gitignorePath, []string{".sdd/tmp/"}); err != nil {
-			log.Warn("could not update .gitignore", "path", gitignorePath, "err", err)
-		} else {
-			touched = append(touched, gitignorePath)
-			if cmd.OnGitignoreUpdated != nil {
-				cmd.OnGitignoreUpdated(gitignorePath)
-			}
-		}
-
 		if cmd.OnCreated != nil {
 			cmd.OnCreated(sddDir, absGraphDir)
 		}
@@ -103,6 +94,20 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 		if err := os.MkdirAll(absGraphDir, 0o755); err != nil {
 			return fmt.Errorf("creating graph dir %s: %w", absGraphDir, err)
+		}
+	}
+
+	// Housekeeping applied on every init (idempotent — ensureGitignoreEntries
+	// skips entries already present). Covers fresh checkouts and upgrades
+	// where a new entry has been added to the required set.
+	gitignoreEntries := []string{".sdd/tmp/", ".sdd/config.local.yaml"}
+	gitignoreAdded, err := ensureGitignoreEntries(gitignorePath, gitignoreEntries)
+	if err != nil {
+		log.Warn("could not update .gitignore", "path", gitignorePath, "err", err)
+	} else if gitignoreAdded {
+		touched = append(touched, gitignorePath)
+		if cmd.OnGitignoreUpdated != nil {
+			cmd.OnGitignoreUpdated(gitignorePath)
 		}
 	}
 
@@ -213,8 +218,10 @@ func initCommitMessage(sddExisted bool) string {
 }
 
 // ensureGitignoreEntries appends entries to .gitignore that are not already
-// present. Creates the file if it does not exist.
-func ensureGitignoreEntries(path string, entries []string) error {
+// present. Creates the file if it does not exist. Returns true when at least
+// one entry was added so the caller can decide whether to record the file
+// as touched.
+func ensureGitignoreEntries(path string, entries []string) (bool, error) {
 	existing := make(map[string]bool)
 	var fileData []byte
 
@@ -225,7 +232,7 @@ func ensureGitignoreEntries(path string, entries []string) error {
 			existing[strings.TrimSpace(scanner.Text())] = true
 		}
 	} else if !os.IsNotExist(err) {
-		return err
+		return false, err
 	}
 
 	var toAdd []string
@@ -235,12 +242,12 @@ func ensureGitignoreEntries(path string, entries []string) error {
 		}
 	}
 	if len(toAdd) == 0 {
-		return nil
+		return false, nil
 	}
 
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer f.Close()
 
@@ -252,7 +259,7 @@ func ensureGitignoreEntries(path string, entries []string) error {
 	for _, e := range toAdd {
 		fmt.Fprintln(f, e)
 	}
-	return nil
+	return true, nil
 }
 
 // migrateOldTmpDir moves files from oldDir to newDir. Returns the count
