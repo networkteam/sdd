@@ -16,14 +16,19 @@ type StatusQuery struct {
 // WHAT-shaped choices. On the signal side, Open carries the closure-gated
 // attention set (gap + question), Insights and Recent are truncated
 // activity streams.
+//
+// LocalParticipant surfaces the canonical participant name from
+// .sdd/config.local.yaml so agents reading the status header see ground
+// truth without inferring from entries (which may contain drift).
 type StatusResult struct {
-	Graph       *model.Graph // for top-line counts (entries, decisions, signals)
-	Aspirations []*model.Entry
-	Contracts   []*model.Entry
-	Plans       []*model.Entry
-	Activities  []*model.Entry
-	Directives  []*model.Entry
-	Open        []*model.Entry // kind: gap and kind: question signals (the actionable set)
-	Insights    []*model.Entry // recent kind: insight signals
-	Recent      []*model.Entry // recent kind: done signals
+	Graph            *model.Graph // for top-line counts (entries, decisions, signals)
+	LocalParticipant string       // canonical from config; empty means "not configured"
+	Aspirations      []*model.Entry
+	Contracts        []*model.Entry
+	Plans            []*model.Entry
+	Activities       []*model.Entry
+	Directives       []*model.Entry
+	Open             []*model.Entry // kind: gap and kind: question signals (the actionable set)
+	Insights         []*model.Entry // recent kind: insight signals
+	Recent           []*model.Entry // recent kind: done signals
 }

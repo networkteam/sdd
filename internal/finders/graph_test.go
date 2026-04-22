@@ -42,7 +42,7 @@ closes:
 
 Done signal closing decision.`)
 
-	f := New(nil)
+	f := New(Options{})
 	g, err := f.LoadGraph(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +96,7 @@ See [design](./06-115516-s-stg-beh/design.md) for details.`)
 		t.Fatal(err)
 	}
 
-	f := New(nil)
+	f := New(Options{})
 	g, err := f.LoadGraph(dir)
 	if err != nil {
 		t.Fatal(err)

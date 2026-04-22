@@ -31,7 +31,7 @@ participant: Bob
 Second task.
 `)
 
-	f := New(nil)
+	f := New(Options{})
 	markers, err := f.LoadWIPMarkers(dir)
 	if err != nil {
 		t.Fatalf("LoadWIPMarkers: %v", err)
@@ -52,7 +52,7 @@ Second task.
 
 func TestLoadWIPMarkersNoDir(t *testing.T) {
 	dir := t.TempDir()
-	f := New(nil)
+	f := New(Options{})
 	markers, err := f.LoadWIPMarkers(dir)
 	if err != nil {
 		t.Fatalf("LoadWIPMarkers: %v", err)
@@ -87,7 +87,7 @@ participant: Alice
 Working on it.
 `)
 
-	f := New(nil)
+	f := New(Options{})
 	g, err := f.LoadGraph(dir)
 	if err != nil {
 		t.Fatalf("LoadGraph: %v", err)

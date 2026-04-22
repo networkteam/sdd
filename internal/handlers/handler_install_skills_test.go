@@ -20,7 +20,7 @@ func TestInstallSkills_FreshInstall(t *testing.T) {
 	tmp := t.TempDir()
 
 	h := handlers.New(handlers.Options{
-		Reader: finders.New(nil),
+		Reader: finders.New(finders.Options{}),
 	})
 
 	var got command.SkillInstallResult
@@ -66,7 +66,7 @@ func TestInstallSkills_FreshInstall(t *testing.T) {
 // everything as Current and writes nothing.
 func TestInstallSkills_RepeatIsNoOp(t *testing.T) {
 	tmp := t.TempDir()
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	run := func() command.SkillInstallResult {
 		var got command.SkillInstallResult
@@ -98,7 +98,7 @@ func TestInstallSkills_RepeatIsNoOp(t *testing.T) {
 // SkippedModified based on its return value.
 func TestInstallSkills_PromptModified(t *testing.T) {
 	tmp := t.TempDir()
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	// Fresh install so files exist.
 	err := h.InstallSkills(context.Background(), &command.InstallSkillsCmd{

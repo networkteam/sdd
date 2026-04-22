@@ -19,7 +19,7 @@ func renderShow(t *testing.T, g *model.Graph, ids []string, opts ...showOpt) str
 	for _, o := range opts {
 		o(&q)
 	}
-	f := finders.New(nil)
+	f := finders.New(finders.Options{})
 	result, err := f.Show(q)
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestRenderShow_FallbackFirstSentence(t *testing.T) {
 func TestRenderShow_EntryNotFound(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{})
 
-	f := finders.New(nil)
+	f := finders.New(finders.Options{})
 	_, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{"20260410-100000-s-stg-xxx"}})
 	if err == nil {
 		t.Fatal("expected error for missing entry")

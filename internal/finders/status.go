@@ -21,14 +21,15 @@ func (f *Finder) Status(q query.StatusQuery) (*query.StatusResult, error) {
 		nInsights = 10
 	}
 	return &query.StatusResult{
-		Graph:       q.Graph,
-		Aspirations: q.Graph.Aspirations(),
-		Contracts:   q.Graph.Contracts(),
-		Plans:       q.Graph.Plans(),
-		Activities:  q.Graph.Activities(),
-		Directives:  q.Graph.Directives(),
-		Open:        q.Graph.OpenSignals(),
-		Insights:    q.Graph.RecentInsights(nInsights),
-		Recent:      q.Graph.RecentDone(nDone),
+		Graph:            q.Graph,
+		LocalParticipant: f.localParticipant(),
+		Aspirations:      q.Graph.Aspirations(),
+		Contracts:        q.Graph.Contracts(),
+		Plans:            q.Graph.Plans(),
+		Activities:       q.Graph.Activities(),
+		Directives:       q.Graph.Directives(),
+		Open:             q.Graph.OpenSignals(),
+		Insights:         q.Graph.RecentInsights(nInsights),
+		Recent:           q.Graph.RecentDone(nDone),
 	}, nil
 }

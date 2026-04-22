@@ -36,7 +36,7 @@ func TestLintFix_AddsKindToDecisions(t *testing.T) {
 
 	h := handlers.New(handlers.Options{
 		GraphDir:  tmp,
-		Reader:    finders.New(nil),
+		Reader:    finders.New(finders.Options{}),
 		Committer: committer,
 		Stderr:    stderr,
 	})
@@ -93,7 +93,7 @@ func TestLintFix_SkipsEntriesWithKind(t *testing.T) {
 
 	h := handlers.New(handlers.Options{
 		GraphDir:  tmp,
-		Reader:    finders.New(nil),
+		Reader:    finders.New(finders.Options{}),
 		Committer: committer,
 		Stderr:    &bytes.Buffer{},
 	})

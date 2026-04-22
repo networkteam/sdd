@@ -13,7 +13,7 @@ import (
 
 func TestSkillStatus_MissingWhenNothingInstalled(t *testing.T) {
 	tmp := t.TempDir()
-	f := finders.New(nil)
+	f := finders.New(finders.Options{})
 	res, err := f.SkillStatus(context.Background(), query.SkillStatusQuery{
 		Target:   model.AgentClaude,
 		Scope:    model.ScopeProject,
@@ -39,7 +39,7 @@ func TestSkillStatus_CurrentWhenInstalledFromSameBundle(t *testing.T) {
 	tmp := t.TempDir()
 
 	// First pass: collect entries.
-	f := finders.New(nil)
+	f := finders.New(finders.Options{})
 	res, err := f.SkillStatus(context.Background(), query.SkillStatusQuery{
 		Target:   model.AgentClaude,
 		Scope:    model.ScopeProject,
@@ -82,7 +82,7 @@ func TestSkillStatus_CurrentWhenInstalledFromSameBundle(t *testing.T) {
 
 func TestSkillStatus_ModifiedWhenBodyEdited(t *testing.T) {
 	tmp := t.TempDir()
-	f := finders.New(nil)
+	f := finders.New(finders.Options{})
 
 	first, err := f.SkillStatus(context.Background(), query.SkillStatusQuery{
 		Target:   model.AgentClaude,

@@ -13,7 +13,7 @@ import (
 
 func TestSchemaStatus_MissingMeta(t *testing.T) {
 	tmp := t.TempDir()
-	f := finders.New(nil)
+	f := finders.New(finders.Options{})
 	res, err := f.SchemaStatus(context.Background(), query.SchemaStatusQuery{
 		SDDDir:              tmp,
 		BinaryVersion:       "v0.2.0",
@@ -41,7 +41,7 @@ func TestSchemaStatus_ParsesAndChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f := finders.New(nil)
+	f := finders.New(finders.Options{})
 
 	// Binary at minimum passes.
 	res, err := f.SchemaStatus(context.Background(), query.SchemaStatusQuery{
