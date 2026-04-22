@@ -47,6 +47,8 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never com
   - **Handlers may use finders internally**; finders never use handlers.
   - **Pre-flight is a query** (pure read intent at the domain level) despite the LLM runner's side effect — lives in `query/` + `finders/`.
 
+- **Type-system plan capture surfaces presentation impact.** When drafting a plan that changes entry types, kinds, or frontmatter, raise downstream presentation surfaces (`sdd status`, `sdd list`, `sdd show`, catch-up narrative, skill rendering) in dialogue. The user decides whether to add ACs for each surface or explicitly carve them out as future work; the agent helps compose once the call is made. Raising this at plan time avoids rediscovery during unrelated execution.
+
 - **Push logic down**: Finders and handlers are orchestration — they wire dependencies and delegate. Graph traversal, tree building, filtering, and any pure computation belongs in `internal/model/`. Always question whether code in a finder/handler could live in a lower package.
 
 - **Single path**: I/O functions (file loading, etc.) should delegate to in-memory constructors. Don't duplicate indexing or initialization logic between production and test code paths.
