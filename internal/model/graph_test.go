@@ -63,6 +63,10 @@ func withSummary(s string) entryOpt {
 	return func(e *Entry) { e.Summary = s }
 }
 
+func withParticipants(names ...string) entryOpt {
+	return func(e *Entry) { e.Participants = names }
+}
+
 func TestParseEntry(t *testing.T) {
 	content := `---
 type: decision
@@ -1515,5 +1519,26 @@ func assertNotContains(t *testing.T, ids []string, unwanted, label string) {
 	t.Helper()
 	if slices.Contains(ids, unwanted) {
 		t.Errorf("expected %s (%s) NOT in results, but it was", label, unwanted)
+	}
+}
+
+func TestGraph_AllParticipants_EmptyGraph(t *testing.T) {
+	g := NewGraph(nil)
+	if got := g.AllParticipants(); got != nil {
+		t.Errorf("empty graph should return nil, got %v", got)
+	}
+}
+
+func TestGraph_AllParticipants_DedupedAndSorted(t *testing.T) {
+	g := NewGraph([]*Entry{
+		entry("20260410-120000-s-cpt-aaa", withParticipants("Christopher", "Claude")),
+		entry("20260411-120000-s-cpt-bbb", withParticipants("Claude")),
+		entry("20260412-120000-s-cpt-ccc", withParticipants("Alice", "Christopher")),
+		entry("20260413-120000-s-cpt-ddd", withParticipants("")),
+	})
+	got := g.AllParticipants()
+	want := []string{"Alice", "Christopher", "Claude"}
+	if !slices.Equal(got, want) {
+		t.Errorf("AllParticipants = %v, want %v", got, want)
 	}
 }

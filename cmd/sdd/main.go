@@ -512,12 +512,17 @@ func newCmd() *cli.Command {
 				kind = model.Kind(k)
 			}
 
+			participants, err := resolveParticipantsFlag(cmd.String("participants"), sddDir)
+			if err != nil {
+				return err
+			}
+
 			ncmd := &command.NewEntryCmd{
 				Type:             typ,
 				Layer:            layer,
 				Kind:             kind,
 				Description:      description,
-				Participants:     splitCSV(cmd.String("participants")),
+				Participants:     participants,
 				Refs:             splitCSV(cmd.String("refs")),
 				Supersedes:       splitCSV(cmd.String("supersedes")),
 				Closes:           splitCSV(cmd.String("closes")),
@@ -818,6 +823,41 @@ func resolveGraphDir(cmd *cli.Command) (string, error) {
 	return meta.ResolveGraphDir(repoRoot, cfg), nil
 }
 
+// resolveParticipantsFlag is the shared fallback rule for capture commands.
+// An explicit flag value is used exactly as given — splitCSV, no merging with
+// the local config (matches --refs semantics per d-tac-q5p). Flag empty falls
+// back to the canonical participant in .sdd/config.local.yaml. Missing both
+// is an error pointing the user at `sdd init`.
+func resolveParticipantsFlag(flagValue, sddDir string) ([]string, error) {
+	if flagValue != "" {
+		return splitCSV(flagValue), nil
+	}
+	cfg, err := meta.ReadConfig(sddDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading .sdd/config.local.yaml: %w", err)
+	}
+	if cfg == nil || cfg.Participant == "" {
+		return nil, fmt.Errorf("no participant configured; run `sdd init` or pass --participants")
+	}
+	return []string{cfg.Participant}, nil
+}
+
+// resolveParticipantFlag is the singular counterpart for `sdd wip start`.
+// Same rule as resolveParticipantsFlag but returns a single string.
+func resolveParticipantFlag(flagValue, sddDir string) (string, error) {
+	if flagValue != "" {
+		return flagValue, nil
+	}
+	cfg, err := meta.ReadConfig(sddDir)
+	if err != nil {
+		return "", fmt.Errorf("reading .sdd/config.local.yaml: %w", err)
+	}
+	if cfg == nil || cfg.Participant == "" {
+		return "", fmt.Errorf("no participant configured; run `sdd init` or pass --participant")
+	}
+	return cfg.Participant, nil
+}
+
 // resolveSDDDir discovers the .sdd/ directory by walking up from cwd.
 // Errors if not found.
 func resolveSDDDir() (string, error) {
@@ -899,6 +939,72 @@ func promptGraphDir(defaultValue string) (string, error) {
 	return value, nil
 }
 
+// participantPromptModel is a bubbletea model for the participant-name prompt.
+type participantPromptModel struct {
+	textInput textinput.Model
+	done      bool
+}
+
+func newParticipantPromptModel(defaultValue string) participantPromptModel {
+	ti := textinput.New()
+	ti.Placeholder = defaultValue
+	ti.Focus()
+	ti.Width = 60
+	return participantPromptModel{textInput: ti}
+}
+
+func (m participantPromptModel) Init() tea.Cmd { return textinput.Blink }
+
+func (m participantPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.Type {
+		case tea.KeyEnter:
+			m.done = true
+			return m, tea.Quit
+		case tea.KeyCtrlC, tea.KeyEsc:
+			return m, tea.Quit
+		}
+	}
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m participantPromptModel) View() string {
+	return fmt.Sprintf("Participant name [%s]: %s",
+		m.textInput.Placeholder, m.textInput.View())
+}
+
+// promptParticipant runs an interactive prompt for the local participant name.
+// Empty input accepts the default. Cancellation returns an error.
+func promptParticipant(defaultValue string) (string, error) {
+	m := newParticipantPromptModel(defaultValue)
+	result, err := tea.NewProgram(m).Run()
+	if err != nil {
+		return "", err
+	}
+	final := result.(participantPromptModel)
+	if !final.done {
+		return "", fmt.Errorf("prompt cancelled")
+	}
+	value := strings.TrimSpace(final.textInput.Value())
+	if value == "" {
+		return defaultValue, nil
+	}
+	return value, nil
+}
+
+// gitUserName reads git config user.name, returning an empty string when
+// git is unavailable or the setting isn't configured. Best-effort — used
+// only as a pre-filled default for the sdd init participant prompt.
+func gitUserName() string {
+	out, err := exec.Command("git", "config", "--get", "user.name").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // isTerminal returns true if f is attached to an interactive terminal. Uses
 // term.IsTerminal rather than os.FileMode checks because special devices
 // like /dev/null are character devices but not terminals — the distinction
@@ -976,6 +1082,10 @@ func initCmd() *cli.Command {
 				Usage: "Graph directory relative to repo root (prompted interactively on fresh init)",
 			},
 			&cli.StringFlag{
+				Name:  "participant",
+				Usage: "Canonical author name recorded in .sdd/config.local.yaml (prompted interactively with git user.name as default when unset)",
+			},
+			&cli.StringFlag{
 				Name:  "scope",
 				Usage: "Where to install skills: user (~/.claude/skills) or project (.claude/skills)",
 				Value: string(model.DefaultScope),
@@ -1015,9 +1125,32 @@ func initCmd() *cli.Command {
 			}
 			userHome, _ := os.UserHomeDir()
 
+			// Resolve participant name: explicit flag wins; otherwise we
+			// only prompt when the config doesn't already carry a
+			// participant *and* stdin is interactive. Re-runs with a
+			// populated config stay silent (idempotent housekeeping).
+			participant := strings.TrimSpace(cmd.String("participant"))
+			if participant == "" {
+				var existing *model.Config
+				if sddExists {
+					existing, _ = meta.ReadConfig(sddDir)
+				}
+				if existing == nil || existing.Participant == "" {
+					if isTerminal(os.Stdin) {
+						def := gitUserName()
+						prompted, err := promptParticipant(def)
+						if err != nil {
+							return fmt.Errorf("prompt: %w", err)
+						}
+						participant = prompted
+					}
+				}
+			}
+
 			icmd := &command.InitCmd{
 				RepoRoot:      repoRoot,
 				GraphDir:      graphDir,
+				Participant:   participant,
 				BinaryVersion: version,
 				Target:        model.DefaultAgentTarget,
 				Scope:         scope,
@@ -1041,6 +1174,9 @@ func initCmd() *cli.Command {
 				},
 				OnMetaWritten: func(path string) {
 					fmt.Printf("  meta: %s\n", path)
+				},
+				OnParticipantWritten: func(path, name string) {
+					fmt.Printf("  participant: %s → %s\n", name, path)
 				},
 				OnSkillsInstalled: func(result command.SkillInstallResult) {
 					installDir := scopeInstallDir(repoRoot, userHome, scope)
@@ -1092,7 +1228,7 @@ func wipStartCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:  "participant",
-				Usage: "Participant name (defaults to git user.name)",
+				Usage: "Participant name (falls back to .sdd/config.local.yaml; run `sdd init` to configure)",
 			},
 			&cli.BoolFlag{
 				Name:  "branch",
@@ -1105,10 +1241,19 @@ func wipStartCmd() *cli.Command {
 				return fmt.Errorf("usage: sdd wip start <entry-id> [description]")
 			}
 
+			sddDir, err := resolveSDDDir()
+			if err != nil {
+				return err
+			}
+			participant, err := resolveParticipantFlag(cmd.String("participant"), sddDir)
+			if err != nil {
+				return err
+			}
+
 			startCmd := &command.StartWIPCmd{
 				EntryID:     args.Get(0),
 				Description: strings.Join(args.Slice()[1:], " "),
-				Participant: cmd.String("participant"),
+				Participant: participant,
 				Exclusive:   cmd.Bool("exclusive"),
 				Branch:      cmd.Bool("branch"),
 				OnStarted: func(markerID, markerPath string) {

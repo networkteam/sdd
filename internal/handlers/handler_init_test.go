@@ -260,6 +260,114 @@ func TestInit_PostUpgradeRefreshesDriftedPristine(t *testing.T) {
 	}
 }
 
+// TestInit_WritesParticipantAndPreservesLLMBlock exercises the participant-write
+// path: an existing config.local.yaml already carries an `llm:` block (from
+// d-tac-bes), and init must add the participant key without touching the
+// llm block or its nested keys.
+func TestInit_WritesParticipantAndPreservesLLMBlock(t *testing.T) {
+	tmp := t.TempDir()
+	// Pre-populate .sdd/config.local.yaml with an llm block (simulating a
+	// repo that already has provider config set before participant rollout).
+	sddDir := filepath.Join(tmp, model.SDDDirName)
+	if err := os.MkdirAll(sddDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seed := []byte("llm:\n  provider: anthropic\n  model: claude-haiku-4-5-20251001\n  api_keys:\n    anthropic: sk-ant-xxx\n")
+	configLocal := filepath.Join(sddDir, "config.local.yaml")
+	if err := os.WriteFile(configLocal, seed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+
+	var gotPath, gotName string
+	err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+		Participant:   "Christopher",
+		OnParticipantWritten: func(path, name string) {
+			gotPath = path
+			gotName = name
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotName != "Christopher" || gotPath == "" {
+		t.Errorf("OnParticipantWritten not fired correctly: path=%q name=%q", gotPath, gotName)
+	}
+
+	data, err := os.ReadFile(configLocal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"participant: Christopher",
+		"provider: anthropic",
+		"model: claude-haiku-4-5-20251001",
+		"sk-ant-xxx",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("config.local.yaml missing %q after init:\n%s", want, content)
+		}
+	}
+}
+
+// TestInit_ParticipantIdempotent ensures a re-init with the same participant
+// produces no write and no OnParticipantWritten callback.
+func TestInit_ParticipantIdempotent(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+
+	// First run: write participant.
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+		Participant:   "Christopher",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second run with same participant: callback must not fire.
+	var fired bool
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:             tmp,
+		BinaryVersion:        "v0.2.0",
+		Scope:                model.ScopeProject,
+		Participant:          "Christopher",
+		OnParticipantWritten: func(string, string) { fired = true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if fired {
+		t.Error("OnParticipantWritten fired on idempotent re-init with same name")
+	}
+}
+
+// TestInit_ParticipantEmptyDoesNotTouchConfig verifies the default path —
+// when no participant is supplied and the config file already exists, init
+// must not create or modify it.
+func TestInit_ParticipantEmptyDoesNotTouchConfig(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	configLocal := filepath.Join(tmp, model.SDDDirName, "config.local.yaml")
+	if _, err := os.Stat(configLocal); !os.IsNotExist(err) {
+		t.Errorf("config.local.yaml should not exist when Participant is empty, got err=%v", err)
+	}
+}
+
 // TestInit_PreservesExistingMeta ensures minimum_version stamped at initial
 // creation survives a later init from a different binary version.
 func TestInit_PreservesExistingMeta(t *testing.T) {

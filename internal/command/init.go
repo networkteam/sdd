@@ -20,6 +20,13 @@ type InitCmd struct {
 	// defaults to model.DefaultGraphDir (".sdd/graph").
 	GraphDir string
 
+	// Participant is the canonical author name to record in
+	// .sdd/config.local.yaml. Empty means "do not change" — existing
+	// values in the local config are preserved (caller resolves the value
+	// interactively if a prompt is warranted). The handler writes the
+	// field into the mapping without disturbing other keys (e.g. llm:).
+	Participant string
+
 	// BinaryVersion is the running sdd binary's version. Stamped into each
 	// installed skill file's frontmatter and, on initial init only, used
 	// to derive the graph's minimum_version (unless it's a dev build).
@@ -68,6 +75,11 @@ type InitCmd struct {
 	// OnMetaPreserved fires when .sdd/meta.json already existed and was
 	// left untouched.
 	OnMetaPreserved func(path string)
+
+	// OnParticipantWritten fires when the participant field is added to or
+	// updated in .sdd/config.local.yaml. Does not fire when the existing
+	// value already matches (idempotent re-init produces no callback).
+	OnParticipantWritten func(path, name string)
 
 	// OnSkillsInstalled fires after the skill install pass completes,
 	// carrying a per-category summary suitable for presenter output.
