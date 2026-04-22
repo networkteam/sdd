@@ -443,8 +443,9 @@ func newCmd() *cli.Command {
 				Usage: "Comma-separated list of participants",
 			},
 			&cli.StringFlag{
-				Name:  "confidence",
-				Usage: "Confidence level (high, medium, low)",
+				Name:     "confidence",
+				Usage:    "Confidence level (high, medium, low)",
+				Required: true,
 			},
 			&cli.StringFlag{
 				Name:  "kind",
@@ -551,6 +552,13 @@ func newCmd() *cli.Command {
 				kind = model.Kind(k)
 			}
 
+			confidence := cmd.String("confidence")
+			switch confidence {
+			case "high", "medium", "low":
+			default:
+				return fmt.Errorf("invalid confidence: %q (expected high, medium, or low)", confidence)
+			}
+
 			participants, err := resolveParticipantsFlag(cmd.String("participants"), sddDir)
 			if err != nil {
 				return err
@@ -565,7 +573,7 @@ func newCmd() *cli.Command {
 				Refs:             splitCSV(cmd.String("refs")),
 				Supersedes:       splitCSV(cmd.String("supersedes")),
 				Closes:           splitCSV(cmd.String("closes")),
-				Confidence:       cmd.String("confidence"),
+				Confidence:       confidence,
 				Attachments:      atts,
 				SkipPreflight:    cmd.Bool("skip-preflight"),
 				DryRun:           cmd.Bool("dry-run"),
