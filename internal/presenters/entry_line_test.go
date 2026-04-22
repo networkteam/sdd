@@ -12,7 +12,6 @@ import (
 // `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) {status: <s>}? <summary>`
 // Kind renders as a qualifier alongside layer/type (identity, not attribute).
 // Square brackets = stored attrs (confidence); curly braces = derived attrs.
-// Status is present for signals and decisions, omitted for actions.
 
 func TestEntryLine_DecisionPlan(t *testing.T) {
 	e := entry("20260416-151058-d-tac-n6y",
@@ -56,25 +55,13 @@ func TestEntryLine_SignalGapDefault(t *testing.T) {
 	}
 }
 
-func TestEntryLine_ActionNoKindNoConfidence(t *testing.T) {
-	e := entry("20260407-144751-a-ops-gn0",
-		withParticipants("Christopher", "Claude"),
-		withSummary("Created CLAUDE.md"))
-	g := model.NewGraph([]*model.Entry{e})
-	got := renderEntryLine(e, g)
-	want := "  20260407-144751-a-ops-gn0 operational action (Christopher, Claude) Created CLAUDE.md\n"
-	if got != want {
-		t.Errorf("got:\n%q\nwant:\n%q", got, want)
-	}
-}
-
 func TestEntryLine_EmptyParticipants(t *testing.T) {
 	// Empty participants still render `()` so the field is uniformly present.
-	e := entry("20260407-144751-a-ops-gn0",
-		withSummary("An action with no participants recorded"))
+	e := entry("20260407-144751-s-ops-gn0",
+		withSummary("A signal with no participants recorded"))
 	g := model.NewGraph([]*model.Entry{e})
 	got := renderEntryLine(e, g)
-	want := "  20260407-144751-a-ops-gn0 operational action () An action with no participants recorded\n"
+	want := "  20260407-144751-s-ops-gn0 operational gap signal () {status: open} A signal with no participants recorded\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
@@ -85,13 +72,14 @@ func TestEntryLine_ClosedSignal(t *testing.T) {
 		withConfidence("high"),
 		withParticipants("Christopher", "Claude"),
 		withSummary("A closed signal"))
-	closer := entry("20260417-093934-a-prc-fxn",
+	closer := entry("20260417-093934-s-prc-fxn",
+		withKind(model.KindDone),
 		withCloses(sig.ID),
 		withParticipants("Christopher"),
-		withSummary("The closing action"))
+		withSummary("The closing done signal"))
 	g := model.NewGraph([]*model.Entry{sig, closer})
 	got := renderEntryLine(sig, g)
-	want := "  20260416-190732-s-prc-omw process gap signal [confidence: high] (Christopher, Claude) {status: closed-by 20260417-093934-a-prc-fxn} A closed signal\n"
+	want := "  20260416-190732-s-prc-omw process gap signal [confidence: high] (Christopher, Claude) {status: closed-by 20260417-093934-s-prc-fxn} A closed signal\n"
 	if got != want {
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}

@@ -2,7 +2,7 @@
 
 **Keep humans and AI agents aligned across parallel work.**
 
-SDD records your project's reasoning as an immutable decision graph — signals (what you noticed), decisions (what you committed to), actions (what you did). At any moment, anyone (human or agent) can see what's in flight, which decisions are active, and what's still open. Built for developers and teams shipping with AI agents.
+SDD records your project's reasoning as an immutable decision graph — signals (what you noticed) and decisions (what you committed to). At any moment, anyone (human or agent) can see what's in flight, which decisions are active, and what's still open. Built for developers and teams shipping with AI agents.
 
 **Why SDD**
 
@@ -10,7 +10,7 @@ SDD records your project's reasoning as an immutable decision graph — signals 
 
 **Most other systems:** scatter state across separate static artifacts — docs, plans, phases, roadmaps, trackers, specs, tickets — that duplicate across layers, go stale, and resist new insight.
 
-**With SDD:** an append-only graph where new insight → new entry (`refs`, `supersedes`, `closes`). State is *derived from the graph*, never maintained in parallel docs. Tracked in Git, so humans and agents work against the same graph — each session runs independently, and signals, decisions, and actions are captured by the work itself.
+**With SDD:** an append-only graph where new insight → new entry (`refs`, `supersedes`, `closes`). State is *derived from the graph*, never maintained in parallel docs. Tracked in Git, so humans and agents work against the same graph — each session runs independently, and signals and decisions are captured by the work itself.
 
 ![SDD in action — parallel feature work without losing context](docs/assets/screencast.gif)
 
@@ -29,8 +29,8 @@ SDD lets each party do what they're good at. Agents work with information and ru
 ```
 > /sdd
 
-Claude: Fork landed yesterday (a-tac-q94). Two fresh plans today, plus
-        a new process signal. No active WIP.
+Claude: Fork landed yesterday (s-tac-q94, kind: done). Two fresh plans
+        today, plus a new process signal. No active WIP.
 
         Release pipeline — just captured, ready to build
          1. GitHub Actions release pipeline (d-tac-lg1) — plan, medium. …
@@ -61,17 +61,17 @@ Claude: [sdd wip start 20260417-173310-d-tac-lg1 --exclusive
 
 A WIP marker signals the work is in flight and discourages parallel edits to the same entry. During implementation Claude captures operational sub-decisions as they come up.
 
-When the work finishes, Claude plays back the closing action and takes the WIP marker down:
+When the work finishes, Claude plays back the closing done signal and takes the WIP marker down:
 
 ```
 > Done. Tests pass, the v0.1.0-rc release went out cleanly.
 
-Claude: [plays back a closing action referencing the final commit
+Claude: [plays back a closing done signal referencing the final commit
          and addressing each AC in d-tac-lg1. Confidence high.]
 
 > Looks right.
 
-Claude: [sdd new a tac --closes 20260417-173310-d-tac-lg1 …
+Claude: [sdd new s tac --kind done --closes 20260417-173310-d-tac-lg1 …
          then sdd wip done <marker-id>]
 ```
 
@@ -85,8 +85,8 @@ Signals usually surface while you're in the work — testing what was just built
 > Testing the release pipeline, the Homebrew formula update didn't
   trigger automatically. Not blocking the release — worth capturing?
 
-Claude: [plays back a tactical signal refsing the closing action for
-         d-tac-lg1, confidence medium; asks to confirm wording.]
+Claude: [plays back a tactical signal refsing the closing done signal
+         for d-tac-lg1, confidence medium; asks to confirm wording.]
 
 > Looks right.
 
@@ -97,7 +97,7 @@ Before writing, Claude plays back the proposed entry. A pre-flight validator (a 
 
 ### Make a plan decision
 
-Plan decisions (`--kind plan`) carry an `## Acceptance criteria` section — each AC is a verifiable outcome that becomes the contract between plan author, implementing agent, and the pre-flight validator that checks the closing action. Claude helps draft the ACs and can attach a longer design doc via `--attach`.
+Plan decisions (`--kind plan`) carry an `## Acceptance criteria` section — each AC is a verifiable outcome that becomes the contract between plan author, implementing agent, and the pre-flight validator that checks the closing done signal. Claude helps draft the ACs and can attach a longer design doc via `--attach`.
 
 ### Groom
 
@@ -194,14 +194,13 @@ The skill runs `sdd status` + `sdd wip list`, clusters the graph state by projec
 
 ## Concepts in a minute
 
-**The loop**: Signal → Dialogue → Decision → Action → Signal...
+**The loop**: Signal → Dialogue → Decision → Done signal → Signal...
 
 Dialogue is the work that turns signals into decisions — it isn't recorded directly. Everything else lives in the graph as an immutable markdown entry with YAML frontmatter.
 
-**Entry types**:
-- **Signal** (`s`) — an observation, a gap, a question raised.
-- **Decision** (`d`) — a commitment to a direction. Kinds: `directive` (default), `contract` (standing rule), `plan` (multi-step scope with acceptance criteria).
-- **Action** (`a`) — a fact of execution. Actions `close` the decisions and signals they fulfil.
+**Entry types** (two; kinds carry the nuance):
+- **Signal** (`s`) — something noticed. Kinds: `gap` (default), `fact`, `question`, `insight`, `done`. A `done` signal records a completed commitment and closes the decision it fulfils.
+- **Decision** (`d`) — something committed to. Kinds: `directive` (default), `activity`, `plan` (multi-step scope with acceptance criteria), `contract` (standing rule), `aspiration` (perpetual direction).
 
 **Layers** describe depth of thinking, not org level:
 
@@ -227,8 +226,8 @@ See [docs/signal-dialogue-decision.md](docs/signal-dialogue-decision.md) for the
 Day to day you rarely run these directly — the skill does. Useful to know:
 
 ```bash
-sdd status                                            # catch-up view: active contracts/plans/decisions, open signals, recent actions
-sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind contract|directive|plan] [--all]
+sdd status                                            # catch-up view: active contracts/plans/decisions, open signals, recent done signals
+sdd list [--type d|s] [--layer stg|cpt|tac|ops|prc] [--kind gap|fact|question|insight|done|directive|activity|plan|contract|aspiration] [--all]
 sdd show <id> [--downstream] [--max-depth N]          # entry + upstream/downstream summary chain
 sdd new <type> <layer> [flags] "<description>"        # create an entry (runs pre-flight)
 sdd wip start <entry-id> --exclusive --participant <name> "<description>" [--branch]

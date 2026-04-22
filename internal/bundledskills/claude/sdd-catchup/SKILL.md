@@ -56,7 +56,7 @@ Include both in the structured output per item so the outer agent can decide whe
 
 Your output is consumed by the outer SDD agent, not shown to the user directly. The outer agent formats it for presentation. Include full entry IDs, kind, participants (direct + upstream), and enough context that the outer agent can act on any item without additional lookups.
 
-Include a top-level `Active recently:` line listing the union of participants appearing on recent entries (actions, decisions, signals from roughly the last two weeks). The outer agent uses this to decide whether per-thread participant mentions differentiate from the active set.
+Include a top-level `Active recently:` line listing the union of participants appearing on recent entries (done signals, decisions, other signals from roughly the last two weeks). The outer agent uses this to decide whether per-thread participant mentions differentiate from the active set.
 
 Structure your output as one numbered block per open item, grouped by thread:
 

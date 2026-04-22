@@ -312,7 +312,7 @@ func listCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:    "type",
 				Aliases: []string{"t"},
-				Usage:   "Filter by type (d, s, a)",
+				Usage:   "Filter by type (d, s)",
 			},
 			&cli.StringFlag{
 				Name:    "layer",
@@ -452,12 +452,19 @@ func newCmd() *cli.Command {
 			typeArg := args.Get(0)
 			layerArg := args.Get(1)
 
+			// Migration hint: `sdd new a` was removed in the two-type redesign.
+			// Intercept here so the user gets actionable guidance rather than a
+			// generic "unknown type" error.
+			if typeArg == "a" || typeArg == "action" {
+				return fmt.Errorf(`"sdd new %s" was removed in the two-type migration; actions are now done signals — use "sdd new s --kind done" (see README for the kind vocabulary)`, typeArg)
+			}
+
 			// Resolve type
 			typ, ok := model.TypeFromAbbrev[typeArg]
 			if !ok {
 				typ = model.EntryType(typeArg)
 				if _, exists := model.TypeAbbrev[typ]; !exists {
-					return fmt.Errorf("invalid type: %s (use d, s, or a)", typeArg)
+					return fmt.Errorf("invalid type: %s (use d or s)", typeArg)
 				}
 			}
 
@@ -590,7 +597,7 @@ func rewriteCmd() *cli.Command {
 			if !ok {
 				typ = model.EntryType(typeArg)
 				if _, exists := model.TypeAbbrev[typ]; !exists {
-					return fmt.Errorf("invalid type: %s (use d, s, or a)", typeArg)
+					return fmt.Errorf("invalid type: %s (use d or s)", typeArg)
 				}
 			}
 

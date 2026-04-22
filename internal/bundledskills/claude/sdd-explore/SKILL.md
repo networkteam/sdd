@@ -39,8 +39,8 @@ sdd show --max-depth 0 <id1> <id2>
 
 From the upstream and downstream information, determine the target's current status:
 - **Open signal**: not closed by any downstream entry, not superseded
-- **Active decision (no actions)**: not closed, not superseded, no downstream actions reference it
-- **Active decision (partial progress)**: has some downstream actions but not closed
+- **Active decision (no completions)**: not closed, not superseded, no downstream done signals reference it
+- **Active decision (partial progress)**: has some downstream done signals but not closed
 - **Closed/superseded**: a downstream entry closes or supersedes it
 - **Stale candidate**: old entry with no downstream activity — flag the date
 

@@ -98,28 +98,28 @@ func writeEntryFile(t *testing.T, graphDir, id, content string) {
 	}
 }
 
-// TestRewriteEntry_ActionToDoneSignal is the primary migration case: an
-// action (a-*) becomes a done-kind signal (s-*). The file moves, frontmatter
-// flips type and kind, and every inbound reference updates to the new ID.
-func TestRewriteEntry_ActionToDoneSignal(t *testing.T) {
+// TestRewriteEntry_SignalToDecision exercises a type flip: a signal
+// recaptured as a decision (e.g., a misclassified gap that should have been
+// an activity decision). The file moves, frontmatter flips type and kind,
+// and every inbound reference updates to the new ID.
+func TestRewriteEntry_SignalToDecision(t *testing.T) {
 	graphDir := t.TempDir()
 
-	// Target action.
-	writeEntryFile(t, graphDir, "20260418-101837-a-tac-r8l", `---
-type: action
+	// Target signal.
+	writeEntryFile(t, graphDir, "20260418-101837-s-tac-r8l", `---
+type: signal
 layer: tactical
+kind: gap
 refs:
-  - 20260418-100000-d-tac-pln
-closes:
   - 20260418-100000-d-tac-pln
 participants:
   - Christopher
 ---
 
-Shipped the plan.
+Should have been captured as an activity.
 `)
 
-	// Plan it closes (target of closes).
+	// Plan it refs.
 	writeEntryFile(t, graphDir, "20260418-100000-d-tac-pln", `---
 type: decision
 layer: tactical
@@ -129,17 +129,17 @@ kind: plan
 The plan.
 `)
 
-	// Inbound decision that refs the action.
+	// Inbound decision that refs the signal.
 	writeEntryFile(t, graphDir, "20260419-090000-d-cpt-inb", `---
 type: decision
 layer: conceptual
 kind: directive
 refs:
-  - 20260418-101837-a-tac-r8l
+  - 20260418-101837-s-tac-r8l
   - 20260418-100000-d-tac-pln
 ---
 
-Builds on the action.
+Builds on the signal.
 `)
 
 	mover := &recordingMover{}
@@ -155,9 +155,9 @@ Builds on the action.
 	var cbOld, cbNew string
 	var cbInbound []string
 	rcmd := &command.RewriteEntryCmd{
-		EntryID: "20260418-101837-a-tac-r8l",
-		NewType: model.TypeSignal,
-		NewKind: model.KindDone,
+		EntryID: "20260418-101837-s-tac-r8l",
+		NewType: model.TypeDecision,
+		NewKind: model.KindActivity,
 		OnRewritten: func(oldID, newID string, inbound []string) {
 			cbOld, cbNew = oldID, newID
 			cbInbound = inbound
@@ -167,29 +167,29 @@ Builds on the action.
 		t.Fatalf("RewriteEntry: %v", err)
 	}
 
-	wantNew := "20260418-101837-s-tac-r8l"
-	if cbOld != "20260418-101837-a-tac-r8l" || cbNew != wantNew {
+	wantNew := "20260418-101837-d-tac-r8l"
+	if cbOld != "20260418-101837-s-tac-r8l" || cbNew != wantNew {
 		t.Errorf("callback IDs = (%q → %q), want (old → %q)", cbOld, cbNew, wantNew)
 	}
 
-	// Old file must no longer exist at the action path.
-	oldPath := filepath.Join(graphDir, "2026/04/18-101837-a-tac-r8l.md")
+	// Old file must no longer exist at the signal path.
+	oldPath := filepath.Join(graphDir, "2026/04/18-101837-s-tac-r8l.md")
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Errorf("old file still exists at %s", oldPath)
 	}
 
-	// New file exists at the signal path, with rewritten frontmatter.
-	newPath := filepath.Join(graphDir, "2026/04/18-101837-s-tac-r8l.md")
+	// New file exists at the decision path, with rewritten frontmatter.
+	newPath := filepath.Join(graphDir, "2026/04/18-101837-d-tac-r8l.md")
 	data, err := os.ReadFile(newPath)
 	if err != nil {
 		t.Fatalf("reading new file: %v", err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "type: signal") {
-		t.Errorf("new file missing 'type: signal':\n%s", text)
+	if !strings.Contains(text, "type: decision") {
+		t.Errorf("new file missing 'type: decision':\n%s", text)
 	}
-	if !strings.Contains(text, "kind: done") {
-		t.Errorf("new file missing 'kind: done':\n%s", text)
+	if !strings.Contains(text, "kind: activity") {
+		t.Errorf("new file missing 'kind: activity':\n%s", text)
 	}
 
 	// Inbound decision's refs must have been rewritten.
@@ -198,11 +198,11 @@ Builds on the action.
 	if err != nil {
 		t.Fatalf("reading inbound: %v", err)
 	}
-	if strings.Contains(string(inb), "20260418-101837-a-tac-r8l") {
-		t.Errorf("inbound still references the old action ID:\n%s", string(inb))
+	if strings.Contains(string(inb), "20260418-101837-s-tac-r8l") {
+		t.Errorf("inbound still references the old signal ID:\n%s", string(inb))
 	}
 	if !strings.Contains(string(inb), wantNew) {
-		t.Errorf("inbound missing the new signal ID:\n%s", string(inb))
+		t.Errorf("inbound missing the new decision ID:\n%s", string(inb))
 	}
 
 	// Mover was called exactly once (main file). No attachments in this fixture.
@@ -274,12 +274,13 @@ A directive that should be an activity.
 // no commit is made.
 func TestRewriteEntry_DryRun_NoSideEffects(t *testing.T) {
 	graphDir := t.TempDir()
-	writeEntryFile(t, graphDir, "20260418-130000-a-ops-qqq", `---
-type: action
+	writeEntryFile(t, graphDir, "20260418-130000-s-ops-qqq", `---
+type: signal
 layer: operational
+kind: gap
 ---
 
-An action.
+A miscategorized signal.
 `)
 
 	mover := &recordingMover{}
@@ -294,9 +295,9 @@ An action.
 
 	var seenNew string
 	rcmd := &command.RewriteEntryCmd{
-		EntryID: "20260418-130000-a-ops-qqq",
-		NewType: model.TypeSignal,
-		NewKind: model.KindDone,
+		EntryID: "20260418-130000-s-ops-qqq",
+		NewType: model.TypeDecision,
+		NewKind: model.KindActivity,
 		DryRun:  true,
 		OnRewritten: func(_, newID string, _ []string) {
 			seenNew = newID
@@ -306,8 +307,8 @@ An action.
 		t.Fatalf("RewriteEntry: %v", err)
 	}
 
-	if seenNew != "20260418-130000-s-ops-qqq" {
-		t.Errorf("dry-run callback newID = %q, want the computed signal id", seenNew)
+	if seenNew != "20260418-130000-d-ops-qqq" {
+		t.Errorf("dry-run callback newID = %q, want the computed decision id", seenNew)
 	}
 	if len(mover.calls) != 0 {
 		t.Errorf("dry-run must not move files, got %d calls", len(mover.calls))
@@ -317,10 +318,10 @@ An action.
 	}
 
 	// Old path still holds the original file; new path must not exist.
-	if _, err := os.Stat(filepath.Join(graphDir, "2026/04/18-130000-a-ops-qqq.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(graphDir, "2026/04/18-130000-s-ops-qqq.md")); err != nil {
 		t.Errorf("original file should still exist on dry-run: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(graphDir, "2026/04/18-130000-s-ops-qqq.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(graphDir, "2026/04/18-130000-d-ops-qqq.md")); !os.IsNotExist(err) {
 		t.Errorf("new-id file must not exist after dry-run")
 	}
 }
@@ -328,12 +329,13 @@ An action.
 // TestRewriteEntry_NoCommit writes to disk but skips the git commit.
 func TestRewriteEntry_NoCommit(t *testing.T) {
 	graphDir := t.TempDir()
-	writeEntryFile(t, graphDir, "20260418-140000-a-prc-nnn", `---
-type: action
+	writeEntryFile(t, graphDir, "20260418-140000-s-prc-nnn", `---
+type: signal
 layer: process
+kind: gap
 ---
 
-Action.
+Signal.
 `)
 
 	committer := &recordingCommitter{}
@@ -347,9 +349,9 @@ Action.
 	})
 
 	rcmd := &command.RewriteEntryCmd{
-		EntryID:  "20260418-140000-a-prc-nnn",
-		NewType:  model.TypeSignal,
-		NewKind:  model.KindDone,
+		EntryID:  "20260418-140000-s-prc-nnn",
+		NewType:  model.TypeDecision,
+		NewKind:  model.KindActivity,
 		NoCommit: true,
 	}
 	if err := h.RewriteEntry(context.Background(), rcmd); err != nil {
@@ -368,9 +370,10 @@ Action.
 // both the file and the dir move.
 func TestRewriteEntry_AttachmentDirectory(t *testing.T) {
 	graphDir := t.TempDir()
-	writeEntryFile(t, graphDir, "20260418-150000-a-cpt-att", `---
-type: action
+	writeEntryFile(t, graphDir, "20260418-150000-s-cpt-att", `---
+type: signal
 layer: conceptual
+kind: gap
 ---
 
 Has attachments.
@@ -378,7 +381,7 @@ Has attachments.
 
 	// Create the attachment directory and a file inside it — mimics a real
 	// entry that carried a plan attachment.
-	attachDir := filepath.Join(graphDir, "2026/04/18-150000-a-cpt-att")
+	attachDir := filepath.Join(graphDir, "2026/04/18-150000-s-cpt-att")
 	if err := os.MkdirAll(attachDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -397,9 +400,9 @@ Has attachments.
 	})
 
 	rcmd := &command.RewriteEntryCmd{
-		EntryID: "20260418-150000-a-cpt-att",
-		NewType: model.TypeSignal,
-		NewKind: model.KindDone,
+		EntryID: "20260418-150000-s-cpt-att",
+		NewType: model.TypeDecision,
+		NewKind: model.KindActivity,
 	}
 	if err := h.RewriteEntry(context.Background(), rcmd); err != nil {
 		t.Fatalf("RewriteEntry: %v", err)
@@ -411,7 +414,7 @@ Has attachments.
 		t.Errorf("mover calls = %d, want 2 (file + attach dir)", len(mover.calls))
 	}
 
-	newAttachDir := filepath.Join(graphDir, "2026/04/18-150000-s-cpt-att")
+	newAttachDir := filepath.Join(graphDir, "2026/04/18-150000-d-cpt-att")
 	if _, err := os.Stat(filepath.Join(newAttachDir, "plan.md")); err != nil {
 		t.Errorf("attachment not moved to new location: %v", err)
 	}
@@ -452,20 +455,21 @@ Already a directive.
 // ID would overlap an already-present entry.
 func TestRewriteEntry_CollisionRejected(t *testing.T) {
 	graphDir := t.TempDir()
-	writeEntryFile(t, graphDir, "20260418-170000-a-tac-col", `---
-type: action
-layer: tactical
----
-
-Action.
-`)
 	writeEntryFile(t, graphDir, "20260418-170000-s-tac-col", `---
 type: signal
 layer: tactical
 kind: gap
 ---
 
-Same-suffix signal — triggers collision.
+Signal.
+`)
+	writeEntryFile(t, graphDir, "20260418-170000-d-tac-col", `---
+type: decision
+layer: tactical
+kind: directive
+---
+
+Same-suffix decision — triggers collision.
 `)
 
 	h := handlers.New(handlers.Options{
@@ -474,9 +478,9 @@ Same-suffix signal — triggers collision.
 	})
 
 	err := h.RewriteEntry(context.Background(), &command.RewriteEntryCmd{
-		EntryID: "20260418-170000-a-tac-col",
-		NewType: model.TypeSignal,
-		NewKind: model.KindDone,
+		EntryID: "20260418-170000-s-tac-col",
+		NewType: model.TypeDecision,
+		NewKind: model.KindActivity,
 	})
 	if err == nil {
 		t.Fatal("expected collision error, got nil")

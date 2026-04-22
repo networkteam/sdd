@@ -7,16 +7,16 @@ import (
 )
 
 func TestDerivedStatus(t *testing.T) {
-	signal := &model.Entry{ID: "20260410-100000-s-tac-sig", Type: model.TypeSignal, Layer: model.LayerTactical}
+	signal := &model.Entry{ID: "20260410-100000-s-tac-sig", Type: model.TypeSignal, Layer: model.LayerTactical, Kind: model.KindGap}
 	decision := &model.Entry{ID: "20260410-100100-d-tac-dec", Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective}
 	plan := &model.Entry{ID: "20260410-100200-d-tac-plan", Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindPlan}
 	contract := &model.Entry{ID: "20260410-100300-d-tac-con", Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindContract}
-	action := &model.Entry{ID: "20260410-100400-a-tac-act", Type: model.TypeAction, Layer: model.LayerTactical}
 
 	closer := &model.Entry{
-		ID:     "20260410-110000-a-tac-cls",
-		Type:   model.TypeAction,
+		ID:     "20260410-110000-s-tac-cls",
+		Type:   model.TypeSignal,
 		Layer:  model.LayerTactical,
+		Kind:   model.KindDone,
 		Closes: []string{signal.ID},
 	}
 	superseder := &model.Entry{
@@ -27,7 +27,7 @@ func TestDerivedStatus(t *testing.T) {
 		Supersedes: []string{decision.ID},
 	}
 
-	g := model.NewGraph([]*model.Entry{signal, decision, plan, contract, action, closer, superseder})
+	g := model.NewGraph([]*model.Entry{signal, decision, plan, contract, closer, superseder})
 
 	tests := []struct {
 		name  string
@@ -38,7 +38,6 @@ func TestDerivedStatus(t *testing.T) {
 		{"active_decision", decision, model.Status{Kind: model.StatusSupersededBy, By: superseder.ID}},
 		{"active_plan", plan, model.Status{Kind: model.StatusActive}},
 		{"active_contract", contract, model.Status{Kind: model.StatusActive}},
-		{"action", action, model.Status{Kind: model.StatusNone}},
 	}
 
 	for _, tt := range tests {

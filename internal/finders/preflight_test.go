@@ -159,7 +159,8 @@ func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{sig, dec})
 
 	proposed := &model.Entry{
-		Type:    model.TypeAction,
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
 		Layer:   model.LayerTactical,
 		Closes:  []string{dec.ID},
 		Content: "implemented everything",
