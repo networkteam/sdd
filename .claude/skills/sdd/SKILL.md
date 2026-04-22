@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 5fdc01b07a68e58fa6cf7f567c453c7f84d9c74464f7e02b5ac4aff0f55c3cdc
+sdd-content-hash: cee3c005fbe47edaa9acb2755a654a2edde6e15d3103fe2a52ac72439a8cceb9
 sdd-version: dev
 ---
 
@@ -101,11 +101,15 @@ For multi-line content, use shell heredocs assigned to variables (`DESC=$(cat <<
 
 ### Infer participants from session context
 
-Participant identity is your responsibility, not the CLI's. The CLI just accepts `--participants` as given. You infer who's involved:
+The CLI resolves a canonical participant name from `.sdd/config.local.yaml` (written by `sdd init`) whenever `--participants` / `--participant` is omitted. In a solo-plus-AI graph that means you usually don't pass the flag at all — the human user comes from config automatically. Use the explicit flag only when the entry involves someone other than the configured default or when Claude should be listed alongside the human. The flag, when present, is taken verbatim — local config is not merged in.
 
-- **The human user**: Read their name from the session's gitStatus context (the "Git user:" field). No shell command needed.
-- **Group sessions**: If the conversation makes clear that multiple people are involved (e.g. the user says "we decided" or mentions a colleague's input), include them. When uncertain, default to the user alone — don't guess.
-- **You (Claude)**: Include yourself as a participant when you contributed meaningfully to the dialogue that shaped the entry. Omit yourself for entries that are purely the user's observation.
+Who to list:
+
+- **The human user**: In a normal solo session, omit `--participants` and let the CLI fall back to the configured name. Override only to name someone else (colleague, visitor, delegate).
+- **Group sessions**: If the conversation makes clear multiple people are involved ("we decided", named colleague weighed in), pass all of them explicitly via `--participants name1,name2`. Don't guess — when uncertain, stay with the user alone.
+- **You (Claude)**: Include yourself as a participant when you contributed meaningfully to the dialogue that shaped the entry. Omit for entries that are purely the user's observation.
+
+**Before playback, correlate proposed participants against names already in the graph.** Every `sdd status` line shows its entry's participants — skim them and prefer established spellings ("Christopher" over "Christopher Hlubek", "Claude" over " Claude"). If a name you're about to propose doesn't match any existing spelling, pause and ask the user before introducing a new voice. The pre-flight validator also emits a medium-severity `participant-drift` finding for unmatched names as a backstop, but you should catch drift at playback time rather than leaning on pre-flight to correct it afterward.
 
 Since you always present proposed entries for confirmation before running `sdd new`, the user can correct participants if your inference is wrong. This is the safety net — get it right most of the time, and the confirmation step catches the rest.
 
