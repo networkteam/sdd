@@ -52,10 +52,16 @@ func (r *PreflightResult) HasBlocking() bool {
 // Preflight runs the pre-flight validator against the given entry and graph.
 // Returns the parsed result regardless of finding severity. Returns an error
 // only for infrastructure failures (runner error, template error, parse error).
-func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph) (*PreflightResult, error) {
+//
+// localCanonical is the canonical participant name from
+// `.sdd/config.local.yaml` (empty string when no config exists). It's plumbed
+// into the prompt as authoritative ground truth for the participant-drift
+// check — decoupling validation from same-session drift in the graph's
+// participant set.
+func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, localCanonical string) (*PreflightResult, error) {
 	ct := selectCheckType(entry, graph)
 
-	pctx := assembleContext(entry, graph, ct)
+	pctx := assembleContext(entry, graph, ct, localCanonical)
 
 	req, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
@@ -137,14 +143,22 @@ var checkTypeTemplates = map[checkType]string{
 // Acceptance criteria live inline in plan decision descriptions (as a
 // `## Acceptance criteria` markdown section), so they flow through
 // ProposedEntry and ClosedEntries without extra fields.
+//
+// LocalCanonical and EstablishedParticipants feed the participant-drift
+// rubric (see participants.tmpl). The two-set model is deliberate: the
+// canonical is fixed ground truth from config; the established set reflects
+// graph history and may contain its own drift — the rubric treats canonical
+// as authoritative when they disagree.
 type preflightContext struct {
-	ProposedEntry     string
-	ReferencedEntries string
-	ClosedEntries     string
-	SupersededEntries string
-	ActiveContracts   string
-	ActiveAspirations string
-	OpenSignals       string
+	ProposedEntry           string
+	ReferencedEntries       string
+	ClosedEntries           string
+	SupersededEntries       string
+	ActiveContracts         string
+	ActiveAspirations       string
+	OpenSignals             string
+	LocalCanonical          string
+	EstablishedParticipants string
 }
 
 // selectCheckType determines the pre-flight check type from entry properties and graph context.
@@ -196,9 +210,15 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 // preflightContext doc). FormatEntryForPrompt includes each entry's
 // Attachments path list so the validator agent can optionally read them
 // when it deems necessary; pre-flight itself stays prompt-only.
-func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType) *preflightContext {
+//
+// localCanonical flows through unchanged; the established-participants
+// string is derived from graph.AllParticipants() here so the caller
+// doesn't have to assemble it.
+func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, localCanonical string) *preflightContext {
 	pctx := &preflightContext{
-		ProposedEntry: FormatEntryForPrompt(entry),
+		ProposedEntry:           FormatEntryForPrompt(entry),
+		LocalCanonical:          localCanonical,
+		EstablishedParticipants: strings.Join(graph.AllParticipants(), ", "),
 	}
 
 	// Referenced entries

@@ -1,0 +1,47 @@
+{{ define "participants" }}
+## Participant identity check (apply to every entry)
+
+Every entry lists participants in its frontmatter. Each proposed participant must be evaluated against two authoritative reference sets, shown below.
+
+{{ if .LocalCanonical -}}
+**Canonical local participant** (ground truth from `.sdd/config.local.yaml`): `{{ .LocalCanonical }}`
+{{- else -}}
+**Canonical local participant**: (not configured on this machine)
+{{- end }}
+
+{{ if .EstablishedParticipants -}}
+**Established participants in graph** (every distinct participant name that appears on an existing entry): {{ .EstablishedParticipants }}
+{{- else -}}
+**Established participants in graph**: (empty — bootstrap mode: this is the first entry with participants)
+{{- end }}
+
+### Judge on form, not on person identity
+
+Pre-flight is a **spelling-consistency gate**, not a person-identity adjudicator. The rubric looks at the *written form* of each name and compares it to the canonical and established sets. It does **not** attempt to guess whether two different names might refer to the same underlying person. Do not reason like *"maybe Christian is Christopher under a different spelling"* — that is out of scope. If the author listed a name, take it at face value.
+
+### Rubric (per proposed participant)
+
+Evaluate each proposed participant independently, then combine into findings.
+
+1. **Exact match** against canonical or any established participant → pass.
+2. **Spelling variant of the same name** — the proposed name is the same lexical name as the canonical (or an established name) with added, removed, or reformatted tokens. Same person, different formatting. Examples of variant forms of canonical `Christopher`: `Christopher Hlubek`, `Christopher H.`, `Chris Hlubek`, `Christopher H`, `Mr. Hlubek`. → `high` drift.
+3. **Distinct name** — a different lexical identifier from any canonical/established name, even if it shares letters or sounds similar (e.g., `Christian` vs `Christopher`, `Claire` vs `Claude`). Two different first names that happen to start with the same letters are distinct names, not variants. Then:
+   - If **any exact canonical or established match is co-listed** in the same `--participants` field → pass. The author's enumeration asserts the listed names are distinct individuals; pre-flight does not override that assertion.
+   - Else, if the description **explicitly introduces** the name as a new voice joining the graph. Qualifying phrases: *"A new colleague X joined the project…"*, *"Introducing X as a new participant…"*, *"Today X began contributing…"*. Non-qualifying: *"X attended the meeting"*, *"X was present"*, *"Transcript included X"*, *"X mentioned that…"* → pass if qualifying, else `high` drift.
+   - Else → `high` drift (novel unintroduced).
+4. **Bootstrap** — the graph has no established participants yet (first entry capture) → pass regardless of other conditions.
+
+Severity is binary: **pass** or `high`. Do not emit `medium` or `low` for participant drift. When in doubt about cases 2 (spelling variance with no co-listed canonical to disambiguate), default to `high`.
+
+Emit **one** `participant-drift` finding per drifting participant. The observation must name the drifting form and, when helpful, the canonical or established spelling it is a variant of.
+
+### Calibration examples
+
+- **Pass** — Proposed `[Christopher]`. Canonical: `Christopher`. Established: `[Christopher, Claude]`. Exact match.
+- **High** — Proposed `[Christopher Hlubek]`. Canonical: `Christopher`. Established: `[Christopher, Claude]`. Spelling variant of canonical (same name, added token). One `participant-drift` finding on `Christopher Hlubek`.
+- **High** — Proposed `[Chris Hlubek]` alone. Canonical: `Christopher`. Same name, abbreviated + added token → spelling variant → drift. Co-listing defense does not apply because the canonical is not in the list.
+- **Pass** — Proposed `[Christopher, Christian]`. Canonical: `Christopher`. Established: `[Christopher, Claude]`. `Christopher` matches canonical. `Christian` is a **distinct name** (different first name from `Christopher`, not a reformatting of it), and the canonical is co-listed — the author has declared these are two separate individuals by enumerating both. Pass. No introduction required.
+- **Pass** — Proposed `[Christopher, Alice]`. Description: *"A new colleague Alice joined the project today to weigh in on the schema change…"*. Canonical: `Christopher`. Established: `[Christopher, Claude]`. `Christopher` matches canonical; `Alice` is a distinct name with explicit introduction. Pass.
+- **High** — Proposed `[Christopher, Bob]`. Description contains: *"Bob attended the meeting and raised concerns about the rollout."* Canonical: `Christopher`. Established: `[Christopher, Claude]`. `Bob` is a distinct name but the narrative **mentions** him rather than **introducing** him as a new voice. One `participant-drift` finding on `Bob`.
+- **Pass** — Proposed `[Christopher]`. Canonical: `Christopher`. Established: (empty). Bootstrap: first entry. Pass.
+{{ end }}

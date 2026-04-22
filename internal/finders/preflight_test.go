@@ -38,7 +38,7 @@ func TestRunPreflight_NoFindings(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(runner)
+	f := New(Options{PreflightRunner: runner})
 	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
 		t.Fatalf("Preflight() error: %v", err)
@@ -66,7 +66,7 @@ func TestRunPreflight_BlockingFinding(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": [{"severity": "high", "category": "signal-target-miss", "observation": "signal not genuinely addressed"}]}`}
-	f := New(runner)
+	f := New(Options{PreflightRunner: runner})
 	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
 		t.Fatalf("Preflight() error: %v", err)
@@ -100,7 +100,7 @@ func TestRunPreflight_NonBlockingFindings(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": [{"severity": "medium", "category": "plan-coverage-ambiguity", "observation": "could be clearer"}, {"severity": "low", "category": "opening-reference-dependent", "observation": "stylistic"}]}`}
-	f := New(runner)
+	f := New(Options{PreflightRunner: runner})
 	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
 		t.Fatalf("Preflight() error: %v", err)
@@ -123,7 +123,7 @@ func TestRunPreflight_RunnerError(t *testing.T) {
 	}
 
 	runner := &mockRunner{err: fmt.Errorf("claude CLI not found")}
-	f := New(runner)
+	f := New(Options{PreflightRunner: runner})
 	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err == nil {
 		t.Fatal("Preflight() expected error when runner fails")
@@ -143,7 +143,7 @@ func TestRunPreflight_ParseError(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: "I think this looks fine!"}
-	f := New(runner)
+	f := New(Options{PreflightRunner: runner})
 	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err == nil {
 		t.Fatal("Preflight() expected error when response is unparseable")
@@ -153,7 +153,14 @@ func TestRunPreflight_ParseError(t *testing.T) {
 	}
 }
 
-func TestRunPreflight_ParticipantDrift_MatchedSkipped(t *testing.T) {
+// Participant-drift validation moved into the LLM prompt per d-tac-6z1;
+// the finder's responsibility is to surface LocalCanonical (from config)
+// and EstablishedParticipants (from graph) to the template. The tests below
+// verify that plumbing — end-to-end rubric behaviour is a property of the
+// LLM layer and depends on the configured provider, so it's not asserted
+// here.
+
+func TestRunPreflight_ParticipantContext_LocalCanonicalFlowsIntoPrompt(t *testing.T) {
 	prior := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
 	prior.Participants = []string{"Christopher", "Claude"}
 	graph := model.NewGraph([]*model.Entry{prior})
@@ -166,95 +173,34 @@ func TestRunPreflight_ParticipantDrift_MatchedSkipped(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(runner)
-	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
+	f := New(Options{
+		PreflightRunner: runner,
+		Config:          &model.Config{Participant: "Christopher"},
+	})
+	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fd := range result.Findings {
-		if fd.Category == "participant-drift" {
-			t.Errorf("drift finding should not fire for an established name, got %+v", fd)
-		}
-	}
-}
 
-func TestRunPreflight_ParticipantDrift_UnknownNameFlagged(t *testing.T) {
-	prior := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
-	prior.Participants = []string{"Christopher", "Claude"}
-	graph := model.NewGraph([]*model.Entry{prior})
-
-	proposed := &model.Entry{
-		Type:         model.TypeSignal,
-		Layer:        model.LayerConceptual,
-		Content:      "new observation",
-		Participants: []string{"Chris"}, // near-miss typo
+	// The prompt must reference the canonical declared in config so the LLM
+	// can treat it as authoritative ground truth.
+	if !strings.Contains(runner.lastPrompt, "Canonical local participant") {
+		t.Error("prompt missing canonical-participant header")
 	}
-
-	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(runner)
-	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(runner.lastPrompt, "`Christopher`") {
+		t.Errorf("prompt missing canonical value 'Christopher'; got:\n%s", runner.lastPrompt)
 	}
-	if len(result.Findings) != 1 {
-		t.Fatalf("Findings len = %d, want 1; got %+v", len(result.Findings), result.Findings)
-	}
-	fd := result.Findings[0]
-	if fd.Category != "participant-drift" || fd.Severity != query.SeverityMedium {
-		t.Errorf("finding = %+v, want category=participant-drift severity=medium", fd)
-	}
-	// Observation must list the established names so the author can judge typo vs new voice.
+	// And the established-set from the graph must reach the prompt.
 	for _, name := range []string{"Christopher", "Claude"} {
-		if !strings.Contains(fd.Observation, name) {
-			t.Errorf("observation missing established name %q: %s", name, fd.Observation)
+		if !strings.Contains(runner.lastPrompt, name) {
+			t.Errorf("prompt missing established participant %q", name)
 		}
-	}
-	if !strings.Contains(fd.Observation, `"Chris"`) {
-		t.Errorf("observation should mention the drifting name %q: %s", "Chris", fd.Observation)
 	}
 }
 
-func TestRunPreflight_ParticipantDrift_PerNameValidation(t *testing.T) {
-	prior := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
-	prior.Participants = []string{"Christopher", "Claude"}
-	graph := model.NewGraph([]*model.Entry{prior})
-
-	proposed := &model.Entry{
-		Type:  model.TypeSignal,
-		Layer: model.LayerConceptual,
-		// Mixed: one known, one unknown. Per-name (AC 10): exactly one
-		// finding, targeting only the drifting name.
-		Participants: []string{"Christopher", "Bob"},
-		Content:      "new observation",
-	}
-
-	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(runner)
-	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var drift []query.Finding
-	for _, fd := range result.Findings {
-		if fd.Category == "participant-drift" {
-			drift = append(drift, fd)
-		}
-	}
-	if len(drift) != 1 {
-		t.Fatalf("expected exactly 1 drift finding (per-name), got %d: %+v", len(drift), drift)
-	}
-	if !strings.Contains(drift[0].Observation, `"Bob"`) {
-		t.Errorf("drift finding should target Bob, got: %s", drift[0].Observation)
-	}
-	if strings.Contains(drift[0].Observation, `"Christopher"`) &&
-		strings.Contains(drift[0].Observation, `participant "Christopher"`) {
-		t.Errorf("drift finding should not target the known name: %s", drift[0].Observation)
-	}
-}
-
-func TestRunPreflight_ParticipantDrift_EmptyGraphBootstrap(t *testing.T) {
-	// Fresh graph: no established participants. The drift check cannot
-	// make any judgment — no findings.
+func TestRunPreflight_ParticipantContext_BootstrapEmptyEstablishedSet(t *testing.T) {
+	// Fresh graph: no established participants. The prompt should surface
+	// the bootstrap framing so the LLM skips the drift check.
 	graph := model.NewGraph(nil)
 	proposed := &model.Entry{
 		Type:         model.TypeSignal,
@@ -264,15 +210,40 @@ func TestRunPreflight_ParticipantDrift_EmptyGraphBootstrap(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(runner)
-	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
+	f := New(Options{
+		PreflightRunner: runner,
+		Config:          &model.Config{Participant: "Christopher"},
+	})
+	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, fd := range result.Findings {
-		if fd.Category == "participant-drift" {
-			t.Errorf("drift finding should not fire on an empty graph, got %+v", fd)
-		}
+	if !strings.Contains(runner.lastPrompt, "bootstrap mode") {
+		t.Errorf("prompt missing bootstrap framing for empty established set; got:\n%s", runner.lastPrompt)
+	}
+}
+
+func TestRunPreflight_ParticipantContext_MissingConfig(t *testing.T) {
+	// No config injected — the prompt should still render but declare the
+	// canonical as unconfigured; the LLM then falls back to the graph set.
+	prior := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
+	prior.Participants = []string{"Christopher"}
+	graph := model.NewGraph([]*model.Entry{prior})
+	proposed := &model.Entry{
+		Type:         model.TypeSignal,
+		Layer:        model.LayerConceptual,
+		Content:      "new observation",
+		Participants: []string{"Christopher"},
+	}
+
+	runner := &mockRunner{response: `{"findings": []}`}
+	f := New(Options{PreflightRunner: runner})
+	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(runner.lastPrompt, "not configured") {
+		t.Errorf("prompt missing 'not configured' marker; got:\n%s", runner.lastPrompt)
 	}
 }
 
@@ -290,7 +261,7 @@ func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(runner)
+	f := New(Options{PreflightRunner: runner})
 	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
 	if err != nil {
 		t.Fatal(err)

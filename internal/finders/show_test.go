@@ -13,7 +13,7 @@ func TestShow_ShortIDResolves(t *testing.T) {
 		entry("20260406-100000-s-stg-aaa"),
 		entry("20260406-100100-d-tac-bbb", withKind(model.KindDirective)),
 	})
-	f := New(nil)
+	f := New(Options{})
 
 	result, err := f.Show(query.ShowQuery{
 		Graph: g,
@@ -35,7 +35,7 @@ func TestShow_AmbiguousShortIDErrors(t *testing.T) {
 		entry("20260406-100000-s-stg-xyz"),
 		entry("20260407-110000-s-stg-xyz"),
 	})
-	f := New(nil)
+	f := New(Options{})
 
 	_, err := f.Show(query.ShowQuery{
 		Graph: g,
@@ -53,7 +53,7 @@ func TestShow_NotFoundShortIDPassesThroughError(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{
 		entry("20260406-100000-s-stg-aaa"),
 	})
-	f := New(nil)
+	f := New(Options{})
 
 	_, err := f.Show(query.ShowQuery{
 		Graph: g,

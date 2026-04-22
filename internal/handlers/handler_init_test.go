@@ -21,7 +21,7 @@ import (
 func TestInit_FreshProjectEndToEnd(t *testing.T) {
 	tmp := t.TempDir()
 
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	var (
 		createdCalled     bool
@@ -93,7 +93,7 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 // for the housekeeping pass that now runs on every init (not just fresh).
 func TestInit_GitignoreIdempotent(t *testing.T) {
 	tmp := t.TempDir()
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	run := func() {
 		if err := h.Init(context.Background(), &command.InitCmd{
@@ -124,7 +124,7 @@ func TestInit_GitignoreIdempotent(t *testing.T) {
 // version leaves minimum_version absent from meta.json on initial write.
 func TestInit_DevBuildSkipsMinimumVersion(t *testing.T) {
 	tmp := t.TempDir()
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	err := h.Init(context.Background(), &command.InitCmd{
 		RepoRoot:      tmp,
@@ -155,7 +155,7 @@ func TestInit_DevBuildSkipsMinimumVersion(t *testing.T) {
 // Current.
 func TestInit_RepeatIsIdempotent(t *testing.T) {
 	tmp := t.TempDir()
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	// First run: populate.
 	err := h.Init(context.Background(), &command.InitCmd{
@@ -233,7 +233,7 @@ func TestInit_PostUpgradeRefreshesDriftedPristine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 	var skills command.SkillInstallResult
 	err = h.Init(context.Background(), &command.InitCmd{
 		RepoRoot:          tmp,
@@ -278,7 +278,7 @@ func TestInit_WritesParticipantAndPreservesLLMBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	var gotPath, gotName string
 	err := h.Init(context.Background(), &command.InitCmd{
@@ -319,7 +319,7 @@ func TestInit_WritesParticipantAndPreservesLLMBlock(t *testing.T) {
 // produces no write and no OnParticipantWritten callback.
 func TestInit_ParticipantIdempotent(t *testing.T) {
 	tmp := t.TempDir()
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	// First run: write participant.
 	if err := h.Init(context.Background(), &command.InitCmd{
@@ -352,7 +352,7 @@ func TestInit_ParticipantIdempotent(t *testing.T) {
 // must not create or modify it.
 func TestInit_ParticipantEmptyDoesNotTouchConfig(t *testing.T) {
 	tmp := t.TempDir()
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	if err := h.Init(context.Background(), &command.InitCmd{
 		RepoRoot:      tmp,
@@ -372,7 +372,7 @@ func TestInit_ParticipantEmptyDoesNotTouchConfig(t *testing.T) {
 // creation survives a later init from a different binary version.
 func TestInit_PreservesExistingMeta(t *testing.T) {
 	tmp := t.TempDir()
-	h := handlers.New(handlers.Options{Reader: finders.New(nil)})
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
 
 	// Initial: stamp minimum_version with v0.2.0.
 	if err := h.Init(context.Background(), &command.InitCmd{

@@ -94,9 +94,32 @@ func (readOnlyRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) 
 
 // newReadFinder builds a Finder suitable for read-only operations. The
 // runner errors on invocation so accidental use in a code path that does
-// call Preflight is loud.
-func newReadFinder() *finders.Finder {
-	return finders.New(readOnlyRunner{})
+// call Preflight is loud. Config load failures propagate — a malformed
+// config is a real problem and the caller decides how to surface it.
+// Returns nil cfg silently only when the CWD is outside an sdd repo or
+// config files simply don't exist (legitimate "no config" states).
+func newReadFinder() (*finders.Finder, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return finders.New(finders.Options{
+		PreflightRunner: readOnlyRunner{},
+		Config:          cfg,
+	}), nil
+}
+
+// loadConfig reads .sdd/config.yaml + config.local.yaml when present.
+// Returns (nil, nil) when the CWD is outside an sdd repo or no config
+// files exist — both are legitimate "no config" states. Returns (nil,
+// err) when discovery succeeded but parsing failed, so callers can
+// fail hard on broken config.
+func loadConfig() (*model.Config, error) {
+	sddDir, err := resolveSDDDir()
+	if err != nil {
+		return nil, nil
+	}
+	return meta.ReadConfig(sddDir)
 }
 
 // splitCSV returns the comma-split fields of s with each element trimmed of
@@ -239,7 +262,11 @@ func loadGraph(cmd *cli.Command) (*model.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newReadFinder().LoadGraph(dir)
+	f, err := newReadFinder()
+	if err != nil {
+		return nil, err
+	}
+	return f.LoadGraph(dir)
 }
 
 func statusCmd() *cli.Command {
@@ -252,7 +279,11 @@ func statusCmd() *cli.Command {
 				return err
 			}
 
-			result, err := newReadFinder().Status(query.StatusQuery{Graph: g})
+			f, err := newReadFinder()
+			if err != nil {
+				return err
+			}
+			result, err := f.Status(query.StatusQuery{Graph: g})
 			if err != nil {
 				return err
 			}
@@ -289,7 +320,11 @@ func showCmd() *cli.Command {
 				return err
 			}
 
-			result, err := newReadFinder().Show(query.ShowQuery{
+			f, err := newReadFinder()
+			if err != nil {
+				return err
+			}
+			result, err := f.Show(query.ShowQuery{
 				Graph:      g,
 				IDs:        ids,
 				MaxDepth:   int(cmd.Int("max-depth")),
@@ -362,7 +397,11 @@ func listCmd() *cli.Command {
 				kind = model.Kind(k)
 			}
 
-			result, err := newReadFinder().List(query.ListQuery{
+			f, err := newReadFinder()
+			if err != nil {
+				return err
+			}
+			result, err := f.List(query.ListQuery{
 				Graph: g,
 				Filter: model.GraphFilter{
 					Type:        typ,
@@ -544,10 +583,17 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
-				GraphDir:  dir,
-				SDDDir:    sddDir,
-				Reader:    finders.New(runner),
+				GraphDir: dir,
+				SDDDir:   sddDir,
+				Reader: finders.New(finders.Options{
+					PreflightRunner: runner,
+					Config:          cfg,
+				}),
 				LLMRunner: runner,
 				Committer: gitCommitterFunc(gitCommit),
 			})
@@ -632,9 +678,13 @@ func rewriteCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			reader, err := newReadFinder()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
-				Reader:    newReadFinder(),
+				Reader:    reader,
 				Committer: gitCommitterFunc(gitCommit),
 				Mover:     gitMover{},
 			})
@@ -663,9 +713,13 @@ func lintCmd() *cli.Command {
 						}
 					},
 				}
+				reader, err := newReadFinder()
+				if err != nil {
+					return err
+				}
 				handler := handlers.New(handlers.Options{
 					GraphDir:  dir,
-					Reader:    newReadFinder(),
+					Reader:    reader,
 					Committer: gitCommitterFunc(gitCommit),
 				})
 				if err := handler.LintFix(ctx, fixCmd); err != nil {
@@ -678,7 +732,11 @@ func lintCmd() *cli.Command {
 				return err
 			}
 
-			result, err := newReadFinder().Lint(query.LintQuery{Graph: g})
+			f, err := newReadFinder()
+			if err != nil {
+				return err
+			}
+			result, err := f.Lint(query.LintQuery{Graph: g})
 			if err != nil {
 				return err
 			}
@@ -753,9 +811,16 @@ func summarizeCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
-				GraphDir:  dir,
-				Reader:    finders.New(runner),
+				GraphDir: dir,
+				Reader: finders.New(finders.Options{
+					PreflightRunner: runner,
+					Config:          cfg,
+				}),
 				LLMRunner: runner,
 				Committer: gitCommitterFunc(gitCommit),
 			})
@@ -1184,8 +1249,12 @@ func initCmd() *cli.Command {
 				},
 			}
 
+			reader, err := newReadFinder()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
-				Reader:    newReadFinder(),
+				Reader:    reader,
 				Committer: gitCommitterFunc(gitCommit),
 			})
 			return handler.Init(ctx, icmd)
@@ -1273,9 +1342,13 @@ func wipStartCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			reader, err := newReadFinder()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
-				Reader:    newReadFinder(),
+				Reader:    reader,
 				Committer: gitCommitterFunc(gitCommit),
 				Brancher:  gitBrancher{},
 			})
@@ -1324,9 +1397,13 @@ func wipDoneCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			reader, err := newReadFinder()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
-				Reader:    newReadFinder(),
+				Reader:    reader,
 				Committer: gitCommitterFunc(gitRemoveAndCommit),
 				Brancher:  gitBrancher{},
 			})
@@ -1365,7 +1442,11 @@ func wipListCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			result, err := newReadFinder().WIPList(query.WIPListQuery{GraphDir: dir})
+			f, err := newReadFinder()
+			if err != nil {
+				return err
+			}
+			result, err := f.WIPList(query.WIPListQuery{GraphDir: dir})
 			if err != nil {
 				return fmt.Errorf("loading WIP markers: %w", err)
 			}

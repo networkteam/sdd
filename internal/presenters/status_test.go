@@ -109,3 +109,41 @@ func TestRenderStatusSections(t *testing.T) {
 		t.Errorf("Gaps and Questions should not contain insight:\n%s", gapsBlock)
 	}
 }
+
+// TestRenderStatusLocalParticipantHeader verifies that the status output
+// begins with a `Local participant:` header above the graph counts. Agents
+// rely on this as the canonical source of truth for the --participants
+// flag, so drift in the recent-entries list can't mislead them.
+func TestRenderStatusLocalParticipantHeader(t *testing.T) {
+	g := model.NewGraph(nil)
+
+	t.Run("canonical configured", func(t *testing.T) {
+		var buf bytes.Buffer
+		presenters.RenderStatus(&buf, &query.StatusResult{
+			Graph:            g,
+			LocalParticipant: "Christopher",
+		})
+		out := buf.String()
+		if !strings.HasPrefix(out, "Local participant: Christopher\n") {
+			t.Errorf("expected 'Local participant: Christopher' header, got:\n%s", out)
+		}
+		// Must come before the graph counts line.
+		hdrIdx := strings.Index(out, "Local participant:")
+		graphIdx := strings.Index(out, "Graph:")
+		if hdrIdx < 0 || graphIdx < 0 || hdrIdx >= graphIdx {
+			t.Errorf("header must precede graph counts, got indices %d and %d", hdrIdx, graphIdx)
+		}
+	})
+
+	t.Run("not configured", func(t *testing.T) {
+		var buf bytes.Buffer
+		presenters.RenderStatus(&buf, &query.StatusResult{
+			Graph:            g,
+			LocalParticipant: "",
+		})
+		out := buf.String()
+		if !strings.Contains(out, "Local participant: (not configured — run sdd init)") {
+			t.Errorf("expected not-configured marker, got:\n%s", out)
+		}
+	})
+}

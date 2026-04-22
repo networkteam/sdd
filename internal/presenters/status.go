@@ -19,6 +19,11 @@ func RenderStatus(w io.Writer, result *query.StatusResult) {
 	g := result.Graph
 	decisions := g.Filter(model.GraphFilter{Type: model.TypeDecision})
 	signals := g.Filter(model.GraphFilter{Type: model.TypeSignal})
+	if result.LocalParticipant != "" {
+		fmt.Fprintf(w, "Local participant: %s\n", result.LocalParticipant)
+	} else {
+		fmt.Fprintln(w, "Local participant: (not configured — run sdd init)")
+	}
 	fmt.Fprintf(w, "Graph: %d entries (%d decisions, %d signals)\n\n",
 		len(g.Entries), len(decisions), len(signals))
 
