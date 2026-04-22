@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 235c8c2e83408f9f21c72b0c00f2b83a4658f9b40975929fa2f7252bd353696c
+sdd-content-hash: 38f78f78e08e248529981a3f9f656882cad4d71cf3cc89840799dff159610a7f
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -142,7 +142,7 @@ Entry lines in `sdd status`, `sdd list`, and summary chains carry three kinds of
 
 - **Identity (kind, layer, type)** renders as plain qualifiers: `tactical plan decision`, `process gap signal`. Kind acts like a sub-type — identity, not an attribute.
 - **Stored attributes** live in the entry's YAML frontmatter — written at creation, immutable afterwards. Rendered with square brackets: `[confidence: medium]`.
-- **Derived attributes** are computed from graph relationships on every read — never written on the entry itself. Rendered with curly braces: `{status: active}`, `{status: open}`, `{status: closed-by <full-id>}`, `{status: superseded-by <full-id>}`.
+- **Derived attributes** are computed from graph relationships on every read — never written on the entry itself. Rendered with curly braces: `{status: active}`, `{status: open}`, `{status: closed-by <full-id>}`, `{status: superseded-by <full-id>}`. Done signals don't carry `{status: ...}` — they're terminal facts of execution with no lifecycle to track.
 
 The stored-vs-derived split is what makes the immutability contract practical: state changes as the graph grows (a signal becomes closed when a closing done signal lands), but the entry file never changes. Reading `{status: ...}` tells you the current computed state; reading stored attrs tells you what was written originally.
 
