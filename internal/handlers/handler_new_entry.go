@@ -47,7 +47,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 			return
 		}
 		fmt.Fprintf(h.stderr, "stdin attachment saved (%s): %s\n", reason, path)
-		fmt.Fprintf(h.stderr, "  retry: cat %s | sdd new ... --attach -:%s\n", path, stdinAtt.Target)
+		fmt.Fprintf(h.stderr, "  retry: sdd new ... --attach %s:%s\n", path, stdinAtt.Target)
 	}
 
 	// On dry-run, ensure stdin is saved on every exit path (including early
