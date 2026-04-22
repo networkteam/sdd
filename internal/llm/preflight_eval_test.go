@@ -94,7 +94,8 @@ func TestPreflightEval_ClosingAction_SilentlyOmittedACs(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{plan})
 
 	proposed := &model.Entry{
-		Type:    model.TypeAction,
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
 		Layer:   model.LayerTactical,
 		Closes:  []string{plan.ID},
 		Content: "Created the users table with email (unique) and bcrypt-hashed password columns via a new migration. Wired up a /users/:id GET endpoint returning JSON.",
@@ -122,7 +123,8 @@ func TestPreflightEval_ClosingAction_NamedButNoReasoning(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{plan})
 
 	proposed := &model.Entry{
-		Type:    model.TypeAction,
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
 		Layer:   model.LayerTactical,
 		Closes:  []string{plan.ID},
 		Content: "Implemented item 1 (database schema) and item 3 (API endpoints). Items 2 and 4 were not addressed.",
@@ -150,7 +152,8 @@ func TestPreflightEval_ClosingAction_DeviationWithReasoning(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{plan})
 
 	proposed := &model.Entry{
-		Type:    model.TypeAction,
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
 		Layer:   model.LayerTactical,
 		Closes:  []string{plan.ID},
 		Content: "Implemented item 1 (database schema with users table and bcrypt passwords) and item 3 (full CRUD endpoints at /users). Deviation: authentication middleware (item 2) deferred — dialogued that we'd adopt an existing Passport.js library in a follow-up rather than build from scratch. Deviation: integration tests (item 4) deferred to a follow-up action — agreed during implementation that the schema/endpoint work needed smoke testing first, with the full suite as a separate closure.",
@@ -176,10 +179,11 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{plan})
 
 	proposed := &model.Entry{
-		Type:        model.TypeAction,
+		Type:        model.TypeSignal,
+		Kind:        model.KindDone,
 		Layer:       model.LayerTactical,
 		Closes:      []string{plan.ID},
-		Attachments: []string{"2026/04/10-130000-a-tac-xyz/implementation.md"},
+		Attachments: []string{"2026/04/10-130000-s-tac-xyz/implementation.md"},
 		Content:     "Built the complete user authentication feature: added users table with email/password columns (bcrypt hashed), wrote Express middleware that validates JWT tokens on protected routes, created REST endpoints for all CRUD operations (create user via signup, read user profile, update user settings, delete user account), and added a full integration test suite covering happy paths and error cases for every endpoint.",
 	}
 
@@ -246,7 +250,8 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{decision})
 
 	proposed := &model.Entry{
-		Type:    model.TypeAction,
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
 		Layer:   model.LayerTactical,
 		Refs:    []string{decision.ID},
 		Closes:  []string{decision.ID},
@@ -278,7 +283,8 @@ func TestPreflightEval_ActionClosesSignal_NoDurableArtifact(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{signal})
 
 	proposed := &model.Entry{
-		Type:    model.TypeAction,
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
 		Layer:   model.LayerProcess,
 		Closes:  []string{signal.ID},
 		Content: "Updated the catch-up playbook and catch-up sub-skill to treat WIP markers as informational context. Fresh sessions no longer suggest picking up WIP work.",
@@ -305,7 +311,8 @@ func TestPreflightEval_ActionClosesSignal_WithCommitRef(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{signal})
 
 	proposed := &model.Entry{
-		Type:    model.TypeAction,
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
 		Layer:   model.LayerProcess,
 		Closes:  []string{signal.ID},
 		Content: "Updated the catch-up playbook and catch-up sub-skill to treat WIP markers as informational context. Fresh sessions no longer suggest picking up WIP work. Commit adebd7e.",

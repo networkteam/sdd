@@ -981,19 +981,6 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 			wantWarns: 0,
 		},
 		{
-			name: "cannot close action",
-			entries: []*Entry{
-				entry("20260406-100000-a-tac-aaa"),
-				func() *Entry {
-					e := entry("20260406-100100-d-tac-bbb")
-					e.Closes = []string{"20260406-100000-a-tac-aaa"}
-					return e
-				}(),
-			},
-			wantWarns: 1,
-			wantMsg:   "actions cannot be closed",
-		},
-		{
 			name: "decision cannot close decision (same kind)",
 			entries: []*Entry{
 				entry("20260406-100000-d-tac-aaa"),
@@ -1040,22 +1027,6 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 			entries: []*Entry{
 				entry("20260406-100000-s-stg-aaa"),
 				entry("20260406-100100-d-stg-bbb", withCloses("20260406-100000-s-stg-aaa")),
-			},
-			wantWarns: 0,
-		},
-		{
-			name: "valid: action closes decision",
-			entries: []*Entry{
-				entry("20260406-100000-d-tac-aaa"),
-				entry("20260406-100100-a-tac-bbb", withCloses("20260406-100000-d-tac-aaa")),
-			},
-			wantWarns: 0,
-		},
-		{
-			name: "valid: action closes signal",
-			entries: []*Entry{
-				entry("20260406-100000-s-tac-aaa"),
-				entry("20260406-100100-a-tac-bbb", withCloses("20260406-100000-s-tac-aaa")),
 			},
 			wantWarns: 0,
 		},

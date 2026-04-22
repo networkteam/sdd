@@ -4,7 +4,7 @@ package model
 type StatusKind string
 
 const (
-	StatusNone         StatusKind = ""              // actions — facts have no lifecycle state
+	StatusNone         StatusKind = ""              // done signals — terminal facts with no lifecycle state
 	StatusActive       StatusKind = "active"        // decision (directive, plan, contract) not closed or superseded
 	StatusOpen         StatusKind = "open"          // signal not closed or superseded
 	StatusClosedBy     StatusKind = "closed-by"     // closed by another entry (By carries the full ID)
@@ -33,6 +33,12 @@ func (g *Graph) DerivedStatus(e *Entry) Status {
 	}
 	switch e.Type {
 	case TypeSignal:
+		// Done signals are terminal — facts of execution with no lifecycle state.
+		// If something does close a done signal (the rare "corrective done" case),
+		// the ClosedBy check above fires first.
+		if e.Kind == KindDone {
+			return Status{Kind: StatusNone}
+		}
 		return Status{Kind: StatusOpen}
 	case TypeDecision:
 		return Status{Kind: StatusActive}

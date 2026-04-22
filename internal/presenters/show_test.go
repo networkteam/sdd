@@ -93,12 +93,12 @@ func TestRenderShow_CombinedRelationsAndKind(t *testing.T) {
 	signal := entry("20260410-100000-s-tac-aaa", withSummary("The signal"))
 	contract := entry("20260410-100050-d-tac-ddd", withKind(model.KindContract), withSummary("A contract"))
 	plan := entry("20260410-100055-d-tac-eee", withKind(model.KindPlan), withSummary("A plan"))
-	action := entry("20260410-100100-a-tac-bbb", withContent("Action with combined relations"),
+	done := entry("20260410-100100-s-tac-bbb", withKind(model.KindDone), withContent("Done signal with combined relations"),
 		withRefs("20260410-100000-s-tac-aaa", "20260410-100050-d-tac-ddd", "20260410-100055-d-tac-eee"),
 		withCloses("20260410-100000-s-tac-aaa"))
 
-	g := model.NewGraph([]*model.Entry{signal, contract, plan, action})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{action.ID}))
+	g := model.NewGraph([]*model.Entry{signal, contract, plan, done})
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{done.ID}))
 }
 
 func TestRenderShow_MaxDepthTruncation(t *testing.T) {

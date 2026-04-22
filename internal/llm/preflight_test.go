@@ -45,16 +45,6 @@ func Test_selectCheckType(t *testing.T) {
 			expected: checkClosingDone,
 		},
 		{
-			name:     "legacy action closing decision routes to closing-done",
-			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{decision.ID}},
-			expected: checkClosingDone,
-		},
-		{
-			name:     "legacy action closing signal routes to short-loop",
-			entry:    &model.Entry{Type: model.TypeAction, Closes: []string{signal.ID}},
-			expected: checkShortLoop,
-		},
-		{
 			name:     "fact signal closing question (dissolution)",
 			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindFact, Closes: []string{questionSignal.ID}},
 			expected: checkDissolution,
@@ -112,11 +102,6 @@ func Test_selectCheckType(t *testing.T) {
 		{
 			name:     "supersedes takes priority over closes",
 			entry:    &model.Entry{Type: model.TypeDecision, Supersedes: []string{decision.ID}, Closes: []string{signal.ID}},
-			expected: checkSupersedes,
-		},
-		{
-			name:     "supersedes on action",
-			entry:    &model.Entry{Type: model.TypeAction, Supersedes: []string{decision.ID}},
 			expected: checkSupersedes,
 		},
 		{
@@ -382,19 +367,20 @@ func Test_assembleContext_OpenSignalsNotIncludedForOtherChecks(t *testing.T) {
 }
 
 func Test_assembleContext_ClosedPlanDescriptionFlowsThrough(t *testing.T) {
-	// Plans carry their AC section inline in the description; closing an
-	// action against a plan flows that description through ClosedEntries
-	// via FormatEntryForPrompt — no attachment extraction needed.
+	// Plans carry their AC section inline in the description; a done signal
+	// closing a plan flows that description through ClosedEntries via
+	// FormatEntryForPrompt — no attachment extraction needed.
 	plan := entry("20260410-120000-d-tac-pln",
 		withKind(model.KindPlan),
 		withContent("Plan body.\n\n## Acceptance criteria\n- [ ] finish X\n- [ ] finish Y\n"))
 	graph := model.NewGraph([]*model.Entry{plan})
 
 	proposed := &model.Entry{
-		Type:    model.TypeAction,
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
 		Layer:   model.LayerTactical,
 		Closes:  []string{plan.ID},
-		Content: "action closing the plan",
+		Content: "done signal closing the plan",
 	}
 
 	pctx := assembleContext(proposed, graph, checkClosingDone)

@@ -529,8 +529,8 @@ func validateIDRefs(e *Entry, g *Graph, field string, ids []string) {
 // Valid: decision closes signal; done-kind signal closes decision or signal;
 // kind: directive decision closes a stable-kind decision (contract or
 // aspiration) as retirement.
-// Invalid: anything closes action; non-done signal closes anything; any
-// decision-closes-decision other than directive→{contract|aspiration}.
+// Invalid: non-done signal closes anything; any decision-closes-decision
+// other than directive→{contract|aspiration}.
 func validateCloses(e *Entry, g *Graph) {
 	for _, id := range e.Closes {
 		target, ok := g.ByID[id]
@@ -544,12 +544,6 @@ func validateCloses(e *Entry, g *Graph) {
 				Field:   "closes",
 				Value:   id,
 				Message: fmt.Sprintf("only done-kind signals may close entries (got %s signal closing %s %s)", e.Kind, target.Type, id),
-			})
-		case target.Type == TypeAction:
-			e.Warnings = append(e.Warnings, Warning{
-				Field:   "closes",
-				Value:   id,
-				Message: fmt.Sprintf("actions cannot be closed (closes action %s)", id),
 			})
 		case e.Type == TypeDecision && target.Type == TypeDecision:
 			// Retirement exception: a kind: directive decision may close a
@@ -586,7 +580,7 @@ func validateSupersedes(e *Entry, g *Graph) {
 }
 
 // validateKind checks that signals and decisions have a kind consistent with
-// their type. Action-type entries are left alone (legacy, no kind vocabulary).
+// their type.
 func validateKind(e *Entry) {
 	switch e.Type {
 	case TypeSignal:

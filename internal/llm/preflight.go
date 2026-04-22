@@ -155,11 +155,10 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 		return checkSupersedes
 	}
 
-	// Completion records — done-kind signals and legacy actions — closing entries.
-	// Route by whether the closure targets a decision (closing_done) or a signal (short_loop).
-	// Unusual close patterns within signal closures get flagged by the unusual_close partial.
-	isCompletionRecord := entry.Type == model.TypeAction ||
-		(entry.Type == model.TypeSignal && entry.Kind == model.KindDone)
+	// Done-kind signals closing entries route by target kind: closing_done for
+	// decisions, short_loop for signals. Unusual close patterns within signal
+	// closures get flagged by the unusual_close partial.
+	isCompletionRecord := entry.Type == model.TypeSignal && entry.Kind == model.KindDone
 	if isCompletionRecord && len(entry.Closes) > 0 {
 		for _, id := range entry.Closes {
 			if target, ok := graph.ByID[id]; ok && target.Type == model.TypeDecision {

@@ -15,7 +15,6 @@ type EntryType string
 const (
 	TypeSignal   EntryType = "signal"
 	TypeDecision EntryType = "decision"
-	TypeAction   EntryType = "action"
 )
 
 type Layer string
@@ -32,14 +31,12 @@ const (
 var TypeAbbrev = map[EntryType]string{
 	TypeSignal:   "s",
 	TypeDecision: "d",
-	TypeAction:   "a",
 }
 
 // TypeFromAbbrev maps abbreviations to full type names.
 var TypeFromAbbrev = map[string]EntryType{
 	"s": TypeSignal,
 	"d": TypeDecision,
-	"a": TypeAction,
 }
 
 // LayerAbbrev maps full layer names to abbreviations used in IDs.
@@ -116,7 +113,6 @@ func IsValidKindForType(t EntryType, k Kind) bool {
 	case TypeDecision:
 		return decisionKinds[k]
 	default:
-		// Legacy types (action) have no kind vocabulary.
 		return false
 	}
 }
@@ -205,9 +201,9 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		return nil, fmt.Errorf("parsing frontmatter in %q: %w", filename, err)
 	}
 
-	entryType, ok := TypeFromAbbrev[fm.Type]
-	if !ok {
-		entryType = EntryType(fm.Type)
+	entryType, err := parseEntryType(fm.Type)
+	if err != nil {
+		return nil, fmt.Errorf("parsing frontmatter in %q: %w", filename, err)
 	}
 
 	layer, ok := LayerFromAbbrev[fm.Layer]
@@ -237,7 +233,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 type IDParts struct {
 	Timestamp string
 	Time      time.Time
-	TypeCode  string // abbreviation: "s", "d", "a"
+	TypeCode  string // abbreviation: "s" or "d"
 	LayerCode string // abbreviation: "stg", "cpt", "tac", "ops", "prc"
 	Suffix    string
 }
@@ -317,6 +313,23 @@ func ResolveAttachmentLinks(content, id string) string {
 	return strings.ReplaceAll(content, "{{attachments}}", "./"+shortName)
 }
 
+// parseEntryType resolves a frontmatter type string to a canonical EntryType.
+// Accepts both abbreviated ("s", "d") and full ("signal", "decision") forms.
+// Unknown values return an error — the loader is the last line of defence
+// against stale or malformed graph entries.
+func parseEntryType(s string) (EntryType, error) {
+	switch s {
+	case "s", "signal":
+		return TypeSignal, nil
+	case "d", "decision":
+		return TypeDecision, nil
+	case "":
+		return "", fmt.Errorf("missing type field")
+	default:
+		return "", fmt.Errorf("unknown type %q (expected signal or decision)", s)
+	}
+}
+
 // parseFrontmatter splits content into YAML frontmatter and body.
 func parseFrontmatter(content string) (*frontmatter, string, error) {
 	content = strings.TrimSpace(content)
@@ -368,8 +381,7 @@ func GenerateID(typ EntryType, layer Layer, suffix string) string {
 
 // RewriteID returns the id with its type abbreviation replaced by newType's
 // abbreviation. Timestamp, layer, and suffix are preserved. Used by the
-// sdd rewrite command when retyping a legacy action to signal+done, or any
-// other mechanical type change.
+// sdd rewrite command for mechanical type changes.
 func RewriteID(id string, newType EntryType) (string, error) {
 	parts, err := ParseID(id)
 	if err != nil {
@@ -411,8 +423,6 @@ func (e *Entry) TypeLabel() string {
 		return "signal"
 	case TypeDecision:
 		return "decision"
-	case TypeAction:
-		return "action"
 	default:
 		return string(e.Type)
 	}

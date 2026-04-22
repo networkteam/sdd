@@ -64,9 +64,9 @@ func FormatConfidence(c string) string {
 }
 
 // FormatStatus renders a derived status in curly-brace notation. Returns the
-// empty string for StatusNone (actions) so callers can omit the attribute.
-// Compound states use a space separator in the value (`closed-by <id>`) to
-// avoid ambiguity with the outer `{key: value}` delimiter.
+// empty string for StatusNone so callers can omit the attribute. Compound
+// states use a space separator in the value (`closed-by <id>`) to avoid
+// ambiguity with the outer `{key: value}` delimiter.
 func FormatStatus(s model.Status) string {
 	if s.Kind == model.StatusNone {
 		return ""
