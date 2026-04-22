@@ -35,6 +35,11 @@ const (
 type Config struct {
 	GraphDir string    `yaml:"graph_dir,omitempty"`
 	LLM      LLMConfig `yaml:"llm,omitempty"`
+	// Participant is the canonical name used for entry authorship when
+	// --participants / --participant is omitted at capture time. Lives in
+	// .sdd/config.local.yaml (gitignored) because the same person may use
+	// different spellings across projects.
+	Participant string `yaml:"participant,omitempty"`
 }
 
 // LLMConfig holds settings for LLM provider selection, model choice, and
@@ -87,6 +92,9 @@ func MergeConfig(base, overlay *Config) *Config {
 	}
 	if overlay.GraphDir != "" {
 		out.GraphDir = overlay.GraphDir
+	}
+	if overlay.Participant != "" {
+		out.Participant = overlay.Participant
 	}
 	out.LLM = mergeLLMConfig(base.LLM, overlay.LLM)
 	return &out

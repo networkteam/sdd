@@ -153,6 +153,129 @@ func TestRunPreflight_ParseError(t *testing.T) {
 	}
 }
 
+func TestRunPreflight_ParticipantDrift_MatchedSkipped(t *testing.T) {
+	prior := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
+	prior.Participants = []string{"Christopher", "Claude"}
+	graph := model.NewGraph([]*model.Entry{prior})
+
+	proposed := &model.Entry{
+		Type:         model.TypeSignal,
+		Layer:        model.LayerConceptual,
+		Content:      "new observation",
+		Participants: []string{"Christopher"},
+	}
+
+	runner := &mockRunner{response: `{"findings": []}`}
+	f := New(runner)
+	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fd := range result.Findings {
+		if fd.Category == "participant-drift" {
+			t.Errorf("drift finding should not fire for an established name, got %+v", fd)
+		}
+	}
+}
+
+func TestRunPreflight_ParticipantDrift_UnknownNameFlagged(t *testing.T) {
+	prior := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
+	prior.Participants = []string{"Christopher", "Claude"}
+	graph := model.NewGraph([]*model.Entry{prior})
+
+	proposed := &model.Entry{
+		Type:         model.TypeSignal,
+		Layer:        model.LayerConceptual,
+		Content:      "new observation",
+		Participants: []string{"Chris"}, // near-miss typo
+	}
+
+	runner := &mockRunner{response: `{"findings": []}`}
+	f := New(runner)
+	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Findings) != 1 {
+		t.Fatalf("Findings len = %d, want 1; got %+v", len(result.Findings), result.Findings)
+	}
+	fd := result.Findings[0]
+	if fd.Category != "participant-drift" || fd.Severity != query.SeverityMedium {
+		t.Errorf("finding = %+v, want category=participant-drift severity=medium", fd)
+	}
+	// Observation must list the established names so the author can judge typo vs new voice.
+	for _, name := range []string{"Christopher", "Claude"} {
+		if !strings.Contains(fd.Observation, name) {
+			t.Errorf("observation missing established name %q: %s", name, fd.Observation)
+		}
+	}
+	if !strings.Contains(fd.Observation, `"Chris"`) {
+		t.Errorf("observation should mention the drifting name %q: %s", "Chris", fd.Observation)
+	}
+}
+
+func TestRunPreflight_ParticipantDrift_PerNameValidation(t *testing.T) {
+	prior := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
+	prior.Participants = []string{"Christopher", "Claude"}
+	graph := model.NewGraph([]*model.Entry{prior})
+
+	proposed := &model.Entry{
+		Type:  model.TypeSignal,
+		Layer: model.LayerConceptual,
+		// Mixed: one known, one unknown. Per-name (AC 10): exactly one
+		// finding, targeting only the drifting name.
+		Participants: []string{"Christopher", "Bob"},
+		Content:      "new observation",
+	}
+
+	runner := &mockRunner{response: `{"findings": []}`}
+	f := New(runner)
+	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var drift []query.Finding
+	for _, fd := range result.Findings {
+		if fd.Category == "participant-drift" {
+			drift = append(drift, fd)
+		}
+	}
+	if len(drift) != 1 {
+		t.Fatalf("expected exactly 1 drift finding (per-name), got %d: %+v", len(drift), drift)
+	}
+	if !strings.Contains(drift[0].Observation, `"Bob"`) {
+		t.Errorf("drift finding should target Bob, got: %s", drift[0].Observation)
+	}
+	if strings.Contains(drift[0].Observation, `"Christopher"`) &&
+		strings.Contains(drift[0].Observation, `participant "Christopher"`) {
+		t.Errorf("drift finding should not target the known name: %s", drift[0].Observation)
+	}
+}
+
+func TestRunPreflight_ParticipantDrift_EmptyGraphBootstrap(t *testing.T) {
+	// Fresh graph: no established participants. The drift check cannot
+	// make any judgment — no findings.
+	graph := model.NewGraph(nil)
+	proposed := &model.Entry{
+		Type:         model.TypeSignal,
+		Layer:        model.LayerConceptual,
+		Content:      "first ever entry",
+		Participants: []string{"Christopher"},
+	}
+
+	runner := &mockRunner{response: `{"findings": []}`}
+	f := New(runner)
+	result, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fd := range result.Findings {
+		if fd.Category == "participant-drift" {
+			t.Errorf("drift finding should not fire on an empty graph, got %+v", fd)
+		}
+	}
+}
+
 func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
 	dec := entry("20260410-130000-d-tac-bbb", withContent("decision"))

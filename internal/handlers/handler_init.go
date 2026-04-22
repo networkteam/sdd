@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -108,6 +109,33 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		touched = append(touched, gitignorePath)
 		if cmd.OnGitignoreUpdated != nil {
 			cmd.OnGitignoreUpdated(gitignorePath)
+		}
+	}
+
+	// Write the participant into .sdd/config.local.yaml when a value was
+	// resolved by the caller. Preserves any other keys already present in
+	// the file (notably the llm: block from d-tac-bes) by operating on a
+	// yaml.Node tree rather than re-marshaling the Config struct.
+	if cmd.Participant != "" {
+		configLocalPath := filepath.Join(sddDir, "config.local.yaml")
+		existing, readErr := os.ReadFile(configLocalPath)
+		if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+			return fmt.Errorf("reading %s: %w", configLocalPath, readErr)
+		}
+		updated, err := model.SetYAMLField(existing, "participant", cmd.Participant)
+		if err != nil {
+			return fmt.Errorf("updating %s: %w", configLocalPath, err)
+		}
+		if !bytes.Equal(existing, updated) {
+			if err := os.WriteFile(configLocalPath, updated, 0o644); err != nil {
+				return fmt.Errorf("writing %s: %w", configLocalPath, err)
+			}
+			// Deliberately NOT appended to `touched`: config.local.yaml is
+			// gitignored, so staging it would fail the commit. The write
+			// is still recorded via OnParticipantWritten for CLI feedback.
+			if cmd.OnParticipantWritten != nil {
+				cmd.OnParticipantWritten(configLocalPath, cmd.Participant)
+			}
 		}
 	}
 

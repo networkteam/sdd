@@ -80,3 +80,12 @@ func TestMergeConfig_NilBase(t *testing.T) {
 		t.Errorf("nil base with overlay should produce overlay values, got %+v", got)
 	}
 }
+
+func TestMergeConfig_ParticipantOverlay(t *testing.T) {
+	base := &Config{}
+	overlay := &Config{Participant: "Christopher"}
+	got := MergeConfig(base, overlay)
+	if got.Participant != "Christopher" {
+		t.Errorf("Participant = %q, want Christopher", got.Participant)
+	}
+}

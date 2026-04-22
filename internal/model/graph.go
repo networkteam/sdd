@@ -214,6 +214,32 @@ func (g *Graph) RecentInsights(n int) []*Entry {
 	return insights
 }
 
+// AllParticipants returns the sorted unique set of participant names that
+// appear on any entry in the graph. Empty strings are excluded. Used by
+// the pre-flight participant-drift check to flag names that don't match
+// any established spelling — the caller compares each proposed name
+// against this set.
+func (g *Graph) AllParticipants() []string {
+	seen := make(map[string]struct{})
+	for _, e := range g.Entries {
+		for _, p := range e.Participants {
+			if p == "" {
+				continue
+			}
+			seen[p] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // RefChain returns the entry and all entries it transitively references, in dependency order.
 func (g *Graph) RefChain(id string) []*Entry {
 	seen := make(map[string]bool)
