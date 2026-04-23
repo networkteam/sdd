@@ -200,7 +200,11 @@ Each graph has a single authoring language configured as `language: <locale>` in
 - **The `/sdd` skill renders translated SDD vocabulary** (types, kinds, layers, status labels) to you on demand, reading `references/vocabulary-<locale>.md` from its bundled references. Catch-up narration, playback, and grooming tables use translated terms.
 - **The technical surface stays English.** YAML frontmatter, CLI tokens (`sdd new d cpt --kind plan`), entry IDs, and section headers like `## Acceptance criteria` are canonical identifiers that pre-flight and CLI tooling key on. `sdd status`, `sdd list`, and `sdd show` output also stay English — translation is a `/sdd` skill concern, not a CLI concern.
 
-German (`de`) is the only bundled locale at the moment. To add another, drop a `vocabulary-<locale>.md` reference into `internal/bundledskills/claude/sdd/references/` following the German file's structure, then rebuild the binary and re-run `sdd init` to refresh the installed skill copy.
+German (`de`) is the only bundled locale at the moment.
+
+**Adding a locale locally** — you can author a vocabulary file into your installed skill tree without touching the source. For the default user-global scope, drop `vocabulary-<locale>.md` into `~/.claude/skills/sdd/references/` (for `--scope project`, use `<your-repo>/.claude/skills/sdd/references/`). Follow the German file's structure and frontmatter. `sdd init` refreshes bundled files but leaves user-added files alone, so your local vocabulary survives upgrades.
+
+**Contributing a locale upstream** — drop the file into `internal/bundledskills/claude/sdd/references/` in the sdd source tree, rebuild the binary, and submit a PR. Every `sdd init` user then picks it up on the next refresh.
 
 ## Concepts in a minute
 
