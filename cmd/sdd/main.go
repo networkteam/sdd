@@ -235,7 +235,16 @@ func main() {
 				Level: level,
 			}))
 			slog.SetDefault(logger)
-			return slogutils.WithLogger(ctx, logger), nil
+			ctx = slogutils.WithLogger(ctx, logger)
+
+			// Background sync check runs on every command except `sdd init`
+			// (bootstrap may precede remote configuration — sync would emit
+			// spurious warnings). Cooldown-bound and timeout-bound internally;
+			// any failure logs at Debug and does not affect the command.
+			if cmd.Args().First() != "init" {
+				runSyncCheck(ctx)
+			}
+			return ctx, nil
 		},
 		Commands: []*cli.Command{
 			initCmd(),
