@@ -195,6 +195,62 @@ func TestLint_ParticipantCoverage_UnknownSurfaces(t *testing.T) {
 	}
 }
 
+// TestLint_ParticipantCoverage_ActiveChainResolves and
+// TestLint_ParticipantCoverage_ClosedChainResolves together pin the lint
+// invariant: existence of an actor chain carrying the canonical is what
+// resolves coverage, regardless of whether the chain's head is currently
+// active or retired. The write-once-across-chains rule means canonicals
+// uniquely own their chain's history, so retired chains still uniquely
+// identify the participant.
+func TestLint_ParticipantCoverage_ActiveChainResolves(t *testing.T) {
+	a := actorHelper("20260410-120000-s-prc-aaa", "Christopher", nil)
+	e := entry("20260410-130000-s-cpt-bbb",
+		withContent("observation"),
+		withParticipants("Christopher"))
+	_ = NewGraph([]*Entry{a, e})
+
+	for _, w := range e.Warnings {
+		if w.Field == "participants" {
+			t.Errorf("active-chain canonical must resolve without warning, got %+v", w)
+		}
+	}
+}
+
+func TestLint_ParticipantCoverage_ClosedChainResolves(t *testing.T) {
+	a := actorHelper("20260410-120000-s-prc-aaa", "Christopher", nil)
+	retire := entry("20260410-130000-d-prc-rtr",
+		withKind(KindDirective),
+		withCloses(a.ID),
+		withContent("retire actor"))
+	e := entry("20260410-140000-s-cpt-bbb",
+		withContent("observation referencing a retired actor"),
+		withParticipants("Christopher"))
+	_ = NewGraph([]*Entry{a, retire, e})
+
+	for _, w := range e.Warnings {
+		if w.Field == "participants" {
+			t.Errorf("closed-chain canonical must still resolve without warning (write-once across chains), got %+v", w)
+		}
+	}
+}
+
+func TestLint_ParticipantCoverage_WithinChainHistoricalCanonicalResolves(t *testing.T) {
+	// A typo-corrected chain carries both the original and corrected
+	// canonical in its history. Either form on a historical entry resolves.
+	a1 := actorHelper("20260410-120000-s-prc-aaa", "Chritopher", nil)
+	a2 := actorHelper("20260410-130000-s-prc-bbb", "Christopher", nil, withSupersedes(a1.ID))
+	e := entry("20260410-140000-s-cpt-ccc",
+		withContent("historical entry captured before typo fix"),
+		withParticipants("Chritopher"))
+	_ = NewGraph([]*Entry{a1, a2, e})
+
+	for _, w := range e.Warnings {
+		if w.Field == "participants" {
+			t.Errorf("historical canonical in chain history must resolve without warning, got %+v", w)
+		}
+	}
+}
+
 func TestLint_ParticipantCoverage_NoActorsSurfacesEverything(t *testing.T) {
 	// Pre-flight has a grace mode for zero active actors; lint does not.
 	// An all-historical graph with participants but no actor signals is

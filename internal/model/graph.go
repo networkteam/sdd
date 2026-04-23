@@ -611,19 +611,25 @@ func validateRoleOrphans(g *Graph) {
 }
 
 // validateParticipantCoverage surfaces every distinct participant name in
-// the graph that does not match an active actor canonical per plan d-cpt-d34
-// AC 10. Unlike the pre-flight mechanical check (AC 6), lint has no grace
-// mode: an all-historical graph with no actor signals is exactly the state
-// AC 10 exists to surface — the warnings drive the bootstrap-playbook
-// dialogue that captures the actors. The warning attaches to each entry
-// listing the unresolved name so lint output clusters naturally by
-// offending entry.
+// the graph that does not match any actor canonical per plan d-cpt-d34
+// AC 10. The match set is every canonical in every actor-identity chain's
+// history — active or retired. A retired chain still uniquely owns its
+// canonicals (write-once across chains), so a participant whose name
+// resolves to a closed chain is still known to the graph; only truly
+// unregistered names surface. This differs from the pre-flight mechanical
+// check (AC 6), which filters to active-head canonicals because capture
+// time is about currency, not existence.
+//
+// Unlike pre-flight, lint has no grace mode: an all-historical graph
+// with no actor signals is exactly the state AC 10 exists to surface —
+// the warnings drive the bootstrap-playbook dialogue that captures the
+// actors. The warning attaches to each entry listing the unresolved
+// name so lint output clusters naturally by offending entry.
 func validateParticipantCoverage(g *Graph) {
-	active := g.ActiveActorHeads()
-	canonicals := make(map[string]struct{}, len(active))
-	for _, a := range active {
-		if a.Canonical != "" {
-			canonicals[a.Canonical] = struct{}{}
+	known := make(map[string]struct{})
+	for _, chain := range g.ActorChains() {
+		for _, c := range chain.CanonicalHistory {
+			known[c] = struct{}{}
 		}
 	}
 	for _, e := range g.Entries {
@@ -631,13 +637,13 @@ func validateParticipantCoverage(g *Graph) {
 			if p == "" {
 				continue
 			}
-			if _, ok := canonicals[p]; ok {
+			if _, ok := known[p]; ok {
 				continue
 			}
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "participants",
 				Value:   p,
-				Message: fmt.Sprintf("participant %q does not match any active actor canonical", p),
+				Message: fmt.Sprintf("participant %q does not match any actor canonical in the graph", p),
 			})
 		}
 	}

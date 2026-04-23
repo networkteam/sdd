@@ -147,7 +147,7 @@ Participants are first-class graph entries. Two kinds partition identity from pa
 
 ### Canonical-only in participants
 
-The `participants` field on every entry lists **canonical names only** — never aliases. Aliases are resolved on the read side (agent comprehension, mining external sources) and are never a validation-time concern. The pre-flight mechanical canonical check (binary severity: pass or high) enforces this at capture time; `sdd lint` surfaces any historical participant names that no longer match an active actor canonical.
+The `participants` field on every entry lists **canonical names only** — never aliases. Aliases are resolved on the read side (agent comprehension, mining external sources) and are never a validation-time concern. The pre-flight mechanical canonical check (binary severity: pass or high) enforces this at capture time against *active* actor canonicals (currency — you don't add retired actors to new entries); `sdd lint` surfaces any participant name that doesn't resolve to *any* actor-identity chain's canonical history, active or retired (existence — a retired chain still uniquely owns its canonicals via the write-once invariant).
 
 ### Write-once canonical invariant
 
