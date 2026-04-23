@@ -23,6 +23,7 @@ func (f *Finder) Status(q query.StatusQuery) (*query.StatusResult, error) {
 	return &query.StatusResult{
 		Graph:            q.Graph,
 		LocalParticipant: f.localParticipant(),
+		Language:         f.language(),
 		Aspirations:      q.Graph.Aspirations(),
 		Contracts:        q.Graph.Contracts(),
 		Plans:            q.Graph.Plans(),

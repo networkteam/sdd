@@ -58,10 +58,15 @@ func (r *PreflightResult) HasBlocking() bool {
 // into the prompt as authoritative ground truth for the participant-drift
 // check — decoupling validation from same-session drift in the graph's
 // participant set.
-func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, localCanonical string) (*PreflightResult, error) {
+//
+// configuredLanguage is the graph authoring language (locale code) from
+// `.sdd/config.yaml` (empty string when unset — English default). It feeds
+// the language-drift check which flags entries whose description prose does
+// not match the configured language.
+func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, localCanonical, configuredLanguage string) (*PreflightResult, error) {
 	ct := selectCheckType(entry, graph)
 
-	pctx := assembleContext(entry, graph, ct, localCanonical)
+	pctx := assembleContext(entry, graph, ct, localCanonical, configuredLanguage)
 
 	req, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
@@ -149,6 +154,10 @@ var checkTypeTemplates = map[checkType]string{
 // canonical is fixed ground truth from config; the established set reflects
 // graph history and may contain its own drift — the rubric treats canonical
 // as authoritative when they disagree.
+//
+// ConfiguredLanguage feeds the language-drift rubric (see language.tmpl).
+// Empty means no language check (English default); a locale code like "de"
+// activates the check against the proposed entry's description prose.
 type preflightContext struct {
 	ProposedEntry           string
 	ReferencedEntries       string
@@ -159,6 +168,7 @@ type preflightContext struct {
 	OpenSignals             string
 	LocalCanonical          string
 	EstablishedParticipants string
+	ConfiguredLanguage      string
 }
 
 // selectCheckType determines the pre-flight check type from entry properties and graph context.
@@ -213,12 +223,13 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 //
 // localCanonical flows through unchanged; the established-participants
 // string is derived from graph.AllParticipants() here so the caller
-// doesn't have to assemble it.
-func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, localCanonical string) *preflightContext {
+// doesn't have to assemble it. configuredLanguage flows through unchanged.
+func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, localCanonical, configuredLanguage string) *preflightContext {
 	pctx := &preflightContext{
 		ProposedEntry:           FormatEntryForPrompt(entry),
 		LocalCanonical:          localCanonical,
 		EstablishedParticipants: strings.Join(graph.AllParticipants(), ", "),
+		ConfiguredLanguage:      configuredLanguage,
 	}
 
 	// Referenced entries

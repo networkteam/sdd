@@ -237,7 +237,7 @@ func Test_assembleContext_BasicSignal(t *testing.T) {
 		Content: "new signal",
 	}
 
-	pctx := assembleContext(proposed, graph, checkSignalCapture, "")
+	pctx := assembleContext(proposed, graph, checkSignalCapture, "", "")
 
 	if !strings.Contains(pctx.ProposedEntry, "new signal") {
 		t.Error("ProposedEntry should contain the signal content")
@@ -262,7 +262,7 @@ func Test_assembleContext_WithRefs(t *testing.T) {
 		Content: "new decision",
 	}
 
-	pctx := assembleContext(proposed, graph, checkDecisionRefs, "")
+	pctx := assembleContext(proposed, graph, checkDecisionRefs, "", "")
 
 	if !strings.Contains(pctx.ReferencedEntries, "first signal") {
 		t.Error("ReferencedEntries should contain the referenced signal content")
@@ -280,7 +280,7 @@ func Test_assembleContext_WithCloses(t *testing.T) {
 		Content: "decision closing signal",
 	}
 
-	pctx := assembleContext(proposed, graph, checkClosingDecision, "")
+	pctx := assembleContext(proposed, graph, checkClosingDecision, "", "")
 
 	if !strings.Contains(pctx.ClosedEntries, "signal to close") {
 		t.Error("ClosedEntries should contain the closed signal content")
@@ -299,7 +299,7 @@ func Test_assembleContext_WithContracts(t *testing.T) {
 		Content: "some signal",
 	}
 
-	pctx := assembleContext(proposed, graph, checkSignalCapture, "")
+	pctx := assembleContext(proposed, graph, checkSignalCapture, "", "")
 
 	if !strings.Contains(pctx.ActiveContracts, "all entries must have refs") {
 		t.Error("ActiveContracts should contain contract content")
@@ -317,7 +317,7 @@ func Test_assembleContext_WithSupersedes(t *testing.T) {
 		Content:    "replacement decision",
 	}
 
-	pctx := assembleContext(proposed, graph, checkSupersedes, "")
+	pctx := assembleContext(proposed, graph, checkSupersedes, "", "")
 
 	if !strings.Contains(pctx.SupersededEntries, "old decision") {
 		t.Error("SupersededEntries should contain the superseded entry content")
@@ -336,7 +336,7 @@ func Test_assembleContext_OpenSignalsForDecisionRefs(t *testing.T) {
 		Content: "new decision",
 	}
 
-	pctx := assembleContext(proposed, graph, checkDecisionRefs, "")
+	pctx := assembleContext(proposed, graph, checkDecisionRefs, "", "")
 
 	if pctx.OpenSignals == "" {
 		t.Error("OpenSignals should be populated for decision-refs check")
@@ -359,7 +359,7 @@ func Test_assembleContext_OpenSignalsNotIncludedForOtherChecks(t *testing.T) {
 		Content: "new signal",
 	}
 
-	pctx := assembleContext(proposed, graph, checkSignalCapture, "")
+	pctx := assembleContext(proposed, graph, checkSignalCapture, "", "")
 
 	if pctx.OpenSignals != "" {
 		t.Error("OpenSignals should be empty for non-decision-refs checks")
@@ -383,7 +383,7 @@ func Test_assembleContext_ClosedPlanDescriptionFlowsThrough(t *testing.T) {
 		Content: "done signal closing the plan",
 	}
 
-	pctx := assembleContext(proposed, graph, checkClosingDone, "")
+	pctx := assembleContext(proposed, graph, checkClosingDone, "", "")
 	if !strings.Contains(pctx.ClosedEntries, "## Acceptance criteria") {
 		t.Errorf("ClosedEntries should contain the plan's AC heading inline, got %q", pctx.ClosedEntries)
 	}

@@ -1,0 +1,32 @@
+{{ define "language" }}
+{{ if .ConfiguredLanguage -}}
+## Language check (apply to every entry)
+
+The graph has a configured authoring language: **`{{ .ConfiguredLanguage }}`** (from `.sdd/config.yaml`). Captured entries must be written in this language so future readers and traversals stay coherent regardless of which language any given dialogue ran in.
+
+Evaluate the **description text** of the proposed entry. Ignore the YAML frontmatter, canonical CLI tokens, entry IDs, section headers like `## Acceptance criteria`, code blocks, and quoted technical identifiers — those stay English as canonical identifiers. Judge the **primary prose language**.
+
+### Rubric
+
+1. **Primary language matches configured language** → pass.
+2. **Primary language differs from configured language** → `high` `language-drift` finding. Name the drift (e.g., "Description is primarily English; configured language is `de`").
+3. **Mixed-language prose** — non-English prose with English technical terms (e.g., "Implementiert die pre-flight-Prüfung für…") is natural. Pass as long as the primary language matches.
+4. **Very short descriptions** (under ~15 words of prose) that are ambiguous → pass. Don't over-block when signal is weak.
+
+Severity is binary: **pass** or `high`. No medium, no low.
+
+Emit **one** `language-drift` finding per entry when drift is detected. The observation must name the detected primary language and the configured language.
+
+### Calibration examples
+
+- **Pass** — Configured `de`. Description: *"Dieses Signal identifiziert eine Lücke in der Agent-Zuverlässigkeit bei kritischen Workflows…"*. Primary German.
+- **Pass** — Configured `de`. Description: *"Implementiert das pre-flight validator pattern für die CQRS-Schicht…"*. German prose with English technical terms. Primary German.
+- **High** — Configured `de`. Description: *"This signal identifies a gap in agent reliability for critical workflows…"*. Primary English, configured German. One `language-drift` finding.
+- **Pass** — Configured `en`. Description: *"This plan commits to per-graph configured language…"*. Primary English matches default.
+- **Pass** — Configured (empty — default English). No language check fires regardless of description content.
+{{- else -}}
+## Language check
+
+No configured graph language (default English). No language-drift check applies.
+{{- end }}
+{{ end }}

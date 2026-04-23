@@ -20,9 +20,15 @@ type StatusQuery struct {
 // LocalParticipant surfaces the canonical participant name from
 // .sdd/config.local.yaml so agents reading the status header see ground
 // truth without inferring from entries (which may contain drift).
+//
+// Language surfaces the configured graph language (locale code) from
+// .sdd/config.yaml so the /sdd skill knows at session start whether to load
+// a translation vocabulary and author entries in the configured language.
+// Empty means English (default).
 type StatusResult struct {
 	Graph            *model.Graph // for top-line counts (entries, decisions, signals)
 	LocalParticipant string       // canonical from config; empty means "not configured"
+	Language         string       // configured graph language (locale code); empty means English default
 	Aspirations      []*model.Entry
 	Contracts        []*model.Entry
 	Plans            []*model.Entry
