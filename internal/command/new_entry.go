@@ -39,6 +39,18 @@ type NewEntryCmd struct {
 	Confidence   string
 	Attachments  []Attachment
 
+	// Canonical and Aliases are only meaningful for kind: actor signals —
+	// copied into the written frontmatter so downstream readers can
+	// resolve participant identity. Ignored on non-actor entries; the
+	// model-layer validator flags a missing canonical on an actor.
+	Canonical string
+	Aliases   []string
+
+	// Actor is only meaningful for kind: role decisions — names the
+	// canonical of the actor-identity chain the role binds to. Ignored
+	// on non-role entries.
+	Actor string
+
 	SkipPreflight    bool
 	DryRun           bool
 	PreflightTimeout time.Duration
@@ -87,6 +99,9 @@ func (c *NewEntryCmd) BuildEntry(id string) (*model.Entry, error) {
 		Closes:       c.Closes,
 		Participants: c.Participants,
 		Confidence:   c.Confidence,
+		Canonical:    c.Canonical,
+		Aliases:      c.Aliases,
+		Actor:        c.Actor,
 		Content:      c.Description,
 	}
 

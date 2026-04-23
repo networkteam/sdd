@@ -339,3 +339,269 @@ func TestNewEntry_AmbiguousShortRefErrors(t *testing.T) {
 		t.Errorf("error = %v, want ambiguous message", err)
 	}
 }
+
+// actorSeed returns a kind: actor signal to stand in as an existing
+// actor head for tests that seed an actor-identity chain.
+func actorSeed(id, canonical string) *model.Entry {
+	e := &model.Entry{
+		ID:        id,
+		Type:      model.TypeSignal,
+		Kind:      model.KindActor,
+		Layer:     model.LayerProcess,
+		Canonical: canonical,
+		Content:   "actor " + canonical,
+	}
+	parts, _ := model.ParseID(id)
+	e.Time = parts.Time
+	return e
+}
+
+// TestNewEntry_WritesEntryByKind is a table-driven pin of the
+// NewEntryCmd → handler → file write path for every kind in the 6+6
+// system introduced by plan d-cpt-d34. Each scenario asserts that
+// kind-specific frontmatter (canonical + aliases for actor, actor for
+// role) and the common kind field round-trip through the writer. Model-
+// level tests don't cover this stack; skipping it is what let actor
+// and role capture flags ship broken.
+func TestNewEntry_WritesEntryByKind(t *testing.T) {
+	const (
+		closeTargetID = "20260406-100000-d-tac-tgt"
+		actorHeadID   = "20260410-120000-s-prc-act"
+	)
+
+	closeTarget := testEntry(closeTargetID)
+	existingActor := actorSeed(actorHeadID, "Christopher")
+
+	cases := []struct {
+		name    string
+		seed    []*model.Entry
+		cmd     command.NewEntryCmd
+		asserts func(t *testing.T, e *model.Entry)
+	}{
+		{
+			name: "signal gap",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerConceptual, Kind: model.KindGap,
+				Description: "A gap needing attention.", Confidence: "medium",
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindGap)
+			},
+		},
+		{
+			name: "signal fact",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerConceptual, Kind: model.KindFact,
+				Description: "A fact observed in practice.", Confidence: "high",
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindFact)
+			},
+		},
+		{
+			name: "signal question",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerConceptual, Kind: model.KindQuestion,
+				Description: "How should X behave under Y?", Confidence: "medium",
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindQuestion)
+			},
+		},
+		{
+			name: "signal insight",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerConceptual, Kind: model.KindInsight,
+				Description: "Synthesis across recent dialogue.", Confidence: "medium",
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindInsight)
+			},
+		},
+		{
+			name: "signal done",
+			seed: []*model.Entry{closeTarget},
+			cmd: command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerTactical, Kind: model.KindDone,
+				Description: "Implemented the thing.", Confidence: "high",
+				Closes: []string{closeTargetID},
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindDone)
+				if len(e.Closes) != 1 || e.Closes[0] != closeTargetID {
+					t.Errorf("closes = %v, want [%s]", e.Closes, closeTargetID)
+				}
+			},
+		},
+		{
+			name: "signal actor",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerProcess, Kind: model.KindActor,
+				Description: "Christopher is the primary human contributor on the SDD project.",
+				Confidence:  "high",
+				Canonical:   "Christopher",
+				Aliases:     []string{"Chris", "CH"},
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				if e.Kind != model.KindActor {
+					t.Errorf("kind = %q, want actor", e.Kind)
+				}
+				if e.Canonical != "Christopher" {
+					t.Errorf("canonical = %q, want Christopher", e.Canonical)
+				}
+				if len(e.Aliases) != 2 || e.Aliases[0] != "Chris" || e.Aliases[1] != "CH" {
+					t.Errorf("aliases = %v, want [Chris CH]", e.Aliases)
+				}
+				if e.Actor != "" {
+					t.Errorf("actor should be empty on an actor signal, got %q", e.Actor)
+				}
+			},
+		},
+		{
+			name: "decision directive",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeDecision, Layer: model.LayerConceptual, Kind: model.KindDirective,
+				Description: "Go in direction X.", Confidence: "high",
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindDirective)
+			},
+		},
+		{
+			name: "decision activity",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindActivity,
+				Description: "Do the scoped work.", Confidence: "medium",
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindActivity)
+			},
+		},
+		{
+			name: "decision plan",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindPlan,
+				Description: "Plan body.\n\n## Acceptance criteria\n- [ ] finish X\n",
+				Confidence:  "medium",
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindPlan)
+				if !strings.Contains(e.Content, "## Acceptance criteria") {
+					t.Errorf("plan content missing AC section, got %q", e.Content)
+				}
+			},
+		},
+		{
+			name: "decision contract",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeDecision, Layer: model.LayerConceptual, Kind: model.KindContract,
+				Description: "Always honor invariant Z.", Confidence: "high",
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindContract)
+			},
+		},
+		{
+			name: "decision aspiration",
+			cmd: command.NewEntryCmd{
+				Type: model.TypeDecision, Layer: model.LayerStrategic, Kind: model.KindAspiration,
+				Description: "Pull toward W.", Confidence: "medium",
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				assertKindAndNoKindSpecificFields(t, e, model.KindAspiration)
+			},
+		},
+		{
+			name: "decision role",
+			seed: []*model.Entry{existingActor},
+			cmd: command.NewEntryCmd{
+				Type: model.TypeDecision, Layer: model.LayerProcess, Kind: model.KindRole,
+				Description: "Christopher reviews architectural decisions.",
+				Confidence:  "medium",
+				Actor:       "Christopher",
+				Refs:        []string{actorHeadID},
+			},
+			asserts: func(t *testing.T, e *model.Entry) {
+				if e.Kind != model.KindRole {
+					t.Errorf("kind = %q, want role", e.Kind)
+				}
+				if e.Actor != "Christopher" {
+					t.Errorf("actor = %q, want Christopher", e.Actor)
+				}
+				if e.Canonical != "" || len(e.Aliases) != 0 {
+					t.Errorf("role should not carry canonical/aliases, got canonical=%q aliases=%v", e.Canonical, e.Aliases)
+				}
+				if len(e.Refs) != 1 || e.Refs[0] != actorHeadID {
+					t.Errorf("refs = %v, want [%s]", e.Refs, actorHeadID)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// End-to-end: seed graph → handler writes entry → parse file
+			// back → assert. Inlined rather than factored to a helper so
+			// the test body reads as "here's the path a capture travels"
+			// instead of "here's a helper call and an assertion lambda."
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+
+			h := handlers.New(handlers.Options{
+				GraphDir: tmp,
+				SDDDir:   sddDir,
+				Reader:   &fakeReader{graph: model.NewGraph(tc.seed)},
+			})
+
+			var writtenID string
+			cmd := tc.cmd
+			cmd.SkipPreflight = true
+			cmd.OnNewEntry = func(id string) { writtenID = id }
+
+			if err := h.NewEntry(context.Background(), &cmd); err != nil {
+				t.Fatalf("NewEntry: %v", err)
+			}
+			if writtenID == "" {
+				t.Fatal("OnNewEntry was not invoked — no id captured")
+			}
+
+			rel, err := model.IDToRelPath(writtenID)
+			if err != nil {
+				t.Fatalf("IDToRelPath: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(tmp, rel))
+			if err != nil {
+				t.Fatalf("read written entry: %v", err)
+			}
+			parsed, err := model.ParseEntry(writtenID+".md", string(data))
+			if err != nil {
+				t.Fatalf("ParseEntry: %v", err)
+			}
+
+			tc.asserts(t, parsed)
+		})
+	}
+}
+
+// assertKindAndNoKindSpecificFields covers the common assertion for kinds
+// that carry no kind-specific frontmatter: the written kind matches, and
+// actor/role-specific fields stay empty. Prevents regressions where a
+// future kind accidentally inherits one of the dedicated fields.
+func assertKindAndNoKindSpecificFields(t *testing.T, e *model.Entry, want model.Kind) {
+	t.Helper()
+	if e.Kind != want {
+		t.Errorf("kind = %q, want %q", e.Kind, want)
+	}
+	if e.Canonical != "" {
+		t.Errorf("%s should not carry canonical, got %q", want, e.Canonical)
+	}
+	if len(e.Aliases) != 0 {
+		t.Errorf("%s should not carry aliases, got %v", want, e.Aliases)
+	}
+	if e.Actor != "" {
+		t.Errorf("%s should not carry actor, got %q", want, e.Actor)
+	}
+}
