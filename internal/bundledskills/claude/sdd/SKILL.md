@@ -134,7 +134,7 @@ If the vocabulary reference is missing for the configured locale (the file doesn
 The `sdd` CLI emits background-sync status lines to stderr at the top of each command (subject to a configurable cooldown in `.sdd/config.yaml`, default 15m). These lines are the cue to keep the shared graph in sync with collaborators. Pattern-match on the `sync:` prefix and act per state:
 
 - **`sync: fast-forward available, N commits behind`** or **`sync: rebase is clean, N remote / M local`** — run `git status --porcelain`. If empty (clean working tree), tell the user ("remote is N ahead, pulling with --rebase…") then run `git pull --rebase`. If non-empty (dirty), do not pull — warn the user ("working tree has uncommitted changes — commit or stash before rebasing") and defer.
-- **`sync: rebase would conflict in <paths>, N remote / M local`** — do not auto-pull. Tell the user the remote is diverged, list the predicted conflict paths, and let them resolve manually. Running rebase here strands them mid-conflict.
+- **`sync: rebase would conflict in <paths>, N remote / M local`** — do not auto-pull reflexively. Name the paths, then offer to drive the rebase together: propose `git pull --rebase`, resolve conflict markers file-by-file, `git rebase --continue` after each. Defer only if the user isn't ready to handle it now.
 - **`sync: local ahead by N, consider push`** — mention it as a suggestion, not an action. Pushing is visible to others; let the user decide when to publish.
 - **`sync: not a git repo` / `no remote configured` / `no upstream for current branch …` / `sync: fetch failed: <error>`** — surface the warning briefly. These are setup or network issues the user resolves; don't try to auto-fix.
 
