@@ -195,17 +195,24 @@ func TestLint_ParticipantCoverage_UnknownSurfaces(t *testing.T) {
 	}
 }
 
-func TestLint_ParticipantCoverage_GraceMode(t *testing.T) {
-	// No active actor signals → check skipped.
+func TestLint_ParticipantCoverage_NoActorsSurfacesEverything(t *testing.T) {
+	// Pre-flight has a grace mode for zero active actors; lint does not.
+	// An all-historical graph with participants but no actor signals is
+	// exactly what AC 10 exists to surface — the bootstrap-playbook
+	// dialogue needs the list of unresolved names.
 	e := entry("20260410-130000-s-cpt-bbb",
-		withContent("first entry"),
+		withContent("observation"),
 		withParticipants("Christopher"))
 	_ = NewGraph([]*Entry{e})
 
+	found := false
 	for _, w := range e.Warnings {
-		if w.Field == "participants" {
-			t.Errorf("grace mode should skip participant check, got warning %+v", w)
+		if w.Field == "participants" && w.Value == "Christopher" {
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("lint must surface unresolved participant even when no actors exist, got %+v", e.Warnings)
 	}
 }
 
