@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: a2d4f3ef5e0cd5b51223c5b497ca378733fb909a3c8916fd2fc2cd3ed4d3d594
+sdd-content-hash: 3c0c38ffc27296f1acc228d94caf6987bda979255c29f49c695796962b53ee1a
 sdd-version: dev
 ---
 
@@ -114,6 +114,22 @@ Who to list:
 If a name you're about to propose matches neither the status header nor any established spelling in the graph, pause and ask the user before introducing a new voice. The pre-flight validator emits a high-severity `participant-drift` finding that blocks creation for any unmatched participant — the severity is **binary**: a name is either an exact match against canonical / established set, or the entry description explicitly introduces them as a new voice joining the graph, or the finding fires. "X attended the meeting" does not qualify as introducing a new voice; variants of known names (`Christopher` → `Christopher Hlubek`) are drift, not new participants.
 
 Since you always present proposed entries for confirmation before running `sdd new`, the user can correct participants if your inference is wrong. This is the safety net — get it right most of the time, and the confirmation step catches the rest.
+
+### Language — render translated vocabulary, author entries in the configured language
+
+`sdd status` surfaces the configured graph language as `Language: <locale>` in its header (just below `Local participant:`). If the line is absent, the graph is English by default and no translation is needed.
+
+When `Language:` names a non-English locale:
+
+1. **Read the matching vocabulary reference on demand** — `references/vocabulary-<locale>.md` (e.g. `references/vocabulary-de.md` when `Language: de`). Load it the first time you need to render a translated term in the session; the file is not pre-loaded.
+2. **Use translated terms in user-facing rendering** — catch-up clusters, playback ("I'd capture this as a [translated-type] at the [translated-layer] layer…"), status narration, grooming tables, and any dialogue that names SDD concepts. The reader sees German (or the configured locale), not English.
+3. **Never translate the technical surface.** YAML frontmatter, CLI tokens, entry IDs, section headers like `## Acceptance criteria`, and raw CLI output (`sdd status`, `sdd list`, `sdd show`) stay English as canonical identifiers — pre-flight, graph traversal, and CLI flags key on the English tokens.
+
+**Author captured entries in the configured language.** Dialogue with the user can flow freely in any language — English, German, mixed — but the description you write into `sdd new` (and any attachments you compose for the capture) must be in the configured graph language. Translate dialogue content at capture time. This keeps the graph coherent for all future readers and traversals regardless of which language any given conversation ran in.
+
+Pre-flight includes a language-drift check that flags entries whose description does not match the configured language. If it fires, the entry is in the wrong language — revise and retry, don't skip.
+
+If the vocabulary reference is missing for the configured locale (the file doesn't exist yet), pause and tell the user — adding the reference is a framework-level contribution, not something to improvise mid-capture.
 
 ## Modes of working
 
