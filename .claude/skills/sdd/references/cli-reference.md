@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: a0f09aef6305056d8ffa0a7b7c69baf9c86b59bc1a17880853c1e33e0efe8f32
+sdd-content-hash: fbde58c2082560396574f885f35be54994da0e1e9c8ee4bf5793a8d416962b8f
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -46,6 +46,9 @@ Summary line format: `{indent}- {relations} {full-id} ({kind}): "{summary}"`
 - `--participants p1,p2` — participant names
 - `--confidence high|medium|low` — confidence level
 - `--kind <kind>` — signals: gap (default), fact, question, insight, done, actor; decisions: directive (default), activity, plan, contract, aspiration, role
+- `--canonical name` — frontmatter `canonical` (kind: actor only)
+- `--aliases a,b` — frontmatter `aliases` (kind: actor only)
+- `--actor canonical` — frontmatter `actor` (kind: role only)
 - `--attach spec` — file to attach (repeatable, see below)
 - `--skip-preflight` — skip pre-flight validation (entry is annotated with `preflight: skipped`)
 - `--dry-run` — run validation and pre-flight only, without writing or committing the entry
