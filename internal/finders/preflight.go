@@ -20,8 +20,12 @@ import (
 // Go-side check was removed — same-person variant detection is a
 // semantic match the LLM handles uniformly with narrative-introduced
 // voices.
+//
+// The language-drift check receives the configured graph language from
+// config (see Finder.language). Empty means no language check (English
+// default); a locale code activates the check against description prose.
 func (f *Finder) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
-	result, err := llm.Preflight(ctx, f.preflightRunner, q.Entry, q.Graph, f.localParticipant())
+	result, err := llm.Preflight(ctx, f.preflightRunner, q.Entry, q.Graph, f.localParticipant(), f.language())
 	if err != nil {
 		return nil, err
 	}

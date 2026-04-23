@@ -40,6 +40,11 @@ type Config struct {
 	// .sdd/config.local.yaml (gitignored) because the same person may use
 	// different spellings across projects.
 	Participant string `yaml:"participant,omitempty"`
+	// Language is a locale code (e.g. "de", "en", "de-DE") that governs the
+	// graph's authored language. Captured entries are written in this
+	// language; the /sdd skill renders translated vocabulary to users via
+	// bundled translation references. Empty means English (default).
+	Language string `yaml:"language,omitempty"`
 }
 
 // LLMConfig holds settings for LLM provider selection, model choice, and
@@ -96,6 +101,9 @@ func MergeConfig(base, overlay *Config) *Config {
 	if overlay.Participant != "" {
 		out.Participant = overlay.Participant
 	}
+	if overlay.Language != "" {
+		out.Language = overlay.Language
+	}
 	out.LLM = mergeLLMConfig(base.LLM, overlay.LLM)
 	return &out
 }
@@ -149,6 +157,11 @@ func FormatConfig(cfg Config) string {
 		"\n" +
 		"# Graph directory relative to repository root.\n" +
 		"graph_dir: " + graphDir + "\n" +
+		"\n" +
+		"# Graph language — locale code for the language captured entries are\n" +
+		"# authored in. Empty means English (default). The /sdd skill reads the\n" +
+		"# matching references/vocabulary-<locale>.md when rendering to users.\n" +
+		"# language: de\n" +
 		"\n" +
 		"# LLM provider settings (defaults shown — override here or in config.local.yaml).\n" +
 		"# llm:\n" +

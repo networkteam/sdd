@@ -44,3 +44,13 @@ func (f *Finder) localParticipant() string {
 	}
 	return f.cfg.Participant
 }
+
+// language returns the configured graph language locale code from config, or
+// "" when no config is available or the key is unset (English default).
+// Shared helper for Preflight (LLM input) and Status (render data).
+func (f *Finder) language() string {
+	if f.cfg == nil {
+		return ""
+	}
+	return f.cfg.Language
+}
