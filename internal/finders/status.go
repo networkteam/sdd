@@ -3,6 +3,7 @@ package finders
 import (
 	"fmt"
 
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
 
@@ -32,5 +33,30 @@ func (f *Finder) Status(q query.StatusQuery) (*query.StatusResult, error) {
 		Open:             q.Graph.OpenSignals(),
 		Insights:         q.Graph.RecentInsights(nInsights),
 		Recent:           q.Graph.RecentDone(nDone),
+		Participants:     activeParticipantGroups(q.Graph),
 	}, nil
+}
+
+// activeParticipantGroups materializes the Participants block for the
+// status view per plan d-cpt-d34 AC 15. Each group couples one active
+// actor head with the derived-active roles that cascade to its chain.
+// Returns nil during grace (no active actors).
+func activeParticipantGroups(g *model.Graph) []query.ParticipantGroup {
+	active := g.ActiveActorHeads()
+	if len(active) == 0 {
+		return nil
+	}
+	roles := g.ActiveRoles()
+	groups := make([]query.ParticipantGroup, 0, len(active))
+	for _, a := range active {
+		var bound []*model.Entry
+		for _, r := range roles {
+			chain := g.ResolveRoleChain(r)
+			if chain != nil && chain.Head != nil && chain.Head.ID == a.ID {
+				bound = append(bound, r)
+			}
+		}
+		groups = append(groups, query.ParticipantGroup{Actor: a, Roles: bound})
+	}
+	return groups
 }

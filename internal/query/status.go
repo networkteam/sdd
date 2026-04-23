@@ -37,4 +37,14 @@ type StatusResult struct {
 	Open             []*model.Entry // kind: gap and kind: question signals (the actionable set)
 	Insights         []*model.Entry // recent kind: insight signals
 	Recent           []*model.Entry // recent kind: done signals
+	Participants     []ParticipantGroup
+}
+
+// ParticipantGroup couples an active actor head with its derived-active
+// role decisions for the status Participants block per plan d-cpt-d34 AC 15.
+// Grouping is materialized in the finder so the presenter stays a pure
+// view layer.
+type ParticipantGroup struct {
+	Actor *model.Entry   // the active actor head (kind: actor signal)
+	Roles []*model.Entry // derived-active roles whose cascade resolves to this actor's chain
 }

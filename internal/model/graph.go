@@ -305,6 +305,14 @@ func (g *Graph) Filter(f GraphFilter) []*Entry {
 				if closed[e.ID] || superseded[e.ID] {
 					continue
 				}
+				// Role cascade: a role whose bound actor chain is closed
+				// or whose canonical doesn't resolve is treated as not-open.
+				if e.IsRole() {
+					status := g.DerivedStatus(e).Kind
+					if status != StatusActive {
+						continue
+					}
+				}
 			}
 		}
 		result = append(result, e)
@@ -510,9 +518,169 @@ func (g *Graph) Lint() []*Entry {
 }
 
 // validate checks all entries for integrity issues and populates their Warnings fields.
+// Runs per-entry checks first, then graph-level actor/role checks that
+// require the full graph context (chain membership, canonical history,
+// cross-chain invariants).
 func (g *Graph) validate() {
 	for _, e := range g.Entries {
 		ValidateEntry(e, g)
+	}
+	validateActorInvariant(g)
+	validateRoleOrphans(g)
+	validateParticipantCoverage(g)
+	validateAliasAmbiguity(g)
+}
+
+// validateActorInvariant enforces the write-once-across-chains invariant
+// per plan d-cpt-d34 AC 12: a canonical may appear in at most one actor-
+// identity chain's history. Defense-in-depth against race conditions or
+// validator bypass — the pre-flight mechanical check is the first line.
+func validateActorInvariant(g *Graph) {
+	chains := g.ActorChains()
+	// Map canonical → list of chain head IDs that carry it.
+	ownerChains := make(map[string][]string)
+	for _, c := range chains {
+		headID := ""
+		if c.Head != nil {
+			headID = c.Head.ID
+		}
+		for _, canonical := range c.CanonicalHistory {
+			ownerChains[canonical] = append(ownerChains[canonical], headID)
+		}
+	}
+	for canonical, headIDs := range ownerChains {
+		if len(headIDs) < 2 {
+			continue
+		}
+		// Flag every actor entry in the offending chains.
+		for _, c := range chains {
+			if c.Head == nil {
+				continue
+			}
+			isInvolved := false
+			for _, hid := range headIDs {
+				if c.Head.ID == hid {
+					isInvolved = true
+					break
+				}
+			}
+			if !isInvolved {
+				continue
+			}
+			if !c.HasCanonical(canonical) {
+				continue
+			}
+			for _, e := range c.Entries {
+				if e.Canonical != canonical {
+					continue
+				}
+				e.Warnings = append(e.Warnings, Warning{
+					Field:   "canonical",
+					Value:   canonical,
+					Message: fmt.Sprintf("canonical %q appears in %d actor-identity chains (write-once invariant violated)", canonical, len(headIDs)),
+				})
+			}
+		}
+	}
+}
+
+// validateRoleOrphans flags role decisions whose Actor canonical does not
+// resolve to any actor-identity chain's canonical history per plan d-cpt-d34
+// AC 13. Distinct from the normal-case cascade: the cascade derives-closes
+// roles automatically when a chain retires; the orphan lint catches entries
+// that shouldn't exist in a healthy graph (direct edits, validator bypass,
+// corruption).
+func validateRoleOrphans(g *Graph) {
+	for _, e := range g.Entries {
+		if !e.IsRole() {
+			continue
+		}
+		actor := strings.TrimSpace(e.Actor)
+		if actor == "" {
+			continue // already flagged by validateRoleFrontmatter
+		}
+		if g.ChainForCanonical(actor) != nil {
+			continue
+		}
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "actor",
+			Value:   actor,
+			Message: fmt.Sprintf("role actor %q does not match any actor-identity chain's canonical history (orphan role)", actor),
+		})
+	}
+}
+
+// validateParticipantCoverage surfaces every distinct participant name in
+// the graph that does not match an active actor canonical per plan d-cpt-d34
+// AC 10. In grace mode (no active actors yet) the check is skipped. The
+// warning attaches to each entry listing the unresolved name so lint output
+// clusters naturally by offending entry.
+func validateParticipantCoverage(g *Graph) {
+	active := g.ActiveActorHeads()
+	if len(active) == 0 {
+		return // grace mode
+	}
+	canonicals := make(map[string]struct{}, len(active))
+	for _, a := range active {
+		if a.Canonical != "" {
+			canonicals[a.Canonical] = struct{}{}
+		}
+	}
+	for _, e := range g.Entries {
+		for _, p := range e.Participants {
+			if p == "" {
+				continue
+			}
+			if _, ok := canonicals[p]; ok {
+				continue
+			}
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "participants",
+				Value:   p,
+				Message: fmt.Sprintf("participant %q does not match any active actor canonical", p),
+			})
+		}
+	}
+}
+
+// validateAliasAmbiguity flags aliases that appear on more than one active
+// actor signal per plan d-cpt-d34 AC 11. Informational: flags the actor
+// entries whose aliases collide so the read side (mining, dialogue
+// comprehension) knows to disambiguate from context.
+func validateAliasAmbiguity(g *Graph) {
+	active := g.ActiveActorHeads()
+	// Map alias → list of actor entry IDs that declare it.
+	owners := make(map[string][]string)
+	for _, a := range active {
+		for _, alias := range a.Aliases {
+			alias = strings.TrimSpace(alias)
+			if alias == "" {
+				continue
+			}
+			owners[alias] = append(owners[alias], a.ID)
+		}
+	}
+	for alias, ids := range owners {
+		if len(ids) < 2 {
+			continue
+		}
+		for _, a := range active {
+			isInvolved := false
+			for _, id := range ids {
+				if a.ID == id {
+					isInvolved = true
+					break
+				}
+			}
+			if !isInvolved {
+				continue
+			}
+			a.Warnings = append(a.Warnings, Warning{
+				Field:   "aliases",
+				Value:   alias,
+				Message: fmt.Sprintf("alias %q is also declared by %d other active actor(s) — read-side disambiguation required", alias, len(ids)-1),
+			})
+		}
 	}
 }
 
@@ -525,6 +693,8 @@ func ValidateEntry(e *Entry, g *Graph) {
 	validateCloses(e, g)
 	validateSupersedes(e, g)
 	validateKind(e)
+	validateActorFrontmatter(e)
+	validateRoleFrontmatter(e)
 	validateDoneSignalRefs(e)
 	validateAttachmentLinks(e)
 }
@@ -613,7 +783,7 @@ func validateKind(e *Entry) {
 		if e.Kind == "" {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "kind",
-				Message: "signal missing kind field (expected gap, fact, question, insight, or done)",
+				Message: "signal missing kind field (expected gap, fact, question, insight, done, or actor)",
 			})
 			return
 		}
@@ -621,14 +791,14 @@ func validateKind(e *Entry) {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "kind",
 				Value:   string(e.Kind),
-				Message: fmt.Sprintf("invalid signal kind %q (expected gap, fact, question, insight, or done)", e.Kind),
+				Message: fmt.Sprintf("invalid signal kind %q (expected gap, fact, question, insight, done, or actor)", e.Kind),
 			})
 		}
 	case TypeDecision:
 		if e.Kind == "" {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "kind",
-				Message: "decision missing kind field (expected directive, activity, plan, contract, or aspiration)",
+				Message: "decision missing kind field (expected directive, activity, plan, contract, aspiration, or role)",
 			})
 			return
 		}
@@ -636,9 +806,53 @@ func validateKind(e *Entry) {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "kind",
 				Value:   string(e.Kind),
-				Message: fmt.Sprintf("invalid decision kind %q (expected directive, activity, plan, contract, or aspiration)", e.Kind),
+				Message: fmt.Sprintf("invalid decision kind %q (expected directive, activity, plan, contract, aspiration, or role)", e.Kind),
 			})
 		}
+	}
+}
+
+// validateActorFrontmatter checks that kind: actor signals have the required
+// canonical field. Actors are process-layer by convention — entries at other
+// layers get a warning.
+func validateActorFrontmatter(e *Entry) {
+	if !e.IsActor() {
+		return
+	}
+	if strings.TrimSpace(e.Canonical) == "" {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "canonical",
+			Message: "actor signal missing required canonical field",
+		})
+	}
+	if e.Layer != LayerProcess {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "layer",
+			Value:   string(e.Layer),
+			Message: fmt.Sprintf("actor signal should live at process layer (got %s)", e.Layer),
+		})
+	}
+}
+
+// validateRoleFrontmatter checks that kind: role decisions have the required
+// actor field. Roles are process-layer by convention — entries at other
+// layers get a warning.
+func validateRoleFrontmatter(e *Entry) {
+	if !e.IsRole() {
+		return
+	}
+	if strings.TrimSpace(e.Actor) == "" {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "actor",
+			Message: "role decision missing required actor field",
+		})
+	}
+	if e.Layer != LayerProcess {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "layer",
+			Value:   string(e.Layer),
+			Message: fmt.Sprintf("role decision should live at process layer (got %s)", e.Layer),
+		})
 	}
 }
 

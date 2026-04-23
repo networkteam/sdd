@@ -1,7 +1,7 @@
 ID:     20260410-100000-d-tac-aaa
 Type:   decision
 Layer:  tactical
-⚠ decision missing kind field (expected directive, activity, plan, contract, or aspiration)
+⚠ decision missing kind field (expected directive, activity, plan, contract, aspiration, or role)
 Time:   2026-04-10 10:00:00
 
 Derived:

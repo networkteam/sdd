@@ -153,17 +153,14 @@ func TestRunPreflight_ParseError(t *testing.T) {
 	}
 }
 
-// Participant-drift validation moved into the LLM prompt per d-tac-6z1;
-// the finder's responsibility is to surface LocalCanonical (from config)
-// and EstablishedParticipants (from graph) to the template. The tests below
-// verify that plumbing — end-to-end rubric behaviour is a property of the
-// LLM layer and depends on the configured provider, so it's not asserted
-// here.
+// Mechanical pre-flight checks per plan d-cpt-d34 replace the retired
+// LLM-judged participant-drift rubric. The tests below cover participant
+// coverage (AC 6), actor write-once invariant (AC 5), and the role
+// mechanical check (AC 7). LLM-side rubrics are tested in internal/llm.
 
-func TestRunPreflight_ParticipantContext_LocalCanonicalFlowsIntoPrompt(t *testing.T) {
-	prior := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
-	prior.Participants = []string{"Christopher", "Claude"}
-	graph := model.NewGraph([]*model.Entry{prior})
+func TestMechanical_ParticipantCoverage_ActiveActorMatches(t *testing.T) {
+	actor := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{actor})
 
 	proposed := &model.Entry{
 		Type:         model.TypeSignal,
@@ -172,79 +169,234 @@ func TestRunPreflight_ParticipantContext_LocalCanonicalFlowsIntoPrompt(t *testin
 		Participants: []string{"Christopher"},
 	}
 
-	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(Options{
-		PreflightRunner: runner,
-		Config:          &model.Config{Participant: "Christopher"},
-	})
-	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
-	if err != nil {
-		t.Fatal(err)
+	got := mechanicalPreflight(proposed, graph)
+	if len(got) != 0 {
+		t.Fatalf("expected no findings for matching canonical, got %+v", got)
+	}
+}
+
+func TestMechanical_ParticipantCoverage_UnknownCanonicalBlocks(t *testing.T) {
+	actor := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{actor})
+
+	proposed := &model.Entry{
+		Type:         model.TypeSignal,
+		Layer:        model.LayerConceptual,
+		Content:      "new observation",
+		Participants: []string{"Claude"},
 	}
 
-	// The prompt must reference the canonical declared in config so the LLM
-	// can treat it as authoritative ground truth.
-	if !strings.Contains(runner.lastPrompt, "Canonical local participant") {
-		t.Error("prompt missing canonical-participant header")
+	got := mechanicalPreflight(proposed, graph)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 finding for unknown canonical, got %d", len(got))
 	}
-	if !strings.Contains(runner.lastPrompt, "`Christopher`") {
-		t.Errorf("prompt missing canonical value 'Christopher'; got:\n%s", runner.lastPrompt)
+	if got[0].Severity != query.SeverityHigh {
+		t.Errorf("severity = %q, want high", got[0].Severity)
 	}
-	// And the established-set from the graph must reach the prompt.
-	for _, name := range []string{"Christopher", "Claude"} {
-		if !strings.Contains(runner.lastPrompt, name) {
-			t.Errorf("prompt missing established participant %q", name)
+	if got[0].Category != "participant-drift" {
+		t.Errorf("category = %q, want participant-drift", got[0].Category)
+	}
+}
+
+func TestMechanical_ParticipantCoverage_GraceModeWhenNoActors(t *testing.T) {
+	// Graph has no actor signals — grace mode skips the check entirely.
+	graph := model.NewGraph(nil)
+
+	proposed := &model.Entry{
+		Type:         model.TypeSignal,
+		Layer:        model.LayerConceptual,
+		Content:      "first entry",
+		Participants: []string{"Christopher"},
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	for _, f := range got {
+		if f.Category == "participant-drift" {
+			t.Errorf("grace mode should skip participant check, got %+v", f)
 		}
 	}
 }
 
-func TestRunPreflight_ParticipantContext_BootstrapEmptyEstablishedSet(t *testing.T) {
-	// Fresh graph: no established participants. The prompt should surface
-	// the bootstrap framing so the LLM skips the drift check.
-	graph := model.NewGraph(nil)
+func TestMechanical_ParticipantCoverage_AliasDoesNotMatch(t *testing.T) {
+	// Aliases are read-side convenience only — never resolve to canonical
+	// at capture time.
+	actor := actorEntry("Christopher", []string{"Chris", "CH"})
+	graph := model.NewGraph([]*model.Entry{actor})
+
 	proposed := &model.Entry{
 		Type:         model.TypeSignal,
 		Layer:        model.LayerConceptual,
-		Content:      "first ever entry",
-		Participants: []string{"Christopher"},
+		Content:      "observation",
+		Participants: []string{"Chris"},
 	}
 
-	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(Options{
-		PreflightRunner: runner,
-		Config:          &model.Config{Participant: "Christopher"},
-	})
-	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
-	if err != nil {
-		t.Fatal(err)
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "participant-drift" {
+			found = true
+		}
 	}
-	if !strings.Contains(runner.lastPrompt, "bootstrap mode") {
-		t.Errorf("prompt missing bootstrap framing for empty established set; got:\n%s", runner.lastPrompt)
+	if !found {
+		t.Error("expected participant-drift finding for alias used in participants")
 	}
 }
 
-func TestRunPreflight_ParticipantContext_MissingConfig(t *testing.T) {
-	// No config injected — the prompt should still render but declare the
-	// canonical as unconfigured; the LLM then falls back to the graph set.
-	prior := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
-	prior.Participants = []string{"Christopher"}
-	graph := model.NewGraph([]*model.Entry{prior})
+func TestMechanical_ActorWriteOnce_NewChainAllowed(t *testing.T) {
+	// First actor for canonical "Christopher" — nothing existing to collide.
+	graph := model.NewGraph(nil)
+
 	proposed := &model.Entry{
-		Type:         model.TypeSignal,
-		Layer:        model.LayerConceptual,
-		Content:      "new observation",
-		Participants: []string{"Christopher"},
+		Type:      model.TypeSignal,
+		Kind:      model.KindActor,
+		Layer:     model.LayerProcess,
+		Canonical: "Christopher",
+		Content:   "joining the project",
 	}
 
-	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(Options{PreflightRunner: runner})
-	_, err := f.Preflight(context.Background(), query.PreflightQuery{Entry: proposed, Graph: graph})
-	if err != nil {
-		t.Fatal(err)
+	got := mechanicalPreflight(proposed, graph)
+	for _, f := range got {
+		if f.Category == "actor-canonical-reused" {
+			t.Errorf("new chain should not trigger reuse finding, got %+v", f)
+		}
 	}
-	if !strings.Contains(runner.lastPrompt, "not configured") {
-		t.Errorf("prompt missing 'not configured' marker; got:\n%s", runner.lastPrompt)
+}
+
+func TestMechanical_ActorWriteOnce_ExtendingSameChainAllowed(t *testing.T) {
+	// A supersession within the same chain must not trip the write-once check,
+	// even when the canonical is unchanged.
+	existing := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{existing})
+
+	proposed := &model.Entry{
+		Type:       model.TypeSignal,
+		Kind:       model.KindActor,
+		Layer:      model.LayerProcess,
+		Canonical:  "Christopher", // same canonical
+		Supersedes: []string{existing.ID},
+		Content:    "typo correction in aliases",
 	}
+
+	got := mechanicalPreflight(proposed, graph)
+	for _, f := range got {
+		if f.Category == "actor-canonical-reused" {
+			t.Errorf("within-chain reuse should be allowed, got %+v", f)
+		}
+	}
+}
+
+func TestMechanical_ActorWriteOnce_CrossChainReuseBlocks(t *testing.T) {
+	// A different chain already carries "Christopher". A new chain cannot
+	// reuse the canonical.
+	existing := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{existing})
+
+	proposed := &model.Entry{
+		Type:      model.TypeSignal,
+		Kind:      model.KindActor,
+		Layer:     model.LayerProcess,
+		Canonical: "Christopher",
+		// No supersedes — starts a new chain.
+		Content: "a different person who happens to share the name",
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "actor-canonical-reused" && f.Severity == query.SeverityHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected actor-canonical-reused finding for cross-chain reuse")
+	}
+}
+
+func TestMechanical_RoleCanonicalMismatch_Blocks(t *testing.T) {
+	actor := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{actor})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindRole,
+		Layer:   model.LayerProcess,
+		Actor:   "Claude", // no chain carries this canonical
+		Refs:    []string{actor.ID},
+		Content: "contribution pattern",
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "role-canonical-mismatch" && f.Severity == query.SeverityHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected role-canonical-mismatch finding, got %+v", got)
+	}
+}
+
+func TestMechanical_RoleRefsMissingHead_Blocks(t *testing.T) {
+	actor := actorEntry("Christopher", nil)
+	other := entry("20260410-130000-s-cpt-oth", withContent("unrelated"))
+	graph := model.NewGraph([]*model.Entry{actor, other})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindRole,
+		Layer:   model.LayerProcess,
+		Actor:   "Christopher",
+		Refs:    []string{other.ID}, // missing actor head
+		Content: "contribution pattern",
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "role-refs-missing-head" && f.Severity == query.SeverityHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected role-refs-missing-head finding, got %+v", got)
+	}
+}
+
+func TestMechanical_RoleValid_NoFindings(t *testing.T) {
+	actor := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{actor})
+
+	proposed := &model.Entry{
+		Type:         model.TypeDecision,
+		Kind:         model.KindRole,
+		Layer:        model.LayerProcess,
+		Actor:        "Christopher",
+		Refs:         []string{actor.ID},
+		Participants: []string{"Christopher"},
+		Content:      "contribution pattern",
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	for _, f := range got {
+		if f.Severity == query.SeverityHigh {
+			t.Errorf("unexpected high finding: %+v", f)
+		}
+	}
+}
+
+// actorEntry is a test helper that builds a kind: actor signal.
+//
+//nolint:unparam // canonical is intentionally parameterized for future test cases
+func actorEntry(canonical string, aliases []string) *model.Entry {
+	const defaultActorID = "20260410-120000-s-prc-act"
+	e := entry(defaultActorID, withContent("actor: "+canonical))
+	e.Type = model.TypeSignal
+	e.Kind = model.KindActor
+	e.Layer = model.LayerProcess
+	e.Canonical = canonical
+	e.Aliases = aliases
+	return e
 }
 
 func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
