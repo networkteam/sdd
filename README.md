@@ -178,7 +178,7 @@ cd your-project
 sdd init
 ```
 
-One idempotent command. On a fresh tree it prompts for the graph directory (default `.sdd/graph`), writes `.sdd/config.yaml` and `.sdd/meta.json`, adds `.sdd/tmp/` to `.gitignore`, and installs the Claude Code skills under `~/.claude/skills/` (the default, user-global scope). Pass `--scope project` to install into this repo's `.claude/skills/` instead.
+One idempotent command. On a fresh tree it prompts for the graph directory (default `.sdd/graph`), your name as the canonical participant, and the graph authoring language (default `en`; see [Multilingual graphs](#multilingual-graphs) below). It writes `.sdd/config.yaml` and `.sdd/meta.json`, adds `.sdd/tmp/` to `.gitignore`, and installs the Claude Code skills under `~/.claude/skills/` (the default, user-global scope). Pass `--scope project` to install into this repo's `.claude/skills/` instead.
 
 Run `sdd init` again after a binary upgrade to refresh drifted skill files. Pristine files update silently; files you've edited yourself are preserved (add `--force` to overwrite them, or `--scope project` + `--force` to rebuild a repo-local installation).
 
@@ -191,6 +191,16 @@ Open Claude Code in your project and run:
 ```
 
 The skill runs `sdd status` + `sdd wip list`, clusters the graph state by project thread, and suggests where to start. Everything after that is dialogue.
+
+## Multilingual graphs
+
+Each graph has a single authoring language configured as `language: <locale>` in `.sdd/config.yaml` (set at `sdd init` time, default `en`). When the language is non-English:
+
+- **Captured entry descriptions are written in the configured language.** Dialogue with the agent can flow freely in any language, but the text that lands in the graph is canonicalized — the `/sdd` skill translates dialogue content before running `sdd new` so the graph stays coherent across sessions. Pre-flight enforces this: an entry whose description language doesn't match the configured language is flagged as drift and blocks capture.
+- **The `/sdd` skill renders translated SDD vocabulary** (types, kinds, layers, status labels) to you on demand, reading `references/vocabulary-<locale>.md` from its bundled references. Catch-up narration, playback, and grooming tables use translated terms.
+- **The technical surface stays English.** YAML frontmatter, CLI tokens (`sdd new d cpt --kind plan`), entry IDs, and section headers like `## Acceptance criteria` are canonical identifiers that pre-flight and CLI tooling key on. `sdd status`, `sdd list`, and `sdd show` output also stay English — translation is a `/sdd` skill concern, not a CLI concern.
+
+German (`de`) is the only bundled locale at the moment. To add another, drop a `vocabulary-<locale>.md` reference into `internal/bundledskills/claude/sdd/references/` following the German file's structure, then rebuild the binary and re-run `sdd init` to refresh the installed skill copy.
 
 ## Concepts in a minute
 
