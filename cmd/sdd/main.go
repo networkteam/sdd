@@ -1067,6 +1067,61 @@ func promptParticipant(defaultValue string) (string, error) {
 	return value, nil
 }
 
+// languagePromptModel is a bubbletea model for the graph-language prompt.
+type languagePromptModel struct {
+	textInput textinput.Model
+	done      bool
+}
+
+func newLanguagePromptModel(defaultValue string) languagePromptModel {
+	ti := textinput.New()
+	ti.Placeholder = defaultValue
+	ti.Focus()
+	ti.Width = 20
+	return languagePromptModel{textInput: ti}
+}
+
+func (m languagePromptModel) Init() tea.Cmd { return textinput.Blink }
+
+func (m languagePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.Type {
+		case tea.KeyEnter:
+			m.done = true
+			return m, tea.Quit
+		case tea.KeyCtrlC, tea.KeyEsc:
+			return m, tea.Quit
+		}
+	}
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+func (m languagePromptModel) View() string {
+	return fmt.Sprintf("Graph language [%s]: %s",
+		m.textInput.Placeholder, m.textInput.View())
+}
+
+// promptLanguage runs an interactive prompt for the graph authoring language.
+// Empty input accepts the default. Cancellation returns an error.
+func promptLanguage(defaultValue string) (string, error) {
+	m := newLanguagePromptModel(defaultValue)
+	result, err := tea.NewProgram(m).Run()
+	if err != nil {
+		return "", err
+	}
+	final := result.(languagePromptModel)
+	if !final.done {
+		return "", fmt.Errorf("prompt cancelled")
+	}
+	value := strings.TrimSpace(final.textInput.Value())
+	if value == "" {
+		return defaultValue, nil
+	}
+	return value, nil
+}
+
 // gitUserName reads git config user.name, returning an empty string when
 // git is unavailable or the setting isn't configured. Best-effort — used
 // only as a pre-filled default for the sdd init participant prompt.
@@ -1159,6 +1214,10 @@ func initCmd() *cli.Command {
 				Usage: "Canonical author name recorded in .sdd/config.local.yaml (prompted interactively with git user.name as default when unset)",
 			},
 			&cli.StringFlag{
+				Name:  "language",
+				Usage: "Graph authoring language as a locale code, e.g. en, de (prompted interactively on fresh init with en as default)",
+			},
+			&cli.StringFlag{
 				Name:  "scope",
 				Usage: "Where to install skills: user (~/.claude/skills) or project (.claude/skills)",
 				Value: string(model.DefaultScope),
@@ -1190,6 +1249,19 @@ func initCmd() *cli.Command {
 			}
 			if graphDir == "" {
 				graphDir = model.DefaultGraphDir
+			}
+
+			// Resolve graph language: explicit flag wins; otherwise prompt
+			// only on fresh init with stdin interactive. The default is
+			// `en` (English); choosing it still writes the key so future
+			// readers of the file don't have to infer default vs. unset.
+			language := strings.TrimSpace(cmd.String("language"))
+			if language == "" && !sddExists && isTerminal(os.Stdin) {
+				prompted, err := promptLanguage("en")
+				if err != nil {
+					return fmt.Errorf("prompt: %w", err)
+				}
+				language = prompted
 			}
 
 			scope := model.Scope(cmd.String("scope"))
@@ -1224,6 +1296,7 @@ func initCmd() *cli.Command {
 				RepoRoot:      repoRoot,
 				GraphDir:      graphDir,
 				Participant:   participant,
+				Language:      language,
 				BinaryVersion: version,
 				Target:        model.DefaultAgentTarget,
 				Scope:         scope,

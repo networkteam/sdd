@@ -146,11 +146,22 @@ func mergeLLMConfig(base, overlay LLMConfig) LLMConfig {
 	return out
 }
 
-// FormatConfig returns a commented YAML config template with the given graph dir.
+// FormatConfig returns a commented YAML config template with the given graph
+// dir. If cfg.Language is set, the locale is written as an active
+// `language: <code>` entry. Otherwise a commented hint is emitted instead so
+// the option stays discoverable in the file.
 func FormatConfig(cfg Config) string {
 	graphDir := cfg.GraphDir
 	if graphDir == "" {
 		graphDir = DefaultGraphDir
+	}
+	languageBlock := "# Graph language — locale code for the language captured entries are\n" +
+		"# authored in. Empty means English (default). The /sdd skill reads the\n" +
+		"# matching references/vocabulary-<locale>.md when rendering to users.\n"
+	if cfg.Language != "" {
+		languageBlock += "language: " + cfg.Language + "\n"
+	} else {
+		languageBlock += "# language: de\n"
 	}
 	return "# SDD configuration\n" +
 		"# See https://github.com/networkteam/sdd for documentation.\n" +
@@ -158,10 +169,7 @@ func FormatConfig(cfg Config) string {
 		"# Graph directory relative to repository root.\n" +
 		"graph_dir: " + graphDir + "\n" +
 		"\n" +
-		"# Graph language — locale code for the language captured entries are\n" +
-		"# authored in. Empty means English (default). The /sdd skill reads the\n" +
-		"# matching references/vocabulary-<locale>.md when rendering to users.\n" +
-		"# language: de\n" +
+		languageBlock +
 		"\n" +
 		"# LLM provider settings (defaults shown — override here or in config.local.yaml).\n" +
 		"# llm:\n" +

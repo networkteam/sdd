@@ -27,6 +27,12 @@ type InitCmd struct {
 	// field into the mapping without disturbing other keys (e.g. llm:).
 	Participant string
 
+	// Language is the graph authoring language (locale code) to record in
+	// .sdd/config.yaml on fresh init. Empty means "use the default behavior"
+	// — FormatConfig keeps the commented hint, so the graph stays English.
+	// Only applied on fresh init; existing config.yaml is never rewritten.
+	Language string
+
 	// BinaryVersion is the running sdd binary's version. Stamped into each
 	// installed skill file's frontmatter and, on initial init only, used
 	// to derive the graph's minimum_version (unless it's a dev build).
