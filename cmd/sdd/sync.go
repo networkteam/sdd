@@ -81,17 +81,12 @@ func (gitSyncerImpl) CountCommits(ctx context.Context, rangeSpec, grepPattern st
 	return model.CountGraphCommits(string(out)), nil
 }
 
-func (gitSyncerImpl) MergeBase(ctx context.Context, a, b string) (string, error) {
-	out, err := exec.CommandContext(ctx, "git", "merge-base", a, b).Output()
-	if err != nil {
-		return "", fmt.Errorf("git merge-base %s %s: %w", a, b, err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func (gitSyncerImpl) MergeTreePredict(ctx context.Context, base, ourRef, theirRef string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "merge-tree", "--write-tree", "--name-only",
-		"--merge-base="+base, ourRef, theirRef)
+func (gitSyncerImpl) MergeTreePredict(ctx context.Context, ourRef, theirRef string) ([]string, error) {
+	// --no-messages suppresses the trailing informational/conflict-message
+	// section so stdout after the OID is purely the conflicted path list.
+	// --merge-base is omitted so git computes the base internally (2.38
+	// compatibility — the explicit flag was added in 2.40).
+	cmd := exec.CommandContext(ctx, "git", "merge-tree", "--write-tree", "--name-only", "--no-messages", ourRef, theirRef)
 	out, err := cmd.Output()
 	if err != nil {
 		// Exit 1 is the documented conflict signal; parse stdout for paths.

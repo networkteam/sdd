@@ -48,8 +48,8 @@ func TestParseMergeTreeConflicts(t *testing.T) {
 			[]string{"path/a.go", "path/b.md"},
 		},
 		{
-			"blank line between paths ignored",
-			"treeoid\npath/a.go\n\npath/b.md\n",
+			"blank line terminates path list (trailing messages ignored)",
+			"treeoid\npath/a.go\npath/b.md\n\nAuto-merging path/a.go\nCONFLICT (content): Merge conflict in path/a.go\n",
 			[]string{"path/a.go", "path/b.md"},
 		},
 	}

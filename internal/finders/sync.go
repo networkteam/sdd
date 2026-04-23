@@ -39,11 +39,12 @@ type GitSyncer interface {
 	// given grep pattern (ERE). rangeSpec is a git log range such as
 	// "HEAD..@{u}" or "@{u}..HEAD".
 	CountCommits(ctx context.Context, rangeSpec, grepPattern string) (int, error)
-	// MergeBase returns the merge-base commit of two refs.
-	MergeBase(ctx context.Context, a, b string) (string, error)
 	// MergeTreePredict simulates a three-way merge in memory and returns
 	// the list of paths that would conflict. An empty slice means clean.
-	MergeTreePredict(ctx context.Context, base, ourRef, theirRef string) ([]string, error)
+	// The merge base is computed by git internally from (ourRef, theirRef)
+	// — this keeps the surface compatible with git 2.38 (the explicit
+	// --merge-base flag was added in 2.40).
+	MergeTreePredict(ctx context.Context, ourRef, theirRef string) ([]string, error)
 }
 
 // SyncStatus processes a SyncStatusQuery into a SyncStatus. Cooldown is
@@ -118,12 +119,9 @@ func (f *Finder) SyncStatus(ctx context.Context, q query.SyncStatusQuery) (model
 		return model.SyncStatus{State: model.SyncStateLocalAhead, LocalAhead: localAhead}, nil
 	}
 
-	// Both sides have diverged — predict rebase safety.
-	base, err := f.gitSyncer.MergeBase(ctx, "HEAD", upstream)
-	if err != nil {
-		return model.SyncStatus{}, fmt.Errorf("computing merge base: %w", err)
-	}
-	conflicts, err := f.gitSyncer.MergeTreePredict(ctx, base, "HEAD", upstream)
+	// Both sides have diverged — predict rebase safety. The merge base is
+	// computed by git internally from HEAD and the upstream ref.
+	conflicts, err := f.gitSyncer.MergeTreePredict(ctx, "HEAD", upstream)
 	if err != nil {
 		return model.SyncStatus{}, fmt.Errorf("predicting merge: %w", err)
 	}
