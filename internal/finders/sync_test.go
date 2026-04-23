@@ -26,8 +26,6 @@ type fakeGitSyncer struct {
 	remoteAhead   int
 	localAhead    int
 	countErr      error
-	mergeBase     string
-	mergeBaseErr  error
 	conflicts     []string
 	mergeTreeErr  error
 	lastRangeSpec []string
@@ -49,10 +47,7 @@ func (f *fakeGitSyncer) CountCommits(_ context.Context, rangeSpec, _ string) (in
 	}
 	return f.localAhead, nil
 }
-func (f *fakeGitSyncer) MergeBase(context.Context, string, string) (string, error) {
-	return f.mergeBase, f.mergeBaseErr
-}
-func (f *fakeGitSyncer) MergeTreePredict(context.Context, string, string, string) ([]string, error) {
+func (f *fakeGitSyncer) MergeTreePredict(context.Context, string, string) ([]string, error) {
 	return f.conflicts, f.mergeTreeErr
 }
 
@@ -216,7 +211,6 @@ func TestSyncStatus_CleanRebaseWhenDiverged(t *testing.T) {
 		upstream:    "origin/main",
 		remoteAhead: 2,
 		localAhead:  1,
-		mergeBase:   "abc123",
 		conflicts:   nil,
 	}
 	f, sddDir := newSyncFinder(t, gs, nil)
@@ -237,7 +231,6 @@ func TestSyncStatus_ConflictPredictedWhenDiverged(t *testing.T) {
 		upstream:    "origin/main",
 		remoteAhead: 2,
 		localAhead:  1,
-		mergeBase:   "abc123",
 		conflicts:   []string{".sdd/graph/2026/04/23-143213-d-tac-hsu.md"},
 	}
 	f, sddDir := newSyncFinder(t, gs, nil)

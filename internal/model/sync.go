@@ -64,21 +64,24 @@ func CountGraphCommits(gitLogOutput string) int {
 }
 
 // ParseMergeTreeConflicts parses the output of
-// `git merge-tree --write-tree --name-only --merge-base=<base> HEAD @{u}`.
+// `git merge-tree --write-tree --name-only --no-messages HEAD @{u}`.
 // On a clean merge, output is a single tree-OID line → returns nil. On a
 // conflict, output is the tree OID followed by conflicted file paths →
-// returns the paths. Blank lines and the leading OID are stripped.
+// returns the paths. A blank line terminates the path list; any trailing
+// informational/conflict-message section (present when --no-messages is
+// omitted) is ignored, so the parser stays correct even if the caller
+// forgets the flag.
 func ParseMergeTreeConflicts(output string) []string {
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 	if len(lines) <= 1 {
 		return nil
 	}
-	paths := make([]string, 0, len(lines)-1)
+	var paths []string
 	for _, line := range lines[1:] {
-		p := strings.TrimSpace(line)
-		if p != "" {
-			paths = append(paths, p)
+		if strings.TrimSpace(line) == "" {
+			break
 		}
+		paths = append(paths, line)
 	}
 	return paths
 }
