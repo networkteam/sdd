@@ -612,14 +612,14 @@ func validateRoleOrphans(g *Graph) {
 
 // validateParticipantCoverage surfaces every distinct participant name in
 // the graph that does not match an active actor canonical per plan d-cpt-d34
-// AC 10. In grace mode (no active actors yet) the check is skipped. The
-// warning attaches to each entry listing the unresolved name so lint output
-// clusters naturally by offending entry.
+// AC 10. Unlike the pre-flight mechanical check (AC 6), lint has no grace
+// mode: an all-historical graph with no actor signals is exactly the state
+// AC 10 exists to surface — the warnings drive the bootstrap-playbook
+// dialogue that captures the actors. The warning attaches to each entry
+// listing the unresolved name so lint output clusters naturally by
+// offending entry.
 func validateParticipantCoverage(g *Graph) {
 	active := g.ActiveActorHeads()
-	if len(active) == 0 {
-		return // grace mode
-	}
 	canonicals := make(map[string]struct{}, len(active))
 	for _, a := range active {
 		if a.Canonical != "" {
