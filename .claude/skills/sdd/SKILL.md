@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 3c0c38ffc27296f1acc228d94caf6987bda979255c29f49c695796962b53ee1a
+sdd-content-hash: 380a6aad8711ae6bfa554dbaf7e9e16fb45e9c4272a090ea9d858fb2cf738a5d
 sdd-version: dev
 ---
 
@@ -130,6 +130,17 @@ When `Language:` names a non-English locale:
 Pre-flight includes a language-drift check that flags entries whose description does not match the configured language. If it fires, the entry is in the wrong language — revise and retry, don't skip.
 
 If the vocabulary reference is missing for the configured locale (the file doesn't exist yet), pause and tell the user — adding the reference is a framework-level contribution, not something to improvise mid-capture.
+
+### Reacting to sync-check output
+
+The `sdd` CLI emits background-sync status lines to stderr at the top of each command (subject to a configurable cooldown in `.sdd/config.yaml`, default 15m). These lines are the cue to keep the shared graph in sync with collaborators. Pattern-match on the `sync:` prefix and act per state:
+
+- **`sync: fast-forward available, N commits behind`** or **`sync: rebase is clean, N remote / M local`** — run `git status --porcelain`. If empty (clean working tree), tell the user ("remote is N ahead, pulling with --rebase…") then run `git pull --rebase`. If non-empty (dirty), do not pull — warn the user ("working tree has uncommitted changes — commit or stash before rebasing") and defer.
+- **`sync: rebase would conflict in <paths>, N remote / M local`** — do not auto-pull. Tell the user the remote is diverged, list the predicted conflict paths, and let them resolve manually. Running rebase here strands them mid-conflict.
+- **`sync: local ahead by N, consider push`** — mention it as a suggestion, not an action. Pushing is visible to others; let the user decide when to publish.
+- **`sync: not a git repo` / `no remote configured` / `no upstream for current branch …` / `sync: fetch failed: <error>`** — surface the warning briefly. These are setup or network issues the user resolves; don't try to auto-fix.
+
+When no `sync:` line appears, the check was skipped (cooldown active, command exempt, or state already up-to-date) — no action needed. The CLI handles the conflict-safety prediction (via `git merge-tree`); your job is only to act on the rendered state, not re-derive it.
 
 ## Modes of working
 
