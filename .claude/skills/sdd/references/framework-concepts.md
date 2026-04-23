@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 38f78f78e08e248529981a3f9f656882cad4d71cf3cc89840799dff159610a7f
+sdd-content-hash: 6af7acfab80f4b6cbd761ed18c37df1df2eb96ce6ecfc5bd8db66f0f4215fc48
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -18,7 +18,7 @@ Completed work is itself a signal — a `kind: done` signal — which closes the
 
 The graph has **two entry types** — signal and decision. Each carries an explicit **kind** that sharpens what the entry is for. Pre-flight enforces that kind matches the narrative shape.
 
-### Signal kinds (5)
+### Signal kinds (6)
 
 | Kind | Question it answers | Default? |
 |---|---|---|
@@ -27,10 +27,13 @@ The graph has **two entry types** — signal and decision. Each carries an expli
 | `question` | What do we not know? | no |
 | `insight` | What have we synthesized? | no |
 | `done` | What was accomplished? | no |
+| `actor` | Who is participating? | no |
 
 A `done` signal records a commitment fulfilled — it must carry at least one `closes` or `refs` pointing at the commitment it completes.
 
-### Decision kinds (5)
+An `actor` signal records a participant identity at the process layer. See the "Actors and Roles" section below for the full semantics, including the write-once canonical invariant.
+
+### Decision kinds (6)
 
 | Kind | Question it answers | Default? |
 |---|---|---|
@@ -39,8 +42,11 @@ A `done` signal records a commitment fulfilled — it must carry at least one `c
 | `plan` | What must be true when done? | no |
 | `contract` | What must always hold? | no |
 | `aspiration` | What are we pulling toward? | no |
+| `role` | How does an actor participate? | no |
 
 Plan decisions require a `## Acceptance criteria` section with at least one checklist item. Each AC is a verifiable outcome — the contract between plan author, implementing agent, and the pre-flight validator that checks the closing done signal.
+
+A `role` decision records one actor's participation pattern — per-actor scope, orthogonal to contracts (which are universal). See "Actors and Roles" below.
 
 ## Distinguishing tests
 
@@ -135,6 +141,40 @@ Open entries — signals, unclosed decisions, open plans — describe *where the
 ## Contracts
 
 Contracts are decisions marked `kind: contract`. They define standing constraints — architectural rules, authority boundaries, process agreements. They emerge from working patterns: a directive that hardens into a permanent rule can be reclassified via supersedes + `kind: contract`. Contracts define constraints, not participation boundaries — anyone can contribute signals and dialogue.
+
+## Actors and Roles
+
+Participants are first-class graph entries. Two kinds partition identity from participation:
+
+- **Actor signals** (`kind: actor`) record *who* a participant is — frontmatter carries a required `canonical` (the identity string used in `participants` fields) and optional `aliases` (read-side convenience for mining and dialogue comprehension). Process layer. Default confidence high. Lifecycle: supersede to correct identity facts, retire via directive that closes the head actor signal.
+- **Role decisions** (`kind: role`) record *what a participant does* — frontmatter's required `actor:` field names the canonical of the actor-identity chain the role binds to. Process layer. Default confidence medium. Multiple roles per actor are permitted. Roles are **orthogonal to contracts**: a role scopes one actor's participation pattern, while a contract is universal.
+
+### Canonical-only in participants
+
+The `participants` field on every entry lists **canonical names only** — never aliases. Aliases are resolved on the read side (agent comprehension, mining external sources) and are never a validation-time concern. The pre-flight mechanical canonical check (binary severity: pass or high) enforces this at capture time; `sdd lint` surfaces any historical participant names that no longer match an active actor canonical.
+
+### Write-once canonical invariant
+
+A canonical is **write-once across actor-identity chains**: once used by any chain, it cannot appear in any other chain, even after the original chain is closed. Within a single supersession chain, canonicals can change across entries (e.g., typo correction) or repeat freely. This preserves the temporal stability of historical participant references without requiring per-entry timestamp-based name resolution. `sdd lint` catches invariant violations as defense-in-depth against race conditions or validator bypass.
+
+### Role-status cascade (chain canonical history)
+
+Role status derives from the bound actor-identity chain's canonical history rather than from closes/supersedes pointing at the role itself:
+
+1. A role with `actor: X` binds to the unique chain that has ever held `X` as canonical.
+2. The role is **derived-active** iff that chain's head actor signal is active (not closed).
+3. Retiring the chain (closing its head) transitively **derives-closed** every role that ever bound to any canonical in the chain's history. No separate role-retirement entries are needed for the cascade.
+
+Capture-time and derivation-time are complementary:
+
+- **Capture-time** (pre-flight) requires the role's `actor:` to match the **current head** canonical and the role's `refs` to include that head's entry ID. This forces new captures to use the latest identity form.
+- **Derivation-time** (status rendering) walks **full chain history**. This keeps older role captures valid after within-chain canonical corrections — the role's `actor:` value stays stable under identity typo fixes.
+
+Roles that reference a canonical matching no chain are **orphan** — flagged by the `sdd lint` orphan-role check. Orphans indicate abnormal state (direct file edits, corruption, validator bypass), distinct from the normal-case cascade where retirement derives-closes automatically.
+
+### Surfacing in status
+
+`sdd status` renders a **Participants block** after the main sections, grouped by active-actor canonical. Each group header is the canonical; entries listed underneath are the active actor signal plus every derived-active role bound to that chain. The block is suppressed during grace (zero active actors) so fresh graphs stay quiet. For filtered views, `sdd list --kind actor` and `sdd list --kind role` expose the underlying entries directly.
 
 ## Rendering Conventions
 
