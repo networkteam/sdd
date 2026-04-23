@@ -366,7 +366,7 @@ func listCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:    "kind",
 				Aliases: []string{"k"},
-				Usage:   "Filter by kind — signals: gap, fact, question, insight, done; decisions: directive, activity, plan, contract, aspiration",
+				Usage:   "Filter by kind — signals: gap, fact, question, insight, done, actor; decisions: directive, activity, plan, contract, aspiration, role",
 			},
 			&cli.BoolFlag{
 				Name:  "missing-kind",
@@ -458,7 +458,7 @@ func newCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:  "kind",
-				Usage: "Entry kind: signals — gap (default), fact, question, insight, done; decisions — directive (default), activity, plan, contract, aspiration",
+				Usage: "Entry kind: signals — gap (default), fact, question, insight, done, actor; decisions — directive (default), activity, plan, contract, aspiration, role",
 			},
 			&cli.StringSliceFlag{
 				Name:  "attach",

@@ -147,3 +147,71 @@ func TestRenderStatusLocalParticipantHeader(t *testing.T) {
 		}
 	})
 }
+
+// TestRenderStatusParticipantsBlock verifies the Participants block added
+// by plan d-cpt-d34 AC 15: one subsection per active actor canonical,
+// active role entries listed underneath, grace mode suppresses the block.
+func TestRenderStatusParticipantsBlock(t *testing.T) {
+	// Build a graph with one actor and one role bound to that actor.
+	actor := entry("20260410-120000-s-prc-act",
+		withKind(model.KindActor),
+		withContent("actor entry"))
+	actor.Canonical = "Christopher"
+	actor.Layer = model.LayerProcess
+
+	role := entry("20260410-130000-d-prc-rol",
+		withKind(model.KindRole),
+		withRefs(actor.ID),
+		withContent("role entry"))
+	role.Actor = "Christopher"
+	role.Layer = model.LayerProcess
+
+	g := model.NewGraph([]*model.Entry{actor, role})
+
+	var buf bytes.Buffer
+	presenters.RenderStatus(&buf, &query.StatusResult{
+		Graph: g,
+		Participants: []query.ParticipantGroup{
+			{Actor: actor, Roles: []*model.Entry{role}},
+		},
+	})
+	out := buf.String()
+
+	if !strings.Contains(out, "## Participants") {
+		t.Errorf("expected Participants block, got:\n%s", out)
+	}
+	if !strings.Contains(out, "### Christopher") {
+		t.Errorf("expected canonical header for Christopher, got:\n%s", out)
+	}
+	if !strings.Contains(out, actor.ID) {
+		t.Errorf("actor entry should render under Participants block, got:\n%s", out)
+	}
+	if !strings.Contains(out, role.ID) {
+		t.Errorf("role entry should render under Participants block, got:\n%s", out)
+	}
+
+	// Participants block must come after the other main sections so catch-up
+	// reads the graph narrative before the identity context.
+	partIdx := strings.Index(out, "## Participants")
+	graphIdx := strings.Index(out, "Graph:")
+	if partIdx < 0 || graphIdx < 0 || partIdx <= graphIdx {
+		t.Errorf("Participants block should appear after graph counts, got indices part=%d graph=%d", partIdx, graphIdx)
+	}
+}
+
+// TestRenderStatusParticipantsBlock_GraceSuppression verifies the block is
+// omitted when no active actors exist (grace mode).
+func TestRenderStatusParticipantsBlock_GraceSuppression(t *testing.T) {
+	g := model.NewGraph(nil)
+
+	var buf bytes.Buffer
+	presenters.RenderStatus(&buf, &query.StatusResult{
+		Graph:        g,
+		Participants: nil,
+	})
+	out := buf.String()
+
+	if strings.Contains(out, "## Participants") {
+		t.Errorf("grace mode should suppress Participants block, got:\n%s", out)
+	}
+}

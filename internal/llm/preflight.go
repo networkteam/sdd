@@ -53,20 +53,18 @@ func (r *PreflightResult) HasBlocking() bool {
 // Returns the parsed result regardless of finding severity. Returns an error
 // only for infrastructure failures (runner error, template error, parse error).
 //
-// localCanonical is the canonical participant name from
-// `.sdd/config.local.yaml` (empty string when no config exists). It's plumbed
-// into the prompt as authoritative ground truth for the participant-drift
-// check — decoupling validation from same-session drift in the graph's
-// participant set.
+// Participant validation is handled by mechanical checks in the finders
+// layer (see finders.mechanicalPreflight) — the LLM participant-drift
+// rubric is retired per plan d-cpt-d34 AC 9.
 //
 // configuredLanguage is the graph authoring language (locale code) from
 // `.sdd/config.yaml` (empty string when unset — English default). It feeds
 // the language-drift check which flags entries whose description prose does
 // not match the configured language.
-func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, localCanonical, configuredLanguage string) (*PreflightResult, error) {
+func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, configuredLanguage string) (*PreflightResult, error) {
 	ct := selectCheckType(entry, graph)
 
-	pctx := assembleContext(entry, graph, ct, localCanonical, configuredLanguage)
+	pctx := assembleContext(entry, graph, ct, configuredLanguage)
 
 	req, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
@@ -105,6 +103,8 @@ const (
 	checkAspirationCapture                  // aspiration decision captured without closes
 	checkSignalCapture                      // signal validation
 	checkSupersedes                         // supersedes operation
+	checkActorCapture                       // kind: actor signal capture
+	checkRoleCapture                        // kind: role decision capture
 )
 
 func (c checkType) String() string {
@@ -125,6 +125,10 @@ func (c checkType) String() string {
 		return "signal-capture"
 	case checkSupersedes:
 		return "supersedes"
+	case checkActorCapture:
+		return "actor-capture"
+	case checkRoleCapture:
+		return "role-capture"
 	default:
 		return fmt.Sprintf("unknown(%d)", int(c))
 	}
@@ -142,6 +146,8 @@ var checkTypeTemplates = map[checkType]string{
 	checkAspirationCapture: "aspiration_capture",
 	checkSignalCapture:     "signal_capture",
 	checkSupersedes:        "supersedes",
+	checkActorCapture:      "actor_capture",
+	checkRoleCapture:       "role_capture",
 }
 
 // preflightContext holds all data needed to render a pre-flight prompt template.
@@ -149,32 +155,35 @@ var checkTypeTemplates = map[checkType]string{
 // `## Acceptance criteria` markdown section), so they flow through
 // ProposedEntry and ClosedEntries without extra fields.
 //
-// LocalCanonical and EstablishedParticipants feed the participant-drift
-// rubric (see participants.tmpl). The two-set model is deliberate: the
-// canonical is fixed ground truth from config; the established set reflects
-// graph history and may contain its own drift — the rubric treats canonical
-// as authoritative when they disagree.
-//
 // ConfiguredLanguage feeds the language-drift rubric (see language.tmpl).
 // Empty means no language check (English default); a locale code like "de"
 // activates the check against the proposed entry's description prose.
 type preflightContext struct {
-	ProposedEntry           string
-	ReferencedEntries       string
-	ClosedEntries           string
-	SupersededEntries       string
-	ActiveContracts         string
-	ActiveAspirations       string
-	OpenSignals             string
-	LocalCanonical          string
-	EstablishedParticipants string
-	ConfiguredLanguage      string
+	ProposedEntry      string
+	ReferencedEntries  string
+	ClosedEntries      string
+	SupersededEntries  string
+	ActiveContracts    string
+	ActiveAspirations  string
+	OpenSignals        string
+	ConfiguredLanguage string
 }
 
 // selectCheckType determines the pre-flight check type from entry properties and graph context.
 // Dispatch is kind-aware: the same structural shape (signal with closes) routes to different
 // templates based on the entry's kind and the closed target's kind.
 func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
+	// Actor / role captures take precedence — their rubric focuses on
+	// frontmatter shape and prose context. Supersessions of an actor
+	// chain still route here rather than to the generic supersedes
+	// template so the template sees actor-specific guidance.
+	if entry.IsActor() {
+		return checkActorCapture
+	}
+	if entry.IsRole() {
+		return checkRoleCapture
+	}
+
 	if len(entry.Supersedes) > 0 {
 		return checkSupersedes
 	}
@@ -221,15 +230,11 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 // Attachments path list so the validator agent can optionally read them
 // when it deems necessary; pre-flight itself stays prompt-only.
 //
-// localCanonical flows through unchanged; the established-participants
-// string is derived from graph.AllParticipants() here so the caller
-// doesn't have to assemble it. configuredLanguage flows through unchanged.
-func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, localCanonical, configuredLanguage string) *preflightContext {
+// configuredLanguage flows through unchanged.
+func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, configuredLanguage string) *preflightContext {
 	pctx := &preflightContext{
-		ProposedEntry:           FormatEntryForPrompt(entry),
-		LocalCanonical:          localCanonical,
-		EstablishedParticipants: strings.Join(graph.AllParticipants(), ", "),
-		ConfiguredLanguage:      configuredLanguage,
+		ProposedEntry:      FormatEntryForPrompt(entry),
+		ConfiguredLanguage: configuredLanguage,
 	}
 
 	// Referenced entries

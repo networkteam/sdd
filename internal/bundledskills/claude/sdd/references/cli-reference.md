@@ -6,7 +6,7 @@
 - `sdd show <id>` — full entry with upstream summary chain (depth-limited)
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
 - `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
-- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind <kind>]` — filtered listing. `--kind` accepts any signal kind (gap, fact, question, insight, done) or decision kind (directive, activity, plan, contract, aspiration); the two sets are disjoint. Uses summaries.
+- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind <kind>]` — filtered listing. `--kind` accepts any signal kind (gap, fact, question, insight, done, actor) or decision kind (directive, activity, plan, contract, aspiration, role); the two sets are disjoint. Uses summaries.
 - `sdd new <type> <layer> [flags] <description>` — create entries
 - `sdd summarize [<id> | --all]` — regenerate entry summaries
 - `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, stale summaries)
@@ -41,7 +41,7 @@ Summary line format: `{indent}- {relations} {full-id} ({kind}): "{summary}"`
 - `--closes id1,id2` — entry IDs this resolves/fulfills
 - `--participants p1,p2` — participant names
 - `--confidence high|medium|low` — confidence level
-- `--kind contract|directive|plan` — decision kind (decisions only)
+- `--kind <kind>` — signals: gap (default), fact, question, insight, done, actor; decisions: directive (default), activity, plan, contract, aspiration, role
 - `--attach spec` — file to attach (repeatable, see below)
 - `--skip-preflight` — skip pre-flight validation (entry is annotated with `preflight: skipped`)
 - `--dry-run` — run validation and pre-flight only, without writing or committing the entry

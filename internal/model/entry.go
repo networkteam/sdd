@@ -60,8 +60,8 @@ var LayerFromAbbrev = map[string]Layer{
 // Kind is a sub-type classifier carried on signals and decisions. Its allowed
 // values depend on the entry's Type:
 //
-//   - Signal kinds: gap (default), fact, question, insight, done
-//   - Decision kinds: directive (default), activity, plan, contract, aspiration
+//   - Signal kinds: gap (default), fact, question, insight, done, actor
+//   - Decision kinds: directive (default), activity, plan, contract, aspiration, role
 //
 // Empty Kind on a new entry is replaced by the type's default during capture.
 type Kind string
@@ -73,6 +73,7 @@ const (
 	KindQuestion Kind = "question"
 	KindInsight  Kind = "insight"
 	KindDone     Kind = "done"
+	KindActor    Kind = "actor"
 
 	// Decision kinds.
 	KindDirective  Kind = "directive"
@@ -80,6 +81,7 @@ const (
 	KindPlan       Kind = "plan"
 	KindContract   Kind = "contract"
 	KindAspiration Kind = "aspiration"
+	KindRole       Kind = "role"
 )
 
 // signalKinds is the set of kinds valid on type: signal entries.
@@ -89,6 +91,7 @@ var signalKinds = map[Kind]bool{
 	KindQuestion: true,
 	KindInsight:  true,
 	KindDone:     true,
+	KindActor:    true,
 }
 
 // decisionKinds is the set of kinds valid on type: decision entries.
@@ -98,6 +101,7 @@ var decisionKinds = map[Kind]bool{
 	KindPlan:       true,
 	KindContract:   true,
 	KindAspiration: true,
+	KindRole:       true,
 }
 
 // IsValidKindForType reports whether k is an allowed kind for the given type.
@@ -150,11 +154,20 @@ type Entry struct {
 	Confidence   string
 	Content      string
 	Time         time.Time
-	Preflight    string    // "skipped" or "error" annotation from pre-flight validation
-	Attachments  []string  // filenames discovered from the co-located attachment directory
-	Summary      string    // LLM-generated summary: this entry + direct relationships
-	SummaryHash  string    // hex-encoded hash of the rendered summary prompt inputs
-	Warnings     []Warning // validation issues found during graph construction
+	// Canonical and Aliases are only meaningful on kind: actor signals.
+	// Canonical is the write-once identity string used in participants fields;
+	// Aliases are read-side conveniences for mining and dialogue comprehension.
+	Canonical string
+	Aliases   []string
+	// Actor is only meaningful on kind: role decisions. It names the canonical
+	// of the actor-identity chain the role binds to. Role status derives from
+	// the actor chain's canonical history (see Graph.RoleStatus).
+	Actor       string
+	Preflight   string    // "skipped" or "error" annotation from pre-flight validation
+	Attachments []string  // filenames discovered from the co-located attachment directory
+	Summary     string    // LLM-generated summary: this entry + direct relationships
+	SummaryHash string    // hex-encoded hash of the rendered summary prompt inputs
+	Warnings    []Warning // validation issues found during graph construction
 }
 
 // IsContract returns true if this decision is a standing constraint.
@@ -172,6 +185,16 @@ func (e *Entry) IsAspiration() bool {
 	return e.Kind == KindAspiration
 }
 
+// IsActor returns true if this signal records a participant identity.
+func (e *Entry) IsActor() bool {
+	return e.Type == TypeSignal && e.Kind == KindActor
+}
+
+// IsRole returns true if this decision commits a participation pattern.
+func (e *Entry) IsRole() bool {
+	return e.Type == TypeDecision && e.Kind == KindRole
+}
+
 // frontmatter is the YAML structure in the file header.
 type frontmatter struct {
 	Type         string   `yaml:"type"`
@@ -182,6 +205,9 @@ type frontmatter struct {
 	Closes       []string `yaml:"closes,omitempty"`
 	Participants []string `yaml:"participants,omitempty"`
 	Confidence   string   `yaml:"confidence,omitempty"`
+	Canonical    string   `yaml:"canonical,omitempty"`
+	Aliases      []string `yaml:"aliases,omitempty"`
+	Actor        string   `yaml:"actor,omitempty"`
 	Preflight    string   `yaml:"preflight,omitempty"`
 	Summary      string   `yaml:"summary,omitempty"`
 	SummaryHash  string   `yaml:"summary_hash,omitempty"`
@@ -221,6 +247,9 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Closes:       fm.Closes,
 		Participants: fm.Participants,
 		Confidence:   fm.Confidence,
+		Canonical:    fm.Canonical,
+		Aliases:      fm.Aliases,
+		Actor:        fm.Actor,
 		Preflight:    fm.Preflight,
 		Summary:      fm.Summary,
 		SummaryHash:  fm.SummaryHash,
@@ -365,6 +394,9 @@ func FormatFrontmatter(e *Entry) string {
 		Closes:       e.Closes,
 		Participants: e.Participants,
 		Confidence:   e.Confidence,
+		Canonical:    e.Canonical,
+		Aliases:      e.Aliases,
+		Actor:        e.Actor,
 		Preflight:    e.Preflight,
 		Summary:      e.Summary,
 		SummaryHash:  e.SummaryHash,

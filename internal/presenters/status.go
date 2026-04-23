@@ -38,6 +38,26 @@ func RenderStatus(w io.Writer, result *query.StatusResult) {
 	renderFlatSection(w, g, "Gaps and Questions", result.Open)
 	renderFlatSection(w, g, "Recent Insights", result.Insights)
 	renderFlatSection(w, g, "Recent Done Signals", result.Recent)
+	renderParticipantsSection(w, g, result.Participants)
+}
+
+// renderParticipantsSection renders the Participants block per plan
+// d-cpt-d34 AC 15 — one sub-section per active actor canonical, with
+// derived-active role decisions listed underneath in the standard entry
+// line format. Suppressed when no active actors exist (grace mode).
+func renderParticipantsSection(w io.Writer, g *model.Graph, groups []query.ParticipantGroup) {
+	if len(groups) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "## Participants\n\n")
+	for _, grp := range groups {
+		fmt.Fprintf(w, "### %s\n", grp.Actor.Canonical)
+		EntryLine(w, grp.Actor, g)
+		for _, r := range grp.Roles {
+			EntryLine(w, r, g)
+		}
+		fmt.Fprintln(w)
+	}
 }
 
 func renderLayeredSection(w io.Writer, g *model.Graph, title string, entries []*model.Entry) {
