@@ -460,6 +460,18 @@ func newCmd() *cli.Command {
 				Name:  "kind",
 				Usage: "Entry kind: signals — gap (default), fact, question, insight, done, actor; decisions — directive (default), activity, plan, contract, aspiration, role",
 			},
+			&cli.StringFlag{
+				Name:  "canonical",
+				Usage: "Canonical identity name (kind: actor only) — written into frontmatter",
+			},
+			&cli.StringFlag{
+				Name:  "aliases",
+				Usage: "Comma-separated aliases (kind: actor only) — read-side convenience for mining and comprehension",
+			},
+			&cli.StringFlag{
+				Name:  "actor",
+				Usage: "Canonical name the role binds to (kind: role only) — must match an active actor chain's head canonical",
+			},
 			&cli.StringSliceFlag{
 				Name:  "attach",
 				Usage: "File to attach (repeatable). Supports source:target mapping and -:name for stdin",
@@ -583,6 +595,9 @@ func newCmd() *cli.Command {
 				Supersedes:       splitCSV(cmd.String("supersedes")),
 				Closes:           splitCSV(cmd.String("closes")),
 				Confidence:       confidence,
+				Canonical:        strings.TrimSpace(cmd.String("canonical")),
+				Aliases:          splitCSV(cmd.String("aliases")),
+				Actor:            strings.TrimSpace(cmd.String("actor")),
 				Attachments:      atts,
 				SkipPreflight:    cmd.Bool("skip-preflight"),
 				DryRun:           cmd.Bool("dry-run"),
