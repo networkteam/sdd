@@ -102,3 +102,9 @@ Skills are **source-of-truth in `internal/bundledskills/claude/`** and compiled 
 ## Git rules
 
 - **Never commit compiled binaries.** `bin/sdd` is in `.gitignore` and must stay there. Rebuild locally.
+
+## Auto-memory
+
+**Do not write auto-memory in this project.** This repo dogfoods SDD — we use SDD to develop SDD. Auto-memory creates a parallel record that shortcuts what the graph and skill dialogue are supposed to handle, and it contaminates the evaluation of whether SDD itself is guiding the work well. If memory quietly carries the context that SDD should be surfacing through signals, decisions, and skill guidance, we lose the signal about where the framework is falling short.
+
+Scope: feedback about stylistic tics or other things genuinely unrelated to SDD behavior (how Claude communicates in general) may still go to memory. Anything about SDD concepts, CLI behavior, graph conventions, skill design, or project working preferences belongs in the graph or in this CLAUDE.md — not auto-memory.
