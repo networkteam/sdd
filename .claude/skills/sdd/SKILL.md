@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 1b8ec7b83abd2b8cbfbb0d94f8f116b50ea7c27f98eca19d104a032d68b7b0d5
+sdd-content-hash: 8910ef27ae97305976ede399f96a539e2c61b240c138d86916caf18852c0ec0e
 sdd-version: dev
 ---
 
@@ -111,7 +111,15 @@ Who to list:
 
 **Before playback, compose `--participants` values from the `Local participant:` header in `sdd status` output — that line is the canonical source of truth**, pulled straight from `.sdd/config.local.yaml`. Use the exact spelling it shows for the human user; `sdd status` lines may contain same-session drift, so don't infer canonical from recent entries. For any additional voice (Claude, a colleague joining mid-session), prefer the established spelling visible on existing entries; when that spelling conflicts with the status header, trust the header.
 
-If a name you're about to propose matches neither the status header nor any established spelling in the graph, pause and ask the user before introducing a new voice. The pre-flight validator emits a high-severity `participant-drift` finding that blocks creation for any unmatched participant — the severity is **binary**: a name is either an exact match against canonical / established set, or the entry description explicitly introduces them as a new voice joining the graph, or the finding fires. "X attended the meeting" does not qualify as introducing a new voice; variants of known names (`Christopher` → `Christopher Hlubek`) are drift, not new participants.
+### Write canonical names, never aliases
+
+The `participants` field carries **canonical names only** — the exact strings declared by active `kind: actor` signals. Aliases listed on an actor entry (e.g. `Chris`, `CH` as aliases of canonical `Christopher`) are **read-side convenience only**: use them when mining external sources or comprehending dialogue, never when writing entries. The pre-flight mechanical canonical check is binary (pass or high-severity block), so an alias in a `--participants` value is a hard rejection. If you find yourself tempted to pass an alias, resolve it to its canonical first.
+
+**Do not auto-ref actor or role entries for routine participation.** Listing a participant in `--participants` already carries the identity reference through the canonical. A role-ref is only required when the entry specifically operationalizes or extends that role (per-kind guidance); for everyday captures, adding `--refs <actor-id>` or `--refs <role-id>` creates noise without adding graph signal.
+
+If a name you're about to propose matches neither the status header nor any active actor canonical, pause and ask the user before introducing a new voice. The pre-flight mechanical check emits a high-severity `participant-drift` finding that blocks creation. Grace mode (fresh graph with zero active actor signals) skips this check — the first actor signal activates enforcement for all subsequent captures.
+
+Actor and role entries surface natively via the `sdd status` **Participants block** (rendered after the main sections, grouped by active-actor canonical with derived-active roles listed underneath) and via `sdd list --kind actor|role` for filtered views. They do **not** appear in the existing kind-based sections (Directives, Aspirations, etc.) — those sections omit actor/role by design so the Participants block stays the single surfacing point for identity context.
 
 Since you always present proposed entries for confirmation before running `sdd new`, the user can correct participants if your inference is wrong. This is the safety net — get it right most of the time, and the confirmation step catches the rest.
 
