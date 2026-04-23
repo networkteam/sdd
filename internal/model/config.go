@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -25,6 +26,11 @@ const (
 	// DefaultLLMConcurrency is the default worker count for concurrent
 	// LLM calls (e.g. sdd summarize --all).
 	DefaultLLMConcurrency = 4
+
+	// DefaultSyncCooldown bounds how often background sync runs git fetch
+	// when last-fetch exceeds this duration. Applied when Config.Sync.Cooldown
+	// is empty or unparseable.
+	DefaultSyncCooldown = "15m"
 )
 
 // Config represents the contents of .sdd/config.yaml (shared, committed) or
@@ -33,8 +39,9 @@ const (
 // Empty / zero-valued fields in the local file mean "inherit from shared",
 // so any subset of fields can appear in either file.
 type Config struct {
-	GraphDir string    `yaml:"graph_dir,omitempty"`
-	LLM      LLMConfig `yaml:"llm,omitempty"`
+	GraphDir string     `yaml:"graph_dir,omitempty"`
+	LLM      LLMConfig  `yaml:"llm,omitempty"`
+	Sync     SyncConfig `yaml:"sync,omitempty"`
 	// Participant is the canonical name used for entry authorship when
 	// --participants / --participant is omitted at capture time. Lives in
 	// .sdd/config.local.yaml (gitignored) because the same person may use
@@ -45,6 +52,16 @@ type Config struct {
 	// language; the /sdd skill renders translated vocabulary to users via
 	// bundled translation references. Empty means English (default).
 	Language string `yaml:"language,omitempty"`
+}
+
+// SyncConfig governs background sync awareness: the auto-fetch cooldown and
+// related behavior. Stored as a string Go duration (e.g. "15m") parsed at
+// use site so malformed values fall back to DefaultSyncCooldown rather than
+// failing at config load.
+type SyncConfig struct {
+	// Cooldown is the minimum interval between background git fetches. Go
+	// duration string (e.g. "15m", "1h"). Empty means DefaultSyncCooldown.
+	Cooldown string `yaml:"cooldown,omitempty"`
 }
 
 // LLMConfig holds settings for LLM provider selection, model choice, and
@@ -105,7 +122,16 @@ func MergeConfig(base, overlay *Config) *Config {
 		out.Language = overlay.Language
 	}
 	out.LLM = mergeLLMConfig(base.LLM, overlay.LLM)
+	out.Sync = mergeSyncConfig(base.Sync, overlay.Sync)
 	return &out
+}
+
+func mergeSyncConfig(base, overlay SyncConfig) SyncConfig {
+	out := base
+	if overlay.Cooldown != "" {
+		out.Cooldown = overlay.Cooldown
+	}
+	return out
 }
 
 func mergeLLMConfig(base, overlay LLMConfig) LLMConfig {
@@ -176,5 +202,27 @@ func FormatConfig(cfg Config) string {
 		"#   provider: " + DefaultLLMProvider + "\n" +
 		"#   model: " + DefaultLLMModel + "\n" +
 		"#   timeout: 2m\n" +
-		"#   concurrency: 4\n"
+		"#   concurrency: 4\n" +
+		"\n" +
+		"# Background sync — controls how often the CLI auto-fetches to detect graph\n" +
+		"# changes from collaborators. Go duration string.\n" +
+		"# sync:\n" +
+		"#   cooldown: " + DefaultSyncCooldown + "\n"
+}
+
+// ResolveSyncCooldown returns the effective cooldown duration from cfg,
+// falling back to DefaultSyncCooldown on empty or unparseable values.
+func ResolveSyncCooldown(cfg *Config) time.Duration {
+	raw := ""
+	if cfg != nil {
+		raw = cfg.Sync.Cooldown
+	}
+	if raw == "" {
+		raw = DefaultSyncCooldown
+	}
+	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+		return d
+	}
+	d, _ := time.ParseDuration(DefaultSyncCooldown)
+	return d
 }

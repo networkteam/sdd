@@ -129,6 +129,17 @@ Pre-flight includes a language-drift check that flags entries whose description 
 
 If the vocabulary reference is missing for the configured locale (the file doesn't exist yet), pause and tell the user — adding the reference is a framework-level contribution, not something to improvise mid-capture.
 
+### Reacting to sync-check output
+
+The `sdd` CLI emits background-sync status lines to stderr at the top of each command (subject to a configurable cooldown in `.sdd/config.yaml`, default 15m). These lines are the cue to keep the shared graph in sync with collaborators. Pattern-match on the `sync:` prefix and act per state:
+
+- **`sync: fast-forward available, N commits behind`** or **`sync: rebase is clean, N remote / M local`** — run `git status --porcelain`. If empty (clean working tree), tell the user ("remote is N ahead, pulling with --rebase…") then run `git pull --rebase`. If non-empty (dirty), do not pull — warn the user ("working tree has uncommitted changes — commit or stash before rebasing") and defer.
+- **`sync: rebase would conflict in <paths>, N remote / M local`** — do not auto-pull. Tell the user the remote is diverged, list the predicted conflict paths, and let them resolve manually. Running rebase here strands them mid-conflict.
+- **`sync: local ahead by N, consider push`** — mention it as a suggestion, not an action. Pushing is visible to others; let the user decide when to publish.
+- **`sync: not a git repo` / `no remote configured` / `no upstream for current branch …` / `sync: fetch failed: <error>`** — surface the warning briefly. These are setup or network issues the user resolves; don't try to auto-fix.
+
+When no `sync:` line appears, the check was skipped (cooldown active, command exempt, or state already up-to-date) — no action needed. The CLI handles the conflict-safety prediction (via `git merge-tree`); your job is only to act on the rendered state, not re-derive it.
+
 ## Modes of working
 
 You don't ask "which mode?" — you read the situation and act accordingly. These describe how you behave in different contexts:

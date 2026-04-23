@@ -17,6 +17,7 @@ import (
 type Finder struct {
 	preflightRunner llm.Runner
 	cfg             *model.Config
+	gitSyncer       GitSyncer
 }
 
 // Options configures a new Finder. Zero-valued fields mean "not available"
@@ -25,6 +26,7 @@ type Finder struct {
 type Options struct {
 	PreflightRunner llm.Runner
 	Config          *model.Config
+	GitSyncer       GitSyncer
 }
 
 // New constructs a Finder with the given options.
@@ -32,6 +34,7 @@ func New(opts Options) *Finder {
 	return &Finder{
 		preflightRunner: opts.PreflightRunner,
 		cfg:             opts.Config,
+		gitSyncer:       opts.GitSyncer,
 	}
 }
 
