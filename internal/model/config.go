@@ -85,8 +85,11 @@ type LLMConfig struct {
 	// APIKeys maps provider name to API key. Typically lives in
 	// config.local.yaml so keys stay out of version control.
 	APIKeys map[string]string `yaml:"api_keys,omitempty"`
-	// RateLimitRPS caps remote-provider requests per second (0 = uncapped).
-	// The claude-cli and ollama providers ignore this.
+	// RateLimitRPS caps remote-provider requests per second. Zero means
+	// "apply a conservative per-model default safe for Anthropic/OpenAI
+	// tier 1"; set an explicit positive value (e.g. a high number like
+	// 100) to effectively disable the cap on higher tiers. The claude-cli
+	// and ollama providers ignore this field.
 	RateLimitRPS float64 `yaml:"rate_limit_rps,omitempty"`
 }
 
