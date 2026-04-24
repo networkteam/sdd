@@ -73,8 +73,9 @@ func TestNew_RemoteProviderWithRateLimit(t *testing.T) {
 	}
 }
 
-func TestNew_RemoteProviderWithoutRateLimit(t *testing.T) {
-	// Same valid config but no rate limit — should not be wrapped.
+func TestNew_RemoteProviderAppliesDefaultRateLimit(t *testing.T) {
+	// No explicit RateLimitRPS → conservative per-model default should apply
+	// so tier-1 users on Anthropic/OpenAI don't immediately hit 429s.
 	r, err := New(model.LLMConfig{
 		Provider: "anthropic",
 		Model:    "claude-3-5-sonnet",
@@ -83,8 +84,68 @@ func TestNew_RemoteProviderWithoutRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New(anthropic): %v", err)
 	}
-	if _, ok := r.(*rateLimited); ok {
-		t.Error("remote runner with RateLimitRPS=0 must not be wrapped")
+	if _, ok := r.(*rateLimited); !ok {
+		t.Errorf("remote runner with RateLimitRPS=0 must be wrapped with provider default, got %T", r)
+	}
+}
+
+func TestProviderDefaultRPS(t *testing.T) {
+	cases := []struct {
+		provider string
+		model    string
+		want     float64
+	}{
+		// Anthropic families — shared limits per family, so name match
+		// drives the default regardless of minor version.
+		{"anthropic", "claude-opus-4-7", 0.5},
+		{"anthropic", "claude-3-opus-latest", 0.5},
+		{"anthropic", "claude-sonnet-4-6", 1.0},
+		{"anthropic", "claude-3-5-sonnet-20241022", 1.0},
+		{"anthropic", "claude-haiku-4-5-20251001", 2.0},
+		// Unknown Anthropic model → safe middle-ground (Sonnet equivalent).
+		{"anthropic", "claude-future-edition", 1.0},
+
+		// OpenAI — mini/nano families get higher throughput, frontier is 1.0.
+		{"openai", "gpt-5", 1.0},
+		{"openai", "gpt-5-mini", 2.0},
+		{"openai", "gpt-5-nano", 2.0},
+		{"openai", "o3", 1.0},
+
+		// Local / unknown → zero (no wrap).
+		{"claude-cli", "anything", 0},
+		{"ollama", "llama3", 0},
+		{"made-up", "x", 0},
+	}
+
+	for _, c := range cases {
+		got := providerDefaultRPS(c.provider, c.model)
+		if got != c.want {
+			t.Errorf("providerDefaultRPS(%q, %q) = %v; want %v", c.provider, c.model, got, c.want)
+		}
+	}
+}
+
+func TestNew_RemoteProviderExplicitOverridesDefault(t *testing.T) {
+	// Explicit RateLimitRPS takes precedence over the per-model default —
+	// higher-tier users can dial up throughput.
+	r, err := New(model.LLMConfig{
+		Provider:     "anthropic",
+		Model:        "claude-opus-4-7", // default would be 0.5
+		APIKeys:      map[string]string{"anthropic": "sk-ant-testkey-aaaaaaaaaaaaaaaaaaaa"},
+		RateLimitRPS: 10,
+	})
+	if err != nil {
+		t.Fatalf("New(anthropic): %v", err)
+	}
+	wrapped, ok := r.(*rateLimited)
+	if !ok {
+		t.Fatalf("expected *rateLimited wrapper, got %T", r)
+	}
+	// rate.Limiter doesn't expose its rate directly, but the burst size is
+	// derived from the RPS, so we can use it as an indirect signal that
+	// the explicit value (10) won rather than the default (0.5).
+	if wrapped.limiter.Burst() != 10 {
+		t.Errorf("expected burst 10 from explicit RateLimitRPS, got %d (default would be 1)", wrapped.limiter.Burst())
 	}
 }
 

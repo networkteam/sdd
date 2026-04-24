@@ -7,6 +7,7 @@ package factory
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"golang.org/x/time/rate"
 
@@ -18,8 +19,10 @@ import (
 
 // New builds an llm.Runner from config. Provider and model fall back to
 // model.DefaultLLMProvider / model.DefaultLLMModel when empty. Remote
-// providers (anthropic, openai) get wrapped with a rate.Limiter when
-// cfg.RateLimitRPS is positive; local providers (claude-cli, ollama) are
+// providers (anthropic, openai) get wrapped with a rate.Limiter: an
+// explicit cfg.RateLimitRPS takes precedence, otherwise a conservative
+// tier-1-safe default is selected per provider/model family (see
+// providerDefaultRPS). Local providers (claude-cli, ollama) stay
 // uncapped. Errors distinguish configuration problems from transport
 // failures so the CLI can surface them distinctly.
 func New(cfg model.LLMConfig) (llm.Runner, error) {
@@ -37,11 +40,51 @@ func New(cfg model.LLMConfig) (llm.Runner, error) {
 		return nil, err
 	}
 
-	if isRemote(provider) && cfg.RateLimitRPS > 0 {
-		runner = newRateLimited(runner, cfg.RateLimitRPS)
+	if isRemote(provider) {
+		rps := cfg.RateLimitRPS
+		if rps == 0 {
+			rps = providerDefaultRPS(provider, cfg.Model)
+		}
+		if rps > 0 {
+			runner = newRateLimited(runner, rps)
+		}
 	}
 
 	return runner, nil
+}
+
+// providerDefaultRPS returns a conservative, tier-1-safe RPS default for a
+// given provider/model. Numbers bias below each tier-1 mathematical ceiling
+// so bursty batch operations (e.g. sdd summarize --all) don't trip 429s
+// out of the box. Returns 0 when no default applies (caller decides).
+//
+// Anthropic tier 1 (shared family limits): Opus 50 RPM, Sonnet 100 RPM,
+// Haiku 200 RPM. OpenAI tier 1 varies per model; cheap mini/nano families
+// get higher throughput than frontier models. Users on higher tiers
+// override via llm.rate_limit_rps in .sdd/config.local.yaml.
+func providerDefaultRPS(provider, modelName string) float64 {
+	name := strings.ToLower(modelName)
+	switch provider {
+	case "anthropic":
+		switch {
+		case strings.Contains(name, "opus"):
+			return 0.5
+		case strings.Contains(name, "haiku"):
+			return 2.0
+		default:
+			// Sonnet or unknown — middle-ground default.
+			return 1.0
+		}
+	case "openai":
+		switch {
+		case strings.Contains(name, "mini"), strings.Contains(name, "nano"):
+			return 2.0
+		default:
+			return 1.0
+		}
+	default:
+		return 0
+	}
 }
 
 func buildProvider(cfg model.LLMConfig) (llm.Runner, error) {
