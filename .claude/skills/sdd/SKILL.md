@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 8910ef27ae97305976ede399f96a539e2c61b240c138d86916caf18852c0ec0e
+sdd-content-hash: de7ae9637831081d7f745cc3a612a9badc4029bc4b46a6471621493694f5d140
 sdd-version: dev
 ---
 
@@ -73,15 +73,16 @@ See [CLI reference](references/cli-reference.md) for full command syntax and fla
 
 ### Get the entry right
 
-- **Right type**: Signal = something noticed (kinds: gap, fact, question, insight, done — see [framework-concepts](references/framework-concepts.md) for each). Decision = something committed to (kinds: directive, activity, plan, contract, aspiration). Pick the kind via the distinguishing tests in framework-concepts.
+- **Right type**: Signal = something noticed (kinds: gap, fact, question, insight, done, actor — see [framework-concepts](references/framework-concepts.md) for each). Decision = something committed to (kinds: directive, activity, plan, contract, aspiration, role). Pick the kind via the distinguishing tests in framework-concepts.
 - **Before capturing a done signal**: Ensure the artifacts it references are durable — either via a prior commit (code or system changes) or via `--attach` on the entry itself (research, synthesis, design docs; the `sdd new` commit carries entry and attachments together).
 - **Short-loop smell test**: when drafting a done signal that closes a gap directly (bypassing a decision), check the narrative. If you'd have to describe *a choice or rationale* to capture what was done, stop and capture the decision first — pre-flight will flag approach-shaped closures, strictly at higher layers.
 - **Right layer**: Strategic = why/direction. Conceptual = approach/shape. Tactical = structure/trade-offs. Operational = individual steps. Process = how we work.
 - **Refs matter**: Always link to the signals/decisions that led to this entry. Use `sdd show` and `sdd list` to find the right refs.
+- **Don't cite graph-mechanics rules in prose or refs**: Contracts that govern all entries (canonical-only participants, immutability, ref semantics) apply universally — citing them in an individual entry adds noise. Only cite a contract when the entry specifically operationalizes, refines, or tests that rule.
 - **Confidence is honest**: High = strong conviction. Medium = reasonable but unvalidated. Low = hypothesis/experiment.
 - **One idea per entry**: Keep entries digestible. If it needs more detail, split into multiple entries or reference an external file.
-- **Kind for decisions**: Default is directive. Use `--kind activity` for concrete next work whose shape is known from context. Use `--kind plan` when the scope needs decomposition and the description carries `## Acceptance criteria`. Use `--kind contract` for standing constraints. Use `--kind aspiration` for perpetual direction with no completion criterion. A directive that hardens into a permanent rule can be reclassified later via supersedes + kind: contract.
-- **Kind for signals**: Default is gap. Use `--kind done` for completion records (must carry `closes` or `refs`). Use `--kind fact`, `question`, or `insight` when the narrative is unambiguously observational, an open question, or a synthesis.
+- **Kind for decisions**: Default is directive. Use `--kind activity` for concrete next work whose shape is known from context. Use `--kind plan` when the scope needs decomposition and the description carries `## Acceptance criteria`. Use `--kind contract` for standing constraints. Use `--kind aspiration` for perpetual direction with no completion criterion. Use `--kind role` for an actor's participation pattern within this project — what contribution shape they take here (review, authorship, domain weight); orthogonal to contracts: role scopes one actor, contract applies to all. A directive that hardens into a permanent rule can be reclassified later via supersedes + kind: contract.
+- **Kind for signals**: Default is gap. Use `--kind done` for completion records (must carry `closes` or `refs`). Use `--kind fact`, `question`, or `insight` when the narrative is unambiguously observational, an open question, or a synthesis. Use `--kind actor` for a first-class participant identity — canonical name in frontmatter, prose covers stable identity facts (affiliation, background, domain expertise) that hold independent of any project frame.
 - **Acceptance criteria for plan decisions**: `--kind plan` decisions must include an `## Acceptance criteria` section in the description (not the attachment) with `- [ ]` checklist items. Each AC is a single verifiable outcome — not an implementation detail. ACs are the contract between plan author, implementing agent, and pre-flight validator. Pre-flight flags a missing AC section on a plan decision as high.
 
 ### Attachment assessment
