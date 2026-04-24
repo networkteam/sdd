@@ -9,18 +9,24 @@ A `kind: actor` signal is being captured — a first-class participant identity 
 
 Actor signals record *who* a participant is. The description prose should make the identity legible to future readers without requiring external context.
 
-1. **Canonical introduction** — The prose should introduce the canonical as the preferred identity string used in `participants` fields across the graph. One sentence is enough: "Christopher is the primary human contributor on the SDD project, referenced as `Christopher` in entry participants."
-2. **External context (optional)** — A sentence or two of role-independent context (e.g. affiliation, relationship to the project) helps future readers disambiguate and grounds the identity. Missing external context is acceptable; conflating role-specific scope with actor prose is a finding (actor = who, role = what-they-do).
+**Identity vs role is frame-relative.** An actor's role *inside this graph* (how they contribute to the project whose graph this is) belongs in a `kind: role` decision, not the actor signal. Organizational positions held in other frames (CEO of another company, employed at X, member of Y), career background (senior developer, product manager, academic), prior domain expertise, and other external or historical attributes are **identity content** from this graph's perspective — they ground *who the participant is* and belong in actor prose. The test: does the prose describe what the participant *does here* (→ role), or what they *bring* from outside this graph (→ identity)?
+
+1. **Canonical introduction** — The prose should introduce the canonical as the preferred identity string used in `participants` fields across the graph. One sentence is enough: "Christopher, canonical `Christopher` in graph participants, is CEO of networkteam with a background as full-stack developer and technical lead."
+2. **External context (optional)** — A sentence or two of role-independent context helps future readers disambiguate and grounds the identity. Suitable content: affiliation with external organizations (employer, institution), career background, prior domain expertise, provenance the participant brings from outside this graph. Missing external context is acceptable; conflating this-graph role scope with actor prose is a finding.
 3. **Alias explanation (when aliases are present)** — If `aliases:` lists variants, the prose should name the dialogue/mining contexts those variants appear in so agents know when to resolve them on the read side (aliases are never used at capture time).
+
+## Identity scope for non-individual actors
+
+Some actors represent a *family* or *collective* rather than a specific individual or session — e.g., an AI model family where individual sessions vary by version and harness, or a team where membership shifts over time. Prefer the stable identity (the family, the team) over the momentary instance (a specific session, a current member roster). Model-family-as-identity is the correct framing for AI actors; specific-session detail belongs in narrative, not in the identity record.
 
 ## Calibration
 
-- `high` — Prose reads as a role description rather than an identity record (e.g. "Christopher reviews PRs and owns migrations" — that belongs in a role decision, not the actor signal).
+- `high` — Prose reads as a role description (what the participant does *inside this graph*) rather than an identity record (e.g. "Christopher reviews PRs and owns migrations", "Claude drafts entries and executes CLI operations" — that belongs in a role decision, not the actor signal).
 - `medium` — Canonical is present in frontmatter but the prose never names or introduces it; the entry is an identity record with no readable identity.
 - `low` — Prose is terse to the point of being uninformative ("actor: Christopher") but the frontmatter canonical and any context prose are intact.
-- No finding — Prose grounds the identity, names the canonical, and keeps role scope out.
+- No finding — Prose grounds the identity, names the canonical, and keeps this-graph role scope out.
 
-Trust the mechanical layer for structural validation: missing canonical, cross-chain canonical reuse, and layer mismatches are handled by frontmatter validation and the lint invariant check. Do not re-flag those here.
+Do not introduce finding categories beyond those calibrated above. External organizational roles, career background, and identity scope (family vs session, collective vs individual) are identity content — not findings. Trust the mechanical layer for structural validation: missing canonical, cross-chain canonical reuse, and layer mismatches are handled by frontmatter validation and the lint invariant check. Do not re-flag those here.
 {{ template "contracts" . -}}
 {{ template "entry_quality" . -}}
 {{ template "language" . -}}
