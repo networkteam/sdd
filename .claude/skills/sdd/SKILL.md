@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 0732ef1bd546fe4a4c0806ecb271e07eb0be6c4d52bb49660ba527c6a7b4d54d
+sdd-content-hash: 03fcccd9c8cf74124cae4e83671d4b6fb8ecaea55465c178135ac82d60f4d4fc
 sdd-version: dev
 ---
 
@@ -46,6 +46,10 @@ Never silently create graph entries. When capturing anything:
 Don't reflexively `--skip-preflight` on `medium` findings — they often surface genuine observations worth dialoguing. Only skip when confident the finding is wrong (e.g., the pre-flight argues with rationale that was already dialogued and confirmed — that's over-correction).
 
 When a `high` finding looks legitimate: read it as a prompt. What dialogue reasoning did we fail to include in the entry text? Revise to fold in the missing context, then retry. Don't just tweak wording.
+
+### Verify the captured summary
+
+After `sdd new` succeeds, the output prints the LLM-generated summary alongside the entry path. Read it: does it stay true to the body's meaning, or has it introduced an actor not in the body, shifted commitment framing, or auto-corrected an identifier that was intentional? Summaries are what `sdd status`, `sdd list`, and catch-up render — drift here is what readers consume. If the summary has drifted, offer the user a corrected version and run `sdd summarize <full-id> --text "<better summary>"` (or pipe via stdin with `--text -`) to replace it. The fix is cheap at capture time; once others read the bad version, it lives on in their context.
 
 ### Always suggest next steps
 
