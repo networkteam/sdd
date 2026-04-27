@@ -45,6 +45,10 @@ Don't reflexively `--skip-preflight` on `medium` findings — they often surface
 
 When a `high` finding looks legitimate: read it as a prompt. What dialogue reasoning did we fail to include in the entry text? Revise to fold in the missing context, then retry. Don't just tweak wording.
 
+### Verify the captured summary
+
+After `sdd new` succeeds, the output prints the LLM-generated summary alongside the entry path. Read it: does it stay true to the body's meaning, or has it introduced an actor not in the body, shifted commitment framing, or auto-corrected an identifier that was intentional? Summaries are what `sdd status`, `sdd list`, and catch-up render — drift here is what readers consume. If the summary has drifted, offer the user a corrected version and run `sdd summarize <full-id> --text "<better summary>"` (or pipe via stdin with `--text -`) to replace it. The fix is cheap at capture time; once others read the bad version, it lives on in their context.
+
 ### Always suggest next steps
 
 End every interaction by offering concrete, prioritized options. Not a menu — a brief assessment of what seems most valuable:

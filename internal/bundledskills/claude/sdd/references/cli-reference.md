@@ -7,8 +7,9 @@
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
 - `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
 - `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind <kind>]` — filtered listing. `--kind` accepts any signal kind (gap, fact, question, insight, done, actor) or decision kind (directive, activity, plan, contract, aspiration, role); the two sets are disjoint. Uses summaries.
-- `sdd new <type> <layer> [flags] <description>` — create entries
+- `sdd new <type> <layer> [flags] <description>` — create entries (output prints the new entry ID, file path, and the LLM-generated summary so the agent can verify fidelity)
 - `sdd summarize [<id> | --all]` — regenerate entry summaries
+- `sdd summarize <id> --text "<summary>"` — write a user-supplied summary directly, bypassing the LLM. Use `--text -` to read from stdin. Single entry only; rejected with `--all` or multiple IDs. The hash is recomputed from the current prompt so subsequent automatic regenerations skip-by-hash unless `--force` is passed.
 - `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, stale summaries)
 - `sdd wip start <entry-id> --exclusive --participant <name> <description>` — create WIP marker
 - `sdd wip start <entry-id> --branch --exclusive --participant <name> <description>` — create WIP marker, create git branch and check out to it
@@ -27,12 +28,14 @@ Short IDs are fine in user-facing narrative (catch-up tables, grooming summaries
 
 ## `sdd show` output format
 
-- **Depth 0** (target entry): full content (metadata + description)
+- **Depth 0** (target entry): metadata block, then a `Summary:` section (omitted when no summary is stored), then the full body
 - **Depth 1+** (upstream/downstream): summary lines with relation labels, kind, and entry ID
 - **Dedup**: each entry shown at shallowest occurrence; later encounters show `(see above)`
 - **Truncation**: at max-depth boundary, hidden entries listed as `[truncated: refs <id>, ...]`
 
 Summary line format: `{indent}- {relations} {full-id} ({kind}): "{summary}"`
+
+The depth-0 `Summary:` section renders the same text shown in `sdd list` and `sdd status` — surfacing it inline gives readers a quick orientation when looking up an ID and makes summary-body drift visible during normal review.
 
 ## `sdd new` flags
 

@@ -56,11 +56,12 @@ type NewEntryCmd struct {
 	PreflightTimeout time.Duration
 	PreflightModel   string
 
-	// OnNewEntry is invoked with the new entry's ID on successful creation.
-	// Not invoked on dry-run or any failure path. The callback receives
-	// only the ID — for richer data (path, content), the caller issues a
-	// query against the appropriate finder.
-	OnNewEntry func(id string)
+	// OnNewEntry is invoked with the new entry's ID and the LLM-generated
+	// summary on successful creation. Summary is empty when the LLM call
+	// failed or was skipped (dry-run path returns before invoking). Not
+	// invoked on dry-run or any failure path. For richer data (path,
+	// content), the caller issues a query against the appropriate finder.
+	OnNewEntry func(id, summary string)
 }
 
 // Validate checks that required fields are populated and internally

@@ -88,7 +88,7 @@ func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 		},
 		SkipPreflight: true, // skip preflight so this test doesn't need a runner
 		DryRun:        true,
-		OnNewEntry:    func(id string) { onNewEntryCalled = true },
+		OnNewEntry:    func(id, summary string) { onNewEntryCalled = true },
 	}
 
 	err := h.NewEntry(context.Background(), cmd)
@@ -559,7 +559,7 @@ func TestNewEntry_WritesEntryByKind(t *testing.T) {
 			var writtenID string
 			cmd := tc.cmd
 			cmd.SkipPreflight = true
-			cmd.OnNewEntry = func(id string) { writtenID = id }
+			cmd.OnNewEntry = func(id, summary string) { writtenID = id }
 
 			if err := h.NewEntry(context.Background(), &cmd); err != nil {
 				t.Fatalf("NewEntry: %v", err)

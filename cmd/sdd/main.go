@@ -603,10 +603,13 @@ func newCmd() *cli.Command {
 				DryRun:           cmd.Bool("dry-run"),
 				PreflightModel:   cmd.String("preflight-model"),
 				PreflightTimeout: resolveTimeout(cmd, "preflight-timeout"),
-				OnNewEntry: func(id string) {
+				OnNewEntry: func(id, summary string) {
 					fmt.Println(id + ".md")
 					if rel, err := model.IDToRelPath(id); err == nil {
 						fmt.Printf("  → %s\n", filepath.Join(dir, rel))
+					}
+					if summary != "" {
+						fmt.Printf("  Summary: %s\n", summary)
 					}
 				},
 			}
@@ -812,6 +815,10 @@ func summarizeCmd() *cli.Command {
 				Usage: "Timeout per summary generation (e.g. 60s, 1m)",
 				Value: 60 * time.Second,
 			},
+			&cli.StringFlag{
+				Name:  "text",
+				Usage: "Write the supplied text as the summary, bypassing the LLM. Use '-' to read from stdin. Single entry only.",
+			},
 		},
 		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
 			ctx = slogutils.WithLogger(ctx, slogutils.FromContext(ctx).With("command", "summarize"))
@@ -821,12 +828,32 @@ func summarizeCmd() *cli.Command {
 				return fmt.Errorf("usage: sdd summarize <id>... or sdd summarize --all")
 			}
 
+			var explicitText *string
+			if cmd.IsSet("text") {
+				if cmd.Bool("all") {
+					return fmt.Errorf("--text cannot be combined with --all (single entry only)")
+				}
+				if len(ids) != 1 {
+					return fmt.Errorf("--text requires exactly one entry ID (got %d)", len(ids))
+				}
+				value := cmd.String("text")
+				if value == "-" {
+					data, err := io.ReadAll(os.Stdin)
+					if err != nil {
+						return fmt.Errorf("reading --text from stdin: %w", err)
+					}
+					value = string(data)
+				}
+				explicitText = &value
+			}
+
 			sumCmd := &command.SummarizeCmd{
-				EntryIDs:    ids,
-				Force:       cmd.Bool("force"),
-				Model:       cmd.String("model"),
-				Timeout:     resolveTimeout(cmd, "timeout"),
-				Concurrency: int(cmd.Int("concurrency")),
+				EntryIDs:     ids,
+				Force:        cmd.Bool("force"),
+				Model:        cmd.String("model"),
+				Timeout:      resolveTimeout(cmd, "timeout"),
+				Concurrency:  int(cmd.Int("concurrency")),
+				ExplicitText: explicitText,
 				OnSummarized: func(id, summary string) {
 					fmt.Fprintf(os.Stderr, "  summarized %s\n", id)
 				},

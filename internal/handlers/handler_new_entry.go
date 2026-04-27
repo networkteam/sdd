@@ -234,7 +234,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	}
 
 	if cmd.OnNewEntry != nil {
-		cmd.OnNewEntry(id)
+		cmd.OnNewEntry(id, entry.Summary)
 	}
 	return nil
 }

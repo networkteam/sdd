@@ -130,6 +130,52 @@ func TestRenderShow_EntryNotFound(t *testing.T) {
 	}
 }
 
+func TestWriteEntryFull_SummarySectionPresent(t *testing.T) {
+	e := entry("20260410-100000-d-tac-aaa",
+		withKind(model.KindPlan),
+		withSummary("Compact synthesis of the plan."),
+		withContent("Body content describing the plan in full detail."))
+	g := model.NewGraph([]*model.Entry{e})
+	var buf bytes.Buffer
+	presenters.WriteEntryFull(&buf, e, g)
+	out := buf.String()
+	if !contains(out, "Summary:") {
+		t.Errorf("expected 'Summary:' label in output:\n%s", out)
+	}
+	if !contains(out, "Compact synthesis of the plan.") {
+		t.Errorf("expected summary text in output:\n%s", out)
+	}
+	// Summary must appear before the body so it sits between metadata and content.
+	if idxSum, idxBody := indexOf(out, "Summary:"), indexOf(out, "Body content describing"); idxSum < 0 || idxBody < 0 || idxSum >= idxBody {
+		t.Errorf("Summary should appear before body content (sum=%d, body=%d):\n%s", idxSum, idxBody, out)
+	}
+}
+
+func TestWriteEntryFull_SummarySectionOmittedWhenEmpty(t *testing.T) {
+	e := entry("20260410-100000-d-tac-aaa",
+		withKind(model.KindPlan),
+		withContent("Body content only — no stored summary."))
+	g := model.NewGraph([]*model.Entry{e})
+	var buf bytes.Buffer
+	presenters.WriteEntryFull(&buf, e, g)
+	out := buf.String()
+	if contains(out, "Summary:") {
+		t.Errorf("Summary label should be omitted when entry has no summary:\n%s", out)
+	}
+}
+
+// contains and indexOf are tiny local helpers to keep the assertions readable
+// without importing strings just for two calls.
+func contains(s, sub string) bool { return indexOf(s, sub) >= 0 }
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestWriteEntryFull_KindDisplayed(t *testing.T) {
 	tests := []struct {
 		name     string
