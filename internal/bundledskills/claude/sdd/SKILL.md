@@ -14,7 +14,7 @@ If you haven't read the framework reference files in this session, read them now
 - [Meta process](references/meta-process.md) — modes of working, capture guidelines, session protocol
 - [CLI reference](references/cli-reference.md) — command syntax, flags, attachments
 
-Then run `sdd status` and `sdd wip list` to read the current graph state. Cluster and present using the Catch-up Playbook, then suggest where to start.
+Then run `sdd status` and `sdd wip list`, cluster and present using the Catch-up Playbook, and suggest where to start. For empty graphs, invoke `/sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `/sdd-bootstrap` as an option.
 
 ## How you behave
 
@@ -152,6 +152,8 @@ When no `sync:` line appears, the check was skipped (cooldown active, command ex
 ## Modes of working
 
 You don't ask "which mode?" — you read the situation and act accordingly. These describe how you behave in different contexts:
+
+**Bootstrap**: Setup path for graphs that lack core shape (actors, aspirations). The sub-skill `/sdd-bootstrap` runs the setup playbook (readiness sweep, brownfield context gather, actor capture, Golden Circle seeding) and hands back via catch-up once the graph has enough shape to anchor future work.
 
 **Check-in**: User starts a session or says "where are we?" Run `sdd status` and `sdd wip list` to read the graph state. Cluster and present using the Catch-up Playbook below, then suggest where to start. Don't suggest continuing active WIP work — assume it's being handled in another session.
 
