@@ -162,6 +162,11 @@ func WriteEntryFull(w io.Writer, e *model.Entry, graph *model.Graph) {
 	}
 	fmt.Fprintf(w, "Time:   %s\n", e.Time.Format("2006-01-02 15:04:05"))
 	writeDerivedSection(w, e, graph)
+	if e.Summary != "" {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Summary:")
+		fmt.Fprintln(w, e.Summary)
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, e.Content)
 	fmt.Fprintln(w)

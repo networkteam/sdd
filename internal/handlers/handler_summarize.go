@@ -22,10 +22,22 @@ import (
 // errgroup with SetLimit(concurrency) — for remote providers the factory
 // applies a rate limiter on top. A short-lived mutex guards graph reads
 // and writes; the LLM call itself runs without the lock.
+//
+// When cmd.ExplicitText is set, the LLM is bypassed entirely: the supplied
+// text is written as the summary on a single named entry, with the hash
+// recomputed from the current prompt so future regenerations skip-by-hash.
 func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) error {
 	graph, err := h.reader.LoadGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph: %w", err)
+	}
+
+	// Explicit-text path: single entry, no LLM call.
+	if cmd.ExplicitText != nil {
+		if len(cmd.EntryIDs) != 1 {
+			return fmt.Errorf("--text requires exactly one entry ID (no --all, no multi-entry batches)")
+		}
+		return h.summarizeExplicit(graph, cmd.EntryIDs[0], *cmd.ExplicitText, cmd.OnSummarized)
 	}
 
 	// Determine which entries to process.
@@ -148,5 +160,57 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 		}
 	}
 
+	return nil
+}
+
+// summarizeExplicit writes user-supplied summary text on a single entry,
+// bypassing the LLM. The hash is recomputed from the current prompt input so
+// later automatic regenerations skip-by-hash unless --force is passed.
+func (h *Handler) summarizeExplicit(graph *model.Graph, idArg, text string, onSummarized func(id, summary string)) error {
+	resolved, err := graph.ResolveIDs([]string{idArg})
+	if err != nil {
+		return err
+	}
+	id := resolved[0]
+	entry, ok := graph.ByID[id]
+	if !ok {
+		return fmt.Errorf("entry not found: %s", id)
+	}
+
+	summary := strings.TrimSpace(text)
+	if summary == "" {
+		return fmt.Errorf("--text value is empty after trimming whitespace")
+	}
+
+	req, err := llm.RenderSummaryPrompt(entry, graph)
+	if err != nil {
+		return fmt.Errorf("rendering summary prompt for hash: %w", err)
+	}
+	hash := llm.ComputePromptHash(req.Combined())
+
+	entry.Summary = summary
+	entry.SummaryHash = hash
+
+	relPath, err := model.IDToRelPath(entry.ID)
+	if err != nil {
+		return fmt.Errorf("computing path for %s: %w", entry.ID, err)
+	}
+	filePath := filepath.Join(h.graphDir, relPath)
+
+	fileContent := model.FormatFrontmatter(entry) + "\n" + entry.Content + "\n"
+	if err := os.WriteFile(filePath, []byte(fileContent), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", filePath, err)
+	}
+
+	if h.committer != nil {
+		msg := fmt.Sprintf("sdd: summarize %s (manual)", entry.ID)
+		if err := h.committer.Commit(msg, filePath); err != nil {
+			fmt.Fprintf(h.stderr, "warning: git commit failed: %v\n", err)
+		}
+	}
+
+	if onSummarized != nil {
+		onSummarized(entry.ID, summary)
+	}
 	return nil
 }
