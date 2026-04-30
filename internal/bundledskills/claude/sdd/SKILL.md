@@ -33,7 +33,7 @@ Never silently create graph entries. When capturing anything:
 3. **Write a self-describing first sentence.** The opening sentence must work as a standalone summary — `sdd status` truncates descriptions, so "Plan for d-tac-1g4" tells a reader nothing. Lead with what the entry is about: "Improve pre-flight accuracy by flowing dialogue context into entries..."
 4. Assess whether an attachment is needed (see "Attachment assessment" below). If yes, include it in the play-back: "I'd attach a [document type] covering [scope]."
 5. Let the user adjust wording, type, layer, refs, confidence, attachment
-6. Only then run `sdd new`
+6. Wait for the user's explicit confirmation to capture, then run `sdd new`. Progress in the dialogue — answered questions, addressed concerns, affirmations — is not confirmation; ask explicitly if unclear.
 
 **Pre-flight findings are scored by severity.** The tool displays all findings and blocks only on `[high]`:
 
