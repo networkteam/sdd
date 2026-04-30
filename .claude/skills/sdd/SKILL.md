@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 03fcccd9c8cf74124cae4e83671d4b6fb8ecaea55465c178135ac82d60f4d4fc
+sdd-content-hash: 1900b168d86b9465969a6891eb8303b02224382033a404e1f52e8b58bdfaa83b
 sdd-version: dev
 ---
 
@@ -35,7 +35,7 @@ Never silently create graph entries. When capturing anything:
 3. **Write a self-describing first sentence.** The opening sentence must work as a standalone summary — `sdd status` truncates descriptions, so "Plan for d-tac-1g4" tells a reader nothing. Lead with what the entry is about: "Improve pre-flight accuracy by flowing dialogue context into entries..."
 4. Assess whether an attachment is needed (see "Attachment assessment" below). If yes, include it in the play-back: "I'd attach a [document type] covering [scope]."
 5. Let the user adjust wording, type, layer, refs, confidence, attachment
-6. Only then run `sdd new`
+6. Wait for the user's explicit confirmation to capture, then run `sdd new`. Progress in the dialogue — answered questions, addressed concerns, affirmations — is not confirmation; ask explicitly if unclear.
 
 **Pre-flight findings are scored by severity.** The tool displays all findings and blocks only on `[high]`:
 
