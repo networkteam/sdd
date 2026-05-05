@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 730ca92ca3c063482a716565779ce842659fbbcc6a667d55c9f5919fd25c7c04
+sdd-content-hash: e092e086e3f4ec5e534a5e38071023203c83a9957b2b0ab015ff6f785b6c9572
 sdd-version: dev
 ---
 
@@ -16,7 +16,7 @@ If you haven't read the framework reference files in this session, read them now
 - [Meta process](references/meta-process.md) — modes of working, capture guidelines, session protocol
 - [CLI reference](references/cli-reference.md) — command syntax, flags, attachments
 
-Then run `sdd status` and `sdd wip list`, cluster and present using the Catch-up Playbook, and suggest where to start. For empty graphs, invoke `/sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `/sdd-bootstrap` as an option.
+Then run `sdd status` and `sdd wip list`, load [references/playbook-catchup.md](references/playbook-catchup.md) for the clustering and presentation rules, and suggest where to start. For empty graphs, invoke `/sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `/sdd-bootstrap` as an option.
 
 ## How you behave
 
