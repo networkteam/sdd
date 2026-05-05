@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash
 description: Set up an SDD graph on a fresh or sparse project — walk through a readiness sweep, brownfield context gather, actor capture, and Golden Circle strategic seeding, then hand back to /sdd via catch-up. Invoke when the graph lacks actors or aspirations.
 name: sdd-bootstrap
-sdd-content-hash: 9af59dfa83c96ab0c3f0d434cbcd418fc3e8c05b780c163b270cbbdf7cc0a6fd
+sdd-content-hash: 46127ee6541a55a1b4c24643f5f774aee836d3c882c7878afb62faef55c46fdf
 sdd-version: dev
 ---
 
@@ -15,7 +15,7 @@ If you haven't read these in this session, read them now:
 - Framework concepts: `../sdd/references/framework-concepts.md` — the loop, entry types and kinds, layers, immutability, actors and roles
 - Main skill: `../sdd/SKILL.md` — playback-before-capture discipline, participants and canonical-name rules, CLI conventions
 
-Then start with the experience gauge, then Move 1.
+Then start with the experience gauge, confirm the local canonical, then Move 1.
 
 ## How you behave
 
@@ -31,6 +31,14 @@ Ask with example answers so they have a menu, not a blank:
 - **Used it seriously / fluent** → transparent mode. Skip framings; go straight to `/sdd`-style playbacks.
 
 Adapt mid-session if the user's replies shift the read (fluent vocabulary → drop framings; confused reactions → add more).
+
+### Local canonical confirmation
+
+The local canonical is set in `.sdd/config.local.yaml` by `sdd init` before bootstrap runs. Confirm it once before any capture lands:
+
+> *"Quick check before we start — your name in the graph is set as `<config-canonical>`. Keep that, or want a different name?"*
+
+If the user wants a different name, the chosen value flows into `--participants` for all subsequent captures (Move 2 facts/decision candidates, Move 3 Golden Circle, Move 4 actor signal, etc.). The full actor signal — aliases, identity prose — is captured later in Move 4; this orientation step only pins the canonical so participant attribution is correct from the first capture onward.
 
 ### Teaching-mode exemplar
 
@@ -56,7 +64,7 @@ Supersedes are rare during bootstrap — most captures hold. When in doubt, ask 
 
 ### Adaptive role awareness
 
-Role candidates can surface anywhere in later dialogue — Move 3, Move 4, an offhand comment. Note them; surface as candidates inline only when the pattern reads as stable across the project, not a current-sprint focus.
+Role candidates can surface anywhere in later dialogue — during Golden Circle, actor capture, an offhand comment. Note them; surface as candidates inline only when the pattern reads as stable across the project, not a current-sprint focus.
 
 Inline playback when a stable pattern lands: *"want to capture [person] as [role-draft]? Defer?"*
 
@@ -64,7 +72,7 @@ Single-sprint patterns aren't roles yet — defer. The trap is capturing "did fe
 
 ## The playbook
 
-Five moves: readiness sweep, brownfield context gather, actor capture, Golden Circle strategic seeding, handoff. Captures happen per-move as the dialogue produces them — the graph grows iteratively, and the user can pause and resume naturally.
+Five moves: readiness sweep, brownfield context gather, Golden Circle strategic seeding, actor capture, handoff. Captures happen per-move as the dialogue produces them — the graph grows iteratively, and the user can pause and resume naturally.
 
 ### Move 1 — Readiness sweep
 
@@ -78,7 +86,7 @@ Five moves: readiness sweep, brownfield context gather, actor capture, Golden Ci
 
 - **Empty graph + brownfield project** → run Moves 2, 3, 4, then 5.
 - **Empty graph + greenfield project** → skip Move 2; run 3, 4, 5.
-- **Non-empty graph** → read what's captured. Skip moves that cover material already in the graph. Use `sdd lint` findings to identify what's missing (e.g. participant-coverage → run Move 3 for the missing actors; no aspirations → run Move 4 WHY pass).
+- **Non-empty graph** → read what's captured. Skip moves that cover material already in the graph. Use `sdd lint` findings to identify what's missing (e.g. participant-coverage → run Move 4 for the missing actors; no aspirations → run Move 3 WHY pass).
 - **Fully bootstrapped** (on-demand invocation, graph has actors + aspirations already) → short-circuit: tell the user the graph looks set, run Move 5 handoff directly.
 
 The skill adapts rather than forcing a rigid classification. Use good judgment from what `sdd status` and `sdd lint` show.
@@ -115,61 +123,7 @@ Skip deep `docs/` crawl and full history.
 
 Capture each with `sdd new s prc --kind fact --confidence medium "<description>"` for facts, or the appropriate decision command for others.
 
-### Move 3 — Actor capture loop
-
-**Move 3 captures participant identity, plus (optional) role:**
-
-- **Actor signal** — who each participant *is*: canonical name + alias variants + stable identity context (affiliation, background, domain expertise). Independent of this project.
-- **Role decision** (deferrable): how each participant contributes *here* — review authority, domain weight, authorship patterns. Multiple per actor allowed.
-
-**Test**: what they bring from outside this project → actor. What they do within this project → role.
-
-Avoid jargon in user-facing prompts ("canonical", "alias", "frame"). The skill has enough framing above to compose questions from the goal.
-
-**Local participant first.** Ask in this order (compose wording adaptively; these are tone anchors, not scripts):
-
-1. **Canonical name**
-   > *"What name should we use for you consistently across the graph? A short first name usually works."*
-2. **Aliases**
-   > *"Any other names you show up under — git commits, chat, external handles?"*
-3. **Identity context**
-   > *"A bit about you — background, affiliation, expertise? Work-style details I'll split into a role."*
-
-Draft the actor signal from the answers, playback, confirm, capture:
-
-```bash
-sdd new s prc --kind actor --canonical <name> --aliases <a,b> --confidence high "<description>"
-```
-
-The description should follow the actor rubric: introduce the canonical, include external identity context (affiliation, background, expertise), explain aliases when present. See `../sdd/SKILL.md` `Write canonical names` guidance and framework-concepts `Actors and Roles` section for the full framing already loaded.
-
-**Multi-participant:**
-
-> *"Anyone else to include? Recent commits show [names from Move 2] — want them, or anyone else?"*
-
-Repeat sub-steps 1–3 for each additional actor. Cadence can compress — agent knows what git log already shows, so prompts can lean on that.
-
-**Light role intro (defer-by-default).** After actors land, ask a natural goal question that drives role derivation. Agent drafts a role candidate from the answer; user confirms or defers.
-
-- **Greenfield** (no Move 2 evidence):
-  > *"What are you best placed to do on this project? Skills, focus, where you add most."*
-- **Brownfield** (Move 2 ran, git log evidence available):
-  > *"Recent commits show [activities]. Is that your usual focus, or just current work? What's your strongest contribution across the project?"*
-
-The "usual vs. current" framing guards against the single-sprint trap — roles capture stable contribution, not this-week activity.
-
-For other participants captured from git log:
-> *"Git shows [colleague] working on [areas]. Know if that's their focus, or defer their role?"*
-
-Playback the drafted role. If the user accepts, capture:
-
-```bash
-sdd new d prc --kind role --actor <canonical> --confidence medium "<description>"
-```
-
-If the user defers, move on. Roles will emerge from actual work.
-
-### Move 4 — Golden Circle strategic seeding
+### Move 3 — Golden Circle strategic seeding
 
 **Goal**: capture the project's shape (WHAT), direction (HOW), and pull (WHY) across three passes.
 
@@ -180,6 +134,8 @@ If the user defers, move on. Roles will emerge from actual work.
 **Contracts are excluded.** Contracts capture rules that must always hold; they harden from working directives over time, not from upfront declaration. Skip them in bootstrap and let them emerge.
 
 Each pass: goal + one opener + adaptive follow-ups. Skip a pass that yields nothing.
+
+Participant attribution: captures here use the local canonical confirmed during orientation. The full actor signal — aliases, identity prose — is captured in Move 4; pre-flight runs in grace mode until then, so participants strings flow through without canonical-active enforcement, and the Move 4 actor signal retroactively makes earlier captures consistent.
 
 #### WHAT pass
 
@@ -222,6 +178,64 @@ sdd new d stg --kind aspiration --confidence medium "<description>"
 ```
 
 If the WHY reshapes earlier WHAT or HOW captures semantically, apply the supersedure test (see *Supersedure during bootstrap* above). Most of the time WHY adds to earlier captures rather than contradicting — prefer new entries that `refs` old ones over supersedes.
+
+### Move 4 — Actor capture loop
+
+**Move 4 captures participant identity, plus (optional) role:**
+
+- **Actor signal** — who each participant *is*: canonical name + alias variants + stable identity context (affiliation, background, domain expertise). Independent of this project.
+- **Role decision** (deferrable): how each participant contributes *here* — review authority, domain weight, authorship patterns. Multiple per actor allowed.
+
+**Test**: what they bring from outside this project → actor. What they do within this project → role.
+
+Avoid jargon in user-facing prompts ("canonical", "alias", "frame"). The skill has enough framing above to compose questions from the goal.
+
+**Local participant first.** The local canonical was already confirmed during orientation — this move captures the full actor signal with identity context. Ask in this order (compose wording adaptively; these are tone anchors, not scripts):
+
+1. **Aliases**
+   > *"Any other names you show up under — git commits, chat, external handles?"*
+2. **Identity context**
+   > *"A bit about you — background, affiliation, expertise? Work-style details I'll split into a role."*
+
+Draft the actor signal from the answers, playback, confirm, capture:
+
+```bash
+sdd new s prc --kind actor --canonical <name> --aliases <a,b> --confidence high "<description>"
+```
+
+The description should follow the actor rubric: introduce the canonical, include external identity context (affiliation, background, expertise), explain aliases when present. See `../sdd/SKILL.md` `Write canonical names` guidance and framework-concepts `Actors and Roles` section for the full framing already loaded.
+
+**Multi-participant:**
+
+> *"Anyone else to include? Recent commits show [names from Move 2] — want them, or anyone else?"*
+
+For each additional actor, ask:
+
+1. **Canonical name** — *"What name should we use for them consistently across the graph?"*
+2. **Aliases** — *"Other names they show up under?"*
+3. **Identity context** — *"Background, affiliation, expertise?"*
+
+Cadence can compress — agent knows what git log already shows, so prompts can lean on that.
+
+**Light role intro (defer-by-default).** After actors land, ask a natural goal question that drives role derivation. Agent drafts a role candidate from the answer; user confirms or defers.
+
+- **Greenfield** (no Move 2 evidence):
+  > *"What are you best placed to do on this project? Skills, focus, where you add most."*
+- **Brownfield** (Move 2 ran, git log evidence available):
+  > *"Recent commits show [activities]. Is that your usual focus, or just current work? What's your strongest contribution across the project?"*
+
+The "usual vs. current" framing guards against the single-sprint trap — roles capture stable contribution, not this-week activity.
+
+For other participants captured from git log:
+> *"Git shows [colleague] working on [areas]. Know if that's their focus, or defer their role?"*
+
+Playback the drafted role. If the user accepts, capture:
+
+```bash
+sdd new d prc --kind role --actor <canonical> --confidence medium "<description>"
+```
+
+If the user defers, move on. Roles will emerge from actual work.
 
 ### Move 5 — Handoff
 
