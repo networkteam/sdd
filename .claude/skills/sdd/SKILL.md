@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 84204bd3ccc2800bf2432adb70534979fc0a70b1f9078cc9ee1607e60393e7e0
+sdd-content-hash: 730ca92ca3c063482a716565779ce842659fbbcc6a667d55c9f5919fd25c7c04
 sdd-version: dev
 ---
 
@@ -187,263 +187,40 @@ When no `sync:` line appears, the check was skipped (cooldown active, command ex
 
 ## Modes of working
 
-You don't ask "which mode?" — you read the situation and act accordingly. These describe how you behave in different contexts:
+You don't ask "which mode?" — you read the situation and act accordingly. The table below routes each mode to the reference (and any sub-skill) it needs. Load the listed reference when entering the matching mode. Do not load references for modes you are not in. Reload (with fresh content) only if the file changed since the last read.
 
-**Bootstrap**: Setup path for graphs that lack core shape (actors, aspirations). The sub-skill `/sdd-bootstrap` runs the setup playbook (readiness sweep, brownfield context gather, actor capture, Golden Circle seeding) and hands back via catch-up once the graph has enough shape to anchor future work.
+| Mode | Trigger | Reference |
+|---|---|---|
+| Bootstrap | Empty graph; lacking actors or aspirations | invokes `/sdd-bootstrap` sub-skill |
+| Check-in | Session start; "where are we?" | [references/playbook-catchup.md](references/playbook-catchup.md) |
+| Capture | User shares observation, insight, finding | (inline — capture discipline already always-loaded) |
+| Evaluate | A done signal landed; user asks about it | [references/playbook-catchup.md](references/playbook-catchup.md) (proactive grooming + after-completion guidance) |
+| Reflect/Dialogue | Open exploration, no specific entry | (inline — natural agent behavior) |
+| Decide | Open signals or tensions need resolution | (inline — capture discipline + decision-kind rules) |
+| Explore | "Dig into N", entry ID named, topic pointed at | invokes `/sdd-explore`, then [references/playbook-explore.md](references/playbook-explore.md) |
+| Act/Implement | "Let's build this" | [references/playbook-implementation.md](references/playbook-implementation.md) |
+| Augment plan | Refinement mid-implementation | [references/playbook-augment-plan.md](references/playbook-augment-plan.md) |
+| Groom | "Let's groom"; user-suggested cleanup | invokes `/sdd-groom`, then [references/playbook-groom.md](references/playbook-groom.md) |
 
-**Check-in**: User starts a session or says "where are we?" Run `sdd status` and `sdd wip list` to read the graph state. Cluster and present using the Catch-up Playbook below, then suggest where to start. Don't suggest continuing active WIP work — assume it's being handled in another session.
+A short note on each mode's situation:
 
-**Capture**: User shares an observation, insight, or finding. Dialogue first — play back what you'd capture, confirm, then record. Could be a signal (of any kind) or a decision (of any kind).
+**Bootstrap**: Setup path for graphs that lack core shape (actors, aspirations). `/sdd-bootstrap` runs the setup playbook and hands back via catch-up once the graph has enough shape to anchor future work.
+
+**Check-in**: User starts a session or says "where are we?" Run `sdd status` and `sdd wip list` to read the graph state, then cluster and present per the catch-up playbook. Don't suggest continuing active WIP work — assume it's being handled in another session.
+
+**Capture**: User shares an observation, insight, or finding. Dialogue first — play back what you'd capture, confirm, then record. Could be a signal (of any kind) or a decision (of any kind). Capture discipline (above) is always-loaded.
 
 **Evaluate**: A commitment was completed (recorded as a `kind: done` signal). Help the user assess: did it meet the intent of the decision it references? What gaps remain? Capture evaluation findings as signals.
-
-**Explore**: User points at something in the graph that needs attention — "dig into #3", a specific entry ID, or a topic. Invoke the `/sdd-explore` skill with the target entry ID. Use its output (full upstream chain, downstream refs, related entries, status) to brief the user and drive a working dialogue. The goal is to **handle** the entry — work through it until the next graph move is clear. See the Explore Playbook below.
 
 **Reflect/Dialogue**: Open exploration around a signal, decision, or question. Be a thinking partner. Synthesize, challenge, connect dots. Don't rush to capture — let the thinking develop. Capture when something crystallizes.
 
 **Decide**: Open signals or tensions need resolution. Summarize the relevant signals, lay out options with trade-offs, help the user choose. Capture the decision with appropriate confidence and refs.
 
-**Act/Implement**: A decision exists and it's time to build. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. When transitioning to implementation, create an exclusive WIP marker (`sdd wip start <entry-id> --exclusive --participant <name> <description>`). Capture operational sub-decisions as needed. When implementation is complete, remove the marker (`sdd wip done <marker-id>`). If implementation is paused (e.g. a missing decision is discovered), leave the marker active — it signals work is in flight. Know when to stop and evaluate.
+**Explore**: User points at something in the graph that needs attention — "dig into #3", a specific entry ID, or a topic. The goal is to **handle** the entry — work through it until the next graph move is clear.
 
-**Augment plan**: During implementation a refinement surfaces that's too substantive for a mechanical fix but too narrow to warrant superseding the plan — a single AC turned out too specific in scope, an edge case was missed, an implementation detail crystallized. Capture it as a directive that refs the plan, articulating the refinement and its rationale. The plan stays active; the directive becomes part of the plan's implicit acceptance contract. The closing done signal addresses both. See the Augment Plan Playbook below.
+**Act/Implement**: A decision exists and it's time to build. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. The implementation playbook covers WIP markers, decision-before-done-signal checks, branching, and worktree mode.
 
-**Groom**: The graph needs hygiene. Invoke `/sdd-groom` to scan for candidates — open entries that may already be resolved but lack proper closure. The sub-skill returns a numbered table of candidates with evidence and suggested resolutions. Present the table to the user, then walk through candidates one by one: confirm the resolution, capture the closure (new done signal with `--closes`, or directive retiring a stable-kind entry), or skip. The goal is to reduce noise in the graph so that status and catch-up reflect reality. See the Grooming Playbook below.
+**Augment plan**: During implementation a refinement surfaces that's too substantive for a mechanical fix but too narrow to warrant superseding the plan. The augment-plan playbook covers the three-option spectrum (mechanical fix, augmenting directive, supersede) and how the closing done signal handles augmentations.
 
-### Proactive grooming suggestion
+**Groom**: The graph needs hygiene. The grooming playbook covers candidate patterns and walk-through moves.
 
-When running catch-up or status, if you notice several older open entries (3+ entries older than a few days with no downstream activity), suggest grooming: "There are N older entries that might need grooming. Want to do a sweep?" Don't force it — just surface the option.
-
-## Catch-up Playbook
-
-For a check-in, use only `sdd status` and `sdd wip list` — do not call `sdd show` or any other lookup. The status output has summaries; the WIP list has active markers. That is the entire input.
-
-### What the CLI gives you
-
-Every entry shown in `sdd status` — under Aspirations, Contracts, Plans, Activities, Directives, Gaps and Questions, Recent Insights, or Recent Done Signals — is active/open by construction. The CLI filters out closed and superseded entries. Do not emit a per-entry Status field, lifecycle label, or "closed / in progress / implemented" commentary — membership in a section *is* the status. The only explicit state surfaced in the catch-up is WIP (from `sdd wip list`). Recent Done Signals are events, not states — use them for context (what just landed, what unblocked what).
-
-### Clustering
-
-Group active entries by project thread — coherent directions of work, not by type or layer. Lead with the thread that has the most recent activity, a live WIP marker, or something the user has been dialoguing about this session. Threads the graph encodes but nothing is moving on go to "Parked."
-
-### Formatting
-
-- **Lead with the most active/actionable thread.**
-- **Number every item sequentially** (1, 2, 3...) across all threads. Sub-aspects of a single item get letters (1a, 1b). The user references items by number — "let's dig into 3" — so every item must have its own number.
-- **One item per number.** Never group multiple entries under one number (e.g. "3-5. Infrastructure signals" with a sub-list is wrong — each gets its own number).
-- **Completeness is mechanical.** Every entry from `sdd status` under Plans, Activities, Directives, Gaps and Questions, and Recent Insights must appear with its own number. No clumping, no silent drops. If an entry feels redundant or dusty, put it in "Parked / not urgent" — don't omit it.
-- **Aspirations, Contracts, and Recent Done Signals are context, not items.** Don't number them. Mention an aspiration or contract inline only if a current signal or decision is pushing against it; reference recent done signals when they explain what just unblocked something. Otherwise silent.
-- **Include the entry ID suffix** after each item title in parentheses (e.g. `s-prc-qyi`). This gives the user a handle without cluttering the display. Keep full IDs in your context for CLI commands.
-- **Narrative, not dashboard.** Write like a colleague briefing, not a monitoring tool. No raw stats or dates unless meaningful.
-- **Keep it skimmable.** Bold thread names, short item descriptions. A busy person should get the picture in 10 seconds.
-- **WIP markers are context, not action items.** Show them as an informational preamble ("Work in progress elsewhere"). Don't suggest continuing WIP work — it's most likely active in another session. Exception: if the current participant's own marker is stale (>1 day old), note it as "might need attention" — but still don't default to "continue here."
-
-### Participants — narrative, not metadata
-
-`sdd status` renders each entry's participants on its line. Use them for narrative, not as per-item dashboard rows.
-
-- **Active-recently header (optional, once):** If participants across recently-active entries include more than one distinct voice, render `Active recently: X, Y, Z` at the top. For a solo-plus-AI graph this collapses to nothing — omit when it adds no signal.
-- **Outside voices only:** Mention a participant only if they're not in the active-recently set — inline on the item, or as a thread note if outsiders shape the thread.
-- **Never** render a per-item `Participants:` line as a rule. That's dashboard drift.
-
-Kind and confidence follow the same principle: `sdd status` shows them per line for reference; narrate only when they carry meaning.
-
-### Example format
-
-```
-### Where things stand
-
-**[Thread name]** — [1-2 sentence narrative]
-
-1. [Item title] (`s-cpt-abc`) — [one sentence description]
-2. [Item title] (`d-prc-xyz`) — [one sentence description]
-   - 2a. [Sub-aspect]
-   - 2b. [Sub-aspect]
-
-**[Second thread]** — [narrative]
-
-3. [Item title] (`s-ops-def`) — [one sentence description]
-4. [Item title] (`s-prc-ghi`) — [one sentence description]
-
-**Parked / not urgent**
-
-5. [Item title] (`s-stg-jkl`) — [one sentence description]
-```
-
-## Explore Playbook
-
-When the user points at a graph entry to explore, invoke `/sdd-explore` with the target entry ID. Use the returned context to brief the user, then drive a dialogue toward handling the entry. The goal is always a graph change — not just understanding.
-
-### Briefing
-
-Present the entry in context:
-- What is this entry about? (one paragraph synthesis from the full chain)
-- What's its status? (open signal, active decision, closed, stale?)
-- What's happened since? (downstream entries, if any)
-- What's related? (entries the sub-skill flagged as connected)
-
-Then ask the orienting question: **"What does this need?"**
-
-### Playbook moves
-
-These are patterns to recognize, not steps to follow. Read the situation and apply the right one:
-
-**Open signal, no decisions addressing it** — Is this still relevant? If yes, what would a decision look like? Explore the signal's implications, challenge assumptions, and work toward a decision or close it as no longer relevant.
-
-**Active decision, no done signal yet** — What would it take to close this? Does the decision need decomposition into sub-decisions first, or is it actionable as-is? Work toward defining the concrete work (and its done signal) that would fulfill it.
-
-**Active decision, needs decomposition** — The decision is too broad to act on directly. Help the user break it into sub-decisions at a lower layer. Each sub-decision should be independently closable.
-
-**Active decision, partial progress** — Some downstream done signals exist but the decision isn't closed. What's left? Are the remaining parts still needed? Work toward completing or adjusting scope.
-
-**Tension between entries** — Two or more entries pull in different directions. Lay out the tension explicitly, explore both sides, and work toward a decision that resolves it.
-
-**Stale entry** — Old entry with no downstream activity. Is it still relevant? Has the context changed? Either close it or revive it with fresh context.
-
-**Signal resolved through dialogue, no implementation needed** — The discussion itself was the work. Don't create a phantom decision that will sit "active" with no done signal to close it. Capture a done signal that directly closes the gap (short-loop), summarizing the conclusion — but apply the smell test: if the narrative reads like a choice, capture the decision first.
-
-**Enough decisions exist, ready to build** — The exploration reveals that sufficient decisions are in place for a scope of work. Surface this: "We have enough to start building. Here's the scope: [decisions]. Want to transition to implementation?"
-
-### After exploration
-
-Always end with concrete next steps: what was produced (new signals, decisions, closures), and what remains open.
-
-## Grooming Playbook
-
-When the user says "let's groom" or you proactively suggest it, invoke `/sdd-groom`. The sub-skill returns one structured block per candidate with rich evidence (downstream entry descriptions, commit messages).
-
-### Presenting results
-
-Build a summary table from the sub-skill's structured data with these columns: #, Entry, Layer, Age, Pattern, Status, Evidence (a short summarizing note), Suggested resolution. Render the Status column using the derived-status notation — `{status: open}`, `{status: active}`, `{status: closed-by <id>}`, `{status: superseded-by <id>}` — matching what `sdd status` / `sdd list` surface. The table is the scanning surface — it should be enough for the user to make quick calls on straightforward candidates. When mentioning entry IDs in the evidence column or in dialogue, always follow each ID with a short title in quotes (e.g. `d-cpt-axa` "evaluate explore mode"). The full evidence from the sub-skill stays in your context so you can answer follow-up questions about any candidate without additional lookups.
-
-Then: "Let's walk through these. Starting with #1, or pick a number."
-
-### Walking through candidates
-
-For each candidate, based on its pattern:
-
-**Pattern A (missing `closes`)** — The work is done, just the link is missing. Show the evidence (the downstream entry that resolved it) and propose a closure: "Entry X already resolved this. I'd capture a done signal with `--closes [id]` to record it. Sound right?" Then execute.
-
-**Pattern B (superseded in practice)** — A newer entry covers the same ground but without an explicit `supersedes` link. Show both entries side by side and ask: "This newer entry seems to cover the same concern. Is the older one superseded?" If yes, capture a new decision or signal with `--supersedes [old-id]` to formalize the relationship. If the entries are complementary rather than redundant, note that and move on.
-
-**Pattern C (stale, no activity)** — No evidence of resolution. Brief the user on the entry and the current context: "This has been open since [date] with no activity. Given [current state / related decisions since then], is this still relevant?" Three outcomes:
-- **Still relevant**: Leave it open. Optionally capture a fresh signal that updates the context or re-frames the concern.
-- **No longer relevant**: For a gap, capture a done signal with `--closes [id]` noting why — context changed, concern was absorbed by another direction, no longer applies. For a stable-kind target (fact, insight, contract, aspiration), capture a directive with `--closes [id]` and retirement rationale.
-- **Partially relevant**: The original framing is stale but the underlying concern persists. Capture a new signal that re-frames it, then close the old one with `--closes`.
-
-**Pattern C with Git evidence** — The sub-skill found commits that look related. Show the commit(s) and ask: "This commit looks like it addresses this entry. Want to capture a done signal for it?" If yes, capture the done signal with `--closes [id]`.
-
-**Pattern D (stale WIP marker)** — A WIP marker is still active but the work appears done, abandoned, or paused. Show the marker details and ask: "This marker has been active since [date]. Is the work still in progress?" If done, run `sdd wip done <marker-id>`. If the work was completed, also check whether the referenced entry needs a closing done signal.
-
-### After grooming
-
-Summarize what was done: "Closed N entries, captured M done signals. N entries confirmed still open." This keeps the user oriented.
-
-## Augment Plan Playbook
-
-Plans accumulate refinements during implementation. The augmentation pattern (per `d-prc-9ti`) makes these refinements lightweight — capture a directive that refs the plan rather than superseding it or letting the refinement drift silently into code.
-
-### Three options on a spectrum of ceremony
-
-When a plan needs adjustment, three paths sit on a spectrum:
-
-**Mechanical fix** — typo, missing ref, formatting correction. No new entry. Edit the file in place; if the change touches the body, regenerate the summary via `sdd summarize <id>`. Per `d-cpt-e1i`, only no-meaning-change corrections qualify; semantic changes never do.
-
-**Augment plan (downstream directive)** — the refinement sharpens a specific AC, extends scope on a narrow point, or codifies an implementation choice that the plan was silent on. The plan's overall direction holds. Discovered during pre-implementation walk-through, early implementation, or after empirical findings. Capture as a directive that refs the plan; the plan stays active; the directive joins the plan's implicit AC chain.
-
-**Supersede plan** — the refinement changes direction, restructures multiple ACs, or invalidates the plan's framing. Heavy but warranted when the plan's spine no longer holds. Capture as a new plan with `--supersedes <old-plan-id>`.
-
-When in doubt between augment and supersede, augment first. If augmentations stack high enough that the plan's shape no longer reads cleanly from the original entry, that's the signal to supersede.
-
-### How to capture an augmenting directive
-
-1. **Description**: state the refinement, its rationale, and which AC(s) of the plan it sharpens or extends. Be specific about what changes for the implementing agent.
-2. **Refs**: the plan being refined (primary). Refs to `d-prc-9ti` are not required for routine augmentations — the pattern is established at the framework level — but include it when explicitly demonstrating or testing the pattern.
-3. **Layer**: tactical for spec sharpening; process for skill/workflow refinements; operational for narrow execution-shape clarifications.
-4. **Kind**: directive (default). Don't use `kind: plan` for an augmentation — you're committing to a refined behavior, not introducing decomposable scope.
-5. **Confidence**: typically matches or sits one notch below the original plan's confidence — the augmentation is grounded in the plan's reasoning but adds a specific refinement.
-
-### How the closing done signal handles augmentations
-
-When closing an augmented plan:
-
-1. Read the plan's original `## Acceptance criteria` AND every downstream directive that refs the plan. The union is the contract.
-2. The done signal addresses both with the same dialogue rigor — each AC and each augmenting directive's commitment gets a confirmation with evidence or a deviation explanation.
-3. Pass all entries to `--closes`: `sdd new s <layer> --kind done --closes <plan-id>,<dir1-id>,<dir2-id> ...`. The done signal closes the plan and every augmenting directive in one move.
-
-### Trade-off — accept it explicitly
-
-The augmentation pattern distributes a plan's acceptance contract across the original entry plus its downstream refinements. Closing requires reading the full chain rather than a single document. This cost is accepted as the price of fluid, dialogue-shaped work, aligning with `d-stg-3k0`'s commitment to no parallel artifacts and no ceremony — the alternative (force every refinement through supersession) creates more friction than the distributed read does.
-
-## Transition to implementation
-
-When the conversation reaches "let's build this":
-
-1. Check: are there enough decisions to scope the work?
-2. If gaps exist, surface them: "Before building, we should decide X"
-3. **Decision-before-done-signal checkpoint**: if the upcoming work requires making a choice between alternatives — not just executing a known path — stop and capture the decision first. A done signal that closes a gap directly should describe *what was done*, not *why this approach*. Approach-shaped closures smuggle decisions past the graph; pre-flight will flag them and strictly block at higher layers (strategic / conceptual).
-4. Assess whether a plan decision is needed. The test: **will the closing done signal have enough to validate against without a plan?** If the decision is specific enough on its own (small fix, single change, obvious path from signal to completion), skip the plan. If the decision describes a direction but implementation requires decomposition (multiple requirements, design choices, multi-step scope), capture a plan decision first — the pre-flight validates every plan item at closing time, which is where the rigor pays off.
-5. If scope is clear, capture any needed operational sub-decisions
-6. Create an exclusive WIP marker for the entry being implemented (`sdd wip start <entry-id> --exclusive --participant <name> <description>`)
-7. **Before starting implementation**, run `sdd show <entry-id> --downstream` to surface any augmenting directives that ref the entry. Treat their commitments as extensions of the original acceptance contract — every AC the original entry carries plus every commitment in a downstream augmenting directive is part of what the closing done signal must address. This is required for plan decisions and recommended for any non-trivial decision; the augmentation pattern (per `d-prc-9ti`) lets refinements accumulate without supersession, so the implicit AC chain is the real spec. See the Augment Plan Playbook below.
-8. **If implementing a plan decision**, read its `## Acceptance criteria` section alongside the downstream commitments and use the union as your work checklist. Each AC and each downstream commitment is a contract item: the closing done signal must either confirm it done with specific evidence or explain the deviation with dialogue reasoning.
-9. Implementation happens in the same session — the meta-process stays active
-10. If you hit a design choice not covered by existing decisions: **stop implementation**, capture a done signal recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself. If the choice is a narrow refinement of the existing plan rather than a missing decision, capture it as an augmenting directive instead (see the Augment Plan Playbook).
-11. After implementation, commit the code changes first, then capture the done signal addressing each original AC and each augmenting directive's commitment. Close the original entry and any augmenting directives in the same done signal via `--closes <entry-id>,<dir1-id>,...`. Then remove the WIP marker (`sdd wip done <marker-id>`).
-12. Prompt for evaluation signals
-
-### Branching for isolated work
-
-**When to suggest branching:**
-- The work is exploratory or uncertain — the direction might be discarded
-- Multi-participant project — other participants are active on main, and in-progress entries would create noise
-- The scope is large enough that intermediate entries would clutter main if the direction changes
-- There's an active WIP marker from another participant on a related entry — branching avoids collision
-
-**Don't branch for:** small confident changes, capturing signals/decisions from dialogue, solo work with no collaboration pressure.
-
-**Starting a branch:**
-```
-sdd wip start <entry-id> --branch --exclusive --participant <name> "<description>"
-```
-The CLI creates a git branch (`sdd/<suffix>-<slug>`) and checks out to it. The WIP marker is committed on main before the checkout for coordination visibility. Same session, same directory.
-
-**Working on a branch:**
-- Normal SDD loop — entries, code changes, all on the branch
-- `git merge main` regularly to stay synchronized with other participants' graph changes and WIP markers
-- Entries on the branch are invisible to main until merge — that's the isolation property
-
-**Ending a branch — assess and recommend one of two moves:**
-
-#### "Conclude and keep"
-Recommend when: the reasoning chain has value for future traversal (even if the conclusion is "this direction is wrong"), code changes are worth keeping, or multiple entries connect to the broader graph.
-
-1. Commit all work, `git merge main`, resolve conflicts on the branch
-2. Walk the entry chain — close/supersede intermediate entries that shouldn't be open after merge
-3. Selectively revert unwanted non-graph changes via new commits
-4. `git checkout main` then `git merge <branch>`
-5. Capture closing done signal + forward-looking signal on main
-6. `sdd wip done <marker-id>` — removes marker, deletes branch
-
-#### "Discard"
-Recommend when: the exploration was shallow, nothing emerged beyond "tried it, didn't work," and the key takeaway fits in a single signal on main.
-
-1. `git checkout main`
-2. Capture summary signal on main (key learning if any)
-3. `sdd wip done <marker-id> --force` — removes marker, force-deletes branch
-
-### Worktree mode (optional)
-
-For multiple concurrent branches on the same machine. When the user asks for worktree isolation, the agent sets it up:
-
-1. After `sdd wip start --branch`, switch back so the branch is free for the worktree:
-   ```bash
-   git checkout main
-   ```
-2. Create the worktree (sibling directory, named after the branch with slashes replaced by hyphens):
-   ```bash
-   git worktree add ../<branch-name-as-dir> <branch-name>
-   ```
-3. Check CLAUDE.md for setup instructions (build steps, dependency installs) and run them inside the worktree directory
-4. Tell the user: "The worktree is ready at `<path>`. Start a new agent session there to continue working on this branch." Close the current session's work on this topic — the new session picks up from the WIP marker and plan.
-
-A single worktree can be reused for different branches over time. Clean up with `git worktree remove ../<path>` when no longer needed.
