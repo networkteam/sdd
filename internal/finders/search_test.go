@@ -374,6 +374,85 @@ func TestRRFFuse_PicksHigherCitation(t *testing.T) {
 	}
 }
 
+// TestStatusMultiplier pins the policy: open / active / done (terminal)
+// stay at 1.0; closed-by entries get a modest demotion; superseded /
+// orphan get heavier penalties. Caught by an eval where a closed gap
+// outranked an open one for a directly-relevant query.
+func TestStatusMultiplier(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		kind model.StatusKind
+		want float32
+	}{
+		{model.StatusActive, 1.0},
+		{model.StatusOpen, 1.0},
+		{model.StatusNone, 1.0}, // done signals — no lifecycle, full weight
+		{model.StatusClosedBy, 0.85},
+		{model.StatusCascadeClosedBy, 0.85},
+		{model.StatusSupersededBy, 0.7},
+		{model.StatusCascadeOrphan, 0.6},
+	}
+	for _, c := range cases {
+		if got := statusMultiplier(c.kind); got != c.want {
+			t.Errorf("statusMultiplier(%q) = %v, want %v", c.kind, got, c.want)
+		}
+	}
+}
+
+// TestSearchFinder_OpenOutranksClosedAtSimilarSimilarity reproduces the
+// eval finding that motivated status-aware scoring: when text-mode
+// returns two entries with the same match count, the open one must
+// rank above the closed-by one.
+func TestSearchFinder_OpenOutranksClosedAtSimilarSimilarity(t *testing.T) {
+	t.Parallel()
+
+	open := entry("20260101-100000-s-tac-aaa",
+		withContent("This entry mentions ordering as the central topic."),
+		withKind(model.KindGap),
+	)
+	open.Summary = "Open gap on ordering."
+
+	closed := entry("20260101-100001-s-tac-bbb",
+		withContent("This entry mentions ordering and was already addressed."),
+		withKind(model.KindGap),
+	)
+	closed.Summary = "Closed gap, also about ordering."
+
+	closer := entry("20260101-100002-s-tac-ccc",
+		withCloses(closed.ID),
+		withKind(model.KindDone),
+	)
+
+	g := model.NewGraph([]*model.Entry{open, closed, closer})
+	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+
+	res, err := f.Search(context.Background(), query.SearchQuery{
+		Graph: g,
+		Terms: []string{"ordering"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Entries) < 2 {
+		t.Fatalf("expected at least 2 hits, got %d", len(res.Entries))
+	}
+	if res.Entries[0].Entry.ID != open.ID {
+		t.Errorf("expected open entry to rank first; got %v at #1, %v at #2",
+			res.Entries[0].Entry.ID, res.Entries[1].Entry.ID)
+	}
+	// Closed entry still appears (not filtered) — just demoted.
+	foundClosed := false
+	for _, se := range res.Entries {
+		if se.Entry.ID == closed.ID {
+			foundClosed = true
+		}
+	}
+	if !foundClosed {
+		t.Errorf("closed entry should still appear in results, just demoted")
+	}
+}
+
 func TestAdjustVectorScore(t *testing.T) {
 	t.Parallel()
 

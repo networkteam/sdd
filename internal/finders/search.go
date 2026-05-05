@@ -134,25 +134,40 @@ func (f *SearchFinder) textSearch(q query.SearchQuery) (*query.SearchResult, err
 		})
 	}
 
-	sort.Slice(hits, func(i, j int) bool {
-		if hits[i].matchCount != hits[j].matchCount {
-			return hits[i].matchCount > hits[j].matchCount
+	// Status-aware sort: status multiplier is the dominant secondary
+	// key after match count, demoting closed/cascade-closed entries
+	// behind comparable open/active hits. Match count is integer so a
+	// halved-by-multiplier match count of 8 still beats a non-demoted
+	// match count of 4 — the multiplier bends the order, doesn't
+	// invert it.
+	type scoredWithStatus struct {
+		s        scored
+		adjusted float32
+	}
+	enriched := make([]scoredWithStatus, len(hits))
+	for i, h := range hits {
+		mult := statusMultiplier(q.Graph.DerivedStatus(h.entry).Kind)
+		enriched[i] = scoredWithStatus{s: h, adjusted: float32(h.matchCount) * mult}
+	}
+	sort.Slice(enriched, func(i, j int) bool {
+		if enriched[i].adjusted != enriched[j].adjusted {
+			return enriched[i].adjusted > enriched[j].adjusted
 		}
-		return hits[i].firstMatchPos < hits[j].firstMatchPos
+		return enriched[i].s.firstMatchPos < enriched[j].s.firstMatchPos
 	})
 
 	limit := q.EffectiveLimit()
-	if len(hits) > limit {
-		hits = hits[:limit]
+	if len(enriched) > limit {
+		enriched = enriched[:limit]
 	}
 
 	out := &query.SearchResult{Mode: query.SearchModeText}
-	for _, h := range hits {
+	for _, e := range enriched {
 		out.Entries = append(out.Entries, query.SearchEntry{
-			Entry: h.entry,
-			Score: float32(h.matchCount),
+			Entry: e.s.entry,
+			Score: e.adjusted,
 			Citation: query.Citation{
-				Snippet: h.bestSnippet,
+				Snippet: e.s.bestSnippet,
 			},
 		})
 	}
@@ -260,9 +275,10 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 
 	out := make([]query.SearchEntry, 0, len(acc))
 	for _, a := range acc {
+		score := a.bestScore * statusMultiplier(q.Graph.DerivedStatus(a.entry).Kind)
 		out = append(out, query.SearchEntry{
 			Entry: a.entry,
-			Score: a.bestScore,
+			Score: score,
 			Citation: query.Citation{
 				Breadcrumb:           a.bestHit.Breadcrumb,
 				Snippet:              snippetAround(a.bestHit.Body, 0, snippetWindow),
@@ -457,6 +473,36 @@ func collapseWS(s string) string {
 		prevSpace = false
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// statusMultiplier returns the score adjustment for an entry's derived
+// status, applied in vector and text modes after the per-chunk score
+// is settled. Active and open entries (and done signals — terminal
+// facts of execution) stay at full weight; closed and cascade-closed
+// entries get a small penalty so they fall behind comparable open hits
+// without being filtered out (closed historical context can still be
+// the right answer to a "what did we used to think" query). Cascade-
+// orphan roles get a heavier penalty — they signal abnormal state, not
+// just lifecycle progress.
+//
+// Tuned empirically from the first real-corpus eval, where a closed
+// gap on output formatting ranked above the open gap on output
+// ordering for a query phrased about ordering. Multiplier values are
+// intentionally modest so an open hit with weak similarity doesn't
+// leapfrog a strongly-similar closed hit.
+func statusMultiplier(s model.StatusKind) float32 {
+	switch s {
+	case model.StatusClosedBy, model.StatusCascadeClosedBy:
+		return 0.85
+	case model.StatusSupersededBy:
+		// Reaches this code path only when --include-superseded is set;
+		// otherwise candidates() already filtered.
+		return 0.7
+	case model.StatusCascadeOrphan:
+		return 0.6
+	default:
+		return 1.0
+	}
 }
 
 // adjustVectorScore applies depth-aware scoring per d-tac-lqr's AC:
