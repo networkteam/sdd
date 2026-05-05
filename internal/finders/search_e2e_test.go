@@ -31,7 +31,13 @@ import (
 // component.
 type e2eEmbedder struct{}
 
-func (e *e2eEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+func (e *e2eEmbedder) EmbedDocuments(_ context.Context, texts []string) ([][]float32, error) {
+	return e.embed(texts)
+}
+func (e *e2eEmbedder) EmbedQueries(_ context.Context, texts []string) ([][]float32, error) {
+	return e.embed(texts)
+}
+func (e *e2eEmbedder) embed(texts []string) ([][]float32, error) {
 	out := make([][]float32, len(texts))
 	for i, t := range texts {
 		out[i] = e2eVector(t)
@@ -312,9 +318,13 @@ type countingEmbedder struct {
 	calls int
 }
 
-func (c *countingEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (c *countingEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
 	c.calls++
-	return c.inner.Embed(ctx, texts)
+	return c.inner.EmbedDocuments(ctx, texts)
+}
+func (c *countingEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
+	c.calls++
+	return c.inner.EmbedQueries(ctx, texts)
 }
 func (c *countingEmbedder) Dimensions() int     { return c.inner.Dimensions() }
 func (c *countingEmbedder) Fingerprint() string { return c.inner.Fingerprint() }

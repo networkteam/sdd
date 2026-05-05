@@ -105,6 +105,31 @@ type EmbeddingConfig struct {
 	// openai, 64 for ollama). Override when working with very large or
 	// very small inputs to balance throughput against per-call timeout.
 	BatchSize int `yaml:"batch_size,omitempty"`
+	// QueryTemplate is applied to every text passed through
+	// EmbedQueries before the transport call. The literal `{text}` is
+	// replaced with the input. Empty disables the transformation
+	// (matches OpenAI's prefix-agnostic behavior). Used by retrieval
+	// (sdd search). Changing this is a free-tweak — query template
+	// changes do not invalidate indexed embeddings.
+	//
+	// Example for Qwen3 / instruction-tuned encoders:
+	//
+	//   query_template: |-
+	//     Instruct: Given a query phrase, retrieve related entries from a knowledge graph
+	//     Query:{text}
+	QueryTemplate string `yaml:"query_template,omitempty"`
+	// DocumentTemplate is applied to every text passed through
+	// EmbedDocuments before the transport call. Same `{text}`
+	// substitution as QueryTemplate. Empty disables. Used by indexing
+	// (sdd index, sdd search lazy-fill).
+	//
+	// Document templates feed into the embedder Fingerprint — changing
+	// this invalidates the index and triggers re-embed on the next
+	// search (or eagerly via `sdd index --force`). Required for
+	// dual-prefix models (E5 `passage:`, Nomic `search_document:`);
+	// stays empty for query-only models (Qwen3, BGE) and untemplated
+	// models (OpenAI).
+	DocumentTemplate string `yaml:"document_template,omitempty"`
 }
 
 // LLMConfig holds settings for LLM provider selection, model choice, and
@@ -198,6 +223,12 @@ func mergeEmbeddingConfig(base, overlay EmbeddingConfig) EmbeddingConfig {
 	}
 	if overlay.BatchSize != 0 {
 		out.BatchSize = overlay.BatchSize
+	}
+	if overlay.QueryTemplate != "" {
+		out.QueryTemplate = overlay.QueryTemplate
+	}
+	if overlay.DocumentTemplate != "" {
+		out.DocumentTemplate = overlay.DocumentTemplate
 	}
 	if len(overlay.APIKeys) > 0 {
 		copied := make(map[string]string, len(out.APIKeys)+len(overlay.APIKeys))

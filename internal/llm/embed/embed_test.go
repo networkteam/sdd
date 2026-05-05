@@ -83,7 +83,7 @@ func TestOpenAIEmbedder_Embed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := emb.Embed(context.Background(), []string{"hello", "world"})
+	got, err := emb.EmbedDocuments(context.Background(), []string{"hello", "world"})
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestOpenAIEmbedder_HTTPError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = emb.Embed(context.Background(), []string{"x"})
+	_, err = emb.EmbedDocuments(context.Background(), []string{"x"})
 	if err == nil || !strings.Contains(err.Error(), "invalid api key") {
 		t.Fatalf("expected error containing API message, got %v", err)
 	}
@@ -163,7 +163,7 @@ func TestOllamaEmbedder_Embed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := emb.Embed(context.Background(), []string{"a", "b"})
+	got, err := emb.EmbedDocuments(context.Background(), []string{"a", "b"})
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestOllamaEmbedder_BatchSplit(t *testing.T) {
 	for i := range inputs {
 		inputs[i] = fmt.Sprintf("a%c", 'a'+byte(i%26))
 	}
-	got, err := emb.Embed(context.Background(), inputs)
+	got, err := emb.EmbedDocuments(context.Background(), inputs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestOllamaEmbedder_Error(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = emb.Embed(context.Background(), []string{"x"})
+	_, err = emb.EmbedDocuments(context.Background(), []string{"x"})
 	if err == nil || !strings.Contains(err.Error(), "model not found") {
 		t.Fatalf("expected error mentioning model not found, got %v", err)
 	}

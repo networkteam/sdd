@@ -18,12 +18,14 @@ const defaultOpenAIEndpoint = "https://api.openai.com"
 // `POST {endpoint}/v1/embeddings` API contract used by OpenAI and
 // OpenAI-compatible self-hosted services.
 type openaiEmbedder struct {
-	endpoint   string
-	apiKey     string
-	model      string
-	dimensions int // 0 means "use model native"
-	batchSize  int
-	httpClient *http.Client
+	endpoint         string
+	apiKey           string
+	model            string
+	dimensions       int // 0 means "use model native"
+	batchSize        int
+	queryTemplate    string
+	documentTemplate string
+	httpClient       *http.Client
 }
 
 func newOpenAI(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) (llm.Embedder, error) {
@@ -36,12 +38,14 @@ func newOpenAI(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) 
 		endpoint = defaultOpenAIEndpoint
 	}
 	return &openaiEmbedder{
-		endpoint:   endpoint,
-		apiKey:     apiKey,
-		model:      cfg.Model,
-		dimensions: cfg.Dimensions,
-		batchSize:  batchSize,
-		httpClient: &http.Client{Timeout: timeout},
+		endpoint:         endpoint,
+		apiKey:           apiKey,
+		model:            cfg.Model,
+		dimensions:       cfg.Dimensions,
+		batchSize:        batchSize,
+		queryTemplate:    cfg.QueryTemplate,
+		documentTemplate: cfg.DocumentTemplate,
+		httpClient:       &http.Client{Timeout: timeout},
 	}, nil
 }
 
@@ -63,11 +67,22 @@ type openaiEmbedResponse struct {
 	} `json:"error"`
 }
 
-// Embed splits a large input slice into capped sub-batches, sends each as
-// a single /v1/embeddings call, and concatenates results in input order.
-// The rate limiter wraps the whole call (one Wait per outer Embed) — the
-// per-batch chunking sits inside.
-func (e *openaiEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+// EmbedDocuments applies the configured document template before
+// dispatching to the shared transport.
+func (e *openaiEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+	return e.embed(ctx, applyTemplate(e.documentTemplate, texts))
+}
+
+// EmbedQueries applies the configured query template before dispatching
+// to the shared transport.
+func (e *openaiEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
+	return e.embed(ctx, applyTemplate(e.queryTemplate, texts))
+}
+
+// embed splits the (already-templated) input slice into capped sub-batches,
+// sends each as a single /v1/embeddings call, and concatenates results
+// in input order.
+func (e *openaiEmbedder) embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
@@ -135,10 +150,6 @@ func (e *openaiEmbedder) Dimensions() int {
 	if e.dimensions > 0 {
 		return e.dimensions
 	}
-	// Defaults for known OpenAI models (3-small=1536, 3-large=3072, ada-002=1536).
-	// Returning 0 here would fail Index validation; pick a reasonable default
-	// per common models, otherwise fall through to a sentinel that the
-	// indexer learns from the first response.
 	switch e.model {
 	case "text-embedding-3-small", "text-embedding-ada-002":
 		return 1536
@@ -149,8 +160,9 @@ func (e *openaiEmbedder) Dimensions() int {
 }
 
 func (e *openaiEmbedder) Fingerprint() string {
+	base := "openai/" + e.model
 	if e.dimensions > 0 {
-		return fmt.Sprintf("openai/%s/%d", e.model, e.dimensions)
+		base = fmt.Sprintf("%s/%d", base, e.dimensions)
 	}
-	return fmt.Sprintf("openai/%s", e.model)
+	return appendDocTemplateHash(base, e.documentTemplate)
 }

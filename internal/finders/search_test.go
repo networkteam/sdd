@@ -21,7 +21,13 @@ type fakeEmbedder struct {
 // Embed produces deterministic 4-dim vectors keyed off SHA-256 of input,
 // then maps a few well-known phrases / texts to specific corners of the
 // space so the search assertions know which way the cosine will lean.
-func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+func (f *fakeEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+	return f.embed(texts)
+}
+func (f *fakeEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
+	return f.embed(texts)
+}
+func (f *fakeEmbedder) embed(texts []string) ([][]float32, error) {
 	f.calls++
 	out := make([][]float32, len(texts))
 	for i, t := range texts {

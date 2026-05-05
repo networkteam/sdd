@@ -190,7 +190,7 @@ func (h *IndexHandler) indexEntries(ctx context.Context, lazyOnly, force bool,
 	for i, c := range allChunks {
 		texts[i] = c.chunk.Text
 	}
-	embeddings, err := h.embedder.Embed(ctx, texts)
+	embeddings, err := h.embedder.EmbedDocuments(ctx, texts)
 	if err != nil {
 		return fmt.Errorf("embed: %w", err)
 	}

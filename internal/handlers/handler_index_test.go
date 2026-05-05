@@ -25,7 +25,13 @@ type fakeEmbedder struct {
 	fingerprint string
 }
 
-func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+func (f *fakeEmbedder) EmbedDocuments(_ context.Context, texts []string) ([][]float32, error) {
+	return f.embed(texts)
+}
+func (f *fakeEmbedder) EmbedQueries(_ context.Context, texts []string) ([][]float32, error) {
+	return f.embed(texts)
+}
+func (f *fakeEmbedder) embed(texts []string) ([][]float32, error) {
 	f.calls++
 	f.totalInputs += len(texts)
 	out := make([][]float32, len(texts))

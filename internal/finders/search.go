@@ -202,7 +202,7 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 	if q.Phrase == "" {
 		return nil, errors.New("vector search requires a non-empty --query phrase")
 	}
-	embeddings, err := f.embedder.Embed(ctx, []string{q.Phrase})
+	embeddings, err := f.embedder.EmbedQueries(ctx, []string{q.Phrase})
 	if err != nil {
 		return nil, fmt.Errorf("embedding query phrase: %w", err)
 	}

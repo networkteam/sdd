@@ -38,6 +38,53 @@ Same as `sdd list`: `--type`, `--layer`, `--kind`. Compose freely with `--term` 
 
 `--limit N` caps the result count (default 10).
 
+## Instruction templates
+
+Instruction-tuned encoders (Qwen3, E5, Nomic, BGE) want a small instruction or prefix prepended to each input. The framework applies this transparently via two config keys:
+
+- `embedding.query_template` — applied to the search-side text (used by `sdd search --query`).
+- `embedding.document_template` — applied to the index-side text (used by `sdd index` and `sdd search` lazy-fill).
+
+Both use a literal `{text}` placeholder that's replaced with the actual content. Empty values mean no transformation (correct for OpenAI / untemplated models).
+
+**Asymmetry to remember:** changing `document_template` invalidates indexed embeddings — `sdd lint` will report drift and the next search lazy-fills. Changing `query_template` is a free tweak; old indexed docs stay valid because they aren't touched. The fingerprint reflects this — only the doc template enters it.
+
+### Known-good templates
+
+```yaml
+# Qwen3 (instruction-tuned, query-only prefix)
+embedding:
+  provider: ollama
+  model: hf.co/Qwen/Qwen3-Embedding-0.6B-GGUF:F16
+  query_template: |-
+    Instruct: Given a query phrase, retrieve related entries from a knowledge graph
+    Query:{text}
+  # document_template: ""  (Qwen3 documents take no prefix)
+
+# Nomic Embed (dual prefix)
+embedding:
+  provider: ollama
+  model: nomic-embed-text
+  query_template: "search_query: {text}"
+  document_template: "search_document: {text}"
+
+# multilingual-e5 (dual prefix)
+embedding:
+  provider: ollama
+  model: intfloat/multilingual-e5-large
+  query_template: "query: {text}"
+  document_template: "passage: {text}"
+
+# OpenAI text-embedding-3 (no templates needed)
+embedding:
+  provider: openai
+  model: text-embedding-3-small
+  api_keys:
+    openai: sk-...
+```
+
+If you switch templates after building, run `sdd index --force` to re-embed eagerly, or just let `sdd search` lazy-fill on the next query.
+
 ## Lifecycle
 
 Vector mode reads from a per-participant local index at `.sdd/index/` (gitignored). Two ways the index gets populated:

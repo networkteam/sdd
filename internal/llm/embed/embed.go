@@ -135,11 +135,18 @@ func newRateLimited(inner llm.Embedder, rps float64) llm.Embedder {
 	}
 }
 
-func (r *rateLimited) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (r *rateLimited) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
 	if err := r.limiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limiter: %w", err)
 	}
-	return r.inner.Embed(ctx, texts)
+	return r.inner.EmbedDocuments(ctx, texts)
+}
+
+func (r *rateLimited) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
+	if err := r.limiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limiter: %w", err)
+	}
+	return r.inner.EmbedQueries(ctx, texts)
 }
 
 func (r *rateLimited) Dimensions() int     { return r.inner.Dimensions() }

@@ -20,11 +20,13 @@ const defaultOllamaEndpoint = "http://localhost:11434"
 // the rate limiter is not applied (caller's disk and network handle
 // backpressure).
 type ollamaEmbedder struct {
-	endpoint   string
-	model      string
-	dims       int // discovered from first response, cached for Dimensions()
-	batchSize  int
-	httpClient *http.Client
+	endpoint         string
+	model            string
+	dims             int // discovered from first response, cached for Dimensions()
+	batchSize        int
+	queryTemplate    string
+	documentTemplate string
+	httpClient       *http.Client
 }
 
 func newOllama(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) (llm.Embedder, error) {
@@ -33,11 +35,13 @@ func newOllama(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) 
 		endpoint = defaultOllamaEndpoint
 	}
 	return &ollamaEmbedder{
-		endpoint:   endpoint,
-		model:      cfg.Model,
-		dims:       cfg.Dimensions,
-		batchSize:  batchSize,
-		httpClient: &http.Client{Timeout: timeout},
+		endpoint:         endpoint,
+		model:            cfg.Model,
+		dims:             cfg.Dimensions,
+		batchSize:        batchSize,
+		queryTemplate:    cfg.QueryTemplate,
+		documentTemplate: cfg.DocumentTemplate,
+		httpClient:       &http.Client{Timeout: timeout},
 	}, nil
 }
 
@@ -51,10 +55,22 @@ type ollamaEmbedResponse struct {
 	Error      string      `json:"error,omitempty"`
 }
 
-// Embed splits a large input slice into capped sub-batches, sends each as
-// a single /api/embed request, and concatenates the results in input
-// order. Empty input returns nil with no transport call.
-func (e *ollamaEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+// EmbedDocuments applies the configured document template before
+// dispatching to the shared transport.
+func (e *ollamaEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+	return e.embed(ctx, applyTemplate(e.documentTemplate, texts))
+}
+
+// EmbedQueries applies the configured query template before dispatching
+// to the shared transport.
+func (e *ollamaEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
+	return e.embed(ctx, applyTemplate(e.queryTemplate, texts))
+}
+
+// embed splits a (already-templated) input slice into capped sub-batches,
+// sends each as a single /api/embed request, and concatenates the
+// results in input order.
+func (e *ollamaEmbedder) embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
@@ -115,8 +131,9 @@ func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 func (e *ollamaEmbedder) Dimensions() int { return e.dims }
 
 func (e *ollamaEmbedder) Fingerprint() string {
+	base := "ollama/" + e.model
 	if e.dims > 0 {
-		return fmt.Sprintf("ollama/%s/%d", e.model, e.dims)
+		base = fmt.Sprintf("%s/%d", base, e.dims)
 	}
-	return fmt.Sprintf("ollama/%s", e.model)
+	return appendDocTemplateHash(base, e.documentTemplate)
 }
