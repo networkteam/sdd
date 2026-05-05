@@ -247,6 +247,24 @@ If the WHY reshapes earlier WHAT or HOW captures semantically, apply the superse
 
 **Test**: what they bring from outside this project → actor. What they do within this project → role.
 
+**Split at draft time.** Users describe people in mixed terms — that's normal. When the answer combines identity and role content, draft TWO entries before playback: an actor signal with identity-only content, and a role decision with the project-specific content. Surface both in one playback so the user can confirm or defer the role:
+
+> **About Christopher — to capture**
+>
+> Actor: Christopher, alongside Chris, CH. CEO of networkteam, full-stack background.
+>
+> Role: designer and principal developer of SDD; holds strategic and conceptual ownership.
+>
+> OK? Or capture just the actor for now and defer the role?
+
+Default is capture-both; deferring role is explicit, never implicit. Don't silently drop volunteered role content.
+
+Splitting examples:
+- "CEO of networkteam" → identity (their external job, stable across projects)
+- "Background in full-stack development" → identity (what they bring)
+- "Designer of this project" → role (contribution here)
+- "Reviews all strategic captures" → role (here-specific responsibility)
+
 Avoid jargon in user-facing prompts ("canonical", "alias", "frame"). The skill has enough framing above to compose questions from the goal.
 
 **Local participant first.** The local canonical was already confirmed during orientation — this move captures the full actor signal with identity context. Ask in this order (compose wording adaptively; these are tone anchors, not scripts):
