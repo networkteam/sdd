@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash
 description: Set up an SDD graph on a fresh or sparse project — walk through a readiness sweep, brownfield context gather, actor capture, and Golden Circle strategic seeding, then hand back to /sdd via catch-up. Invoke when the graph lacks actors or aspirations.
 name: sdd-bootstrap
-sdd-content-hash: 69d3d9afd52b83da2d75195dab5cc0512ae1a5a8bd210f452157cb5ebdabb880
+sdd-content-hash: d9cf66d8dce0afc598bd8e416eb624199d84b72d1042dc08895f4087be358f82
 sdd-version: dev
 ---
 
@@ -40,11 +40,72 @@ The local canonical is set in `.sdd/config.local.yaml` by `sdd init` before boot
 
 If the user wants a different name, the chosen value flows into `--participants` for all subsequent captures (Move 2 facts/decision candidates, Move 3 Golden Circle, Move 4 actor signal, etc.). The full actor signal — aliases, identity prose — is captured later in Move 4; this orientation step only pins the canonical so participant attribution is correct from the first capture onward.
 
-### Teaching-mode exemplar
+### Plain language in user-facing text
 
-When teaching mode is on, prefix each capture's playback with a short framing. One example to set the tone; compose the rest adaptively from the entry type's definition in framework-concepts.
+Two layers of vocabulary:
 
-> *"Actor signals capture who each participant is — stable identity (name, background, external affiliation) that stays true regardless of this specific project. Now the playback: I'd record this as a process-layer actor signal — 'Christopher, canonical `Christopher` in graph participants, is CEO of networkteam with a background as full-stack developer.' Sound right?"*
+- **User-facing concepts** (entries, types and kinds, aspirations, gaps, decisions, the loop, layers when they matter) — the user will encounter these in `/sdd` and beyond. Teaching mode introduces them gradually as they come up.
+- **Agent-internal mechanics** (canonical, aliases, write-once invariants, frontmatter field names, `kind:` / `--participants` flags, pre-flight finding identifiers, "Sinek's Golden Circle reverse order", "process layer", "Greenfield/Brownfield") — these stay private. The user doesn't operate them; the agent does.
+
+**Teaching pattern**: explain in plain words first, then attach the technical term in bold once the substance is clear. Each term gets introduced once; subsequent uses don't need re-explanation.
+
+> "We'll capture you so the graph knows who said what. These entries are called **actors**."
+
+> "What does this project do, and where's it headed — the shape you're settling on. We capture each of these as **directives**."
+
+> "The pull behind the project — what you're aspiring toward over time. These are **aspirations**, and every later decision aligns against them."
+
+If the user identified as experienced (or shows fluent SDD vocabulary), skip the introductions and use terms transparently.
+
+When pre-flight runs and the user is in teaching mode, frame it once on first occurrence:
+
+> *"These captures get checked against quality rules. When something comes up, we read it together and decide whether to revise or proceed."*
+
+Surface findings as they arise without lecturing the validator's mechanics. Never surface "Move N", numbered "Step N of M" labels, or any internal structural skeleton — the user navigates the dialogue by topic, not by structure.
+
+### Concise, scannable output
+
+Every user-facing turn should be skimmable in one glance — a short bold header on the first line, then one or two short sentences with the actual question. The user shouldn't have to read every word to know what's being asked.
+
+Headers can be topic-only or carry a sequence word for flow — both work, pick what reads naturally:
+
+> **Now: project shape**
+>
+> What does this project do, and where's it headed?
+
+> **About you**
+>
+> What name should we use for you in the graph?
+
+> **Last: quick check**
+>
+> Your name is set as `Christopher`. Keep that, or want a different one?
+
+For playbacks (drafted entries before capture): header + one-line summary + the substance + a single confirm:
+
+> **About you — to capture**
+>
+> Christopher, alongside Chris, CH. CEO of networkteam, full-stack background.
+>
+> OK?
+
+Cut warm-ups, justifications, and meta-commentary. Headers carry the orientation.
+
+### One question at a time
+
+Sub-steps in this skill (e.g. Move 4's local-actor sequence: aliases → identity context) are an outline of what the agent needs, not a script for what to ask in one turn.
+
+Pattern: outline the upcoming sequence in one short sentence if useful, then ask only the first question and wait. After the answer lands, ask the next.
+
+> **About you**
+>
+> A couple of things — first any other names you go by, then a bit about your background.
+>
+> Any other names you show up under?
+
+Compose the outline adaptively — exact wording matters less than the discipline of one ask per turn. If the user volunteers more than asked (e.g. answers all three at once), accept it gracefully and confirm before moving on; the discipline is about not overwhelming, not about ignoring offered material.
+
+For complex captures (drafting an actor signal or a role decision from accumulated context), still ask only what's needed to fill the next gap, even if the agent already has the rest.
 
 ### Playback before capture
 
