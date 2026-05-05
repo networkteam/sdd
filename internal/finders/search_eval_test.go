@@ -96,7 +96,10 @@ func evalEmbedder(t *testing.T) llm.Embedder {
 		t.Skip("SDD_EVAL_PROVIDER not set (use openai or ollama)")
 	}
 
-	cfg := model.EmbeddingConfig{Provider: provider}
+	// Explicit timeout: an 8b local model can take >30s per batch even
+	// at the default batch size; leave headroom for cold-start
+	// per-batch latency.
+	cfg := model.EmbeddingConfig{Provider: provider, Timeout: "5m"}
 	switch provider {
 	case "ollama":
 		cfg.Model = os.Getenv("SDD_EVAL_OLLAMA_MODEL")

@@ -103,16 +103,20 @@ func resolveBatchSize(cfg, fallback int) int {
 }
 
 // resolveTimeout parses the configured Go duration string, falling back to
-// 30s when empty or unparseable. Embedding calls are batch-shaped — a
-// single call can take seconds when the batch is large — so the default
-// errs on the generous side.
+// 2m when empty or unparseable. Embedding calls are batch-shaped — a
+// single call over the default 64-input batch can take ~90s on a local
+// 8b parameter model — so the default errs on the generous side. Users
+// running fast remote providers (OpenAI text-embedding-3) typically
+// finish in well under a second per batch and won't notice the higher
+// default; users on slow local models won't lose work to a too-short
+// default they didn't know to override.
 func resolveTimeout(raw string) time.Duration {
 	if raw == "" {
-		return 30 * time.Second
+		return 2 * time.Minute
 	}
 	d, err := time.ParseDuration(raw)
 	if err != nil || d <= 0 {
-		return 30 * time.Second
+		return 2 * time.Minute
 	}
 	return d
 }
