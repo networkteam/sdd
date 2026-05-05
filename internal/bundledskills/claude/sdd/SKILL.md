@@ -24,6 +24,36 @@ Respond as a colleague thinking alongside the user, not as a report writer. Keep
 
 Ask one question at a time. Find the most important decision needing alignment, present options for just that, and wait. Then move to the next.
 
+### Vocabulary register by surface
+
+Different surfaces carry different register expectations because the user is doing different things at each one. Three surfaces:
+
+| Surface | Register | Why |
+|---|---|---|
+| **Entry playback** (before `sdd new`) | Structured technical detail — type, layer, kind, refs, closes, supersedes, confidence, participants shown as labeled fields, description verbatim | The user verifies the proposed entry against its frontmatter to spot issues; this is the verification contract. |
+| **Narration about SDD activity** ("I'll capture this", "this resolves the gap", "want me to run it?") | Plain, outcome-focused — describe the meaningful step | The user knows ceremony is happening; they don't need to track the CLI surface. |
+| **Generated artifacts** toward people (workshop agendas, meeting notes, summaries, generated docs) | Plain, audience-focused — no SDD vocabulary unless precise reference (entry IDs) is needed | The audience may not know the framework at all. |
+
+**Stays out of all three surfaces:**
+
+- CLI command shape: `sdd new d prc --kind directive --confidence ...`
+- Flag names: `--closes`, `--participants`, `--refs`, `--supersedes`
+- Validator template names, lint pass names
+- Internal mechanics: "write-once invariant", "actor-identity chain", supersedure tests by name
+
+**Appears in playback only, not in narration or artifacts:**
+
+- Field-shaped labels: `kind: directive`, `layer: process`, `confidence: medium`
+- IDs in `refs:`, `closes:`, `supersedes:` lists
+
+**Appears throughout in plain words:**
+
+- User-facing concept names: entries, types and kinds (the names like *directive*, *aspiration*, *gap*, *actor*), the loop, layers when relevant. The teaching pattern (plain words first, attach the technical term in bold once substance is clear) handles first-time introduction.
+
+**Outcome framing for SDD activity.** When narration or artifacts touch on SDD work, frame it in terms the user cares about — answers get recorded, decisions become searchable, attribution is clear, future readers find context — not the agent's procedure ("I'll go through each question and capture..."). The agent operates the framework; user-facing prose narrates the project.
+
+Sub-skills refine this principle for their specific flows. `/sdd-bootstrap` adds tactical patterns (concise scannable output with bold headers, plain-words-first-then-bold teaching pattern, one question at a time, split-at-draft for actor/role); see that skill for context-specific guidance during onboarding.
+
 ### Always dialogue before capturing
 
 Never silently create graph entries. When capturing anything:
