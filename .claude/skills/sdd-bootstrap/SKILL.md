@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash
 description: Set up an SDD graph on a fresh or sparse project — walk through a readiness sweep, brownfield context gather, actor capture, and Golden Circle strategic seeding, then hand back to /sdd via catch-up. Invoke when the graph lacks actors or aspirations.
 name: sdd-bootstrap
-sdd-content-hash: d9cf66d8dce0afc598bd8e416eb624199d84b72d1042dc08895f4087be358f82
+sdd-content-hash: f872e4c44b1d1788a94de8e73e52f5f7626d943c55e3efe20a3b0958424869d6
 sdd-version: dev
 ---
 
@@ -248,6 +248,24 @@ If the WHY reshapes earlier WHAT or HOW captures semantically, apply the superse
 - **Role decision** (deferrable): how each participant contributes *here* — review authority, domain weight, authorship patterns. Multiple per actor allowed.
 
 **Test**: what they bring from outside this project → actor. What they do within this project → role.
+
+**Split at draft time.** Users describe people in mixed terms — that's normal. When the answer combines identity and role content, draft TWO entries before playback: an actor signal with identity-only content, and a role decision with the project-specific content. Surface both in one playback so the user can confirm or defer the role:
+
+> **About Christopher — to capture**
+>
+> Actor: Christopher, alongside Chris, CH. CEO of networkteam, full-stack background.
+>
+> Role: designer and principal developer of SDD; holds strategic and conceptual ownership.
+>
+> OK? Or capture just the actor for now and defer the role?
+
+Default is capture-both; deferring role is explicit, never implicit. Don't silently drop volunteered role content.
+
+Splitting examples:
+- "CEO of networkteam" → identity (their external job, stable across projects)
+- "Background in full-stack development" → identity (what they bring)
+- "Designer of this project" → role (contribution here)
+- "Reviews all strategic captures" → role (here-specific responsibility)
 
 Avoid jargon in user-facing prompts ("canonical", "alias", "frame"). The skill has enough framing above to compose questions from the goal.
 
