@@ -115,7 +115,7 @@ func TestInstallSkills_PromptModified(t *testing.T) {
 	installDir := filepath.Join(tmp, ".claude", "skills")
 	paths := []string{
 		filepath.Join(installDir, "sdd", "SKILL.md"),
-		filepath.Join(installDir, "sdd-catchup", "SKILL.md"),
+		filepath.Join(installDir, "sdd-explore", "SKILL.md"),
 	}
 	for _, p := range paths {
 		data, err := os.ReadFile(p)

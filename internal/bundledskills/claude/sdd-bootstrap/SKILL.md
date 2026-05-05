@@ -320,7 +320,7 @@ If the user defers, move on. Roles will emerge from actual work.
 
 1. Run `sdd lint`. If findings, name them briefly as a one-liner.
 2. Announce: *"Bootstrap complete — handing back to /sdd. Here's where your graph stands now:"*
-3. Apply the **Catch-up Playbook** from `../sdd/SKILL.md` against the now-populated graph — cluster by thread, number items, narrate. The catch-up voice naturally produces the readiness summary; no separate summary logic needed here.
+3. Apply the **Catch-up Playbook** from `../sdd/references/playbook-catchup.md` against the now-populated graph — cluster by thread, number items, narrate. The catch-up voice naturally produces the readiness summary; no separate summary logic needed here.
 4. From this point on, `/sdd` patterns take over — capture, explore, decide.
 
 **Partial-readiness note**: if a move yielded nothing clear (e.g. WHY round stayed empty), add a one-liner before running catch-up: *"Note: WHY round didn't land anything this session — worth revisiting when clarity shows up."*

@@ -20,7 +20,7 @@ func TestLoadClaude(t *testing.T) {
 	for _, e := range b.Entries {
 		skills[e.Skill]++
 	}
-	for _, want := range []string{"sdd", "sdd-catchup", "sdd-explore", "sdd-groom"} {
+	for _, want := range []string{"sdd", "sdd-bootstrap", "sdd-explore", "sdd-groom"} {
 		if skills[want] == 0 {
 			t.Errorf("expected skill %q in bundle", want)
 		}
