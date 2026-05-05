@@ -1,8 +1,8 @@
-# Greenfield Bootstrap Evaluation — ClientCo Chatbot POC
+# Greenfield Bootstrap Evaluation — external client chatbot POC
 
 ## Setup
 
-- Project: external ClientCo chatbot POC (path not recorded per policy — outside this graph)
+- Project: external client chatbot POC (path not recorded per policy — outside this graph)
 - SDD bin: copied freshly-built `bin/sdd` to `~/.local/bin/sdd` to use under test
 - Git: fresh repo; `sdd init --language de`
 - Session: new Claude Code session in the project directory; ran `/sdd`
@@ -49,19 +49,19 @@ User commentary: *"Teaching is terrible. It's absolutely terrible. That's not at
 
 User principle: teaching mode should use plain words, then introduce SDD concepts gradually (graph, entries, types, kinds), without surfacing internals like canonical, aliases, write-once, identity chain.
 
-### PM & UX capture — actor/role conflation (issues F, G, H, I)
+### PM & Dev capture — actor/role conflation (issues F, G, H, I)
 
 Agent drafted PM prose (issue H — `kanonisch:` surfaced):
 
-> PM (kanonisch: PM) ist Projektmanagerin bei networkteam und Hauptansprechpartnerin für Kunden. In diesem Projekt führt sie die Kundenkommunikation mit ClientCo.
+> [PM] (kanonisch: [PM]) ist Projektmanagerin beim Anbieter und Hauptansprechpartnerin für Kunden. In diesem Projekt führt sie die Kundenkommunikation mit dem Kunden.
 
 Pre-flight blocked (issue F):
 
-> [high] role-drift: The prose conflates this-graph role scope with identity content. 'In diesem Projekt führt sie die Kundenkommunikation mit ClientCo' describes what PM does inside this graph (project-specific responsibility), not who she is.
+> [high] role-drift: The prose conflates this-graph role scope with identity content. 'In diesem Projekt führt sie die Kundenkommunikation mit dem Kunden' describes what the PM does inside this graph (project-specific responsibility), not who she is.
 
 Second attempt also blocked (issue I):
 
-> [high] role-identity-conflation: 'Projektmanagerin bei networkteam mit Schwerpunkt auf Kundenkommunikation' describes what PM does *inside this graph*
+> [high] role-identity-conflation: 'Projektmanagerin beim Anbieter mit Schwerpunkt auf Kundenkommunikation' describes what the PM does *inside this graph*
 
 User decision: skip pre-flight to proceed.
 
@@ -88,7 +88,7 @@ User dumped extensive workshop material; agent jumped to a 5-entry capture plan 
 > Capture-Plan (5 Einträge):
 > 1. Fakt, Prozess-Ebene — Kundenkontext...
 > 2. Anspruch, strategisch (kind: aspiration) — WARUM...
-> 3. Direktive, konzeptionell — Chatbot-Konzept + Phase-1-Scope + MUST/SHOULD/COULD/WON'T...
+> 3. Direktive, konzeptionell — Projekt-Konzept + Phase-1-Scope + MUST/SHOULD/COULD/WON'T...
 > 4. Direktive, strategisch — Vorgehen: Anbieter-Evaluation...
 > 5. Lücke, taktisch — Als Nächstes...
 
@@ -106,7 +106,7 @@ User principle: teaching mode should introduce pre-flight on first occurrence �
 
 After captures landed, agent observation:
 
-> UXs Actor-Zusammenfassung (automatisch generiert) ist auf Englisch gelandet — lass uns das bei Gelegenheit mit sdd summarize korrigieren, aber nicht jetzt.
+> Die Actor-Zusammenfassung des zweiten Teilnehmers (automatisch generiert) ist auf Englisch gelandet — lass uns das bei Gelegenheit mit sdd summarize korrigieren, aber nicht jetzt.
 
 The auto-generated summary ignored `Language: de`.
 
@@ -141,22 +141,22 @@ User commentary on the result:
 **Severity**: medium — jargon for non-technical users.
 
 ### F. Actor/role conflation at draft time
-**Observation**: agent drafted PM's actor signal with project-role content; pre-flight blocked. Pattern repeated on retry.
+**Observation**: agent drafted the PM's actor signal with project-role content; pre-flight blocked. Pattern repeated on retry.
 **Root cause**: skill doesn't apply identity/role boundary at draft time.
 **Severity**: high — wastes pre-flight cycles, forces `--skip-preflight`.
 
 ### G. When user gives mixed identity + role content, skill should split and capture both
-**Observation**: user volunteered PM's project role alongside identity; agent drafted with both, got blocked, then deferred role capture instead of splitting.
+**Observation**: user volunteered the PM's project role alongside identity; agent drafted with both, got blocked, then deferred role capture instead of splitting.
 **Root cause**: skill mentions splitting in principle but doesn't proactively capture both entries.
 **Severity**: high — leaves volunteered material uncaptured.
 
 ### H. "Kanonisch:" surfaced in playback prose
-**Observation**: playback showed "PM (kanonisch: `PM`) ist...".
+**Observation**: playback showed "[PM] (kanonisch: `[PM]`) ist...".
 **Root cause**: same as B.
 **Severity**: medium — playback is a high-visibility surface.
 
 ### I. Pre-flight actor/role boundary too strict (or concept too coupled)
-**Observation**: pre-flight rejected "Projektmanagerin bei networkteam mit Schwerpunkt auf Kundenkommunikation" as role content. But this is what PM does at her external employer, not in this graph specifically. Boundary drawn tighter than practice supports.
+**Observation**: pre-flight rejected "Projektmanagerin beim Anbieter mit Schwerpunkt auf Kundenkommunikation" as role content. But this is what the PM does at her external employer, not in this graph specifically. Boundary drawn tighter than practice supports.
 **Root cause**: either rubric miscalibration (job-at-employer should be identity), or deeper concept tension — actor and role may be more coupled in practice than the framework allows.
 **Severity**: high. Belongs in the parallel `s-prc-kve` thread and possibly a broader review.
 
@@ -204,7 +204,7 @@ After `sdd init` on a fresh install, the CLI could hint: *"start a new Claude Co
 The rubric rejected natural identity descriptions touching on what someone does at their external employer. Either the rubric needs calibration, or actor/role is too coupled for practical use. Belongs in the parallel `s-prc-kve` thread.
 
 ### O. Auto-generated summary ignored configured language
-UX's actor summary (auto-generated) came out in English despite `Language: de`. The summary template either doesn't pull in the locale config or doesn't respect it.
+The second participant's actor summary (auto-generated) came out in English despite `Language: de`. The summary template either doesn't pull in the locale config or doesn't respect it.
 **Scope**: LLM template / CLI bug.
 
 ## Improvement directions — non-binding

@@ -4,7 +4,9 @@
 
 In a sibling SDD-instrumented project, an agent was asked to generate a meeting agenda document for a workshop where open questions previously captured in the graph would be discussed. The questions section read fine. The trailing section, intended to describe what happens after the meeting, drifted into SDD-internal mechanics.
 
-## Verbatim excerpt
+## Verbatim excerpt (abstracted)
+
+The actual content has been abstracted to generic placeholders; the failure modes are preserved.
 
 ```
 ---
@@ -14,15 +16,15 @@ In a sibling SDD-instrumented project, an agent was asked to generate a meeting 
 Pro geklärter Frage:
 
 1. **Done-Signal** mit `--closes <frage-id>` und der konkreten Antwort als Beschreibung.
-2. Falls die Antwort eine **neue Anforderung** etabliert (z. B. „Englisch ist MUST"): zusätzliche Direktive oder Update von `workshop-ergebnisse.md` + ggf. Supersede-Kette zu `konzept-id`, falls die MoSCoW-Liste sich verschiebt.
-3. Falls die Antwort eine **Bewertungsachse stärker gewichtet** (z. B. „Hand-off = Rückruf primär"): Update des Stufe-X-Templates und der bereits angelegten Anbieter-Profile (Kategorie X).
-4. Stufe-X-Bewertung kann auf Basis der geklärten Achsen zur Top-3-Synthese verdichtet werden.
+2. Falls die Antwort eine **neue Anforderung** etabliert: zusätzliche Direktive oder Update der Konzept-Beschreibung + ggf. Supersede-Kette zu vorhandenen Konzept-Einträgen.
+3. Falls die Antwort eine **Bewertungsachse stärker gewichtet**: Update der Bewertungs-Templates und der bereits angelegten Profile.
+4. Bewertung kann auf Basis der geklärten Achsen verdichtet werden.
 
 | Frage | Done-Signal schließt | Mögliche Folge-Captures |
 |---|---|---|
-| 1 — Volumen | `frage-1-id` | Fakt-Signal mit Volumen-Annahme; ggf. Direktive zur Bewertungs-Methode |
-| 2 — Hand-off | `frage-2-id` | Direktive zum Phase-1-Hand-off; Update Kategorie X |
-| 3 — Englisch | `frage-3-id` | MoSCoW-Update; ggf. Direktive die `konzept-id` ergänzt/ablöst |
+| 1 | <frage-1-id> | Fakt-Signal; ggf. Direktive zur Methode |
+| 2 | <frage-2-id> | Direktive; Update relevanter Profile |
+| 3 | <frage-3-id> | Update der Konzept-Beschreibung; ggf. Direktive |
 ```
 
 ## Two failure modes
@@ -37,7 +39,7 @@ The same back-fill intent reads cleanly without leaking the playbook:
 
 > ## Nach dem Meeting
 >
-> Die Antworten auf die offenen Fragen werden im Anschluss strukturiert festgehalten und mit den ursprünglichen Fragen verknüpft (Fragen 1–3, IDs `frage-1-id`, `frage-2-id`, `frage-3-id`). Falls eine Antwort eine neue Anforderung etabliert oder ein vorhandenes Bewertungsraster verschiebt, wird das ebenfalls dokumentiert und führt zu einer angepassten Top-3-Auswahl.
+> Die Antworten auf die offenen Fragen werden im Anschluss strukturiert festgehalten und mit den ursprünglichen Fragen verknüpft (Fragen 1–3 mit ihren jeweiligen Entry-IDs). Falls eine Antwort eine neue Anforderung etabliert oder ein vorhandenes Bewertungsraster verschiebt, wird das ebenfalls dokumentiert und führt zu einer angepassten Auswahl.
 
 Entry IDs are still present for precise referencing — that is internal-consistency hygiene, not jargon. What is gone: the procedural how-to that belongs to the agent's behavior.
 
