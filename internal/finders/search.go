@@ -211,9 +211,18 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 	}
 
 	limit := q.EffectiveLimit()
-	chunkLimit := limit * 4
-	if chunkLimit < 20 {
-		chunkLimit = 20
+	// Oversample chunks so the per-entry roll-up still has enough
+	// distinct entries to fill top-N. A large entry can contribute many
+	// chunks to the chunk-level top-K — observed during the first
+	// real-corpus eval, where d-tac-lqr alone owns 24 chunks (its body +
+	// design.md attachment) and dominated the top-20 hits, collapsing
+	// the entry-rollup to just 1-2 unique entries. 10× the limit (with
+	// a floor of 50) keeps the pool diverse without making the chromem
+	// scan meaningfully more expensive — flat scan is O(N), not
+	// O(K·log N).
+	chunkLimit := limit * 10
+	if chunkLimit < 50 {
+		chunkLimit = 50
 	}
 	indexHits, err := f.indexStore.Query(ctx, embeddings[0], chunkLimit)
 	if err != nil {
@@ -337,21 +346,31 @@ func searchableText(graphDir string, e *model.Entry) (combined, body string) {
 	return b.String(), body
 }
 
-// snippetWindow is the half-width (in bytes) of the citation snippet
-// extracted around a match. ~150 chars total per d-tac-lqr's AC.
-const snippetWindow = 75
+// snippetWindow is the half-width (in runes) of the citation snippet
+// extracted around a known match position; vector hits use the leading
+// 2*snippetWindow as no specific position applies. ~300 runes total
+// gives the agent enough context to judge relevance without forcing a
+// follow-up `sdd show`. Originally 75 (~150 total) per d-tac-lqr's AC,
+// but real-corpus evaluation showed mid-word truncations and too little
+// context — bumped to 150 with word-boundary trimming below.
+const snippetWindow = 150
 
-// snippetAround returns up to 2*window+a few chars of context around
-// pos. Snippets are trimmed to whitespace boundaries when possible.
-// pos<0 returns an empty snippet (no match position known).
+// snippetAround returns up to ~2*window bytes of context around pos,
+// trimmed to whitespace boundaries so the citation never starts or
+// ends mid-word. pos<0 (or pos==0 for vector hits where no specific
+// match position applies) returns the leading window of the chunk.
+//
+// When the snippet is shorter than the source text on either side, a
+// `[...]` marker is added so the agent reading the citation can tell
+// whether it's seeing a complete chunk or a window into a longer one.
+// The markers sit outside any word-boundary trim so an agent that
+// strips them gets clean prose.
 func snippetAround(text string, pos int, window int) string {
-	if text == "" || pos < 0 {
-		// Fall back to the leading window when no position is known
-		// (e.g. vector hits where pos is irrelevant).
-		if pos < 0 && text != "" {
-			return collapseWS(headSnippet(text, 2*window))
-		}
+	if text == "" {
 		return ""
+	}
+	if pos < 0 {
+		pos = 0
 	}
 	start := pos - window
 	if start < 0 {
@@ -361,14 +380,63 @@ func snippetAround(text string, pos int, window int) string {
 	if end > len(text) {
 		end = len(text)
 	}
-	return collapseWS(text[start:end])
+	start = trimToWordBoundaryStart(text, start)
+	end = trimToWordBoundaryEnd(text, end)
+
+	out := collapseWS(text[start:end])
+	if start > 0 {
+		out = "[...] " + out
+	}
+	if end < len(text) {
+		out = out + " [...]"
+	}
+	return out
 }
 
-func headSnippet(text string, max int) string {
-	if len(text) <= max {
-		return text
+// trimToWordBoundaryStart advances start forward past any partial word
+// it lands inside, so the snippet begins on a word edge. start==0 stays
+// at 0 (we're already at the beginning of the text). Bounded by a small
+// look-ahead to avoid wandering into the next sentence on long
+// run-on prose.
+func trimToWordBoundaryStart(text string, start int) int {
+	if start == 0 {
+		return 0
 	}
-	return text[:max]
+	const maxAdvance = 40
+	limit := start + maxAdvance
+	if limit > len(text) {
+		limit = len(text)
+	}
+	// If the byte at start is in the middle of a word, advance to the
+	// next whitespace.
+	for i := start; i < limit; i++ {
+		c := text[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			return i + 1
+		}
+	}
+	return start
+}
+
+// trimToWordBoundaryEnd retreats end backward to the previous whitespace
+// so the snippet ends cleanly. end==len(text) stays at len(text). Same
+// look-back bound as the start counterpart.
+func trimToWordBoundaryEnd(text string, end int) int {
+	if end >= len(text) {
+		return len(text)
+	}
+	const maxRetreat = 40
+	limit := end - maxRetreat
+	if limit < 0 {
+		limit = 0
+	}
+	for i := end; i > limit; i-- {
+		c := text[i]
+		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+			return i
+		}
+	}
+	return end
 }
 
 // collapseWS replaces runs of whitespace (including newlines) with a
