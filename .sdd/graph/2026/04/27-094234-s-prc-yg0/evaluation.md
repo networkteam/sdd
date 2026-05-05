@@ -49,7 +49,7 @@ User commentary: *"Teaching is terrible. It's absolutely terrible. That's not at
 
 User principle: teaching mode should use plain words, then introduce SDD concepts gradually (graph, entries, types, kinds), without surfacing internals like canonical, aliases, write-once, identity chain.
 
-### PM & Dev capture — actor/role conflation (issues F, G, H, I)
+### PM & UX capture — actor/role conflation (issues F, G, H, I)
 
 Agent drafted PM prose (issue H — `kanonisch:` surfaced):
 
