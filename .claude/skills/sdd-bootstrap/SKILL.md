@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash
 description: Set up an SDD graph on a fresh or sparse project — walk through a readiness sweep, brownfield context gather, actor capture, and Golden Circle strategic seeding, then hand back to /sdd via catch-up. Invoke when the graph lacks actors or aspirations.
 name: sdd-bootstrap
-sdd-content-hash: 46127ee6541a55a1b4c24643f5f774aee836d3c882c7878afb62faef55c46fdf
+sdd-content-hash: 69d3d9afd52b83da2d75195dab5cc0512ae1a5a8bd210f452157cb5ebdabb880
 sdd-version: dev
 ---
 
@@ -110,8 +110,8 @@ Skip deep `docs/` crawl and full history.
 **Synthesize and confirm:**
 
 - One paragraph: *"here's what I understand about this project — [stack, shape, recent activity]"*. User confirms or corrects.
-- Recent contributors from git log → hold as candidates to offer in Move 3.
-- Ask: *"what's currently active, what's planned next, anything the repo doesn't show?"* WHY usually lives outside the repo — expect it in Move 4.
+- Recent contributors from git log → hold as candidates to offer in Move 4.
+- Ask: *"what's currently active, what's planned next, anything the repo doesn't show?"* WHY usually lives outside the repo — expect it in Move 3.
 
 **Capture candidates (playback-before-capture):**
 
