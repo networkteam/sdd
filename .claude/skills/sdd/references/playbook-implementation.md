@@ -1,12 +1,12 @@
 ---
-sdd-content-hash: 9008be9888c0dc19a75a9236656b2901c32af21a7de449ec4039b6419049dada
+sdd-content-hash: 5e3e6dbff88198780397a918d7dac2cb3c3e63fa6f304e055ee92510200fa8a9
 sdd-version: dev
 ---
 # Transition to implementation
 
 When the conversation reaches "let's build this":
 
-1. Check: are there enough decisions to scope the work?
+1. Check: are there enough decisions to scope the work? **Prefer reducing scope over building into the unknown** — if a portion of the work depends on a decision not yet made, narrow the scope to what's decided rather than improvising the missing piece.
 2. If gaps exist, surface them: "Before building, we should decide X"
 3. **Decision-before-done-signal checkpoint**: if the upcoming work requires making a choice between alternatives — not just executing a known path — stop and capture the decision first. A done signal that closes a gap directly should describe *what was done*, not *why this approach*. Approach-shaped closures smuggle decisions past the graph; pre-flight will flag them and strictly block at higher layers (strategic / conceptual).
 4. Assess whether a plan decision is needed. The test: **will the closing done signal have enough to validate against without a plan?** If the decision is specific enough on its own (small fix, single change, obvious path from signal to completion), skip the plan. If the decision describes a direction but implementation requires decomposition (multiple requirements, design choices, multi-step scope), capture a plan decision first — the pre-flight validates every plan item at closing time, which is where the rigor pays off.
