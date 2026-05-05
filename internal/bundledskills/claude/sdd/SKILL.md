@@ -173,6 +173,8 @@ You don't ask "which mode?" — you read the situation and act accordingly. Thes
 
 **Act/Implement**: A decision exists and it's time to build. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. When transitioning to implementation, create an exclusive WIP marker (`sdd wip start <entry-id> --exclusive --participant <name> <description>`). Capture operational sub-decisions as needed. When implementation is complete, remove the marker (`sdd wip done <marker-id>`). If implementation is paused (e.g. a missing decision is discovered), leave the marker active — it signals work is in flight. Know when to stop and evaluate.
 
+**Augment plan**: During implementation a refinement surfaces that's too substantive for a mechanical fix but too narrow to warrant superseding the plan — a single AC turned out too specific in scope, an edge case was missed, an implementation detail crystallized. Capture it as a directive that refs the plan, articulating the refinement and its rationale. The plan stays active; the directive becomes part of the plan's implicit acceptance contract. The closing done signal addresses both. See the Augment Plan Playbook below.
+
 **Groom**: The graph needs hygiene. Invoke `/sdd-groom` to scan for candidates — open entries that may already be resolved but lack proper closure. The sub-skill returns a numbered table of candidates with evidence and suggested resolutions. Present the table to the user, then walk through candidates one by one: confirm the resolution, capture the closure (new done signal with `--closes`, or directive retiring a stable-kind entry), or skip. The goal is to reduce noise in the graph so that status and catch-up reflect reality. See the Grooming Playbook below.
 
 ### Proactive grooming suggestion
@@ -304,6 +306,42 @@ For each candidate, based on its pattern:
 
 Summarize what was done: "Closed N entries, captured M done signals. N entries confirmed still open." This keeps the user oriented.
 
+## Augment Plan Playbook
+
+Plans accumulate refinements during implementation. The augmentation pattern (per `d-prc-9ti`) makes these refinements lightweight — capture a directive that refs the plan rather than superseding it or letting the refinement drift silently into code.
+
+### Three options on a spectrum of ceremony
+
+When a plan needs adjustment, three paths sit on a spectrum:
+
+**Mechanical fix** — typo, missing ref, formatting correction. No new entry. Edit the file in place; if the change touches the body, regenerate the summary via `sdd summarize <id>`. Per `d-cpt-e1i`, only no-meaning-change corrections qualify; semantic changes never do.
+
+**Augment plan (downstream directive)** — the refinement sharpens a specific AC, extends scope on a narrow point, or codifies an implementation choice that the plan was silent on. The plan's overall direction holds. Discovered during pre-implementation walk-through, early implementation, or after empirical findings. Capture as a directive that refs the plan; the plan stays active; the directive joins the plan's implicit AC chain.
+
+**Supersede plan** — the refinement changes direction, restructures multiple ACs, or invalidates the plan's framing. Heavy but warranted when the plan's spine no longer holds. Capture as a new plan with `--supersedes <old-plan-id>`.
+
+When in doubt between augment and supersede, augment first. If augmentations stack high enough that the plan's shape no longer reads cleanly from the original entry, that's the signal to supersede.
+
+### How to capture an augmenting directive
+
+1. **Description**: state the refinement, its rationale, and which AC(s) of the plan it sharpens or extends. Be specific about what changes for the implementing agent.
+2. **Refs**: the plan being refined (primary). Refs to `d-prc-9ti` are not required for routine augmentations — the pattern is established at the framework level — but include it when explicitly demonstrating or testing the pattern.
+3. **Layer**: tactical for spec sharpening; process for skill/workflow refinements; operational for narrow execution-shape clarifications.
+4. **Kind**: directive (default). Don't use `kind: plan` for an augmentation — you're committing to a refined behavior, not introducing decomposable scope.
+5. **Confidence**: typically matches or sits one notch below the original plan's confidence — the augmentation is grounded in the plan's reasoning but adds a specific refinement.
+
+### How the closing done signal handles augmentations
+
+When closing an augmented plan:
+
+1. Read the plan's original `## Acceptance criteria` AND every downstream directive that refs the plan. The union is the contract.
+2. The done signal addresses both with the same dialogue rigor — each AC and each augmenting directive's commitment gets a confirmation with evidence or a deviation explanation.
+3. Pass all entries to `--closes`: `sdd new s <layer> --kind done --closes <plan-id>,<dir1-id>,<dir2-id> ...`. The done signal closes the plan and every augmenting directive in one move.
+
+### Trade-off — accept it explicitly
+
+The augmentation pattern distributes a plan's acceptance contract across the original entry plus its downstream refinements. Closing requires reading the full chain rather than a single document. This cost is accepted as the price of fluid, dialogue-shaped work, aligning with `d-stg-3k0`'s commitment to no parallel artifacts and no ceremony — the alternative (force every refinement through supersession) creates more friction than the distributed read does.
+
 ## Transition to implementation
 
 When the conversation reaches "let's build this":
@@ -314,11 +352,12 @@ When the conversation reaches "let's build this":
 4. Assess whether a plan decision is needed. The test: **will the closing done signal have enough to validate against without a plan?** If the decision is specific enough on its own (small fix, single change, obvious path from signal to completion), skip the plan. If the decision describes a direction but implementation requires decomposition (multiple requirements, design choices, multi-step scope), capture a plan decision first — the pre-flight validates every plan item at closing time, which is where the rigor pays off.
 5. If scope is clear, capture any needed operational sub-decisions
 6. Create an exclusive WIP marker for the entry being implemented (`sdd wip start <entry-id> --exclusive --participant <name> <description>`)
-7. **If implementing a plan decision**, read its `## Acceptance criteria` section and use it as your work checklist. Each AC is a contract item: the closing done signal must either confirm it done with specific evidence or explain the deviation with dialogue reasoning.
-8. Implementation happens in the same session — the meta-process stays active
-9. If you hit a design choice not covered by existing decisions: **stop implementation**, capture a done signal recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself.
-10. After implementation, commit the code changes first, then capture the done signal (addressing each AC if the plan had one), then remove the WIP marker (`sdd wip done <marker-id>`)
-11. Prompt for evaluation signals
+7. **Before starting implementation**, run `sdd show <entry-id> --downstream` to surface any augmenting directives that ref the entry. Treat their commitments as extensions of the original acceptance contract — every AC the original entry carries plus every commitment in a downstream augmenting directive is part of what the closing done signal must address. This is required for plan decisions and recommended for any non-trivial decision; the augmentation pattern (per `d-prc-9ti`) lets refinements accumulate without supersession, so the implicit AC chain is the real spec. See the Augment Plan Playbook below.
+8. **If implementing a plan decision**, read its `## Acceptance criteria` section alongside the downstream commitments and use the union as your work checklist. Each AC and each downstream commitment is a contract item: the closing done signal must either confirm it done with specific evidence or explain the deviation with dialogue reasoning.
+9. Implementation happens in the same session — the meta-process stays active
+10. If you hit a design choice not covered by existing decisions: **stop implementation**, capture a done signal recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself. If the choice is a narrow refinement of the existing plan rather than a missing decision, capture it as an augmenting directive instead (see the Augment Plan Playbook).
+11. After implementation, commit the code changes first, then capture the done signal addressing each original AC and each augmenting directive's commitment. Close the original entry and any augmenting directives in the same done signal via `--closes <entry-id>,<dir1-id>,...`. Then remove the WIP marker (`sdd wip done <marker-id>`).
+12. Prompt for evaluation signals
 
 ### Branching for isolated work
 
