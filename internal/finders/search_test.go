@@ -160,7 +160,7 @@ func TestSearchFinder_TextModeMultiTermAND(t *testing.T) {
 		}
 		t.Errorf("expected one hit (the directive), got %v", ids)
 	}
-	if res.Entries[0].Citation.Snippet == "" {
+	if res.Entries[0].Citation().Snippet == "" {
 		t.Error("expected a non-empty citation snippet")
 	}
 }
@@ -279,8 +279,9 @@ func TestSearchFinder_VectorMode(t *testing.T) {
 	}
 	// The first-hit citation must carry breadcrumb (from a body chunk) or
 	// IsSummary=true (from the summary chunk).
-	if !res.Entries[0].Citation.IsSummary && len(res.Entries[0].Citation.Breadcrumb) == 0 {
-		t.Errorf("expected breadcrumb or IsSummary on top citation, got %#v", res.Entries[0].Citation)
+	c := res.Entries[0].Citation()
+	if !c.IsSummary && len(c.Breadcrumb) == 0 {
+		t.Errorf("expected breadcrumb or IsSummary on top citation, got %#v", c)
 	}
 }
 
@@ -350,12 +351,12 @@ func TestRRFFuse_PicksHigherCitation(t *testing.T) {
 	textRes := &query.SearchResult{
 		Entries: []query.SearchEntry{
 			{Entry: entry("20260101-100001-s-tac-yyy")},
-			{Entry: e, Citation: query.Citation{Snippet: "from-text"}},
+			{Entry: e, Citations: []query.Citation{{Snippet: "from-text"}}},
 		},
 	}
 	vecRes := &query.SearchResult{
 		Entries: []query.SearchEntry{
-			{Entry: e, Citation: query.Citation{Snippet: "from-vector"}},
+			{Entry: e, Citations: []query.Citation{{Snippet: "from-vector"}}},
 		},
 	}
 
@@ -369,8 +370,8 @@ func TestRRFFuse_PicksHigherCitation(t *testing.T) {
 	if found == nil {
 		t.Fatal("expected entry in fused output")
 	}
-	if found.Citation.Snippet != "from-vector" {
-		t.Errorf("expected vector citation (it ranked higher), got %q", found.Citation.Snippet)
+	if found.Citation().Snippet != "from-vector" {
+		t.Errorf("expected vector citation (it ranked higher), got %q", found.Citation().Snippet)
 	}
 }
 

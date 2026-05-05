@@ -199,8 +199,9 @@ func TestE2E_BuildAndVectorSearch(t *testing.T) {
 	}
 	// Citation should carry breadcrumb (from a body-section chunk) or
 	// IsSummary=true (from the summary chunk).
-	if !res.Entries[0].Citation.IsSummary && len(res.Entries[0].Citation.Breadcrumb) == 0 {
-		t.Errorf("expected citation with breadcrumb or IsSummary, got %#v", res.Entries[0].Citation)
+	c := res.Entries[0].Citation()
+	if !c.IsSummary && len(c.Breadcrumb) == 0 {
+		t.Errorf("expected citation with breadcrumb or IsSummary, got %#v", c)
 	}
 }
 

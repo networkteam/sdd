@@ -246,6 +246,11 @@ func searchCmd() *cli.Command {
 				Usage: "Maximum entries returned (default 10)",
 				Value: query.DefaultSearchLimit,
 			},
+			&cli.IntFlag{
+				Name:  "max-citations",
+				Usage: "Maximum citations per entry — 1 for one-line-per-entry, 3 to surface multiple matching chunks per entry",
+				Value: query.DefaultMaxCitationsPerEntry,
+			},
 		),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			terms := cmd.StringSlice("term")
@@ -333,12 +338,13 @@ func searchCmd() *cli.Command {
 			}
 
 			res, err := finder.Search(ctx, query.SearchQuery{
-				Graph:             g,
-				Terms:             terms,
-				Phrase:            phrase,
-				Filter:            model.GraphFilter{Type: typ, Layer: layer, Kind: kind},
-				IncludeSuperseded: cmd.Bool("include-superseded"),
-				Limit:             int(cmd.Int("limit")),
+				Graph:                g,
+				Terms:                terms,
+				Phrase:               phrase,
+				Filter:               model.GraphFilter{Type: typ, Layer: layer, Kind: kind},
+				IncludeSuperseded:    cmd.Bool("include-superseded"),
+				Limit:                int(cmd.Int("limit")),
+				MaxCitationsPerEntry: int(cmd.Int("max-citations")),
 			})
 			if err != nil {
 				return err

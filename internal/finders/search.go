@@ -166,9 +166,10 @@ func (f *SearchFinder) textSearch(q query.SearchQuery) (*query.SearchResult, err
 		out.Entries = append(out.Entries, query.SearchEntry{
 			Entry: e.s.entry,
 			Score: e.adjusted,
-			Citation: query.Citation{
+			Citations: []query.Citation{{
 				Snippet: e.s.bestSnippet,
-			},
+				Score:   e.adjusted,
+			}},
 		})
 	}
 	return out, nil
@@ -250,42 +251,32 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 		candidateSet[e.ID] = e
 	}
 
-	type entryAccumulator struct {
-		entry      *model.Entry
-		bestScore  float32
-		bestHit    index.Hit
-	}
-	acc := map[string]*entryAccumulator{}
-
+	// Collect all chunk hits per entry so the rollup can keep the
+	// strongest few rather than just the single best. An entry that
+	// matches on multiple dimensions (a long plan whose summary,
+	// approach section, and attachment all touch the query) deserves
+	// to surface that breadth in its citations.
+	perEntry := map[string][]chunkScore{}
 	for _, h := range indexHits {
-		e, ok := candidateSet[h.EntryID]
-		if !ok {
+		if _, ok := candidateSet[h.EntryID]; !ok {
 			continue
 		}
 		adjusted := adjustVectorScore(h.Score, h.IsSummary, h.Depth)
-		if cur, ok := acc[h.EntryID]; ok {
-			if adjusted > cur.bestScore {
-				cur.bestScore = adjusted
-				cur.bestHit = h
-			}
-		} else {
-			acc[h.EntryID] = &entryAccumulator{entry: e, bestScore: adjusted, bestHit: h}
-		}
+		perEntry[h.EntryID] = append(perEntry[h.EntryID], chunkScore{hit: h, score: adjusted})
 	}
 
-	out := make([]query.SearchEntry, 0, len(acc))
-	for _, a := range acc {
-		score := a.bestScore * statusMultiplier(q.Graph.DerivedStatus(a.entry).Kind)
+	out := make([]query.SearchEntry, 0, len(perEntry))
+	for entryID, hits := range perEntry {
+		sort.Slice(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
+		topChunkScore := hits[0].score
+		statusMult := statusMultiplier(q.Graph.DerivedStatus(candidateSet[entryID]).Kind)
+		entryScore := topChunkScore * statusMult
+
+		citations := selectCitations(hits, topChunkScore, statusMult, q.EffectiveMaxCitations())
 		out = append(out, query.SearchEntry{
-			Entry: a.entry,
-			Score: score,
-			Citation: query.Citation{
-				Breadcrumb:           a.bestHit.Breadcrumb,
-				Snippet:              snippetAround(a.bestHit.Body, 0, snippetWindow),
-				SourceAttachmentPath: a.bestHit.SourceAttachmentPath,
-				IsSummary:            a.bestHit.IsSummary,
-				IsAttachment:         a.bestHit.IsAttachment,
-			},
+			Entry:     candidateSet[entryID],
+			Score:     entryScore,
+			Citations: citations,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Score > out[j].Score })
@@ -475,6 +466,64 @@ func collapseWS(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
+// selectCitations picks the chunks whose score is strong enough to be
+// worth surfacing alongside the entry's primary citation. The 85%
+// threshold (relative to the top chunk's score) keeps near-duplicates
+// and weak runs out of the citation slice while letting genuinely-
+// strong secondary chunks through. The cap (max) flows from the
+// SearchQuery via EffectiveMaxCitations() so callers can dial verbosity
+// per-call.
+//
+// Each citation carries its own status-adjusted score so the presenter
+// can render per-citation relative percentages — different chunks from
+// the same entry typically score differently, and hiding that under one
+// entry-level number loses real information about WHERE inside the
+// entry the strongest match landed.
+//
+// hits must be pre-sorted by score descending — the caller does that.
+func selectCitations(hits []chunkScore, topScore, statusMult float32, max int) []query.Citation {
+	if len(hits) == 0 || max <= 0 {
+		return nil
+	}
+	threshold := topScore * citationScoreThreshold
+	out := make([]query.Citation, 0, max)
+	for _, h := range hits {
+		if len(out) >= max {
+			break
+		}
+		if h.score < threshold && len(out) > 0 {
+			break
+		}
+		out = append(out, query.Citation{
+			Breadcrumb:           h.hit.Breadcrumb,
+			Snippet:              snippetAround(h.hit.Body, 0, snippetWindow),
+			SourceAttachmentPath: h.hit.SourceAttachmentPath,
+			IsSummary:            h.hit.IsSummary,
+			IsAttachment:         h.hit.IsAttachment,
+			Score:                h.score * statusMult,
+		})
+	}
+	return out
+}
+
+// citationScoreThreshold is the per-entry cutoff relative to the entry's
+// top chunk score: chunks scoring below this fraction are skipped (the
+// primary citation is always kept regardless). This is a heuristic, not
+// a user knob — exposing it as configuration would invite over-tuning
+// without empirical signal that one value beats another. The value is
+// tuned against the first real-corpus eval and revisited when the eval
+// set grows.
+const citationScoreThreshold = 0.85
+
+// chunkScore is a tiny adapter type used by selectCitations to keep the
+// adjusted-score and the index Hit together while sorting and
+// thresholding. Lifted to package scope so the helper signature stays
+// clean.
+type chunkScore struct {
+	hit   index.Hit
+	score float32
+}
+
 // statusMultiplier returns the score adjustment for an entry's derived
 // status, applied in vector and text modes after the per-chunk score
 // is settled. Active and open entries (and done signals — terminal
@@ -534,9 +583,9 @@ func adjustVectorScore(raw float32, isSummary bool, depth int) float32 {
 func rrfFuse(textRes, vecRes *query.SearchResult, limit int) *query.SearchResult {
 	const k = 60
 	type fused struct {
-		entry    *model.Entry
-		score    float32
-		citation query.Citation
+		entry     *model.Entry
+		score     float32
+		citations []query.Citation
 		// rank in each ranker (zero means absent).
 		textRank int
 		vecRank  int
@@ -548,10 +597,10 @@ func rrfFuse(textRes, vecRes *query.SearchResult, limit int) *query.SearchResult
 			rank := i + 1
 			contribution := 1.0 / float32(k+rank)
 			merged[se.Entry.ID] = &fused{
-				entry:    se.Entry,
-				score:    contribution,
-				citation: se.Citation,
-				textRank: rank,
+				entry:     se.Entry,
+				score:     contribution,
+				citations: se.Citations,
+				textRank:  rank,
 			}
 		}
 	}
@@ -562,18 +611,21 @@ func rrfFuse(textRes, vecRes *query.SearchResult, limit int) *query.SearchResult
 			if cur, ok := merged[se.Entry.ID]; ok {
 				cur.score += contribution
 				cur.vecRank = rank
-				// Take vector citation only if it ranked higher than text
-				// (smaller rank). Keeps the citation aligned with the
-				// stronger signal.
+				// Take the vector citations only if vector ranked the
+				// entry higher (smaller rank). Mixing citations from
+				// text and vector would mean per-citation scores live
+				// on different scales — match-count vs cosine — which
+				// the relative-percentage rendering can't reconcile.
+				// One side wins, all its citations come along.
 				if cur.vecRank > 0 && (cur.textRank == 0 || cur.vecRank < cur.textRank) {
-					cur.citation = se.Citation
+					cur.citations = se.Citations
 				}
 			} else {
 				merged[se.Entry.ID] = &fused{
-					entry:    se.Entry,
-					score:    contribution,
-					citation: se.Citation,
-					vecRank:  rank,
+					entry:     se.Entry,
+					score:     contribution,
+					citations: se.Citations,
+					vecRank:   rank,
 				}
 			}
 		}
@@ -582,9 +634,9 @@ func rrfFuse(textRes, vecRes *query.SearchResult, limit int) *query.SearchResult
 	out := make([]query.SearchEntry, 0, len(merged))
 	for _, m := range merged {
 		out = append(out, query.SearchEntry{
-			Entry:    m.entry,
-			Score:    m.score,
-			Citation: m.citation,
+			Entry:     m.entry,
+			Score:     m.score,
+			Citations: m.citations,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
