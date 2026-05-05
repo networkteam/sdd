@@ -10,7 +10,9 @@
 - `sdd new <type> <layer> [flags] <description>` — create entries (output prints the new entry ID, file path, and the LLM-generated summary so the agent can verify fidelity)
 - `sdd summarize [<id> | --all]` — regenerate entry summaries
 - `sdd summarize <id> --text "<summary>"` — write a user-supplied summary directly, bypassing the LLM. Use `--text -` to read from stdin. Single entry only; rejected with `--all` or multiple IDs. The hash is recomputed from the current prompt so subsequent automatic regenerations skip-by-hash unless `--force` is passed.
-- `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, stale summaries)
+- `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, stale summaries). When an embedding provider is configured, also reports the search index's fingerprint and drift count.
+- `sdd index` — warm up the per-participant search index at `.sdd/index/` over every entry on disk. Skips entries whose stored hash and embedder fingerprint match the manifest; `--force` re-embeds everything regardless. Required only on a fresh clone or after deliberate full rebuilds — `sdd search` lazy-fills missing/stale entries on demand.
+- `sdd search [--term <regex>...] [--query <phrase>] [--type d|s] [--layer ...] [--kind ...] [--include-superseded] [--limit N]` — three-mode retrieval. `--term` runs text mode (live grep with multi-term AND), `--query` runs vector mode, both flags together run hybrid (RRF fusion). At least one of `--term` / `--query` is required; vector and hybrid require `Search: vector,text` in `sdd status`. See [search reference](search.md) for citation reading and mode selection guidance.
 - `sdd wip start <entry-id> --exclusive --participant <name> <description>` — create WIP marker
 - `sdd wip start <entry-id> --branch --exclusive --participant <name> <description>` — create WIP marker, create git branch and check out to it
 - `sdd wip done <marker-id>` — remove WIP marker (deletes branch if merged)

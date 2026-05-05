@@ -13,6 +13,7 @@ If you haven't read the framework reference files in this session, read them now
 - [Framework concepts](references/framework-concepts.md) — the loop, entry types, layers, immutability, refs vs supersedes
 - [Meta process](references/meta-process.md) — modes of working, capture guidelines, session protocol
 - [CLI reference](references/cli-reference.md) — command syntax, flags, attachments
+- [Search](references/search.md) — `sdd search` retrieval modes (text / vector / hybrid), citation reading, when to use which mode in explore and groom (load on demand the first time you reach for `sdd search` in a session)
 
 Then enter Check-in mode (see "Modes of working" below) to brief the user on graph state. For empty graphs, invoke `/sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `/sdd-bootstrap` as an option.
 
@@ -78,6 +79,10 @@ When a `high` finding looks legitimate: read it as a prompt. What dialogue reaso
 ### Verify the captured summary
 
 After `sdd new` succeeds, the output prints the LLM-generated summary alongside the entry path. Read it: does it stay true to the body's meaning, or has it introduced an actor not in the body, shifted commitment framing, or auto-corrected an identifier that was intentional? Summaries are what `sdd status`, `sdd list`, and catch-up render — drift here is what readers consume. If the summary has drifted, offer the user a corrected version and run `sdd summarize <full-id> --text "<better summary>"` (or pipe via stdin with `--text -`) to replace it. The fix is cheap at capture time; once others read the bad version, it lives on in their context.
+
+### Surface candidates with `sdd search`
+
+When dialogue references a concept, identifier, or area of the graph, `sdd search` produces ranked candidates fast. Use it before drafting a new entry (to check what already exists), during explore briefings (to widen the related set), and when grooming candidates that look superseded-in-practice (to find the newer entry). Search returns seeds; agent judgment via dialogue picks the right one — search never substitutes for reading the candidate's full chain via `sdd show`. See [search reference](references/search.md) for mode selection and citation reading.
 
 ### Always suggest next steps
 

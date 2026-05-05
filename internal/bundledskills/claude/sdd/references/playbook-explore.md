@@ -8,7 +8,7 @@ Present the entry in context:
 - What is this entry about? (one paragraph synthesis from the full chain)
 - What's its status? (open signal, active decision, closed, stale?)
 - What's happened since? (downstream entries, if any)
-- What's related? (entries the sub-skill flagged as connected)
+- What's related? (entries the sub-skill flagged as connected; supplement with `sdd search --query "<concept phrase>"` when the user names a concept that doesn't surface obvious connections — see [search reference](search.md))
 
 Then ask the orienting question: **"What does this need?"**
 

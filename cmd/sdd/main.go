@@ -256,6 +256,8 @@ func main() {
 			wipCmd(),
 			lintCmd(),
 			summarizeCmd(),
+			indexCmd(),
+			searchCmd(),
 		},
 		DefaultCommand: "status",
 	}
@@ -775,6 +777,7 @@ func lintCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			populateIndexLint(cmd, result)
 			presenters.RenderLint(os.Stdout, result, g)
 			if result.TotalIssues > 0 {
 				return fmt.Errorf("lint found %d issue(s)", result.TotalIssues)

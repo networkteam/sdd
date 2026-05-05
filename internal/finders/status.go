@@ -25,6 +25,7 @@ func (f *Finder) Status(q query.StatusQuery) (*query.StatusResult, error) {
 		Graph:            q.Graph,
 		LocalParticipant: f.localParticipant(),
 		Language:         f.language(),
+		Search:           f.searchCapability(),
 		Aspirations:      q.Graph.Aspirations(),
 		Contracts:        q.Graph.Contracts(),
 		Plans:            q.Graph.Plans(),
@@ -35,6 +36,17 @@ func (f *Finder) Status(q query.StatusQuery) (*query.StatusResult, error) {
 		Recent:           q.Graph.RecentDone(nDone),
 		Participants:     activeParticipantGroups(q.Graph),
 	}, nil
+}
+
+// searchCapability reports whether vector search is configured. Returns
+// "vector,text" when an embedding provider is set, "text" otherwise.
+// Pure config inspection — actual index health (drift, missing rows) is
+// reported by `sdd lint`.
+func (f *Finder) searchCapability() string {
+	if f.cfg != nil && f.cfg.Embedding.Provider != "" {
+		return "vector,text"
+	}
+	return "text"
 }
 
 // activeParticipantGroups materializes the Participants block for the

@@ -10,6 +10,7 @@ require (
 	github.com/networkteam/slogutils v0.4.0
 	github.com/teilomillet/gollm v0.1.11
 	github.com/urfave/cli/v3 v3.8.0
+	gitlab.com/golang-commonmark/markdown v0.0.0-20211110145824-bf3e522c626a
 	golang.org/x/mod v0.35.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/time v0.15.0
@@ -49,6 +50,7 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
+	github.com/philippgille/chromem-go v0.7.0 // indirect
 	github.com/pkoukk/tiktoken-go v0.1.8 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -56,6 +58,10 @@ require (
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	gitlab.com/golang-commonmark/html v0.0.0-20191124015941-a22733972181 // indirect
+	gitlab.com/golang-commonmark/linkify v0.0.0-20191026162114-a0c2df6c8f82 // indirect
+	gitlab.com/golang-commonmark/mdurl v0.0.0-20191124015652-932350d1cb84 // indirect
+	gitlab.com/golang-commonmark/puny v0.0.0-20191124015043-9f83538fa04f // indirect
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect

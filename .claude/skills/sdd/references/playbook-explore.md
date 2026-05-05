@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: ffb5749c8bde6266f195aaa42aa18320c5d65344bc44020a52acf0e45eb2845f
+sdd-content-hash: 2ceb9eef0b56314452fd1bc5cd1c2c9387195da4c2e198f209770e6d802dac55
 sdd-version: dev
 ---
 # Explore Playbook
@@ -12,7 +12,7 @@ Present the entry in context:
 - What is this entry about? (one paragraph synthesis from the full chain)
 - What's its status? (open signal, active decision, closed, stale?)
 - What's happened since? (downstream entries, if any)
-- What's related? (entries the sub-skill flagged as connected)
+- What's related? (entries the sub-skill flagged as connected; supplement with `sdd search --query "<concept phrase>"` when the user names a concept that doesn't surface obvious connections — see [search reference](search.md))
 
 Then ask the orienting question: **"What does this need?"**
 

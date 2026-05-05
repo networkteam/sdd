@@ -14,7 +14,7 @@ For each candidate, based on its pattern:
 
 **Pattern A (missing `closes`)** — The work is done, just the link is missing. Show the evidence (the downstream entry that resolved it) and propose a closure: "Entry X already resolved this. I'd capture a done signal with `--closes [id]` to record it. Sound right?" Then execute.
 
-**Pattern B (superseded in practice)** — A newer entry covers the same ground but without an explicit `supersedes` link. Show both entries side by side and ask: "This newer entry seems to cover the same concern. Is the older one superseded?" If yes, capture a new decision or signal with `--supersedes [old-id]` to formalize the relationship. If the entries are complementary rather than redundant, note that and move on.
+**Pattern B (superseded in practice)** — A newer entry covers the same ground but without an explicit `supersedes` link. When the candidate looks like it might be superseded but the sub-skill didn't surface a clear successor, run `sdd search --query "<phrase from candidate's summary>"` to hunt for newer same-ground entries. Show both entries side by side and ask: "This newer entry seems to cover the same concern. Is the older one superseded?" If yes, capture a new decision or signal with `--supersedes [old-id]` to formalize the relationship. If the entries are complementary rather than redundant, note that and move on.
 
 **Pattern C (stale, no activity)** — No evidence of resolution. Brief the user on the entry and the current context: "This has been open since [date] with no activity. Given [current state / related decisions since then], is this still relevant?" Three outcomes:
 - **Still relevant**: Leave it open. Optionally capture a fresh signal that updates the context or re-frames the concern.
