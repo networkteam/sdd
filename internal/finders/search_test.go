@@ -36,6 +36,7 @@ func (f *fakeEmbedder) embed(texts []string) ([][]float32, error) {
 	return out, nil
 }
 func (f *fakeEmbedder) Dimensions() int     { return 4 }
+func (f *fakeEmbedder) BatchSize() int      { return 64 }
 func (f *fakeEmbedder) Fingerprint() string { return "fake/1/4" }
 
 // vectorFor maps text to a 4-dim vector. Inputs containing one of a few

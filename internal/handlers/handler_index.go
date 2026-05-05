@@ -93,7 +93,7 @@ func (h *IndexHandler) Build(ctx context.Context, cmd *command.BuildIndexCmd) er
 	if cmd == nil {
 		return errors.New("BuildIndexCmd is required")
 	}
-	return h.indexEntries(ctx, false, cmd.Force, cmd.OnEntryIndexed, cmd.OnEntrySkipped, cmd.OnComplete)
+	return h.indexEntries(ctx, cmd.Force, cmd.OnEntryIndexed, cmd.OnEntrySkipped, cmd.OnComplete)
 }
 
 // LazyFill is the sdd-search prelude — only entries missing from the
@@ -108,13 +108,24 @@ func (h *IndexHandler) LazyFill(ctx context.Context, cmd *command.LazyFillIndexC
 			cmd.OnComplete(indexed)
 		}
 	}
-	return h.indexEntries(ctx, true, false, cmd.OnEntryIndexed, nil, onComplete)
+	return h.indexEntries(ctx, false, cmd.OnEntryIndexed, nil, onComplete)
 }
 
-// indexEntries is the shared core for Build and LazyFill. lazyOnly limits
-// the work set to entries that fail entryUpToDate; force bypasses the
-// up-to-date check entirely.
-func (h *IndexHandler) indexEntries(ctx context.Context, lazyOnly, force bool,
+// indexEntries is the shared core for Build and LazyFill. The
+// up-to-date check (manifest hash + fingerprint match) skips converged
+// entries; force bypasses that check.
+//
+// Work is packed into buckets sized to the embedder's BatchSize so each
+// EmbedDocuments call corresponds to a single transport round-trip on
+// the model — progress callbacks fire per bucket (≈ per HTTP call)
+// instead of waiting for one giant cross-entry batch to return. Each
+// bucket holds entries whose total chunk count fits within BatchSize;
+// an entry whose own chunks exceed BatchSize gets its own oversized
+// bucket (the embedder splits internally).
+//
+// The manifest is saved after every bucket so a crash mid-build leaves
+// a resumable state.
+func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 	onIndexed func(string, int), onSkipped func(string), onComplete func(int, int)) error {
 
 	logger := slogutils.FromContext(ctx)
@@ -130,18 +141,14 @@ func (h *IndexHandler) indexEntries(ctx context.Context, lazyOnly, force bool,
 	}
 
 	fingerprint := h.embedder.Fingerprint()
-
-	type ownedChunk struct {
-		entryID string
-		chunkID string
-		chunk   textsplitter.Chunk
+	batchSize := h.embedder.BatchSize()
+	if batchSize <= 0 {
+		batchSize = 1 // defensive — no embedder should report 0, but a bucket of 1 still terminates
 	}
 
 	var (
-		allChunks    []ownedChunk
-		entriesToDo  []*model.Entry
-		entryHashes  = map[string]string{}
-		skipped      int
+		work    []entryWithChunks
+		skipped int
 	)
 
 	for _, e := range g.Entries {
@@ -150,8 +157,6 @@ func (h *IndexHandler) indexEntries(ctx context.Context, lazyOnly, force bool,
 			logger.Warn("hash failure, skipping entry", "entry", e.ID, "err", err)
 			continue
 		}
-		entryHashes[e.ID] = hash
-
 		if !force {
 			if state, ok := manifest.Entries[e.ID]; ok && state.Hash == hash && state.Fingerprint == fingerprint {
 				if onSkipped != nil {
@@ -160,45 +165,113 @@ func (h *IndexHandler) indexEntries(ctx context.Context, lazyOnly, force bool,
 				skipped++
 				continue
 			}
-			if lazyOnly {
-				// entries already up-to-date: skipped above. Anything
-				// here is missing or stale → falls through to indexing.
-			}
 		}
-
 		chunks, err := h.deriveChunks(e)
 		if err != nil {
 			return fmt.Errorf("deriving chunks for %s: %w", e.ID, err)
 		}
-		entriesToDo = append(entriesToDo, e)
-		for _, c := range chunks {
-			allChunks = append(allChunks, ownedChunk{entryID: e.ID, chunkID: c.ChunkID, chunk: c.Chunk})
-		}
+		work = append(work, entryWithChunks{entry: e, hash: hash, chunks: chunks})
 	}
 
-	if len(allChunks) == 0 {
+	if len(work) == 0 {
 		if onComplete != nil {
 			onComplete(0, skipped)
 		}
 		return nil
 	}
 
-	// Cross-entry batched embedding. The embedder splits the slice into
-	// provider-appropriate sub-batches internally — see
-	// internal/llm/embed for the per-provider batch-size knob.
+	indexed := 0
+	bucketStart := 0
+	bucketChunks := 0
+	for i, w := range work {
+		// Flush the current bucket when adding this entry's chunks would
+		// exceed batchSize. Empty bucket case (single entry larger than
+		// batchSize) takes the entry on its own — the embedder will
+		// split internally on its way to the wire.
+		if bucketChunks > 0 && bucketChunks+len(w.chunks) > batchSize {
+			if err := h.indexBucket(ctx, work[bucketStart:i], manifest, fingerprint, onIndexed); err != nil {
+				return err
+			}
+			if err := manifest.Save(h.indexDir); err != nil {
+				return fmt.Errorf("save manifest after bucket [%d:%d]: %w", bucketStart, i, err)
+			}
+			indexed += i - bucketStart
+			bucketStart = i
+			bucketChunks = 0
+		}
+		bucketChunks += len(w.chunks)
+	}
+	// Flush the trailing bucket.
+	if bucketStart < len(work) {
+		if err := h.indexBucket(ctx, work[bucketStart:], manifest, fingerprint, onIndexed); err != nil {
+			return err
+		}
+		if err := manifest.Save(h.indexDir); err != nil {
+			return fmt.Errorf("save manifest after final bucket: %w", err)
+		}
+		indexed += len(work) - bucketStart
+	}
+
+	if onComplete != nil {
+		onComplete(indexed, skipped)
+	}
+	return nil
+}
+
+// indexBucket embeds and upserts a single bucket of entries. All chunks
+// across the bucket are embedded in one EmbedDocuments call — that's
+// one transport round-trip on the model when the bucket is sized to
+// the embedder's BatchSize. After the call returns, every entry in
+// the bucket has all its embeddings ready and is upserted as a unit;
+// the manifest entry follows.
+func (h *IndexHandler) indexBucket(ctx context.Context, bucket []entryWithChunks,
+	manifest *index.Manifest, fingerprint string,
+	onIndexed func(string, int)) error {
+
+	// Flatten chunks across the bucket while remembering which entry each
+	// embedding belongs to.
+	type ownedChunk struct {
+		entryID string
+		chunkID string
+		chunk   textsplitter.Chunk
+	}
+	var allChunks []ownedChunk
+	for _, w := range bucket {
+		for _, c := range w.chunks {
+			allChunks = append(allChunks, ownedChunk{entryID: w.entry.ID, chunkID: c.ChunkID, chunk: c.Chunk})
+		}
+	}
+
+	if len(allChunks) == 0 {
+		// Every entry in this bucket has no chunks (empty summary, no
+		// body). Record them in the manifest anyway so the up-to-date
+		// check skips them next pass.
+		for _, w := range bucket {
+			manifest.Entries[w.entry.ID] = index.EntryState{
+				Hash:        w.hash,
+				Fingerprint: fingerprint,
+				ChunkIDs:    nil,
+				IndexedAt:   h.now(),
+			}
+			if onIndexed != nil {
+				onIndexed(w.entry.ID, 0)
+			}
+		}
+		return nil
+	}
+
 	texts := make([]string, len(allChunks))
 	for i, c := range allChunks {
 		texts[i] = c.chunk.Text
 	}
 	embeddings, err := h.embedder.EmbedDocuments(ctx, texts)
 	if err != nil {
-		return fmt.Errorf("embed: %w", err)
+		return fmt.Errorf("embed bucket: %w", err)
 	}
 	if len(embeddings) != len(texts) {
 		return fmt.Errorf("embedder returned %d embeddings for %d inputs", len(embeddings), len(texts))
 	}
 
-	// Bucket rows back to their owning entry, in chunk-emit order.
 	rowsByEntry := map[string][]index.Row{}
 	for i, c := range allChunks {
 		rowsByEntry[c.entryID] = append(rowsByEntry[c.entryID], index.Row{
@@ -217,37 +290,36 @@ func (h *IndexHandler) indexEntries(ctx context.Context, lazyOnly, force bool,
 		})
 	}
 
-	indexed := 0
-	for _, e := range entriesToDo {
-		rows := rowsByEntry[e.ID]
-		oldChunkIDs := manifest.Entries[e.ID].ChunkIDs
-		if err := h.indexStore.UpsertEntry(ctx, e.ID, oldChunkIDs, rows); err != nil {
-			return fmt.Errorf("upsert %s: %w", e.ID, err)
+	for _, w := range bucket {
+		rows := rowsByEntry[w.entry.ID]
+		oldChunkIDs := manifest.Entries[w.entry.ID].ChunkIDs
+		if err := h.indexStore.UpsertEntry(ctx, w.entry.ID, oldChunkIDs, rows); err != nil {
+			return fmt.Errorf("upsert %s: %w", w.entry.ID, err)
 		}
 		newChunkIDs := make([]string, 0, len(rows))
 		for _, r := range rows {
 			newChunkIDs = append(newChunkIDs, r.ChunkID)
 		}
-		manifest.Entries[e.ID] = index.EntryState{
-			Hash:        entryHashes[e.ID],
+		manifest.Entries[w.entry.ID] = index.EntryState{
+			Hash:        w.hash,
 			Fingerprint: fingerprint,
 			ChunkIDs:    newChunkIDs,
 			IndexedAt:   h.now(),
 		}
-		indexed++
 		if onIndexed != nil {
-			onIndexed(e.ID, len(rows))
+			onIndexed(w.entry.ID, len(rows))
 		}
 	}
-
-	if err := manifest.Save(h.indexDir); err != nil {
-		return fmt.Errorf("save manifest: %w", err)
-	}
-
-	if onComplete != nil {
-		onComplete(indexed, skipped)
-	}
 	return nil
+}
+
+// entryWithChunks pairs an entry with its derived chunks and the hash
+// recorded in the manifest. Lifted to a top-level type so indexBucket
+// can take a slice without re-declaring the shape.
+type entryWithChunks struct {
+	entry  *model.Entry
+	hash   string
+	chunks []entryChunk
 }
 
 // entryChunk pairs a derived chunk with its deterministic chunk ID. Used

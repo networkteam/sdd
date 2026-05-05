@@ -47,6 +47,7 @@ func (f *fakeEmbedder) embed(texts []string) ([][]float32, error) {
 	return out, nil
 }
 func (f *fakeEmbedder) Dimensions() int { return 4 }
+func (f *fakeEmbedder) BatchSize() int  { return 64 }
 func (f *fakeEmbedder) Fingerprint() string {
 	if f.fingerprint == "" {
 		return "fake/v1/4"

@@ -45,6 +45,7 @@ func (e *e2eEmbedder) embed(texts []string) ([][]float32, error) {
 	return out, nil
 }
 func (e *e2eEmbedder) Dimensions() int     { return 4 }
+func (e *e2eEmbedder) BatchSize() int      { return 64 }
 func (e *e2eEmbedder) Fingerprint() string { return "e2e/v1/4" }
 
 func e2eVector(t string) []float32 {
@@ -327,4 +328,5 @@ func (c *countingEmbedder) EmbedQueries(ctx context.Context, texts []string) ([]
 	return c.inner.EmbedQueries(ctx, texts)
 }
 func (c *countingEmbedder) Dimensions() int     { return c.inner.Dimensions() }
+func (c *countingEmbedder) BatchSize() int      { return c.inner.BatchSize() }
 func (c *countingEmbedder) Fingerprint() string { return c.inner.Fingerprint() }

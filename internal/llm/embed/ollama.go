@@ -128,12 +128,22 @@ func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 	return decoded.Embeddings, nil
 }
 
+func (e *ollamaEmbedder) BatchSize() int { return e.batchSize }
+
 func (e *ollamaEmbedder) Dimensions() int { return e.dims }
 
+// Fingerprint deliberately excludes dims even though they're observable
+// after the first call. Ollama models don't expose a matryoshka-style
+// truncation knob — the model name uniquely determines the vector
+// dimension — so dims are redundant in the fingerprint AND including
+// them creates a stability bug: dims is 0 at construction and only
+// becomes populated after the first response. Capturing the fingerprint
+// before vs after the first call would otherwise yield different values
+// and mark every previously-indexed row as drift on the next session.
+//
+// If you ever switch to a model with a different dim, the model-name
+// component of the fingerprint changes and triggers re-embed — which
+// is the correct behavior.
 func (e *ollamaEmbedder) Fingerprint() string {
-	base := "ollama/" + e.model
-	if e.dims > 0 {
-		base = fmt.Sprintf("%s/%d", base, e.dims)
-	}
-	return appendDocTemplateHash(base, e.documentTemplate)
+	return appendDocTemplateHash("ollama/"+e.model, e.documentTemplate)
 }

@@ -146,6 +146,8 @@ func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 	return out, nil
 }
 
+func (e *openaiEmbedder) BatchSize() int { return e.batchSize }
+
 func (e *openaiEmbedder) Dimensions() int {
 	if e.dimensions > 0 {
 		return e.dimensions

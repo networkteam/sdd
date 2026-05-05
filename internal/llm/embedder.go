@@ -36,4 +36,11 @@ type Embedder interface {
 	EmbedQueries(ctx context.Context, texts []string) ([][]float32, error)
 	Dimensions() int
 	Fingerprint() string
+	// BatchSize is the per-call input cap the embedder targets. Drivers
+	// the indexer's outer bucketing so each Embed call corresponds to
+	// exactly one HTTP round-trip — progress callbacks fire per batch
+	// instead of "all-at-once at the end" of a giant cross-entry call.
+	// Larger inputs still embed correctly; the embedder splits
+	// internally and the indexer just sees a slower individual call.
+	BatchSize() int
 }

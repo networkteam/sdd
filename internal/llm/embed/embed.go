@@ -151,3 +151,4 @@ func (r *rateLimited) EmbedQueries(ctx context.Context, texts []string) ([][]flo
 
 func (r *rateLimited) Dimensions() int     { return r.inner.Dimensions() }
 func (r *rateLimited) Fingerprint() string { return r.inner.Fingerprint() }
+func (r *rateLimited) BatchSize() int      { return r.inner.BatchSize() }

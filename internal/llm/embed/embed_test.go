@@ -176,8 +176,51 @@ func TestOllamaEmbedder_Embed(t *testing.T) {
 	if emb.Dimensions() != 2 {
 		t.Errorf("Dimensions(): got %d", emb.Dimensions())
 	}
-	if emb.Fingerprint() != "ollama/nomic-embed-text/2" {
+	if emb.Fingerprint() != "ollama/nomic-embed-text" {
 		t.Errorf("Fingerprint(): got %q", emb.Fingerprint())
+	}
+}
+
+// TestOllamaEmbedder_FingerprintStableAcrossFirstCall pins that the
+// fingerprint observed before the first embed call equals the
+// fingerprint observed after — Ollama's dims are discovered from the
+// first response, so a fingerprint that included dims would shift
+// mid-session. The IndexHandler captures the fingerprint once per
+// build, so any shift would mark every prior row as drift on the next
+// run.
+func TestOllamaEmbedder_FingerprintStableAcrossFirstCall(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body ollamaEmbedRequest
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		out := make([][]float32, len(body.Input))
+		for i := range body.Input {
+			out[i] = []float32{0.1, 0.2, 0.3, 0.4} // 4-dim
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": out})
+	}))
+	defer srv.Close()
+
+	emb, err := New(model.EmbeddingConfig{
+		Provider:       "ollama",
+		Model:          "test-model",
+		OllamaEndpoint: srv.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := emb.Fingerprint()
+	if _, err := emb.EmbedDocuments(context.Background(), []string{"warm up"}); err != nil {
+		t.Fatal(err)
+	}
+	after := emb.Fingerprint()
+	if before != after {
+		t.Errorf("fingerprint shifted across the first call:\n  before %q\n  after  %q", before, after)
+	}
+	if emb.Dimensions() != 4 {
+		t.Errorf("Dimensions(): got %d, want 4", emb.Dimensions())
 	}
 }
 
