@@ -369,6 +369,7 @@ func TestRRFFuse_PicksHigherCitation(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("expected entry in fused output")
+		return
 	}
 	if found.Citation().Snippet != "from-vector" {
 		t.Errorf("expected vector citation (it ranked higher), got %q", found.Citation().Snippet)

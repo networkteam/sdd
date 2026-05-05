@@ -71,7 +71,7 @@ func (noopRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) {
 	return nil, fmt.Errorf("no llm runner configured")
 }
 
-func writeEntry(t *testing.T, graphDir, id, body string, summary string) string {
+func writeEntry(t *testing.T, graphDir, id, body, summary string) {
 	t.Helper()
 	yyyy := id[:4]
 	mm := id[4:6]
@@ -90,7 +90,7 @@ func writeEntry(t *testing.T, graphDir, id, body string, summary string) string 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return path
+	return
 }
 
 func TestIndexHandler_Build(t *testing.T) {

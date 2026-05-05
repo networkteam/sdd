@@ -49,7 +49,7 @@ func New(cfg model.EmbeddingConfig) (llm.Embedder, error) {
 	case "openai":
 		inner, err = newOpenAI(cfg, timeout, resolveBatchSize(cfg.BatchSize, defaultOpenAIBatchSize))
 	case "ollama":
-		inner, err = newOllama(cfg, timeout, resolveBatchSize(cfg.BatchSize, defaultOllamaBatchSize))
+		inner = newOllama(cfg, timeout, resolveBatchSize(cfg.BatchSize, defaultOllamaBatchSize))
 	default:
 		return nil, fmt.Errorf("unknown embedding provider %q (supported: openai, ollama)", cfg.Provider)
 	}

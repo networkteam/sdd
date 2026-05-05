@@ -136,6 +136,7 @@ Body for hash validation.
 	entry := graph.ByID[id]
 	if entry == nil {
 		t.Fatal("entry not found after summarize")
+		return
 	}
 	req, err := llm.RenderSummaryPrompt(entry, graph)
 	if err != nil {

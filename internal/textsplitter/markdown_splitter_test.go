@@ -39,6 +39,7 @@ func assertChunks(t *testing.T, got []rawChunk, want []expectedChunk) {
 		if got[i].Body != want[i].Body {
 			t.Errorf("chunk %d body:\n  got  %q\n  want %q", i, got[i].Body, want[i].Body)
 		}
+		//nolint:staticcheck // Linter says we could apply De Morgan's law, but why?
 		if !reflect.DeepEqual(got[i].Breadcrumb, want[i].Breadcrumb) && !(len(got[i].Breadcrumb) == 0 && len(want[i].Breadcrumb) == 0) {
 			t.Errorf("chunk %d breadcrumb: got %#v, want %#v", i, got[i].Breadcrumb, want[i].Breadcrumb)
 		}

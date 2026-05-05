@@ -6,8 +6,8 @@
 //
 // Storage layout (under .sdd/index/):
 //
-//   chromem/        # chromem-go gob persistence
-//   manifest.json   # entry tracking sidecar (see manifest.go)
+//	chromem/        # chromem-go gob persistence
+//	manifest.json   # entry tracking sidecar (see manifest.go)
 package index
 
 import (

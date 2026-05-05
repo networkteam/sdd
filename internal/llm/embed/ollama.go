@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -29,7 +30,7 @@ type ollamaEmbedder struct {
 	httpClient       *http.Client
 }
 
-func newOllama(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) (llm.Embedder, error) {
+func newOllama(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) llm.Embedder {
 	endpoint := cfg.OllamaEndpoint
 	if endpoint == "" {
 		endpoint = defaultOllamaEndpoint
@@ -42,7 +43,7 @@ func newOllama(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) 
 		queryTemplate:    cfg.QueryTemplate,
 		documentTemplate: cfg.DocumentTemplate,
 		httpClient:       &http.Client{Timeout: timeout},
-	}, nil
+	}
 }
 
 type ollamaEmbedRequest struct {
@@ -92,7 +93,7 @@ func (e *ollamaEmbedder) embed(ctx context.Context, texts []string) ([][]float32
 	return out, nil
 }
 
-func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) (vec [][]float32, err error) {
 	body := ollamaEmbedRequest{Model: e.model, Input: texts}
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -108,7 +109,9 @@ func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 	if err != nil {
 		return nil, fmt.Errorf("ollama embed request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err = errors.Join(err, resp.Body.Close())
+	}()
 
 	var decoded ollamaEmbedResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {

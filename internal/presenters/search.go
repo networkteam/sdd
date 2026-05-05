@@ -15,15 +15,15 @@ import (
 //
 // Render format (single-citation case):
 //
-//   <id> <layer> <kind>? <type> [confidence: ?]? (<participants>) {status: ?}? <summary>
-//     ↳ 100%  ·  Breadcrumb > Chain  ·  <snippet>
+//	<id> <layer> <kind>? <type> [confidence: ?]? (<participants>) {status: ?}? <summary>
+//	  ↳ 100%  ·  Breadcrumb > Chain  ·  <snippet>
 //
 // Render format (multi-citation case):
 //
-//   <id> ...
-//     ↳ 100%  ·  Summary  ·  <snippet>
-//     ↳  91%  ·  Approach > Storage  ·  <snippet>
-//     ↳  87%  ·  ... [attachment: ...]  ·  <snippet>
+//	<id> ...
+//	  ↳ 100%  ·  Summary  ·  <snippet>
+//	  ↳  91%  ·  Approach > Storage  ·  <snippet>
+//	  ↳  87%  ·  ... [attachment: ...]  ·  <snippet>
 //
 // The percentage is each citation's score normalized against the
 // strongest score in the result set — the top citation everywhere

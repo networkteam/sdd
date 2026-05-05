@@ -26,10 +26,8 @@ import (
 // IsSet check so unset flags don't clobber config defaults.
 func resolveEmbeddingConfig(cmd *cli.Command) model.EmbeddingConfig {
 	var cfg model.EmbeddingConfig
-	if sddDir, err := resolveSDDDir(); err == nil {
-		if fileCfg, err := readMetaConfig(sddDir); err == nil && fileCfg != nil {
-			cfg = fileCfg.Embedding
-		}
+	if fileCfg, err := loadConfig(); err == nil && fileCfg != nil {
+		cfg = fileCfg.Embedding
 	}
 	if cmd.IsSet("embedding-provider") {
 		cfg.Provider = cmd.String("embedding-provider")
@@ -53,13 +51,6 @@ func resolveEmbeddingConfig(cmd *cli.Command) model.EmbeddingConfig {
 		cfg.RateLimitRPS = cmd.Float("embedding-rate-limit-rps")
 	}
 	return cfg
-}
-
-// readMetaConfig is a thin wrapper for the local resolver — kept here so
-// the search-side config loader stays self-contained and doesn't recurse
-// through the shared loadConfig path that bundles other concerns.
-func readMetaConfig(sddDir string) (*model.Config, error) {
-	return loadConfig() // delegates to the shared loader; we just rename
 }
 
 // embeddingFlags returns the CLI flag set used by both `sdd index` and

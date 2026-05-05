@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -123,7 +124,9 @@ func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 	if err != nil {
 		return nil, fmt.Errorf("openai embed request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		err = errors.Join(err, resp.Body.Close())
+	}()
 
 	var decoded openaiEmbedResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
