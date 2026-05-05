@@ -29,15 +29,20 @@ type StatusResult struct {
 	Graph            *model.Graph // for top-line counts (entries, decisions, signals)
 	LocalParticipant string       // canonical from config; empty means "not configured"
 	Language         string       // configured graph language (locale code); empty means English default
-	Aspirations      []*model.Entry
-	Contracts        []*model.Entry
-	Plans            []*model.Entry
-	Activities       []*model.Entry
-	Directives       []*model.Entry
-	Open             []*model.Entry // kind: gap and kind: question signals (the actionable set)
-	Insights         []*model.Entry // recent kind: insight signals
-	Recent           []*model.Entry // recent kind: done signals
-	Participants     []ParticipantGroup
+	// Search renders as `Search: text` when only text mode is available,
+	// `Search: vector,text` when an embedding provider is configured. The
+	// finder fills this from the SDD config alone — actual index health
+	// is reported by `sdd lint`, not the header.
+	Search       string
+	Aspirations  []*model.Entry
+	Contracts    []*model.Entry
+	Plans        []*model.Entry
+	Activities   []*model.Entry
+	Directives   []*model.Entry
+	Open         []*model.Entry // kind: gap and kind: question signals (the actionable set)
+	Insights     []*model.Entry // recent kind: insight signals
+	Recent       []*model.Entry // recent kind: done signals
+	Participants []ParticipantGroup
 }
 
 // ParticipantGroup couples an active actor head with its derived-active

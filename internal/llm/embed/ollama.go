@@ -1,0 +1,122 @@
+package embed
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/model"
+)
+
+const defaultOllamaEndpoint = "http://localhost:11434"
+
+// ollamaEmbedder implements llm.Embedder against Ollama's batch-capable
+// `POST {endpoint}/api/embed` API (newer endpoint with list-input support
+// — the older `/api/embeddings` only accepts a single prompt). Local-only;
+// the rate limiter is not applied (caller's disk and network handle
+// backpressure).
+type ollamaEmbedder struct {
+	endpoint   string
+	model      string
+	dims       int // discovered from first response, cached for Dimensions()
+	batchSize  int
+	httpClient *http.Client
+}
+
+func newOllama(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) (llm.Embedder, error) {
+	endpoint := cfg.OllamaEndpoint
+	if endpoint == "" {
+		endpoint = defaultOllamaEndpoint
+	}
+	return &ollamaEmbedder{
+		endpoint:   endpoint,
+		model:      cfg.Model,
+		dims:       cfg.Dimensions,
+		batchSize:  batchSize,
+		httpClient: &http.Client{Timeout: timeout},
+	}, nil
+}
+
+type ollamaEmbedRequest struct {
+	Model string   `json:"model"`
+	Input []string `json:"input"`
+}
+
+type ollamaEmbedResponse struct {
+	Embeddings [][]float32 `json:"embeddings"`
+	Error      string      `json:"error,omitempty"`
+}
+
+// Embed splits a large input slice into capped sub-batches, sends each as
+// a single /api/embed request, and concatenates the results in input
+// order. Empty input returns nil with no transport call.
+func (e *ollamaEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	out := make([][]float32, 0, len(texts))
+	for start := 0; start < len(texts); start += e.batchSize {
+		end := start + e.batchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		batch, err := e.embedBatch(ctx, texts[start:end])
+		if err != nil {
+			return nil, fmt.Errorf("ollama batch [%d:%d]: %w", start, end, err)
+		}
+		out = append(out, batch...)
+		if e.dims == 0 && len(batch) > 0 {
+			e.dims = len(batch[0])
+		}
+	}
+	return out, nil
+}
+
+func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	body := ollamaEmbedRequest{Model: e.model, Input: texts}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ollama request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint+"/api/embed", bytes.NewReader(buf))
+	if err != nil {
+		return nil, fmt.Errorf("build ollama request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ollama embed request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var decoded ollamaEmbedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, fmt.Errorf("decode ollama response (status %d): %w", resp.StatusCode, err)
+	}
+	if resp.StatusCode != http.StatusOK || decoded.Error != "" {
+		msg := decoded.Error
+		if msg == "" {
+			msg = fmt.Sprintf("status %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("ollama embed error: %s", msg)
+	}
+	if len(decoded.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("ollama returned %d embeddings for %d inputs (model %q)",
+			len(decoded.Embeddings), len(texts), e.model)
+	}
+	return decoded.Embeddings, nil
+}
+
+func (e *ollamaEmbedder) Dimensions() int { return e.dims }
+
+func (e *ollamaEmbedder) Fingerprint() string {
+	if e.dims > 0 {
+		return fmt.Sprintf("ollama/%s/%d", e.model, e.dims)
+	}
+	return fmt.Sprintf("ollama/%s", e.model)
+}

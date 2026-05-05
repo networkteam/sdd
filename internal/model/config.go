@@ -39,9 +39,10 @@ const (
 // Empty / zero-valued fields in the local file mean "inherit from shared",
 // so any subset of fields can appear in either file.
 type Config struct {
-	GraphDir string     `yaml:"graph_dir,omitempty"`
-	LLM      LLMConfig  `yaml:"llm,omitempty"`
-	Sync     SyncConfig `yaml:"sync,omitempty"`
+	GraphDir  string          `yaml:"graph_dir,omitempty"`
+	LLM       LLMConfig       `yaml:"llm,omitempty"`
+	Embedding EmbeddingConfig `yaml:"embedding,omitempty"`
+	Sync      SyncConfig      `yaml:"sync,omitempty"`
 	// Participant is the canonical name used for entry authorship when
 	// --participants / --participant is omitted at capture time. Lives in
 	// .sdd/config.local.yaml (gitignored) because the same person may use
@@ -62,6 +63,48 @@ type SyncConfig struct {
 	// Cooldown is the minimum interval between background git fetches. Go
 	// duration string (e.g. "15m", "1h"). Empty means DefaultSyncCooldown.
 	Cooldown string `yaml:"cooldown,omitempty"`
+}
+
+// EmbeddingConfig holds settings for the search index's embedding provider.
+// Decoupled from LLMConfig (chat / summary) so a participant can run a
+// local Ollama embedder while still using a remote chat provider, and
+// vice versa. Lives in `.sdd/config.local.yaml` because indexes are
+// per-participant (see d-tac-lqr's storage decision).
+type EmbeddingConfig struct {
+	// Provider names the embedder transport: "openai" (OpenAI-compatible
+	// /v1/embeddings) or "ollama" (/api/embeddings). Empty disables vector
+	// search — the CLI falls back to text-mode-only.
+	Provider string `yaml:"provider,omitempty"`
+	// Model is the provider-specific embedding model identifier
+	// (e.g. "text-embedding-3-small", "nomic-embed-text").
+	Model string `yaml:"model,omitempty"`
+	// Endpoint overrides the OpenAI-compatible base URL. Empty defaults to
+	// the OpenAI public endpoint. Useful for self-hosted proxies that
+	// implement the same wire protocol.
+	Endpoint string `yaml:"endpoint,omitempty"`
+	// OllamaEndpoint overrides the default Ollama URL for the embedding
+	// adapter. Independent of LLMConfig.OllamaEndpoint so embedding and
+	// chat can target different instances.
+	OllamaEndpoint string `yaml:"ollama_endpoint,omitempty"`
+	// APIKeys maps provider name to API key. Defaults to LLMConfig.APIKeys
+	// if empty so a single key value can serve both axes; explicit values
+	// here override that.
+	APIKeys map[string]string `yaml:"api_keys,omitempty"`
+	// RateLimitRPS caps remote-provider requests per second. Zero means
+	// "apply a conservative per-provider default safe for tier-1 limits".
+	// Local providers (ollama) ignore this field.
+	RateLimitRPS float64 `yaml:"rate_limit_rps,omitempty"`
+	// Timeout is a Go duration string (e.g. "30s") applied per Embed call.
+	Timeout string `yaml:"timeout,omitempty"`
+	// Dimensions optionally overrides the embedded vector size — used for
+	// OpenAI's matryoshka-style truncation. Zero means "use the model's
+	// native dimension".
+	Dimensions int `yaml:"dimensions,omitempty"`
+	// BatchSize bounds the number of inputs sent in a single embedding
+	// request. Zero means "use a provider-specific default" (100 for
+	// openai, 64 for ollama). Override when working with very large or
+	// very small inputs to balance throughput against per-call timeout.
+	BatchSize int `yaml:"batch_size,omitempty"`
 }
 
 // LLMConfig holds settings for LLM provider selection, model choice, and
@@ -125,8 +168,48 @@ func MergeConfig(base, overlay *Config) *Config {
 		out.Language = overlay.Language
 	}
 	out.LLM = mergeLLMConfig(base.LLM, overlay.LLM)
+	out.Embedding = mergeEmbeddingConfig(base.Embedding, overlay.Embedding)
 	out.Sync = mergeSyncConfig(base.Sync, overlay.Sync)
 	return &out
+}
+
+func mergeEmbeddingConfig(base, overlay EmbeddingConfig) EmbeddingConfig {
+	out := base
+	if overlay.Provider != "" {
+		out.Provider = overlay.Provider
+	}
+	if overlay.Model != "" {
+		out.Model = overlay.Model
+	}
+	if overlay.Endpoint != "" {
+		out.Endpoint = overlay.Endpoint
+	}
+	if overlay.OllamaEndpoint != "" {
+		out.OllamaEndpoint = overlay.OllamaEndpoint
+	}
+	if overlay.RateLimitRPS != 0 {
+		out.RateLimitRPS = overlay.RateLimitRPS
+	}
+	if overlay.Timeout != "" {
+		out.Timeout = overlay.Timeout
+	}
+	if overlay.Dimensions != 0 {
+		out.Dimensions = overlay.Dimensions
+	}
+	if overlay.BatchSize != 0 {
+		out.BatchSize = overlay.BatchSize
+	}
+	if len(overlay.APIKeys) > 0 {
+		copied := make(map[string]string, len(out.APIKeys)+len(overlay.APIKeys))
+		for k, v := range out.APIKeys {
+			copied[k] = v
+		}
+		for k, v := range overlay.APIKeys {
+			copied[k] = v
+		}
+		out.APIKeys = copied
+	}
+	return out
 }
 
 func mergeSyncConfig(base, overlay SyncConfig) SyncConfig {

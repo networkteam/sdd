@@ -1,0 +1,13 @@
+source_id,related_id,modes,note
+20260504-235258-d-tac-lqr,20260505-100545-d-tac-jvd,vector|hybrid,Search plan and its chunker-preamble augmenting directive
+20260504-235258-d-tac-lqr,20260505-152151-d-tac-85r,text|vector|hybrid,Search plan and its langchaingo-vendoring augmentation (mentions "search" "chunker" verbatim)
+20260505-100545-d-tac-jvd,20260505-152151-d-tac-85r,vector|hybrid,Two augmenting directives sharing the chunker scope
+20260501-092144-s-tac-ixt,20260504-235258-d-tac-lqr,vector|hybrid,Reopened semantic-search gap and the plan addressing it
+20260413-142536-d-cpt-ah1,20260413-142300-d-cpt-l3s,vector|hybrid,CQRS planning contract and the CQRS pattern directive it operationalises
+20260505-111247-s-prc-nxy,20260505-152402-d-tac-ab1,text|vector|hybrid,Modularization gap and the Pattern A plan landing it (both mention "modularization" "Pattern A")
+20260505-140419-s-prc-gu6,20260505-152402-d-tac-ab1,vector|hybrid,Comparative skills examination feeding into the modularization plan
+20260505-100442-d-prc-9ti,20260505-100545-d-tac-jvd,text|vector|hybrid,Augment-plan pattern and an entry that uses it (both mention "augment plan")
+20260505-111057-s-tac-n8u,20260505-111247-s-prc-nxy,vector|hybrid,Token measurement signal feeding the modularization gap
+20260412-004028-d-cpt-vt1,20260410-211553-d-tac-s6w,vector|hybrid,Structural-separation contract and the pre-flight validator that operationalises it
+20260410-151529-s-stg-3vr,20260412-004028-d-cpt-vt1,vector|hybrid,Insight on instruction unreliability and the structural-separation contract grounding it
+20260422-122136-d-stg-beb,20260422-122317-d-stg-qlt,vector|hybrid,Dialogue-first aspiration and parallel-coherence aspiration (twin strategic posts)

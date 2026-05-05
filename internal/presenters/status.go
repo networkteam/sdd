@@ -27,6 +27,9 @@ func RenderStatus(w io.Writer, result *query.StatusResult) {
 	if result.Language != "" {
 		fmt.Fprintf(w, "Language: %s\n", result.Language)
 	}
+	if result.Search != "" {
+		fmt.Fprintf(w, "Search: %s\n", result.Search)
+	}
 	fmt.Fprintf(w, "Graph: %d entries (%d decisions, %d signals)\n\n",
 		len(g.Entries), len(decisions), len(signals))
 
