@@ -14,7 +14,7 @@ If you haven't read the framework reference files in this session, read them now
 - [Meta process](references/meta-process.md) — modes of working, capture guidelines, session protocol
 - [CLI reference](references/cli-reference.md) — command syntax, flags, attachments
 
-Then run `sdd status` and `sdd wip list`, load [references/playbook-catchup.md](references/playbook-catchup.md) for the clustering and presentation rules, and suggest where to start. For empty graphs, invoke `/sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `/sdd-bootstrap` as an option.
+Then enter Check-in mode (see "Modes of working" below) to brief the user on graph state. For empty graphs, invoke `/sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `/sdd-bootstrap` as an option.
 
 ## How you behave
 
@@ -185,40 +185,26 @@ When no `sync:` line appears, the check was skipped (cooldown active, command ex
 
 ## Modes of working
 
-You don't ask "which mode?" — you read the situation and act accordingly. The table below routes each mode to the reference (and any sub-skill) it needs. Load the listed reference when entering the matching mode. Do not load references for modes you are not in. Reload (with fresh content) only if the file changed since the last read.
+You don't ask "which mode?" — you read the situation and act accordingly. The table routes each mode to the reference (and any sub-skill) it needs. **Load the listed reference first**, then invoke any named sub-skill, then run any data-gathering CLI commands the playbook prescribes — the just-loaded playbook guides those moves, not the other way around. Do not load references for modes you are not in. Reload (with fresh content) only if the file changed since the last read.
 
 | Mode | Trigger | Reference |
 |---|---|---|
 | Bootstrap | Empty graph; lacking actors or aspirations | invokes `/sdd-bootstrap` sub-skill |
 | Check-in | Session start; "where are we?" | [references/playbook-catchup.md](references/playbook-catchup.md) |
-| Capture | User shares observation, insight, finding | (inline — capture discipline already always-loaded) |
-| Evaluate | A done signal landed; user asks about it | [references/playbook-catchup.md](references/playbook-catchup.md) (proactive grooming + after-completion guidance) |
-| Reflect/Dialogue | Open exploration, no specific entry | (inline — natural agent behavior) |
-| Decide | Open signals or tensions need resolution | (inline — capture discipline + decision-kind rules) |
+| Capture | User shares observation, insight, finding | inline (see below) |
+| Evaluate | A done signal landed; user asks about it | [references/playbook-catchup.md](references/playbook-catchup.md) |
+| Reflect/Dialogue | Open exploration, no specific entry | inline (see below) |
+| Decide | Open signals or tensions need resolution | inline (see below) |
 | Explore | "Dig into N", entry ID named, topic pointed at | invokes `/sdd-explore`, then [references/playbook-explore.md](references/playbook-explore.md) |
 | Act/Implement | "Let's build this" | [references/playbook-implementation.md](references/playbook-implementation.md) |
 | Augment plan | Refinement mid-implementation | [references/playbook-augment-plan.md](references/playbook-augment-plan.md) |
 | Groom | "Let's groom"; user-suggested cleanup | invokes `/sdd-groom`, then [references/playbook-groom.md](references/playbook-groom.md) |
 
-A short note on each mode's situation:
+The three inline modes below have no reference because the always-loaded surface (capture discipline, decision-kind tests, framework concepts) already covers their mechanics. The brief notes below define each mode's posture.
 
-**Bootstrap**: Setup path for graphs that lack core shape (actors, aspirations). `/sdd-bootstrap` runs the setup playbook and hands back via catch-up once the graph has enough shape to anchor future work.
+**Capture**: Dialogue first — play back what you'd capture, adjust, confirm, then run `sdd new`. The capture-discipline rules above define the playback contract.
 
-**Check-in**: User starts a session or says "where are we?" Run `sdd status` and `sdd wip list` to read the graph state, then cluster and present per the catch-up playbook. Don't suggest continuing active WIP work — assume it's being handled in another session.
+**Reflect/Dialogue**: Be a thinking partner. Synthesize, challenge, connect dots. Don't rush to capture — let the thinking develop. Capture when something crystallizes.
 
-**Capture**: User shares an observation, insight, or finding. Dialogue first — play back what you'd capture, confirm, then record. Could be a signal (of any kind) or a decision (of any kind). Capture discipline (above) is always-loaded.
-
-**Evaluate**: A commitment was completed (recorded as a `kind: done` signal). Help the user assess: did it meet the intent of the decision it references? What gaps remain? Capture evaluation findings as signals.
-
-**Reflect/Dialogue**: Open exploration around a signal, decision, or question. Be a thinking partner. Synthesize, challenge, connect dots. Don't rush to capture — let the thinking develop. Capture when something crystallizes.
-
-**Decide**: Open signals or tensions need resolution. Summarize the relevant signals, lay out options with trade-offs, help the user choose. Capture the decision with appropriate confidence and refs.
-
-**Explore**: User points at something in the graph that needs attention — "dig into #3", a specific entry ID, or a topic. The goal is to **handle** the entry — work through it until the next graph move is clear.
-
-**Act/Implement**: A decision exists and it's time to build. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. The implementation playbook covers WIP markers, decision-before-done-signal checks, branching, and worktree mode.
-
-**Augment plan**: During implementation a refinement surfaces that's too substantive for a mechanical fix but too narrow to warrant superseding the plan. The augment-plan playbook covers the three-option spectrum (mechanical fix, augmenting directive, supersede) and how the closing done signal handles augmentations.
-
-**Groom**: The graph needs hygiene. The grooming playbook covers candidate patterns and walk-through moves.
+**Decide**: Summarize the relevant signals, lay out options with trade-offs, help the user choose. The decision-kind tests above guide kind selection; capture discipline handles the entry creation.
 
