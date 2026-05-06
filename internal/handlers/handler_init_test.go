@@ -74,14 +74,15 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 		t.Errorf("unexpected non-installed categories on fresh init: %+v", skills)
 	}
 
-	// .gitignore should contain both the tmp directory and the local config
-	// file so API keys stored locally don't get committed.
+	// .gitignore should contain the tmp directory, local config file (so API
+	// keys stored locally don't get committed), and the per-participant search
+	// index (machine-local, embedder-fingerprint dependent).
 	gitignore := filepath.Join(tmp, ".gitignore")
 	data, err = os.ReadFile(gitignore)
 	if err != nil {
 		t.Fatalf("read .gitignore: %v", err)
 	}
-	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml"} {
+	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/index/"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf(".gitignore missing %q, got:\n%s", want, data)
 		}
@@ -112,7 +113,7 @@ func TestInit_GitignoreIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .gitignore: %v", err)
 	}
-	for _, entry := range []string{".sdd/tmp/", ".sdd/config.local.yaml"} {
+	for _, entry := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/index/"} {
 		count := strings.Count(string(data), entry)
 		if count != 1 {
 			t.Errorf("%q appears %d times in .gitignore; want exactly 1\n%s", entry, count, data)

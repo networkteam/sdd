@@ -101,7 +101,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	// Housekeeping applied on every init (idempotent — ensureGitignoreEntries
 	// skips entries already present). Covers fresh checkouts and upgrades
 	// where a new entry has been added to the required set.
-	gitignoreEntries := []string{".sdd/tmp/", ".sdd/config.local.yaml"}
+	gitignoreEntries := []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/index/"}
 	gitignoreAdded, err := ensureGitignoreEntries(gitignorePath, gitignoreEntries)
 	if err != nil {
 		log.Warn("could not update .gitignore", "path", gitignorePath, "err", err)
