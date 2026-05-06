@@ -105,6 +105,8 @@ const (
 	checkSupersedes                         // supersedes operation
 	checkActorCapture                       // kind: actor signal capture
 	checkRoleCapture                        // kind: role decision capture
+	checkAnnotationCapture                  // kind: annotation signal capture
+	checkFocusCapture                       // kind: focus decision capture
 )
 
 func (c checkType) String() string {
@@ -129,6 +131,10 @@ func (c checkType) String() string {
 		return "actor-capture"
 	case checkRoleCapture:
 		return "role-capture"
+	case checkAnnotationCapture:
+		return "annotation-capture"
+	case checkFocusCapture:
+		return "focus-capture"
 	default:
 		return fmt.Sprintf("unknown(%d)", int(c))
 	}
@@ -148,6 +154,8 @@ var checkTypeTemplates = map[checkType]string{
 	checkSupersedes:        "supersedes",
 	checkActorCapture:      "actor_capture",
 	checkRoleCapture:       "role_capture",
+	checkAnnotationCapture: "annotation_capture",
+	checkFocusCapture:      "focus_capture",
 }
 
 // preflightContext holds all data needed to render a pre-flight prompt template.
@@ -173,15 +181,21 @@ type preflightContext struct {
 // Dispatch is kind-aware: the same structural shape (signal with closes) routes to different
 // templates based on the entry's kind and the closed target's kind.
 func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
-	// Actor / role captures take precedence — their rubric focuses on
-	// frontmatter shape and prose context. Supersessions of an actor
-	// chain still route here rather than to the generic supersedes
-	// template so the template sees actor-specific guidance.
+	// Identity / structural kinds take precedence — their rubrics focus on
+	// frontmatter shape and per-kind prose conventions. Supersessions of
+	// these kinds still route here rather than to the generic supersedes
+	// template so the templates see kind-specific guidance.
 	if entry.IsActor() {
 		return checkActorCapture
 	}
 	if entry.IsRole() {
 		return checkRoleCapture
+	}
+	if entry.IsAnnotation() {
+		return checkAnnotationCapture
+	}
+	if entry.IsFocus() {
+		return checkFocusCapture
 	}
 
 	if len(entry.Supersedes) > 0 {

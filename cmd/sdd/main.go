@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -368,7 +369,11 @@ func listCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:    "kind",
 				Aliases: []string{"k"},
-				Usage:   "Filter by kind — signals: gap, fact, question, insight, done, actor; decisions: directive, activity, plan, contract, aspiration, role",
+				Usage:   "Filter by kind — signals: gap, fact, question, insight, done, actor, annotation; decisions: directive, activity, plan, contract, aspiration, role, focus",
+			},
+			&cli.StringFlag{
+				Name:  "topic",
+				Usage: "Filter by topic — case-insensitive prefix match on path components (e.g. 'UX' matches 'UX/CLI'). Reuses topic(L) filter primitive shared with sdd view.",
 			},
 			&cli.BoolFlag{
 				Name:  "missing-kind",
@@ -408,6 +413,15 @@ func listCmd() *cli.Command {
 				kind = model.Kind(k)
 			}
 
+			var topic model.TopicPath
+			if t := strings.TrimSpace(cmd.String("topic")); t != "" {
+				p, err := model.ParseTopicPath(t)
+				if err != nil {
+					return fmt.Errorf("--topic: %w", err)
+				}
+				topic = p
+			}
+
 			f, err := newReadFinder()
 			if err != nil {
 				return err
@@ -421,6 +435,7 @@ func listCmd() *cli.Command {
 					MissingKind: cmd.Bool("missing-kind"),
 					OpenOnly:    !cmd.Bool("all"),
 				},
+				Topic: topic,
 			})
 			if err != nil {
 				return err
@@ -460,7 +475,7 @@ func newCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:  "kind",
-				Usage: "Entry kind: signals — gap (default), fact, question, insight, done, actor; decisions — directive (default), activity, plan, contract, aspiration, role",
+				Usage: "Entry kind: signals — gap (default), fact, question, insight, done, actor, annotation; decisions — directive (default), activity, plan, contract, aspiration, role, focus",
 			},
 			&cli.StringFlag{
 				Name:  "canonical",
@@ -473,6 +488,26 @@ func newCmd() *cli.Command {
 			&cli.StringFlag{
 				Name:  "actor",
 				Usage: "Canonical name the role binds to (kind: role only) — must match an active actor chain's head canonical",
+			},
+			&cli.StringFlag{
+				Name:  "topics",
+				Usage: "Comma-separated topic labels (any kind) — inline topic membership written as `topics:` strings",
+			},
+			&cli.StringSliceFlag{
+				Name:  "topic",
+				Usage: "Topic cluster (kind: annotation only) — JSON object {\"label\":\"path\",\"members\":[\"id\",...]}; repeatable. A plain string in --topics works too for whole-refs membership.",
+			},
+			&cli.StringFlag{
+				Name:  "actors",
+				Usage: "Comma-separated focus-level default actor canonicals (kind: focus only)",
+			},
+			&cli.StringFlag{
+				Name:  "when",
+				Usage: "Focus-level default temporal scope (kind: focus only) — JSON object {\"from\":\"YYYY-MM-DD\",\"to\":\"YYYY-MM-DD\"}; at least one of from/to required",
+			},
+			&cli.StringSliceFlag{
+				Name:  "involvement",
+				Usage: "Involvement triple (kind: focus only) — JSON object {\"target\":\"<id>\",\"actors\":[\"...\"],\"when\":{\"from\":\"...\",\"to\":\"...\"}}; repeatable. actors omitted inherits focus default; explicit \"actors\":[] means pull-available.",
 			},
 			&cli.StringSliceFlag{
 				Name:  "attach",
@@ -587,6 +622,20 @@ func newCmd() *cli.Command {
 				return err
 			}
 
+			focusActors := splitCSV(cmd.String("actors"))
+			focusWhen, err := parseWhenFlag(cmd.String("when"))
+			if err != nil {
+				return err
+			}
+			involvement, err := parseInvolvementFlags(cmd.StringSlice("involvement"))
+			if err != nil {
+				return err
+			}
+			annotationTopics, err := parseAnnotationTopicFlags(cmd.StringSlice("topic"))
+			if err != nil {
+				return err
+			}
+
 			ncmd := &command.NewEntryCmd{
 				Type:             typ,
 				Layer:            layer,
@@ -600,6 +649,11 @@ func newCmd() *cli.Command {
 				Canonical:        strings.TrimSpace(cmd.String("canonical")),
 				Aliases:          splitCSV(cmd.String("aliases")),
 				Actor:            strings.TrimSpace(cmd.String("actor")),
+				TopicLabels:      splitCSV(cmd.String("topics")),
+				AnnotationTopics: annotationTopics,
+				FocusActors:      focusActors,
+				FocusWhen:        focusWhen,
+				Involvement:      involvement,
 				Attachments:      atts,
 				SkipPreflight:    cmd.Bool("skip-preflight"),
 				DryRun:           cmd.Bool("dry-run"),
@@ -1642,4 +1696,107 @@ func parseAttachFlags(specs []string, stdinReader io.Reader) ([]attachment, erro
 		}
 	}
 	return attachments, nil
+}
+
+// parseWhenFlag parses a --when JSON value into a *model.FocusWhen.
+// Empty input returns nil so the field is omitted on entries that don't
+// declare a focus-level temporal default.
+func parseWhenFlag(s string) (*model.FocusWhen, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	var w model.FocusWhen
+	if err := json.Unmarshal([]byte(s), &w); err != nil {
+		return nil, fmt.Errorf("--when: invalid JSON: %w", err)
+	}
+	if err := w.Validate(); err != nil {
+		return nil, fmt.Errorf("--when: %w", err)
+	}
+	return &w, nil
+}
+
+// parseInvolvementFlags parses each --involvement JSON value into a
+// model.Involvement, preserving the actors-omitted vs explicit-empty
+// distinction (the latter declares pull-available involvement).
+func parseInvolvementFlags(specs []string) ([]model.Involvement, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	out := make([]model.Involvement, 0, len(specs))
+	for i, spec := range specs {
+		raw := struct {
+			Target string           `json:"target"`
+			Actors *[]string        `json:"actors,omitempty"`
+			When   *model.FocusWhen `json:"when,omitempty"`
+		}{}
+		if err := json.Unmarshal([]byte(spec), &raw); err != nil {
+			return nil, fmt.Errorf("--involvement[%d]: invalid JSON: %w", i, err)
+		}
+		if strings.TrimSpace(raw.Target) == "" {
+			return nil, fmt.Errorf("--involvement[%d]: missing required `target`", i)
+		}
+		if raw.When != nil {
+			if err := raw.When.Validate(); err != nil {
+				return nil, fmt.Errorf("--involvement[%d].when: %w", i, err)
+			}
+		}
+		inv := model.Involvement{
+			Target: raw.Target,
+			When:   raw.When,
+		}
+		if raw.Actors != nil {
+			inv.Actors = *raw.Actors
+			inv.ActorsSet = true
+		}
+		out = append(out, inv)
+	}
+	return out, nil
+}
+
+// parseAnnotationTopicFlags parses each --topic JSON value into a
+// model.AnnotationTopic. The CLI accepts either a JSON object
+// {"label":"...","members":["..."]} or a bare JSON-quoted string for the
+// plain "all-refs" form, mirroring the on-disk shape that AnnotationTopic
+// already round-trips. A non-JSON value (e.g. plain `foo`) is treated as a
+// label string for ergonomics — quoting in shells is fiddly enough that
+// this small forgiveness is worth it.
+func parseAnnotationTopicFlags(specs []string) ([]model.AnnotationTopic, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	out := make([]model.AnnotationTopic, 0, len(specs))
+	for i, spec := range specs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		// Object form first.
+		if strings.HasPrefix(spec, "{") {
+			var raw struct {
+				Label   string   `json:"label"`
+				Members []string `json:"members,omitempty"`
+			}
+			if err := json.Unmarshal([]byte(spec), &raw); err != nil {
+				return nil, fmt.Errorf("--topic[%d]: invalid JSON: %w", i, err)
+			}
+			if strings.TrimSpace(raw.Label) == "" {
+				return nil, fmt.Errorf("--topic[%d]: missing required `label`", i)
+			}
+			out = append(out, model.AnnotationTopic{Label: raw.Label, Members: raw.Members})
+			continue
+		}
+		// JSON-quoted scalar string.
+		if strings.HasPrefix(spec, `"`) {
+			var label string
+			if err := json.Unmarshal([]byte(spec), &label); err != nil {
+				return nil, fmt.Errorf("--topic[%d]: invalid JSON: %w", i, err)
+			}
+			out = append(out, model.AnnotationTopic{Label: label})
+			continue
+		}
+		// Bare label string (shell-friendly shortcut).
+		out = append(out, model.AnnotationTopic{Label: spec})
+	}
+	return out, nil
 }

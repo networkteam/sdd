@@ -130,3 +130,53 @@ func (g *Graph) Annotations() []*Entry {
 	}
 	return out
 }
+
+// EffectiveTopics returns the merged topic-path set for an entry: inline
+// `topics:` declared on the entry's own frontmatter unioned with topics
+// declared by every kind: annotation entry whose refs (or per-topic members
+// sub-selection) include this entry. Deduplicated case-insensitively with
+// first-seen casing winning. Used by the topic(L) filter and by display
+// rendering. Pure — uses the graph's reverse-ref index for annotation
+// lookups, no I/O.
+func (g *Graph) EffectiveTopics(e *Entry) []TopicPath {
+	if e == nil {
+		return nil
+	}
+	var paths []TopicPath
+	paths = append(paths, e.Topics...)
+
+	for _, refdByID := range g.RefsTo[e.ID] {
+		ann, ok := g.ByID[refdByID]
+		if !ok || !ann.IsAnnotation() {
+			continue
+		}
+		for _, t := range ann.AnnotationTopics {
+			if !annotationMembers(ann, t, e.ID) {
+				continue
+			}
+			p, err := ParseTopicPath(t.Label)
+			if err != nil {
+				continue // malformed label ignored here; lint surfaces it
+			}
+			paths = append(paths, p)
+		}
+	}
+	return CanonicalizeTopicPaths(paths)
+}
+
+// annotationMembers reports whether entryID is in the set of members an
+// annotation's topic assigns. The plain-string item form (Members nil/empty)
+// means "all of the annotation's refs"; the mapping form restricts to the
+// listed subset.
+func annotationMembers(ann *Entry, t AnnotationTopic, entryID string) bool {
+	pool := t.Members
+	if len(pool) == 0 {
+		pool = ann.Refs
+	}
+	for _, m := range pool {
+		if m == entryID {
+			return true
+		}
+	}
+	return false
+}

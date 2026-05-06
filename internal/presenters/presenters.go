@@ -18,13 +18,15 @@ import (
 // EntryLine writes a single entry summary line — used by status, list, and
 // other surfaces that show entries in a flat list.
 //
-// Format: `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) {status: <status>}? <summary>`
+// Format: `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) {status: <status>}? <topics>? <summary>`
 // Kind renders as a qualifier alongside layer/type — it's identity, not an
 // attribute (d-cpt-omm's two-type redesign makes every entry carry a kind).
 // Square brackets denote stored attributes (today: confidence); curly braces
-// denote derived attributes computed from graph relationships (d-tac-3yi).
-// Participants are always present — empty is rendered as `()`. Status is
-// present for signals and decisions; omitted for actions.
+// denote derived attributes computed from graph relationships (d-tac-3yi);
+// angle brackets denote topic membership (also derived — inline topics merged
+// with annotation declarations). Participants are always present — empty is
+// rendered as `()`. Status is present for signals and decisions; omitted for
+// actions. Topics are omitted entirely when the effective set is empty.
 func EntryLine(w io.Writer, e *model.Entry, g *model.Graph) {
 	var sb strings.Builder
 	sb.WriteString("  ")
@@ -48,6 +50,10 @@ func EntryLine(w io.Writer, e *model.Entry, g *model.Graph) {
 		sb.WriteString(" ")
 		sb.WriteString(s)
 	}
+	if topics := FormatTopics(g.EffectiveTopics(e)); topics != "" {
+		sb.WriteString(" ")
+		sb.WriteString(topics)
+	}
 	sb.WriteString(" ")
 	desc := e.Summary
 	if desc == "" {
@@ -56,6 +62,20 @@ func EntryLine(w io.Writer, e *model.Entry, g *model.Graph) {
 	sb.WriteString(desc)
 	sb.WriteString("\n")
 	fmt.Fprint(w, sb.String())
+}
+
+// FormatTopics renders an entry's effective topic set in angle-bracket
+// notation (`<label1, label2>`). Returns the empty string when the set is
+// empty so callers can omit the segment entirely.
+func FormatTopics(paths []model.TopicPath) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(paths))
+	for _, p := range paths {
+		parts = append(parts, p.String())
+	}
+	return "<" + strings.Join(parts, ", ") + ">"
 }
 
 // FormatConfidence renders a stored confidence attribute in square-bracket notation.

@@ -14,7 +14,7 @@ Completed work is itself a signal — a `kind: done` signal — which closes the
 
 The graph has **two entry types** — signal and decision. Each carries an explicit **kind** that sharpens what the entry is for. Pre-flight enforces that kind matches the narrative shape.
 
-### Signal kinds (6)
+### Signal kinds (7)
 
 | Kind | Question it answers | Default? |
 |---|---|---|
@@ -24,12 +24,15 @@ The graph has **two entry types** — signal and decision. Each carries an expli
 | `insight` | What have we synthesized? | no |
 | `done` | What was accomplished? | no |
 | `actor` | Who is participating? | no |
+| `annotation` | Structural metadata layered onto referenced entries | no |
 
 A `done` signal records a commitment fulfilled — it must carry at least one `closes` or `refs` pointing at the commitment it completes.
 
 An `actor` signal records a participant identity at the process layer. See the "Actors and Roles" section below for the full semantics, including the write-once canonical invariant.
 
-### Decision kinds (6)
+An `annotation` signal carries structural metadata — today, topic membership — for the entries it refs. See "Topics and annotations" below.
+
+### Decision kinds (7)
 
 | Kind | Question it answers | Default? |
 |---|---|---|
@@ -39,10 +42,13 @@ An `actor` signal records a participant identity at the process layer. See the "
 | `contract` | What must always hold? | no |
 | `aspiration` | What are we pulling toward? | no |
 | `role` | How does an actor participate? | no |
+| `focus` | What are we attending to in this period, and who is engaged? | no |
 
 Plan decisions require a `## Acceptance criteria` section with at least one checklist item. Each AC is a verifiable outcome — the contract between plan author, implementing agent, and the pre-flight validator that checks the closing done signal.
 
 A `role` decision records one actor's participation pattern — per-actor scope, orthogonal to contracts (which are universal). See "Actors and Roles" below.
+
+A `focus` decision declares involvement triples for the current period. Layer-flexible (like directive/plan/activity). See "Focus and involvement" below.
 
 ## Distinguishing tests
 
@@ -116,11 +122,13 @@ Per-kind retirement paths:
 | question | refined question | directive: "answered as X" or "won't pursue"; or fact / insight (dissolution) |
 | insight | corrected insight | directive: "noted, no action needed" |
 | done | corrective done (rare) | — (terminal — facts of execution) |
+| annotation | replacement annotation (rare; usually a new annotation entry instead) | directive retiring it |
 | directive | replacement directive | done signal (standard); directive retiring it |
 | activity | replacement activity | done signal (standard); directive retiring it |
 | contract | replacement contract | directive retiring it |
 | plan | restructured plan | done signal (via ACs); directive retiring it |
 | aspiration | evolved aspiration | directive retiring it |
+| focus | replacement focus (priorities shift mid-cycle) | done signal (cycle ended naturally); directive retiring it |
 
 **Retirement rationale is required** when closing a stable-kind entry (fact, insight, contract, aspiration). Pre-flight checks that the narrative states *why* — not whether the why is correct.
 
@@ -172,6 +180,39 @@ Roles that reference a canonical matching no chain are **orphan** — flagged by
 
 `sdd status` renders a **Participants block** after the main sections, grouped by active-actor canonical. Each group header is the canonical; entries listed underneath are the active actor signal plus every derived-active role bound to that chain. The block is suppressed during grace (zero active actors) so fresh graphs stay quiet. For filtered views, `sdd list --kind actor` and `sdd list --kind role` expose the underlying entries directly.
 
+## Topics and annotations
+
+Topics are hierarchical labels (`/`-joined paths, e.g. `infrastructure/cli`, `type-system/kinds`) that cluster entries across kind, layer, and type. Two ways to assign:
+
+- **Inline `topics:`** in any entry's frontmatter — list of label strings. Zero-ceremony tagging at capture time.
+- **`kind: annotation` signals** — structural metadata entries that point at member entries via `refs:` and declare topic assignments via `topics:`. Each item in an annotation's `topics:` list is either a plain label string (applies to *all* of the annotation's refs) or a mapping `{label, members}` where `members` is a subset of refs.
+
+Either path produces "membership" — the entry is in the topic. The graph computes the **effective topic set** for any entry by merging its inline topics with topics declared by every annotation whose refs (or per-topic members sub-selection) include the entry. Effective topics render as `<label1, label2>` between `{status: ...}` and the summary on entry lines, and via the `Topics:` derived field on `sdd show`.
+
+**Path semantics:**
+
+- Components match `[\p{L}\p{N}\-]+` (Unicode letter/digit plus hyphen). Empty components rejected.
+- Comparison is case-insensitive on each component; first-seen casing wins for display.
+- Filter via `sdd list --topic <label>` does component-wise prefix match (case-insensitive). `--topic UX` matches `UX`, `UX/CLI`, `UX/CLI/Status` — but does not match `UXTesting` (because matching is component-wise, not raw-string).
+
+**No alias mechanism in v1.** If a topic label needs to evolve, capture a new annotation that re-assigns members under the new label rather than rewriting historical entries.
+
+The annotation kind is general — today it carries topics, but future annotation forms (other typed-edge metadata) can add their own frontmatter fields alongside `topics:` without requiring a new kind.
+
+## Focus and involvement
+
+A `kind: focus` decision declares "what we're attending to in this period, and who is engaged." It carries:
+
+- **`involvement:`** — list of triples, each `{target, actors?, when?}`. Required: `target` (entry ID). Optional: per-involvement `actors` and `when` overrides.
+- **Top-level `actors:`** — focus-level default actor canonicals. Per-involvement values override; omitting on a triple inherits this default.
+- **Top-level `when:`** — focus-level default temporal scope `{from?, to?}`. At least one of `from`/`to` is required when `when:` is present.
+
+**Actors-set vs actors-omitted:** an involvement triple that declares `actors: []` explicitly is *deliberately unattributed* — the canonical "pull-available" state, in scope but awaiting pickup. A triple that omits `actors:` entirely *inherits* the focus-level default. The CLI preserves this distinction at capture time and through frontmatter roundtrip; rendering and ranking layers treat the two cases differently.
+
+**Layer-flexible.** Focus is not pinned to a single layer like actor/role. Use the layer matching the cadence: process or operational for daily/weekly, tactical for cycle-level, strategic or conceptual for roadmap.
+
+**Dual lifecycle.** A focus retires either by supersession (priorities shift mid-cycle) or by a closing done signal (cycle ended naturally — declared work was completed or work-set has resolved). Both paths are valid; pre-flight does not argue which one applies when. Three observation patterns surface as informational findings (low severity, never blocking): closure with no target completions, supersession with zero shared targets, and all-pull-available involvement.
+
 ## Rendering Conventions
 
 Entry lines in `sdd status`, `sdd list`, and summary chains carry three kinds of information, visually distinguished by notation:
@@ -179,6 +220,7 @@ Entry lines in `sdd status`, `sdd list`, and summary chains carry three kinds of
 - **Identity (kind, layer, type)** renders as plain qualifiers: `tactical plan decision`, `process gap signal`. Kind acts like a sub-type — identity, not an attribute.
 - **Stored attributes** live in the entry's YAML frontmatter — written at creation, immutable afterwards. Rendered with square brackets: `[confidence: medium]`.
 - **Derived attributes** are computed from graph relationships on every read — never written on the entry itself. Rendered with curly braces: `{status: active}`, `{status: open}`, `{status: closed-by <full-id>}`, `{status: superseded-by <full-id>}`. Done signals don't carry `{status: ...}` — they're terminal facts of execution with no lifecycle to track.
+- **Topic membership** is also derived (inline ∪ annotation) and renders with angle brackets between `{status: ...}` and the summary: `<infrastructure/cli, type-system/kinds>`. The segment is omitted entirely when the effective topic set is empty.
 
 The stored-vs-derived split is what makes the immutability contract practical: state changes as the graph grows (a signal becomes closed when a closing done signal lands), but the entry file never changes. Reading `{status: ...}` tells you the current computed state; reading stored attrs tells you what was written originally.
 

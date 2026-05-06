@@ -6,7 +6,7 @@
 - `sdd show <id>` — full entry with upstream summary chain (depth-limited)
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
 - `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
-- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind <kind>]` — filtered listing. `--kind` accepts any signal kind (gap, fact, question, insight, done, actor) or decision kind (directive, activity, plan, contract, aspiration, role); the two sets are disjoint. Uses summaries.
+- `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind <kind>] [--topic <label>]` — filtered listing. `--kind` accepts any signal kind (gap, fact, question, insight, done, actor, annotation) or decision kind (directive, activity, plan, contract, aspiration, role, focus); the two sets are disjoint. `--topic` filters to entries whose effective topic set (inline `topics:` ∪ topics declared by annotations whose refs include the entry) has any label with the given path as a component-wise, case-insensitive prefix. Uses summaries.
 - `sdd new <type> <layer> [flags] <description>` — create entries (output prints the new entry ID, file path, and the LLM-generated summary so the agent can verify fidelity)
 - `sdd summarize [<id> | --all]` — regenerate entry summaries
 - `sdd summarize <id> --text "<summary>"` — write a user-supplied summary directly, bypassing the LLM. Use `--text -` to read from stdin. Single entry only; rejected with `--all` or multiple IDs. The hash is recomputed from the current prompt so subsequent automatic regenerations skip-by-hash unless `--force` is passed.
@@ -46,16 +46,65 @@ The depth-0 `Summary:` section renders the same text shown in `sdd list` and `sd
 - `--closes id1,id2` — entry IDs this resolves/fulfills
 - `--participants p1,p2` — participant names
 - `--confidence high|medium|low` — confidence level
-- `--kind <kind>` — signals: gap (default), fact, question, insight, done, actor; decisions: directive (default), activity, plan, contract, aspiration, role
+- `--kind <kind>` — signals: gap (default), fact, question, insight, done, actor, annotation; decisions: directive (default), activity, plan, contract, aspiration, role, focus
 - `--canonical name` — frontmatter `canonical` (kind: actor only)
 - `--aliases a,b` — frontmatter `aliases` (kind: actor only)
 - `--actor canonical` — frontmatter `actor` (kind: role only)
+- `--topics LABEL[,LABEL...]` — inline `topics:` labels (any kind). CSV form. Each label is a topic-path string (`/`-joined components, e.g. `infrastructure/cli`).
+- `--topic '{json}'` — annotation topic cluster (kind: annotation only). Repeatable. Either a JSON object `{"label":"path","members":["id",...]}` (sub-selection of refs) or a bare label like `--topic catch-up-scaling` (applies to all refs).
+- `--actors NAME[,NAME...]` — focus-level default actor canonicals (kind: focus only). CSV form.
+- `--when '{json}'` — focus-level default temporal scope (kind: focus only). JSON object `{"from":"YYYY-MM-DD","to":"YYYY-MM-DD"}`; at least one of `from` / `to` is required when present.
+- `--involvement '{json}'` — focus involvement triple (kind: focus only). Repeatable. JSON object `{"target":"<id>","actors":["..."],"when":{"from":"...","to":"..."}}`. Omitting `actors` inherits the focus-level default; explicit `"actors":[]` declares pull-available involvement (deliberately unattributed).
 - `--attach spec` — file to attach (repeatable, see below)
 - `--skip-preflight` — skip pre-flight validation (entry is annotated with `preflight: skipped`)
 - `--dry-run` — run validation and pre-flight only, without writing or committing the entry
 - `--preflight-timeout` — timeout for pre-flight validation (default `2m`)
 
 See the Entry IDs section above for how ID arguments are resolved across all commands.
+
+## Annotation and focus capture examples
+
+**Annotation — tag a cluster of entries with a topic** (one entry, all refs are members):
+
+```bash
+sdd new s cpt --kind annotation --confidence medium \
+  --refs 20260505-215340-s-cpt-rwd,20260505-215333-s-cpt-jq7,20260504-100323-s-cpt-8tu \
+  --topics catch-up-scaling \
+  "These three entries cluster around the catch-up-scaling concern that drove Plan 1 / Plan 2."
+```
+
+**Annotation with multiple topics and a sub-selection**:
+
+```bash
+sdd new s cpt --kind annotation --confidence medium \
+  --refs 20260423-203503-d-cpt-ygn,20260506-151849-d-tac-gvn \
+  --topic catch-up-scaling \
+  --topic '{"label":"type-system/kinds","members":["20260423-203503-d-cpt-ygn"]}' \
+  "Both refs are catch-up related; only ygn is also a type-system/kinds entry."
+```
+
+The first `--topic` is bare-label form (applies to all refs); the second restricts to one member.
+
+**Focus — declare an involvement period** (uses outer single quotes for JSON to preserve `$`/backticks; inner double quotes for JSON keys):
+
+```bash
+sdd new d tac --kind focus --confidence medium \
+  --participants Christopher,Claude \
+  --actors Christopher,Claude \
+  --when '{"from":"2026-05-06","to":"2026-05-20"}' \
+  --involvement '{"target":"20260506-151849-d-tac-gvn"}' \
+  --involvement '{"target":"20260506-151345-d-tac-uww","actors":[]}' \
+  --involvement '{"target":"20260506-152044-d-tac-1du","actors":["Claude"],"when":{"from":"2026-05-13","to":"2026-05-20"}}' \
+  "Drive type-system 7+7 + sdd view + playbook rewrite over the next two weeks."
+```
+
+The first triple inherits both top-level defaults; the second overrides actors with explicit empty (pull-available); the third overrides both actors and when.
+
+## Quoting convention for JSON flags
+
+- Outer single quotes preserve `$`, backticks, and backslashes verbatim
+- Inner double quotes for JSON keys and string values
+- The CLI accepts JSON parse errors gracefully — failures cite the offending field path
 
 ## Attachments
 

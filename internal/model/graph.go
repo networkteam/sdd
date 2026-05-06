@@ -701,6 +701,9 @@ func ValidateEntry(e *Entry, g *Graph) {
 	validateKind(e)
 	validateActorFrontmatter(e)
 	validateRoleFrontmatter(e)
+	validateAnnotationFrontmatter(e)
+	validateFocusFrontmatter(e, g)
+	validateInlineTopics(e)
 	validateDoneSignalRefs(e)
 	validateAttachmentLinks(e)
 }
@@ -784,12 +787,14 @@ func validateSupersedes(e *Entry, g *Graph) {
 // validateKind checks that signals and decisions have a kind consistent with
 // their type.
 func validateKind(e *Entry) {
+	const signalKindList = "gap, fact, question, insight, done, actor, or annotation"
+	const decisionKindList = "directive, activity, plan, contract, aspiration, role, or focus"
 	switch e.Type {
 	case TypeSignal:
 		if e.Kind == "" {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "kind",
-				Message: "signal missing kind field (expected gap, fact, question, insight, done, or actor)",
+				Message: "signal missing kind field (expected " + signalKindList + ")",
 			})
 			return
 		}
@@ -797,14 +802,14 @@ func validateKind(e *Entry) {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "kind",
 				Value:   string(e.Kind),
-				Message: fmt.Sprintf("invalid signal kind %q (expected gap, fact, question, insight, done, or actor)", e.Kind),
+				Message: fmt.Sprintf("invalid signal kind %q (expected %s)", e.Kind, signalKindList),
 			})
 		}
 	case TypeDecision:
 		if e.Kind == "" {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "kind",
-				Message: "decision missing kind field (expected directive, activity, plan, contract, aspiration, or role)",
+				Message: "decision missing kind field (expected " + decisionKindList + ")",
 			})
 			return
 		}
@@ -812,7 +817,7 @@ func validateKind(e *Entry) {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "kind",
 				Value:   string(e.Kind),
-				Message: fmt.Sprintf("invalid decision kind %q (expected directive, activity, plan, contract, aspiration, or role)", e.Kind),
+				Message: fmt.Sprintf("invalid decision kind %q (expected %s)", e.Kind, decisionKindList),
 			})
 		}
 	}
@@ -875,6 +880,152 @@ func validateDoneSignalRefs(e *Entry) {
 			Field:   "closes",
 			Message: "done signal must carry at least one closes or refs (target of the completion claim)",
 		})
+	}
+}
+
+// validateAnnotationFrontmatter checks the structural shape of a kind: annotation
+// entry: at least one ref (the canonical edge to its members), at least one
+// topic, every topic label parses as a TopicPath, and every explicit members
+// list is a subset of the entry's refs.
+func validateAnnotationFrontmatter(e *Entry) {
+	if !e.IsAnnotation() {
+		return
+	}
+	if len(e.Refs) == 0 {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "refs",
+			Message: "annotation signal must carry at least one ref (the entries the annotation is about)",
+		})
+	}
+	if len(e.AnnotationTopics) == 0 {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "topics",
+			Message: "annotation signal must declare at least one topic",
+		})
+		return
+	}
+	refSet := make(map[string]bool, len(e.Refs))
+	for _, r := range e.Refs {
+		refSet[r] = true
+	}
+	for i, t := range e.AnnotationTopics {
+		if t.Label == "" {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "topics",
+				Value:   fmt.Sprintf("topics[%d]", i),
+				Message: fmt.Sprintf("topics[%d]: missing label", i),
+			})
+			continue
+		}
+		if _, err := ParseTopicPath(t.Label); err != nil {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "topics",
+				Value:   t.Label,
+				Message: fmt.Sprintf("topics[%d].label: %v", i, err),
+			})
+		}
+		for j, m := range t.Members {
+			if !refSet[m] {
+				e.Warnings = append(e.Warnings, Warning{
+					Field:   "topics",
+					Value:   m,
+					Message: fmt.Sprintf("topics[%d].members[%d]: %s is not in refs (members must be a subset of the annotation's refs)", i, j, m),
+				})
+			}
+		}
+	}
+}
+
+// validateFocusFrontmatter checks the structural shape of a kind: focus
+// decision: top-level when (if present) is well-formed, top-level actors are
+// non-empty strings, and each involvement triple has a target that resolves
+// in the graph plus a per-involvement when (if present) that is well-formed.
+func validateFocusFrontmatter(e *Entry, g *Graph) {
+	if !e.IsFocus() {
+		return
+	}
+	if err := e.FocusWhen.Validate(); err != nil {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "when",
+			Message: err.Error(),
+		})
+	}
+	for i, name := range e.FocusActors {
+		if strings.TrimSpace(name) == "" {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "actors",
+				Value:   fmt.Sprintf("actors[%d]", i),
+				Message: fmt.Sprintf("actors[%d]: empty actor name", i),
+			})
+		}
+	}
+	if len(e.Involvement) == 0 {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "involvement",
+			Message: "focus decision must declare at least one involvement triple",
+		})
+		return
+	}
+	for i, inv := range e.Involvement {
+		if strings.TrimSpace(inv.Target) == "" {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "involvement",
+				Value:   fmt.Sprintf("involvement[%d]", i),
+				Message: fmt.Sprintf("involvement[%d]: missing target", i),
+			})
+			continue
+		}
+		if g != nil {
+			if _, ok := g.ByID[inv.Target]; !ok {
+				e.Warnings = append(e.Warnings, Warning{
+					Field:   "involvement",
+					Value:   inv.Target,
+					Message: fmt.Sprintf("involvement[%d].target: %s does not resolve to an existing entry", i, inv.Target),
+				})
+			}
+		}
+		if err := inv.When.Validate(); err != nil {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "involvement",
+				Value:   fmt.Sprintf("involvement[%d].when", i),
+				Message: fmt.Sprintf("involvement[%d].when: %v", i, err),
+			})
+		}
+		for j, name := range inv.Actors {
+			if strings.TrimSpace(name) == "" {
+				e.Warnings = append(e.Warnings, Warning{
+					Field:   "involvement",
+					Value:   fmt.Sprintf("involvement[%d].actors[%d]", i, j),
+					Message: fmt.Sprintf("involvement[%d].actors[%d]: empty actor name", i, j),
+				})
+			}
+		}
+	}
+}
+
+// validateInlineTopics checks that every TopicPath on Entry.Topics is well-
+// formed. ParseEntry already converts and warns on parse-time issues for
+// most cases, but the validator runs at lint time too, where entries built
+// programmatically may carry unparsed labels.
+func validateInlineTopics(e *Entry) {
+	for i, t := range e.Topics {
+		if t.IsZero() {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "topics",
+				Value:   fmt.Sprintf("topics[%d]", i),
+				Message: fmt.Sprintf("topics[%d]: empty topic path", i),
+			})
+			continue
+		}
+		// Re-validate the path components in case the entry was built
+		// programmatically rather than parsed from disk.
+		if _, err := ParseTopicPath(t.String()); err != nil {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "topics",
+				Value:   t.String(),
+				Message: fmt.Sprintf("topics[%d]: %v", i, err),
+			})
+		}
 	}
 }
 

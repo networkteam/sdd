@@ -51,6 +51,30 @@ type NewEntryCmd struct {
 	// on non-role entries.
 	Actor string
 
+	// TopicLabels carries inline topic labels (CSV form on the CLI; flat
+	// list here). Valid on any non-annotation entry. Stored verbatim;
+	// parsing into TopicPath happens during BuildEntry so the command
+	// surface stays simple.
+	TopicLabels []string
+
+	// AnnotationTopics carries the topic assignments for a kind: annotation
+	// entry. Each --topic flag at the CLI parses into one entry here. The
+	// item shape supports plain label (members empty → applies to all refs)
+	// or label + member sub-selection.
+	AnnotationTopics []model.AnnotationTopic
+
+	// FocusActors is the focus-level default actor list (canonical-only).
+	// Only meaningful on kind: focus decisions.
+	FocusActors []string
+
+	// FocusWhen is the focus-level default temporal scope. Per-involvement
+	// when overrides this. Only meaningful on kind: focus decisions.
+	FocusWhen *model.FocusWhen
+
+	// Involvement is the list of involvement triples for a kind: focus
+	// decision. Each --involvement flag parses into one entry here.
+	Involvement []model.Involvement
+
 	SkipPreflight    bool
 	DryRun           bool
 	PreflightTimeout time.Duration
@@ -103,12 +127,34 @@ func (c *NewEntryCmd) BuildEntry(id string) (*model.Entry, error) {
 		Canonical:    c.Canonical,
 		Aliases:      c.Aliases,
 		Actor:        c.Actor,
+		FocusActors:  c.FocusActors,
+		FocusWhen:    c.FocusWhen,
+		Involvement:  c.Involvement,
 		Content:      c.Description,
 	}
 
 	// Apply per-type default when no kind is specified.
 	if entry.Kind == "" {
 		entry.Kind = model.DefaultKindForType(entry.Type)
+	}
+
+	// Topics routing: annotation entries take the rich AnnotationTopics
+	// form; everything else parses TopicLabels into inline TopicPaths. A
+	// label that fails to parse returns an error here so the user gets
+	// actionable feedback at command construction rather than as a load-
+	// time warning on the written entry.
+	if entry.IsAnnotation() {
+		entry.AnnotationTopics = c.AnnotationTopics
+	} else if len(c.TopicLabels) > 0 {
+		paths := make([]model.TopicPath, 0, len(c.TopicLabels))
+		for _, label := range c.TopicLabels {
+			p, err := model.ParseTopicPath(label)
+			if err != nil {
+				return nil, fmt.Errorf("topics: %w", err)
+			}
+			paths = append(paths, p)
+		}
+		entry.Topics = paths
 	}
 
 	if len(c.Attachments) > 0 {

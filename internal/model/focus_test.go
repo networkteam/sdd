@@ -258,6 +258,211 @@ Body text.`
 	}
 }
 
+func TestValidate_Annotation(t *testing.T) {
+	target1 := &Entry{ID: "20260101-000000-s-cpt-aaa", Type: TypeSignal, Kind: KindGap}
+	target2 := &Entry{ID: "20260101-000000-s-cpt-bbb", Type: TypeSignal, Kind: KindGap}
+	g := NewGraph([]*Entry{target1, target2})
+
+	t.Run("ok with all-refs string topic", func(t *testing.T) {
+		e := &Entry{
+			ID:               "20260506-000000-s-cpt-ann",
+			Type:             TypeSignal,
+			Kind:             KindAnnotation,
+			Refs:             []string{target1.ID, target2.ID},
+			AnnotationTopics: []AnnotationTopic{{Label: "catch-up-scaling"}},
+		}
+		ValidateEntry(e, g)
+		if len(e.Warnings) != 0 {
+			t.Fatalf("unexpected warnings: %v", e.Warnings)
+		}
+	})
+
+	t.Run("ok with explicit subset members", func(t *testing.T) {
+		e := &Entry{
+			ID:   "20260506-000000-s-cpt-ann",
+			Type: TypeSignal,
+			Kind: KindAnnotation,
+			Refs: []string{target1.ID, target2.ID},
+			AnnotationTopics: []AnnotationTopic{
+				{Label: "x", Members: []string{target1.ID}},
+			},
+		}
+		ValidateEntry(e, g)
+		if len(e.Warnings) != 0 {
+			t.Fatalf("unexpected warnings: %v", e.Warnings)
+		}
+	})
+
+	t.Run("flags missing refs", func(t *testing.T) {
+		e := &Entry{
+			ID:               "20260506-000000-s-cpt-ann",
+			Type:             TypeSignal,
+			Kind:             KindAnnotation,
+			AnnotationTopics: []AnnotationTopic{{Label: "x"}},
+		}
+		ValidateEntry(e, g)
+		if !hasWarningField(e, "refs") {
+			t.Fatalf("expected refs warning, got %v", e.Warnings)
+		}
+	})
+
+	t.Run("flags missing topics", func(t *testing.T) {
+		e := &Entry{
+			ID:   "20260506-000000-s-cpt-ann",
+			Type: TypeSignal,
+			Kind: KindAnnotation,
+			Refs: []string{target1.ID},
+		}
+		ValidateEntry(e, g)
+		if !hasWarningField(e, "topics") {
+			t.Fatalf("expected topics warning, got %v", e.Warnings)
+		}
+	})
+
+	t.Run("flags member outside refs", func(t *testing.T) {
+		e := &Entry{
+			ID:   "20260506-000000-s-cpt-ann",
+			Type: TypeSignal,
+			Kind: KindAnnotation,
+			Refs: []string{target1.ID},
+			AnnotationTopics: []AnnotationTopic{
+				{Label: "x", Members: []string{target2.ID}}, // not in refs
+			},
+		}
+		ValidateEntry(e, g)
+		found := false
+		for _, w := range e.Warnings {
+			if w.Field == "topics" && strings.Contains(w.Message, "subset") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected subset warning, got %v", e.Warnings)
+		}
+	})
+
+	t.Run("flags malformed label", func(t *testing.T) {
+		e := &Entry{
+			ID:   "20260506-000000-s-cpt-ann",
+			Type: TypeSignal,
+			Kind: KindAnnotation,
+			Refs: []string{target1.ID},
+			AnnotationTopics: []AnnotationTopic{
+				{Label: "has spaces"},
+			},
+		}
+		ValidateEntry(e, g)
+		if !hasWarningField(e, "topics") {
+			t.Fatalf("expected topics warning for malformed label, got %v", e.Warnings)
+		}
+	})
+}
+
+func TestValidate_Focus(t *testing.T) {
+	target := &Entry{ID: "20260101-000000-s-cpt-aaa", Type: TypeSignal, Kind: KindGap}
+	g := NewGraph([]*Entry{target})
+
+	t.Run("ok minimal focus", func(t *testing.T) {
+		e := &Entry{
+			ID:    "20260506-000000-d-tac-foc",
+			Type:  TypeDecision,
+			Kind:  KindFocus,
+			Layer: LayerTactical,
+			Involvement: []Involvement{
+				{Target: target.ID},
+			},
+		}
+		ValidateEntry(e, g)
+		if len(e.Warnings) != 0 {
+			t.Fatalf("unexpected warnings: %v", e.Warnings)
+		}
+	})
+
+	t.Run("ok with top-level defaults", func(t *testing.T) {
+		e := &Entry{
+			ID:          "20260506-000000-d-tac-foc",
+			Type:        TypeDecision,
+			Kind:        KindFocus,
+			Layer:       LayerTactical,
+			FocusActors: []string{"Christopher", "Claude"},
+			FocusWhen:   &FocusWhen{From: "2026-05-06", To: "2026-05-20"},
+			Involvement: []Involvement{
+				{Target: target.ID},
+				{Target: target.ID, ActorsSet: true, Actors: nil}, // pull-available
+				{Target: target.ID, ActorsSet: true, Actors: []string{"Claude"},
+					When: &FocusWhen{To: "2026-05-13"}},
+			},
+		}
+		ValidateEntry(e, g)
+		if len(e.Warnings) != 0 {
+			t.Fatalf("unexpected warnings: %v", e.Warnings)
+		}
+	})
+
+	t.Run("flags missing involvement", func(t *testing.T) {
+		e := &Entry{
+			ID:    "20260506-000000-d-tac-foc",
+			Type:  TypeDecision,
+			Kind:  KindFocus,
+			Layer: LayerTactical,
+		}
+		ValidateEntry(e, g)
+		if !hasWarningField(e, "involvement") {
+			t.Fatalf("expected involvement warning, got %v", e.Warnings)
+		}
+	})
+
+	t.Run("flags involvement target missing in graph", func(t *testing.T) {
+		e := &Entry{
+			ID:    "20260506-000000-d-tac-foc",
+			Type:  TypeDecision,
+			Kind:  KindFocus,
+			Layer: LayerTactical,
+			Involvement: []Involvement{
+				{Target: "20260101-000000-s-cpt-zzz"},
+			},
+		}
+		ValidateEntry(e, g)
+		found := false
+		for _, w := range e.Warnings {
+			if w.Field == "involvement" && strings.Contains(w.Message, "does not resolve") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected unresolved-target warning, got %v", e.Warnings)
+		}
+	})
+
+	t.Run("flags malformed when", func(t *testing.T) {
+		e := &Entry{
+			ID:        "20260506-000000-d-tac-foc",
+			Type:      TypeDecision,
+			Kind:      KindFocus,
+			Layer:     LayerTactical,
+			FocusWhen: &FocusWhen{From: "next-month"},
+			Involvement: []Involvement{
+				{Target: target.ID},
+			},
+		}
+		ValidateEntry(e, g)
+		if !hasWarningField(e, "when") {
+			t.Fatalf("expected when warning, got %v", e.Warnings)
+		}
+	})
+}
+
+func hasWarningField(e *Entry, field string) bool {
+	for _, w := range e.Warnings {
+		if w.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
 func TestParseEntry_InlineTopics_RejectsMembersForm(t *testing.T) {
 	// Non-annotation entry with an object-form topic item should warn (not error
 	// — preserving the load-permissive contract) and skip the offending item.

@@ -173,15 +173,27 @@ func WriteEntryFull(w io.Writer, e *model.Entry, graph *model.Graph) {
 }
 
 // writeDerivedSection writes a "Derived:" block with graph-computed attributes,
-// omitted entirely when the entry has no derived state (e.g. actions).
+// omitted entirely when the entry has no derived state (e.g. actions). Status
+// always renders when present; Topics renders when the entry has a non-empty
+// effective topic set (inline ∪ annotation memberships).
 func writeDerivedSection(w io.Writer, e *model.Entry, graph *model.Graph) {
 	status := graph.DerivedStatus(e)
-	if status.Kind == model.StatusNone {
+	topics := graph.EffectiveTopics(e)
+	if status.Kind == model.StatusNone && len(topics) == 0 {
 		return
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Derived:")
-	fmt.Fprintf(w, "  Status: %s\n", formatStatusValue(status))
+	if status.Kind != model.StatusNone {
+		fmt.Fprintf(w, "  Status: %s\n", formatStatusValue(status))
+	}
+	if len(topics) > 0 {
+		labels := make([]string, 0, len(topics))
+		for _, t := range topics {
+			labels = append(labels, t.String())
+		}
+		fmt.Fprintf(w, "  Topics: %s\n", strings.Join(labels, ", "))
+	}
 }
 
 // formatStatusValue renders a Status as a plain value (no curly braces) for
