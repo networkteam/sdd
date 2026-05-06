@@ -41,7 +41,8 @@ func (r *liveRunner) Run(ctx context.Context, req Request) (*RunResult, error) {
 func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*PreflightResult, string) {
 	t.Helper()
 	ct := selectCheckType(proposed, graph)
-	pctx := assembleContext(proposed, graph, ct)
+	// English default — the language-drift rubric only fires for non-empty locales.
+	pctx := assembleContext(proposed, graph, ct, "")
 	req, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
 		t.Fatal(err)
@@ -351,5 +352,136 @@ func TestPreflightEval_ContractViolation(t *testing.T) {
 		t.Errorf("Expected at least one high finding (contract violation), got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Correctly flagged. Findings: %+v", result.Findings)
+	}
+}
+
+func TestPreflightEval_AugmentingDirective_CleanRefinement(t *testing.T) {
+	// Positive case: a tactical directive refs an active plan and refines
+	// one of its acceptance criteria. No supersede, no close, no replacement
+	// of a core commitment — just sharpening. The augment-plan pattern
+	// (per d-prc-9ti) covers this exactly. Expected: no high finding tied to
+	// the augment-plan pattern (no demand for a backward ref on the plan, no
+	// "supersede the AC" remedy, no "scope smuggling", no "dangling commitment"
+	// on the lifecycle).
+	plan := planWithACs("20260415-100000-d-tac-pln",
+		"Migrate the user-search index from postgres trigrams to elasticsearch for better fuzzy matching.",
+		"Index ingestion runs nightly via a cron job",
+		"Search latency at p95 stays under 200ms for indexed corpora",
+		"Stale-index warnings surface in the operator dashboard",
+	)
+	graph := model.NewGraph([]*model.Entry{plan})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindDirective,
+		Refs:    []string{plan.ID},
+		Content: "The 200ms p95 latency target in d-tac-pln applies to query corpora up to 50k documents — beyond that we accept up to 350ms in the first iteration. The plan's AC stands for the bulk of expected production traffic; this directive sharpens the boundary so the closing done signal can address both regimes explicitly. Plan stays active; this directive is closed by the plan's done signal alongside the plan.",
+		Time:    time.Date(2026, 4, 15, 14, 0, 0, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if result.HasBlocking() {
+		t.Errorf("Expected no high findings (clean augmenting directive — refines an AC without superseding the plan), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly accepted augmenting directive. Findings: %+v", result.Findings)
+	}
+}
+
+func TestPreflightEval_AugmentingDirective_GenuineSupersessionFlagged(t *testing.T) {
+	// Negative case: a directive refs an active plan but rather than refining
+	// an AC, it asserts that one of the plan's commitments is wrong and should
+	// not be carried forward. This is replacement-shaped — it belongs in a
+	// supersedes operation on the plan, not an augmentation. The augment-aware
+	// template explicitly distinguishes refinement from replacement; this case
+	// must still be flagged.
+	//
+	// Expected: at least one finding mentioning supersede / replacement /
+	// AC drop. Severity may be `medium` (the directive is structurally valid;
+	// supersession is the better-fit shape) or `high` — both are correct
+	// outcomes. The regression we guard against is *no finding at all* —
+	// silently accepting a replacement-shaped directive as augmentation.
+	plan := planWithACs("20260415-100000-d-tac-pln",
+		"Migrate the user-search index from postgres trigrams to elasticsearch for better fuzzy matching.",
+		"Index ingestion runs nightly via a cron job",
+		"Search latency at p95 stays under 200ms for indexed corpora",
+		"Stale-index warnings surface in the operator dashboard",
+	)
+	graph := model.NewGraph([]*model.Entry{plan})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindDirective,
+		Refs:    []string{plan.ID},
+		Content: "The nightly cron-job AC in d-tac-pln is wrong. We will not run nightly ingestion at all — instead, ingestion will be event-driven from the source-of-truth write stream, with no scheduled runs. The dashboard stale-index warning AC also no longer applies because there is no scheduled cadence to fall behind. The plan's overall direction (move to elasticsearch) holds; the operational shape changes substantially.",
+		Time:    time.Date(2026, 4, 15, 14, 0, 0, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if !mentionsSupersession(result.Findings) {
+		t.Errorf("Expected at least one finding mentioning supersession / replacement / AC drop (directive replaces a core AC commitment — should be supersession of the plan, not augmentation), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly surfaced replacement-shape concern. Findings: %+v", result.Findings)
+	}
+}
+
+// mentionsSupersession reports whether any finding's category or observation
+// names supersession, replacement, or AC drop — the signals that the validator
+// caught a replacement-shaped directive that should belong in a supersedes
+// operation rather than an augmentation. Used by the augmenting-directive
+// negative case to allow medium-or-high severity calibration.
+func mentionsSupersession(findings []Finding) bool {
+	for _, f := range findings {
+		blob := strings.ToLower(f.Category + " " + f.Observation)
+		if strings.Contains(blob, "supersede") ||
+			strings.Contains(blob, "supersession") ||
+			strings.Contains(blob, "replacement") ||
+			strings.Contains(blob, "replaces") {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPreflightEval_AugmentingDirective_TopicFilterReconstruction(t *testing.T) {
+	// Reconstruction of the original blocked case from s-prc-vko: a tactical
+	// directive resolves topic-filter ownership across two active plans
+	// (Plan 1 ships the `topic(L)` primitive; Plan 2 consumes it). Two
+	// capture attempts at this directive were blocked at high severity by
+	// pre-flight; capture went through via --skip-preflight. With augment-
+	// aware decision_refs.tmpl, this case should produce no high findings
+	// tied to the augment-plan pattern.
+	plan1 := planWithACs("20260506-151849-d-tac-gvn",
+		"Plans the type-system expansion to 7+7 kinds by adding `kind: annotation` signal for topic clustering and `kind: focus` decision for involvement-driven planning, including CLI capture, display rendering, and pre-flight validation.",
+		"`kind: annotation` validates frontmatter shape (target, label) at capture time",
+		"`kind: focus` validates frontmatter shape (target, actors, optional date range) at capture time",
+		"`sdd list --kind annotation|focus` filters on the new kinds",
+		"`sdd list --topic <label>` filters via prefix-match on topic-path components, case-insensitive; reuses `topic(L)` filter primitive from Plan 2's shared internals",
+		"Pre-flight validates participant canonicals against active actor chain heads",
+	)
+	plan2 := planWithACs("20260506-151345-d-tac-uww",
+		"Plans implementation of `sdd view`, a new CLI command with a composable pipeline of query primitives (source, filter, transform, aggregate, rank, page, render).",
+		"Pipeline primitives in shared internal packages, callable from other CLI commands (`sdd list --topic` consumes `topic(L)` filter)",
+		"`source` primitive accepts a graph reference and emits an entry stream",
+		"`filter` primitive accepts a predicate and removes non-matching entries",
+		"`render` primitive emits a textual rendering of the streamed entries",
+	)
+	graph := model.NewGraph([]*model.Entry{plan1, plan2})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindDirective,
+		Refs:    []string{plan1.ID, plan2.ID},
+		Content: "Plan 1 (d-tac-gvn) ships the `topic(L)` filter primitive in shared internal packages as part of its `sdd list --topic` AC. Plan 2 (d-tac-uww) consumes the existing primitive rather than re-implementing it. This resolves an ambiguity in Plan 1's AC text — which described the primitive as living in Plan 2's shared internals — by clarifying ownership in Plan 1's favor, since Plan 1 is the first plan to need the primitive. Plan 1 stays active; this directive is scoped to Plan 1's AC contract and is closed by Plan 1's done signal alongside the plan.",
+		Time:    time.Date(2026, 5, 6, 15, 47, 59, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if result.HasBlocking() {
+		t.Errorf("Expected no high findings (reconstructed topic-filter ownership case — clean augmenting directive across two active plans), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly accepted reconstructed augmenting directive. Findings: %+v", result.Findings)
 	}
 }
