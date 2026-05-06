@@ -90,7 +90,6 @@ func writeEntry(t *testing.T, graphDir, id, body, summary string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return
 }
 
 func TestIndexHandler_Build(t *testing.T) {
