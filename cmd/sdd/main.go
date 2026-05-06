@@ -451,6 +451,10 @@ func newCmd() *cli.Command {
 		Name:      "new",
 		Usage:     "Create a new graph entry",
 		ArgsUsage: "<type> <layer> [description]",
+		// Disable v3's slice-flag CSV-splitting at the subcommand level too —
+		// the root toggle does not propagate to subcommands in v3, and our
+		// JSON-bearing flags (--involvement, --topic) live here.
+		DisableSliceFlagSeparator: true,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "refs",
