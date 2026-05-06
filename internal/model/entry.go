@@ -60,20 +60,21 @@ var LayerFromAbbrev = map[string]Layer{
 // Kind is a sub-type classifier carried on signals and decisions. Its allowed
 // values depend on the entry's Type:
 //
-//   - Signal kinds: gap (default), fact, question, insight, done, actor
-//   - Decision kinds: directive (default), activity, plan, contract, aspiration, role
+//   - Signal kinds: gap (default), fact, question, insight, done, actor, annotation
+//   - Decision kinds: directive (default), activity, plan, contract, aspiration, role, focus
 //
 // Empty Kind on a new entry is replaced by the type's default during capture.
 type Kind string
 
 const (
 	// Signal kinds.
-	KindGap      Kind = "gap"
-	KindFact     Kind = "fact"
-	KindQuestion Kind = "question"
-	KindInsight  Kind = "insight"
-	KindDone     Kind = "done"
-	KindActor    Kind = "actor"
+	KindGap        Kind = "gap"
+	KindFact       Kind = "fact"
+	KindQuestion   Kind = "question"
+	KindInsight    Kind = "insight"
+	KindDone       Kind = "done"
+	KindActor      Kind = "actor"
+	KindAnnotation Kind = "annotation"
 
 	// Decision kinds.
 	KindDirective  Kind = "directive"
@@ -82,16 +83,18 @@ const (
 	KindContract   Kind = "contract"
 	KindAspiration Kind = "aspiration"
 	KindRole       Kind = "role"
+	KindFocus      Kind = "focus"
 )
 
 // signalKinds is the set of kinds valid on type: signal entries.
 var signalKinds = map[Kind]bool{
-	KindGap:      true,
-	KindFact:     true,
-	KindQuestion: true,
-	KindInsight:  true,
-	KindDone:     true,
-	KindActor:    true,
+	KindGap:        true,
+	KindFact:       true,
+	KindQuestion:   true,
+	KindInsight:    true,
+	KindDone:       true,
+	KindActor:      true,
+	KindAnnotation: true,
 }
 
 // decisionKinds is the set of kinds valid on type: decision entries.
@@ -102,6 +105,7 @@ var decisionKinds = map[Kind]bool{
 	KindContract:   true,
 	KindAspiration: true,
 	KindRole:       true,
+	KindFocus:      true,
 }
 
 // IsValidKindForType reports whether k is an allowed kind for the given type.
@@ -162,7 +166,32 @@ type Entry struct {
 	// Actor is only meaningful on kind: role decisions. It names the canonical
 	// of the actor-identity chain the role binds to. Role status derives from
 	// the actor chain's canonical history (see Graph.RoleStatus).
-	Actor       string
+	Actor string
+	// Topics carries inline topic labels — valid on any non-annotation entry.
+	// Empty for kind: annotation entries (those use AnnotationTopics, which
+	// supports the richer "label or {label, members}" form). Each path is
+	// parsed and validated at load time; invalid components surface as
+	// Warnings rather than failing the parse, matching how other shape rules
+	// are handled.
+	Topics []TopicPath
+	// AnnotationTopics carries the topic assignments declared by a
+	// kind: annotation entry. Each item is either a plain label (Members nil
+	// — applies to all of the annotation's Refs) or a label with explicit
+	// member sub-selection (Members must be a subset of Refs; checked at
+	// pre-flight time).
+	AnnotationTopics []AnnotationTopic
+	// FocusActors is the focus-level default actor list (canonical-only),
+	// used for involvement triples that don't carry their own actors override.
+	// Only meaningful on kind: focus decisions.
+	FocusActors []string
+	// FocusWhen is the focus-level default temporal scope. Per-involvement
+	// `when:` overrides this; involvement without `when:` inherits this value.
+	// Only meaningful on kind: focus decisions.
+	FocusWhen *FocusWhen
+	// Involvement is the list of involvement triples on a kind: focus
+	// decision. Each triple binds a target entry to (resolved) actors and
+	// (resolved) when scope.
+	Involvement []Involvement
 	Preflight   string    // "skipped" or "error" annotation from pre-flight validation
 	Attachments []string  // filenames discovered from the co-located attachment directory
 	Summary     string    // LLM-generated summary: this entry + direct relationships
@@ -196,21 +225,43 @@ func (e *Entry) IsRole() bool {
 }
 
 // frontmatter is the YAML structure in the file header.
+//
+// Per-kind fields (Canonical/Aliases on actor; Actor on role; Topics on
+// non-annotation; AnnotationTopics on annotation; FocusActors/FocusWhen/
+// Involvement on focus) are kept on a single struct because YAML decoding
+// has no knowledge of kind at parse time. The kind-conditional shape rules
+// are enforced after the fact in ParseEntry — we let YAML decode whatever
+// is present, then route fields into the Entry based on Kind.
 type frontmatter struct {
-	Type         string   `yaml:"type"`
-	Layer        string   `yaml:"layer"`
-	Kind         string   `yaml:"kind,omitempty"`
-	Refs         []string `yaml:"refs,omitempty"`
-	Supersedes   []string `yaml:"supersedes,omitempty"`
-	Closes       []string `yaml:"closes,omitempty"`
-	Participants []string `yaml:"participants,omitempty"`
-	Confidence   string   `yaml:"confidence,omitempty"`
-	Canonical    string   `yaml:"canonical,omitempty"`
-	Aliases      []string `yaml:"aliases,omitempty"`
-	Actor        string   `yaml:"actor,omitempty"`
-	Preflight    string   `yaml:"preflight,omitempty"`
-	Summary      string   `yaml:"summary,omitempty"`
-	SummaryHash  string   `yaml:"summary_hash,omitempty"`
+	Type         string            `yaml:"type"`
+	Layer        string            `yaml:"layer"`
+	Kind         string            `yaml:"kind,omitempty"`
+	Refs         []string          `yaml:"refs,omitempty"`
+	Supersedes   []string          `yaml:"supersedes,omitempty"`
+	Closes       []string          `yaml:"closes,omitempty"`
+	Participants []string          `yaml:"participants,omitempty"`
+	Confidence   string            `yaml:"confidence,omitempty"`
+	Canonical    string            `yaml:"canonical,omitempty"`
+	Aliases      []string          `yaml:"aliases,omitempty"`
+	Actor        string            `yaml:"actor,omitempty"`
+	Topics       []AnnotationTopic `yaml:"topics,omitempty"`
+	FocusActors  []string          `yaml:"actors,omitempty"`
+	FocusWhen    *FocusWhen        `yaml:"when,omitempty"`
+	Involvement  []involvementYAML `yaml:"involvement,omitempty"`
+	Preflight    string            `yaml:"preflight,omitempty"`
+	Summary      string            `yaml:"summary,omitempty"`
+	SummaryHash  string            `yaml:"summary_hash,omitempty"`
+}
+
+// involvementYAML mirrors the on-disk shape for involvement triples. The
+// `actorsSet` flag is computed during parse based on whether the YAML
+// contained the `actors:` key at all — distinguishing "inherit focus-level
+// default" (omitted) from "deliberately empty / pull-available" (explicit
+// `actors: []`).
+type involvementYAML struct {
+	Target string     `yaml:"target"`
+	Actors *[]string  `yaml:"actors,omitempty"`
+	When   *FocusWhen `yaml:"when,omitempty"`
 }
 
 // ParseEntry parses a graph entry from its filename and file content.
@@ -237,7 +288,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		layer = Layer(fm.Layer)
 	}
 
-	return &Entry{
+	e := &Entry{
 		ID:           id,
 		Type:         entryType,
 		Layer:        layer,
@@ -250,12 +301,63 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Canonical:    fm.Canonical,
 		Aliases:      fm.Aliases,
 		Actor:        fm.Actor,
+		FocusActors:  fm.FocusActors,
+		FocusWhen:    fm.FocusWhen,
 		Preflight:    fm.Preflight,
 		Summary:      fm.Summary,
 		SummaryHash:  fm.SummaryHash,
 		Content:      strings.TrimSpace(body),
 		Time:         idParts.Time,
-	}, nil
+	}
+
+	// Route topics:[] based on kind. Annotation entries keep the rich shape
+	// (label, optional members); everything else flattens to plain labels and
+	// any members entry indicates a malformed inline use.
+	if e.IsAnnotation() {
+		e.AnnotationTopics = fm.Topics
+	} else if len(fm.Topics) > 0 {
+		paths := make([]TopicPath, 0, len(fm.Topics))
+		for _, t := range fm.Topics {
+			if len(t.Members) > 0 {
+				e.Warnings = append(e.Warnings, Warning{
+					Field:   "topics",
+					Value:   t.Label,
+					Message: fmt.Sprintf("inline topics on non-annotation entry must be plain labels; got members on %q", t.Label),
+				})
+				continue
+			}
+			p, err := ParseTopicPath(t.Label)
+			if err != nil {
+				e.Warnings = append(e.Warnings, Warning{
+					Field:   "topics",
+					Value:   t.Label,
+					Message: err.Error(),
+				})
+				continue
+			}
+			paths = append(paths, p)
+		}
+		e.Topics = paths
+	}
+
+	// Lift involvement triples into Entry.Involvement, preserving the
+	// "actors omitted vs empty" distinction.
+	if len(fm.Involvement) > 0 {
+		e.Involvement = make([]Involvement, 0, len(fm.Involvement))
+		for _, iv := range fm.Involvement {
+			out := Involvement{
+				Target: iv.Target,
+				When:   iv.When,
+			}
+			if iv.Actors != nil {
+				out.Actors = *iv.Actors
+				out.ActorsSet = true
+			}
+			e.Involvement = append(e.Involvement, out)
+		}
+	}
+
+	return e, nil
 }
 
 // IDParts holds the parsed components of a document ID.
@@ -397,9 +499,40 @@ func FormatFrontmatter(e *Entry) string {
 		Canonical:    e.Canonical,
 		Aliases:      e.Aliases,
 		Actor:        e.Actor,
+		FocusActors:  e.FocusActors,
+		FocusWhen:    e.FocusWhen,
 		Preflight:    e.Preflight,
 		Summary:      e.Summary,
 		SummaryHash:  e.SummaryHash,
+	}
+
+	// Topics: annotation entries emit AnnotationTopics verbatim (preserves
+	// the per-item string-or-mapping form via AnnotationTopic.MarshalYAML).
+	// Other kinds emit plain labels by lifting Topics into the same field
+	// shape with empty Members.
+	switch {
+	case e.IsAnnotation() && len(e.AnnotationTopics) > 0:
+		fm.Topics = e.AnnotationTopics
+	case len(e.Topics) > 0:
+		fm.Topics = make([]AnnotationTopic, 0, len(e.Topics))
+		for _, p := range e.Topics {
+			fm.Topics = append(fm.Topics, AnnotationTopic{Label: p.String()})
+		}
+	}
+
+	if len(e.Involvement) > 0 {
+		fm.Involvement = make([]involvementYAML, 0, len(e.Involvement))
+		for _, inv := range e.Involvement {
+			out := involvementYAML{
+				Target: inv.Target,
+				When:   inv.When,
+			}
+			if inv.ActorsSet {
+				actors := inv.Actors
+				out.Actors = &actors
+			}
+			fm.Involvement = append(fm.Involvement, out)
+		}
 	}
 
 	data, _ := yaml.Marshal(&fm)
