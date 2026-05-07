@@ -995,6 +995,204 @@ func TestView_AllFiltersCompose(t *testing.T) {
 	}
 }
 
+// --- Slice 5: group(by(field)) + as-grouped ---
+
+func TestView_GroupByKind_AsGrouped(t *testing.T) {
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	dir1 := entry("20260101-110000-d-tac-da1", withKind(model.KindDirective))
+	dir2 := entry("20260101-120000-d-tac-da2", withKind(model.KindDirective))
+	gap := entry("20260101-130000-s-tac-gap", withKind(model.KindGap))
+	g := model.NewGraph([]*model.Entry{plan, dir1, dir2, gap})
+
+	layout := mustParseLayout(t, "group(by(kind)):as-grouped")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+
+	section := result.Sections[0]
+	if section.Render != "as-grouped" {
+		t.Errorf("render: got %q, want as-grouped", section.Render)
+	}
+	grouped, ok := section.Data.(model.Grouped)
+	if !ok {
+		t.Fatalf("section data: got %T, want model.Grouped", section.Data)
+	}
+	if grouped.Field != "kind" {
+		t.Errorf("Field: got %q, want kind", grouped.Field)
+	}
+
+	// Alphabetical group order: directive, gap, plan.
+	wantKeys := []string{"directive", "gap", "plan"}
+	gotKeys := make([]string, len(grouped.Groups))
+	for i, gr := range grouped.Groups {
+		gotKeys[i] = gr.Key
+	}
+	if !equalStrings(gotKeys, wantKeys) {
+		t.Errorf("group keys:\n  got:  %v\n  want: %v", gotKeys, wantKeys)
+	}
+
+	// Within-group order is input order — dir1 before dir2.
+	directiveGroup := grouped.Groups[0]
+	if got, want := idsOf(directiveGroup.Entries), []string{dir1.ID, dir2.ID}; !equalIDs(got, want) {
+		t.Errorf("directive entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_GroupByKind_ComposesWithKindFilter(t *testing.T) {
+	// The decisions macro shape: filter to specific kinds, then group by kind.
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	directive := entry("20260101-110000-d-tac-dir", withKind(model.KindDirective))
+	gap := entry("20260101-120000-s-tac-gap", withKind(model.KindGap))
+	g := model.NewGraph([]*model.Entry{plan, directive, gap})
+
+	layout := mustParseLayout(t, "kind(plan,directive):group(by(kind)):as-grouped")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+
+	grouped := result.Sections[0].Data.(model.Grouped)
+	wantKeys := []string{"directive", "plan"}
+	gotKeys := make([]string, len(grouped.Groups))
+	for i, gr := range grouped.Groups {
+		gotKeys[i] = gr.Key
+	}
+	if !equalStrings(gotKeys, wantKeys) {
+		t.Errorf("group keys:\n  got:  %v\n  want: %v", gotKeys, wantKeys)
+	}
+}
+
+func TestView_GroupRequiresByMarker(t *testing.T) {
+	// Per d-tac-3pq: group's argument must be the nested marker call by(<field>),
+	// not a bare identifier or string. Slice 5 is strict about this so the
+	// nested-form contract surfaces clearly to users.
+	g := model.NewGraph(nil)
+	cases := []string{
+		"group():as-grouped",
+		"group(kind):as-grouped",
+		`group("kind"):as-grouped`,
+	}
+	for _, layoutSrc := range cases {
+		t.Run(layoutSrc, func(t *testing.T) {
+			f := New(Options{})
+			_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, layoutSrc)})
+			if err == nil {
+				t.Fatalf("expected error for %q, got nil", layoutSrc)
+			}
+			if !strings.Contains(err.Error(), "by(") {
+				t.Errorf("error %q must mention by(<field>)", err.Error())
+			}
+		})
+	}
+}
+
+func TestView_GroupRequiresFieldArg(t *testing.T) {
+	// by() with no inner argument is a clear user mistake — error rather
+	// than silently grouping into a single empty-key bucket.
+	g := model.NewGraph(nil)
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "group(by()):as-grouped")})
+	if err == nil {
+		t.Fatalf("expected error for group(by()), got nil")
+	}
+}
+
+func TestView_GroupRejectsUnknownField(t *testing.T) {
+	g := model.NewGraph(nil)
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "group(by(summary)):as-grouped")})
+	if err == nil {
+		t.Fatalf("expected error for unknown field 'summary', got nil")
+	}
+	for _, want := range []string{"summary", "kind", "layer", "type"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestView_AsGroupedWithoutGroup_ShapeMismatch(t *testing.T) {
+	// as-grouped expects a Grouped result; without a group() call the
+	// section produces a flat list — this is the AC 16 render-shape
+	// mismatch error fired for the first time.
+	g := model.NewGraph(nil)
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "as-grouped")})
+	if err == nil {
+		t.Fatalf("expected render-shape mismatch error, got nil")
+	}
+	for _, want := range []string{"as-grouped", "flat", "group("} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestView_GroupWithAsList_ShapeMismatch(t *testing.T) {
+	// Symmetric mismatch: group(...) followed by as-list — grouped result,
+	// flat-shape render. Same listed-valid-set guidance.
+	g := model.NewGraph(nil)
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "group(by(kind)):as-list")})
+	if err == nil {
+		t.Fatalf("expected render-shape mismatch error, got nil")
+	}
+	for _, want := range []string{"as-list", "grouped"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestView_GroupExclusiveWithRank(t *testing.T) {
+	// Slice 5 doesn't sort within groups — combining group() with rank()
+	// errors clearly. Per-group ranking is reserved for a future slice.
+	g := model.NewGraph(nil)
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "group(by(kind)):rank(in-degree):as-grouped")})
+	if err == nil {
+		t.Fatalf("expected error for group + rank, got nil")
+	}
+	if !strings.Contains(err.Error(), "rank") || !strings.Contains(err.Error(), "group") {
+		t.Errorf("error %q must mention both group and rank", err.Error())
+	}
+}
+
+func TestView_GroupExclusiveWithN(t *testing.T) {
+	// Same reasoning for n() — the meaning of "first N entries" across
+	// groups is ambiguous in slice 5; clear error rather than guessing.
+	g := model.NewGraph(nil)
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "group(by(kind)):n(5):as-grouped")})
+	if err == nil {
+		t.Fatalf("expected error for group + n, got nil")
+	}
+	if !strings.Contains(err.Error(), "n") || !strings.Contains(err.Error(), "group") {
+		t.Errorf("error %q must mention both group and n", err.Error())
+	}
+}
+
+func TestView_GroupAsGroupedKnownInUnknownErr(t *testing.T) {
+	// Unknown function error must list group and as-grouped after slice 5
+	// so the listed-valid-set message stays accurate as the vocabulary
+	// grows.
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "futurefn:as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	for _, want := range []string{"group", "as-grouped"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
 // helpers
 
 func mustParseLayout(t *testing.T, s string) model.Layout {

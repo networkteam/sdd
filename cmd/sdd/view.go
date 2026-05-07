@@ -62,8 +62,15 @@ Currently implemented vocabulary (more arrives in later slices):
   Page:
     n(N)                   Take first N entries (after filtering and ranking)
 
+  Aggregate:
+    group(by(<field>))     Bucket entries by a frontmatter field. Field is one
+                           of kind, layer, type. Buckets emit alphabetically.
+                           Mutually exclusive with rank() and n() in this slice.
+
   Render:
     as-list                One line per entry (terminator)
+    as-grouped             One ### header per group, then entry lines (terminator;
+                           requires a preceding group(by(<field>)))
 
 Examples:
 
@@ -94,6 +101,13 @@ Examples:
 
   sdd view --layout=topic("infrastructure/cli"):rank(by(date)):n(20):as-list
     Most recent 20 entries tagged anywhere under infrastructure/cli.
+
+  sdd view --layout=active:kind(plan,directive,activity,contract,aspiration):group(by(kind)):as-grouped
+    Active decisions grouped by kind — close to the decisions section in the
+    catch-up macros (slice 6 wraps this as the named macro).
+
+  sdd view --layout=active:kind(gap,question):group(by(kind)):as-grouped
+    Active signals grouped by kind — open gaps and questions, side by side.
 
 See the d-tac-uww plan for the full grammar; primitives not yet implemented
 return a clear "unknown function" error listing what is available.

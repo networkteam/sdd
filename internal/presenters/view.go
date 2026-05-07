@@ -35,5 +35,11 @@ func renderSection(w io.Writer, g *model.Graph, section query.SectionResult) {
 			return
 		}
 		renderAsList(w, g, flat)
+	case "as-grouped":
+		grouped, ok := section.Data.(model.Grouped)
+		if !ok {
+			return
+		}
+		renderAsGrouped(w, g, grouped)
 	}
 }

@@ -125,6 +125,69 @@ func TestRenderView_RankedAsList(t *testing.T) {
 	}
 }
 
+func TestRenderView_AsGrouped(t *testing.T) {
+	plan := entry("20260101-100000-d-tac-pln",
+		withKind(model.KindPlan),
+		withParticipants("Christopher"),
+		withSummary("Plan entry"))
+	dir1 := entry("20260101-110000-d-tac-da1",
+		withKind(model.KindDirective),
+		withParticipants("Christopher"),
+		withSummary("Directive one"))
+	dir2 := entry("20260101-120000-d-tac-da2",
+		withKind(model.KindDirective),
+		withParticipants("Christopher"),
+		withSummary("Directive two"))
+	g := model.NewGraph([]*model.Entry{plan, dir1, dir2})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-grouped",
+			Data: model.Grouped{
+				Field: "kind",
+				Groups: []model.Group{
+					{Key: "directive", Entries: []*model.Entry{dir1, dir2}},
+					{Key: "plan", Entries: []*model.Entry{plan}},
+				},
+			},
+		}},
+	}
+
+	got := renderView(result)
+	// Per group: a `### <key>` header, then entry lines, then a blank
+	// line. No `## ...` for the section as a whole — the `name(...)`
+	// modifier (slice 6) is what supplies the section title.
+	want := "" +
+		"### directive\n" +
+		"  20260101-110000-d-tac-da1 tactical directive decision (Christopher) {status: active} Directive one\n" +
+		"  20260101-120000-d-tac-da2 tactical directive decision (Christopher) {status: active} Directive two\n" +
+		"\n" +
+		"### plan\n" +
+		"  20260101-100000-d-tac-pln tactical plan decision (Christopher) {status: active} Plan entry\n"
+
+	if got != want {
+		t.Errorf("RenderView grouped mismatch:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestRenderView_AsGroupedEmpty(t *testing.T) {
+	// A grouped result with zero groups (e.g. all entries filtered away
+	// before group()) renders as nothing — same as as-list with no entries.
+	g := model.NewGraph(nil)
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-grouped",
+			Data:   model.Grouped{Field: "kind"},
+		}},
+	}
+	got := renderView(result)
+	if got != "" {
+		t.Errorf("RenderView empty grouped: got %q, want empty string", got)
+	}
+}
+
 func TestRenderView_UnrankedAsList_NoScoreSegment(t *testing.T) {
 	// FlatList without Scores should render plain EntryLine output —
 	// no score segment. Belt-and-suspenders against the scored branch
