@@ -57,6 +57,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `layer(L)` | Entries at layer L (`stg`, `cpt`, `tac`, `ops`, `prc`; full names also accepted) |
 | `since(spec)` | ISO date `YYYY-MM-DD` or duration `Nd|Nw|Nm|Ny`. Quoted string. m/y use calendar arithmetic; d/w use 24h offsets |
 | `topic(L)` | Entries whose effective topic set has L as a component-wise prefix (case-insensitive) |
+| `not(<filter>)` | Excludes entries matched by the inner filter. Supported inner: `kind`, `layer`, `topic` |
 
 ### Rank, page, output, transforms
 
@@ -155,6 +156,9 @@ sdd view --layout='wip'
 
 sdd view --layout='top(10):rank(heat(exp-7d)):name("Hot last week"),top(10):rank(heat(exp-30d)):name("Hot last month")'
 # Two side-by-side top-10s with explicit headers
+
+sdd view --layout='top(20):not(kind(contract,aspiration))'
+# Top 20 by heat, excluding standing entries that anchor by structure
 ```
 
 ## `sdd show` output format

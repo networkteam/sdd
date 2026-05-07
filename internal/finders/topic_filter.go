@@ -48,3 +48,20 @@ func (f TopicFilter) FilterEntries(g *model.Graph, entries []*model.Entry) []*mo
 	}
 	return out
 }
+
+// ExcludeEntries returns the subset of entries whose effective topic set
+// does NOT match the prefix. Mirror of FilterEntries for the
+// not(topic(...)) negation primitive (d-tac-e1s). A zero prefix is
+// treated as "no exclusion" — every entry passes through unchanged.
+func (f TopicFilter) ExcludeEntries(g *model.Graph, entries []*model.Entry) []*model.Entry {
+	if f.Prefix.IsZero() {
+		return entries
+	}
+	var out []*model.Entry
+	for _, e := range entries {
+		if !f.MatchEntry(g, e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}

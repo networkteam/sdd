@@ -1549,6 +1549,207 @@ func TestView_GroupAsGroupedKnownInUnknownErr(t *testing.T) {
 	}
 }
 
+// --- d-tac-e1s: not(<filter>) negation primitive ---
+
+func TestView_NotKind_ExcludesKinds(t *testing.T) {
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	directive := entry("20260101-110000-d-tac-dir", withKind(model.KindDirective))
+	contract := entry("20260101-120000-d-cpt-con", withKind(model.KindContract))
+	aspiration := entry("20260101-130000-d-stg-asp", withKind(model.KindAspiration))
+	g := model.NewGraph([]*model.Entry{plan, directive, contract, aspiration})
+
+	layout := mustParseLayout(t, "not(kind(contract,aspiration)):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{plan.ID, directive.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_NotKind_ComposesWithPositiveKind(t *testing.T) {
+	// Positive kind() includes ∩ negative not(kind()) excludes — the
+	// expected pattern for a top(N) catch-up that wants only actionable
+	// decisions but not standing ones.
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	directive := entry("20260101-110000-d-tac-dir", withKind(model.KindDirective))
+	contract := entry("20260101-120000-d-cpt-con", withKind(model.KindContract))
+	aspiration := entry("20260101-130000-d-stg-asp", withKind(model.KindAspiration))
+	gap := entry("20260101-140000-s-tac-gap", withKind(model.KindGap))
+	g := model.NewGraph([]*model.Entry{plan, directive, contract, aspiration, gap})
+
+	layout := mustParseLayout(t, "kind(plan,directive,contract,aspiration):not(kind(contract,aspiration)):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{plan.ID, directive.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_NotKind_MultipleCallsUnion(t *testing.T) {
+	// Multiple not(kind(...)) calls union their exclusion sets — not(kind(A,B)):not(kind(C))
+	// drops kinds A, B, and C.
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	contract := entry("20260101-110000-d-cpt-con", withKind(model.KindContract))
+	aspiration := entry("20260101-120000-d-stg-asp", withKind(model.KindAspiration))
+	annotation := entry("20260101-130000-s-cpt-ann", withKind(model.KindAnnotation))
+	g := model.NewGraph([]*model.Entry{plan, contract, aspiration, annotation})
+
+	layout := mustParseLayout(t, "not(kind(contract,aspiration)):not(kind(annotation)):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{plan.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_NotLayer_ExcludesLayer(t *testing.T) {
+	stg := entry("20260101-100000-d-stg-aaa", withKind(model.KindAspiration))
+	cpt := entry("20260101-110000-d-cpt-bbb", withKind(model.KindContract))
+	tac := entry("20260101-120000-d-tac-ccc", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{stg, cpt, tac})
+
+	layout := mustParseLayout(t, "not(layer(stg)):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{cpt.ID, tac.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_NotTopic_ExcludesTopic(t *testing.T) {
+	// not(topic(L)) drops entries whose effective topic set has L as a
+	// component-wise prefix; the comparison topic-filter test covers
+	// component-wise semantics, this one covers the inverse selection.
+	infra := &model.Entry{
+		ID:     "20260101-100000-d-tac-aaa",
+		Type:   model.TypeDecision,
+		Layer:  model.LayerTactical,
+		Kind:   model.KindDirective,
+		Topics: []model.TopicPath{mustParseTopic(t, "infrastructure/cli")},
+	}
+	other := &model.Entry{
+		ID:     "20260101-110000-d-tac-bbb",
+		Type:   model.TypeDecision,
+		Layer:  model.LayerTactical,
+		Kind:   model.KindDirective,
+		Topics: []model.TopicPath{mustParseTopic(t, "type-system/kinds")},
+	}
+	untagged := &model.Entry{
+		ID:    "20260101-120000-d-tac-ccc",
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindDirective,
+	}
+	g := model.NewGraph([]*model.Entry{infra, other, untagged})
+
+	layout := mustParseLayout(t, `not(topic("infrastructure")):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{other.ID, untagged.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_Not_RejectsUnsupportedInner(t *testing.T) {
+	// active, since, and nested not are deferred / disallowed for d-tac-e1s.
+	// Each surface variants in one table-driven test so the supported-set
+	// error is exercised uniformly.
+	g := model.NewGraph(nil)
+	cases := []struct {
+		layout string
+		hint   string
+	}{
+		{"not(active):as-list", "active"},
+		{`not(since("7d")):as-list`, "since"},
+		{"not(not(kind(plan))):as-list", "nested"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.hint, func(t *testing.T) {
+			layout := mustParseLayout(t, tc.layout)
+			f := New(Options{})
+			_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			// Error message must list the supported inner set so users
+			// see what's available rather than guessing.
+			for _, want := range []string{"kind", "layer", "topic"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q missing supported-inner %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+func TestView_Not_ArityErrors(t *testing.T) {
+	// Zero or multiple arguments on not() are clear user mistakes; the
+	// error must point at the canonical example shape.
+	g := model.NewGraph(nil)
+	cases := []string{
+		"not():as-list",
+		"not(kind(plan),kind(directive)):as-list",
+	}
+	for _, layoutStr := range cases {
+		t.Run(layoutStr, func(t *testing.T) {
+			layout := mustParseLayout(t, layoutStr)
+			f := New(Options{})
+			_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "exactly one filter argument") {
+				t.Errorf("error %q does not name the arity contract", err.Error())
+			}
+		})
+	}
+}
+
+func TestView_Not_RegisteredInKnownFunctions(t *testing.T) {
+	// Misspellings like nott(...) must produce the unknown-function error
+	// listing not as available — the AC against shadow misspellings.
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "nott(kind(plan)):as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not") {
+		t.Errorf("known-functions list must contain 'not'; error was: %v", err)
+	}
+}
+
 // helpers
 
 func mustParseLayout(t *testing.T, s string) model.Layout {

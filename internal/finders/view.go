@@ -106,7 +106,13 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "kind", "layer", "since", "topic", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "kind", "layer", "since", "topic", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-focus-block", "as-participants-block", "as-wip-list"}
+
+// supportedNotInner lists the inner filter names accepted by `not(<inner>)`
+// in d-tac-e1s's first cut. Pure set-shaped filters with unambiguous
+// inverse semantics. active and since are deferred (closed-vs-superseded
+// distinction, future-vs-past cutoff direction); nested not is rejected.
+var supportedNotInner = []string{"kind", "layer", "topic"}
 
 // knownSources is the user-facing list of valid `source(<name>)` arguments,
 // shown in the unknown-source error message. Mirrors the data-source
@@ -215,11 +221,20 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	for _, kinds := range spec.kindFilters {
 		entries = filterByKinds(entries, kinds)
 	}
+	if len(spec.excludeKinds) > 0 {
+		entries = excludeByKinds(entries, spec.excludeKinds)
+	}
+	if spec.excludeLayer != "" {
+		entries = excludeByLayer(entries, spec.excludeLayer)
+	}
 	if spec.sinceCutoff != nil {
 		entries = filterBySince(entries, *spec.sinceCutoff)
 	}
 	if !spec.topicPrefix.IsZero() {
 		entries = TopicFilter{Prefix: spec.topicPrefix}.FilterEntries(g, entries)
+	}
+	if !spec.excludeTopicPrefix.IsZero() {
+		entries = TopicFilter{Prefix: spec.excludeTopicPrefix}.ExcludeEntries(g, entries)
 	}
 	var scores []float64
 	if spec.rank != nil {
@@ -352,6 +367,11 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 			return fmt.Errorf("topic: %w", err)
 		}
 		spec.topicPrefix = path
+
+	case fn.Name == "not":
+		if err := parseNotArgs(spec, fn.Args); err != nil {
+			return fmt.Errorf("not: %w", err)
+		}
 
 	case fn.Name == "rank":
 		rank, err := parseRankArg(fn.Args)
@@ -646,4 +666,99 @@ func filterByKinds(entries []*model.Entry, kinds []model.Kind) []*model.Entry {
 		}
 	}
 	return out
+}
+
+// excludeByKinds returns entries whose Kind is NOT in the exclusion set.
+// Mirror of filterByKinds for the not(kind(...)) negation primitive.
+func excludeByKinds(entries []*model.Entry, kinds []model.Kind) []*model.Entry {
+	if len(kinds) == 0 {
+		return entries
+	}
+	set := make(map[model.Kind]struct{}, len(kinds))
+	for _, k := range kinds {
+		set[k] = struct{}{}
+	}
+	var out []*model.Entry
+	for _, e := range entries {
+		if _, ok := set[e.Kind]; !ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// excludeByLayer returns entries that are NOT at the given layer. Mirror
+// of the positive layer() filter for the not(layer(...)) primitive.
+func excludeByLayer(entries []*model.Entry, layer model.Layer) []*model.Entry {
+	if layer == "" {
+		return entries
+	}
+	var out []*model.Entry
+	for _, e := range entries {
+		if e.Layer != layer {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// parseNotArgs validates a `not(<inner-filter>)` call and dispatches the
+// inner filter into the corresponding exclusion slot on spec. The argument
+// must be exactly one nested function call whose name is in the supported
+// inner set (kind, layer, topic). Active, since, and nested not are
+// rejected with the listed-supported-set error so users see what's
+// available rather than guessing.
+func parseNotArgs(spec *sectionSpec, args []model.FunctionArg) error {
+	if len(args) != 1 {
+		return fmt.Errorf("requires exactly one filter argument, e.g. not(kind(contract,aspiration))")
+	}
+	a := args[0]
+	if a.Kind != model.ArgKindFunc || a.Func == nil {
+		// A bare identifier (e.g. not(active)) lands here too — the parser
+		// treats names without parens as idents. Surface the supported-
+		// inner set in the same message so users see what's accepted
+		// regardless of which shape they tried.
+		return fmt.Errorf("argument must be a filter call (e.g. not(kind(contract,aspiration))); supported inner: %s", strings.Join(supportedNotInner, ", "))
+	}
+	inner := *a.Func
+	switch inner.Name {
+	case "kind":
+		kinds, err := parseKindArgs(inner.Args)
+		if err != nil {
+			return fmt.Errorf("kind: %w", err)
+		}
+		// Multiple not(kind(...)) calls union their exclusion sets — the
+		// flat slice captures every kind to drop, regardless of how many
+		// not() calls contributed which kinds.
+		spec.excludeKinds = append(spec.excludeKinds, kinds...)
+	case "layer":
+		if len(inner.Args) != 1 {
+			return fmt.Errorf("layer: requires exactly one argument (e.g. not(layer(stg)))")
+		}
+		s, err := argString(inner.Args[0])
+		if err != nil {
+			return fmt.Errorf("layer: %w", err)
+		}
+		if abbrev, ok := model.LayerFromAbbrev[s]; ok {
+			spec.excludeLayer = abbrev
+		} else {
+			spec.excludeLayer = model.Layer(s)
+		}
+	case "topic":
+		if len(inner.Args) != 1 {
+			return fmt.Errorf("topic: requires exactly one argument (e.g. not(topic(\"infrastructure/cli\")))")
+		}
+		s, err := argString(inner.Args[0])
+		if err != nil {
+			return fmt.Errorf("topic: %w", err)
+		}
+		path, err := model.ParseTopicPath(s)
+		if err != nil {
+			return fmt.Errorf("topic: %w", err)
+		}
+		spec.excludeTopicPrefix = path
+	default:
+		return fmt.Errorf("unsupported inner filter %q (supported: %s)", inner.Name, strings.Join(supportedNotInner, ", "))
+	}
+	return nil
 }

@@ -35,6 +35,19 @@ type sectionSpec struct {
 	groupField  string    // empty = no group; non-empty = group(by(<field>))
 	expandField string    // empty = no expand; non-empty = expand(<field>) (slice 7: only "involvement")
 
+	// Negation slots — populated by `not(<inner-filter>)` calls per
+	// d-tac-e1s. Each slot mirrors the semantic of its positive
+	// counterpart's storage:
+	//   excludeKinds       — flat union (multiple not(kind()) calls union
+	//                        their exclusion sets)
+	//   excludeLayer       — last-write-wins (mirrors positive layer())
+	//   excludeTopicPrefix — last-write-wins (mirrors positive topic())
+	// Inner filters active and since are deferred (semantic edge cases);
+	// nested not(not(...)) is rejected at parse time.
+	excludeKinds       []model.Kind
+	excludeLayer       model.Layer
+	excludeTopicPrefix model.TopicPath
+
 	// Focus-block-only knob.
 	stalledThreshold float64
 	stalledSet       bool // user-supplied threshold via stalled(value)
@@ -91,6 +104,12 @@ func (s *sectionSpec) rejectGraphPrimitivesForWip() error {
 		return fmt.Errorf("source(wip) does not support expand(); markers have no involvement field")
 	case s.stalledSet:
 		return fmt.Errorf("source(wip) does not support stalled(); the threshold applies only to focus-block sections")
+	case len(s.excludeKinds) > 0:
+		return fmt.Errorf("source(wip) does not support not(kind(...)); markers are not graph entries")
+	case s.excludeLayer != "":
+		return fmt.Errorf("source(wip) does not support not(layer(...)); markers are not graph entries")
+	case !s.excludeTopicPrefix.IsZero():
+		return fmt.Errorf("source(wip) does not support not(topic(...)); markers do not carry topics")
 	}
 	return nil
 }
