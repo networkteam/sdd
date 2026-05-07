@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: b2d6a5c629f983e6205ecd31a804f1a8204ec0747672e4792792bb82abf95e1a
+sdd-content-hash: 22ce966a3d0d8498fa93437fa9672e2fecaa38bd22743c143d31c48c3f329a3f
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -61,6 +61,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `layer(L)` | Entries at layer L (`stg`, `cpt`, `tac`, `ops`, `prc`; full names also accepted) |
 | `since(spec)` | ISO date `YYYY-MM-DD` or duration `Nd|Nw|Nm|Ny`. Quoted string. m/y use calendar arithmetic; d/w use 24h offsets |
 | `topic(L)` | Entries whose effective topic set has L as a component-wise prefix (case-insensitive) |
+| `not(<filter>)` | Excludes entries matched by the inner filter. Supported inner: `kind`, `layer`, `topic` |
 
 ### Rank, page, output, transforms
 
@@ -159,6 +160,9 @@ sdd view --layout='wip'
 
 sdd view --layout='top(10):rank(heat(exp-7d)):name("Hot last week"),top(10):rank(heat(exp-30d)):name("Hot last month")'
 # Two side-by-side top-10s with explicit headers
+
+sdd view --layout='top(20):not(kind(contract,aspiration))'
+# Top 20 by heat, excluding standing entries that anchor by structure
 ```
 
 ## `sdd show` output format
