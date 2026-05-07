@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 24c9a42fb034dd887b4b5edd4103a827d38236e9d288985ec2a46f206869dab7
+sdd-content-hash: 1a990491951362c23fc261e554633d0d20c2cdb2b6b5760af68c4da1411e3965
 sdd-version: dev
 ---
 # SDD Meta Process
@@ -25,7 +25,7 @@ A session can move fluidly between these modes:
 
 **Decide**: Open signals or tensions need resolution. Summarize the relevant signals, discuss options, capture the decision with confidence level and refs.
 
-**Act/Implement**: A decision exists and it's time to execute. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. Decompose into operational sub-decisions. Capture a done signal against each when complete. Know when to stop and evaluate.
+**Engage**: A session anchors on a graph entry to explore, implement, evaluate, or otherwise act on it. Before acting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. Decompose into operational sub-decisions. Capture a done signal against each when complete. Know when to stop and evaluate.
 
 ## Capture Guidelines
 
