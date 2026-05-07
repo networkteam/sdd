@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 8d9279c3bf1f1d3d3df1932079879b3f36508d936a2b89eadf55c31aa0c78f08
+sdd-content-hash: b2d6a5c629f983e6205ecd31a804f1a8204ec0747672e4792792bb82abf95e1a
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -142,8 +142,10 @@ sdd view --layout='top(20)'
 # Twenty most-warm active entries (catch-up "what's hot")
 
 sdd view --layout='focus,top(15)'
-# Active focuses with state-derived involvement, then top-15 by heat
-# excluding focus targets (layout-level dedup via AC 13)
+# Active focuses with state-derived involvement, then top-15 by heat.
+# Sections render independently — an entry in both the focus block and
+# the top list appears in both (cross-section dedup is an open design
+# question; sections currently render fully on their own information).
 
 sdd view --layout='decisions,signals,participants'
 # Three sections: kind-grouped decisions, kind-grouped signals,
