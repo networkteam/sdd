@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 1cebf3ab308a9618b227afe2b6f01f2d9f7e10d59b3ab62a14e16507206dbba2
+sdd-content-hash: ba16dec478414202be024df37508c417d1a3e3c6c4eb5fc5470f4bbcebdb1815
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -7,6 +7,7 @@ sdd-version: dev
 ## Commands
 
 - `sdd status` — overview grouped by decision kind (Aspirations, Contracts, Plans, Activities, Directives), plus Gaps and Questions, Recent Insights, and Recent Done Signals (uses summaries)
+- `sdd view --layout=<spec>` — composable pipeline of primitives (source, filter, transform, aggregate, rank, page, render) with named macros as sugar. Mechanical catch-up at scale; bare `sdd view` prints help with vocabulary tables. See "`sdd view` pipeline" below.
 - `sdd show <id>` — full entry with upstream summary chain (depth-limited)
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
 - `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
@@ -31,6 +32,117 @@ Every argument that takes an entry ID — positional args on `sdd show`, `sdd su
 - **Short ID** (e.g. `d-prc-oka`, shape `{type}-{layer}-{suffix}`) — human convenience. Resolves to the full ID when the suffix uniquely identifies an entry. Ambiguous short IDs exit non-zero and list all matching full IDs.
 
 Short IDs are fine in user-facing narrative (catch-up tables, grooming summaries, dialogue). Never substitute them for full IDs in CLI calls you construct — a suffix collision would break the call later when the graph grows.
+
+## `sdd view` pipeline
+
+`sdd view` runs a layout pipeline over the graph. Each section is a colon-chained sequence of function calls; multiple sections separate with commas. Render is always the section's terminator. Filters intersect cumulatively; non-filter modifiers (rank, page, name, render) apply last-write-wins per kind.
+
+```
+layout    := entry ("," entry)*
+entry     := func (":" func)*
+func      := name ("(" arg-list? ")")?
+```
+
+Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,directive)`. Nested calls let algorithms carry decay: `rank(heat(exp-14d))`. Strings use quotes: `topic("infrastructure/cli")`. No whitespace anywhere except inside quoted strings.
+
+### Sources
+
+| Function | Semantics |
+|---|---|
+| `source(graph)` | All graph entries (default if omitted) |
+| `source(wip)` | Active WIP markers from `.sdd/graph/wip/`. Disjoint vocabulary — only `name()` and `as-wip-list` compose; graph-side primitives error |
+
+### Filters (graph source)
+
+| Function | Semantics |
+|---|---|
+| `active` | Entries not closed and not superseded |
+| `kind(K[, K2, ...])` | Disjunction within one filter; multiple `kind()` calls intersect |
+| `layer(L)` | Entries at layer L (`stg`, `cpt`, `tac`, `ops`, `prc`; full names also accepted) |
+| `since(spec)` | ISO date `YYYY-MM-DD` or duration `Nd|Nw|Nm|Ny`. Quoted string. m/y use calendar arithmetic; d/w use 24h offsets |
+| `topic(L)` | Entries whose effective topic set has L as a component-wise prefix (case-insensitive) |
+
+### Rank, page, output, transforms
+
+| Function | Semantics |
+|---|---|
+| `rank(<algorithm>)` | Sort by computed score, descending. Adds `{score: X.XXX}` to rendered entries |
+| `n(N)` | Take first N entries (after filtering and ranking) |
+| `name(<string>)` | Override section header. Last call wins; `name("")` clears any prior name |
+| `expand(involvement)` | Per row, explode involvement triples into focus-block sub-rows (focus-block only) |
+| `group(by(<field>))` | Bucket entries by field; produces grouped shape (consume with `as-grouped`) |
+| `stalled(<value>)` | Threshold below which a focus target with assigned actors is "stalled" (default 1.0) |
+
+### Algorithms (used inside `rank(...)`)
+
+| Algorithm | Formula |
+|---|---|
+| `heat(decay)` | Σ over incoming refs of decay(age). Default decay: `exp-14d` |
+| `in-degree` | Raw count of incoming refs (decay arg ignored) |
+| `mult(decay)` | `heat(decay) × in-degree` |
+| `add(decay)` | `heat(decay) + in-degree` |
+| `log(decay)` | `heat(decay) × log(1 + in-degree)` |
+| `by(date)` | Sort by entry creation timestamp (no scores) |
+
+### Decay names (used inside algorithm calls)
+
+| Name | Formula |
+|---|---|
+| `exp-{7,14,30}d` | `2^(-age_days/N)` — half-life every N days |
+| `linear-{7,14,30}d` | `max(0, 1 - age_days/N)` — zero past N days |
+| `none` | `1` (no age effect) |
+
+### Render terminators
+
+| Render | Input shape |
+|---|---|
+| `as-list` | Flat list — one line per entry. Auto-derives header from rank when no `name()` (e.g. "Top by heat (exp-14d)", "Most recent" for by(date)) |
+| `as-grouped` | Grouped result (requires `group(by(<field>))`); one `### <bucket>` per group |
+| `as-focus-block` | Focus-block result (requires `kind(focus):active:expand(involvement)`); per-focus header + per-target lines tagged `{state: pull-available|stalled|driving}` |
+| `as-participants-block` | Active actor heads + bound active roles (requires `kind(actor):active`); one `### <canonical>` per actor with bound role entries underneath |
+| `as-wip-list` | WIP marker rows (requires `source(wip)`) |
+
+### Macros
+
+| Macro | Expansion |
+|---|---|
+| `top(N)` | `active:n(N):rank(heat(exp-14d)):as-list` |
+| `topic(L)` | `topic(L):rank(heat(exp-14d)):as-list` |
+| `focus` | `kind(focus):active:expand(involvement):as-focus-block` |
+| `decisions` | `active:kind(plan,directive,activity,contract,aspiration):group(by(kind)):as-grouped` |
+| `signals` | `active:kind(gap,question):group(by(kind)):as-grouped` |
+| `insights` | `active:kind(insight):since("30d"):rank(by(date)):as-list` |
+| `done` | `kind(done):since("30d"):rank(by(date)):as-list` |
+| `aspirations` | `active:kind(aspiration):as-list` |
+| `contracts` | `active:kind(contract):as-list` |
+| `participants` | `active:kind(actor):as-participants-block` |
+| `wip` | `source(wip):as-wip-list` |
+
+User modifiers append after macro expansion and resolve via last-write-wins, so `top(20):rank(in-degree)` overrides the macro's default rank.
+
+### Worked examples
+
+```bash
+sdd view --layout='top(20)'
+# Twenty most-warm active entries (catch-up "what's hot")
+
+sdd view --layout='focus,top(15)'
+# Active focuses with state-derived involvement, then top-15 by heat
+# excluding focus targets (layout-level dedup via AC 13)
+
+sdd view --layout='decisions,signals,participants'
+# Three sections: kind-grouped decisions, kind-grouped signals,
+# active actor canonicals with bound roles
+
+sdd view --layout='topic(catch-up-scaling):rank(heat):n(10):as-list'
+# Top 10 entries clustered under catch-up-scaling, ranked by heat
+
+sdd view --layout='wip'
+# Active WIP markers (just source(wip):as-wip-list under the hood)
+
+sdd view --layout='top(10):rank(heat(exp-7d)):name("Hot last week"),top(10):rank(heat(exp-30d)):name("Hot last month")'
+# Two side-by-side top-10s with explicit headers
+```
 
 ## `sdd show` output format
 
