@@ -244,6 +244,15 @@ func main() {
 			// any failure logs at Debug and does not affect the command.
 			if cmd.Args().First() != "init" {
 				runSyncCheck(ctx)
+				// Participant-missing nudge (AC 8): one-line stderr
+				// warning naming `sdd init` as the fix. Suppressed for
+				// `sdd init` itself (it's the resolution path) and
+				// silently dropped when no .sdd/ is discoverable (the
+				// inner command will emit its own "run sdd init"
+				// guidance). The `--quiet` / structured-output
+				// suppression branch is deferred until those flags
+				// exist as a real surface.
+				warnIfParticipantMissing()
 			}
 			return ctx, nil
 		},
@@ -1323,6 +1332,30 @@ func promptScope() (model.Scope, error) {
 		return "", fmt.Errorf("prompt cancelled")
 	}
 	return final.options[final.cursor].value, nil
+}
+
+// warnIfParticipantMissing emits a one-line stderr nudge when no local
+// participant is configured. Silently noops outside SDD-instrumented
+// repos and on any read error — the surface is informational, not a
+// gate, and downstream commands have their own "no participant
+// configured" errors for the cases where one is actually required.
+//
+// The Before hook in main() guards `sdd init` so the warning never
+// fires from inside the resolution path. A future `--quiet` / structured
+// output mode would suppress it here too; the call site is the right
+// place to attach that branch when those flags land.
+func warnIfParticipantMissing() {
+	sddDir, err := resolveSDDDir()
+	if err != nil {
+		return
+	}
+	cfg, err := meta.ReadConfig(sddDir)
+	if err != nil {
+		return
+	}
+	if cfg == nil || strings.TrimSpace(cfg.Participant) == "" {
+		fmt.Fprintln(os.Stderr, "sdd: no local participant configured — run `sdd init` to set one")
+	}
 }
 
 // readRecordedSkillScope reads the persisted skill_scope value from
