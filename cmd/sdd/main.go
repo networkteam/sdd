@@ -1465,6 +1465,54 @@ func initCmd() *cli.Command {
 				sddExists = true
 			}
 
+			// Read everything we know about the current state up-front so
+			// the missing-piece detection (for the non-interactive
+			// aggregated error) and the per-piece prompts work from the
+			// same picture.
+			scope := model.Scope(cmd.String("scope"))
+			scopeExplicit := cmd.IsSet("scope")
+			if scope != model.ScopeUser && scope != model.ScopeProject {
+				return fmt.Errorf("invalid --scope: %s (use user or project)", scope)
+			}
+			var recordedScope model.Scope
+			if sddExists {
+				recordedScope = readRecordedSkillScope(sddDir)
+			}
+			var existingMerged *model.Config
+			if sddExists {
+				existingMerged, _ = meta.ReadConfig(sddDir)
+			}
+			recordedParticipant := ""
+			if existingMerged != nil {
+				recordedParticipant = existingMerged.Participant
+			}
+			languageFlag := strings.TrimSpace(cmd.String("language"))
+			participantFlag := strings.TrimSpace(cmd.String("participant"))
+
+			// Aggregated non-interactive error (AC 5): a single message
+			// names every missing piece and the exact flag to fix it,
+			// rather than failing the run on the first one. Runs only
+			// when stdin is not a TTY — interactive callers fall through
+			// to the per-piece prompts below.
+			if !isTerminal(os.Stdin) {
+				var missing []string
+				if !sddExists && languageFlag == "" {
+					missing = append(missing, "--language LOCALE   (e.g. --language en — graph authoring language)")
+				}
+				if !scopeExplicit && recordedScope == "" {
+					missing = append(missing, "--scope project|user   (where to install skills)")
+				}
+				if participantFlag == "" && recordedParticipant == "" {
+					missing = append(missing, "--participant NAME   (canonical author name)")
+				}
+				if len(missing) > 0 {
+					return fmt.Errorf(
+						"sdd init needs values for the following flags to run non-interactively:\n  %s",
+						strings.Join(missing, "\n  "),
+					)
+				}
+			}
+
 			graphDir := cmd.String("graph-dir")
 			if graphDir == "" && !sddExists && isTerminal(os.Stdin) {
 				prompted, err := promptGraphDir(model.DefaultGraphDir)
@@ -1481,7 +1529,7 @@ func initCmd() *cli.Command {
 			// only on fresh init with stdin interactive. The default is
 			// `en` (English); choosing it still writes the key so future
 			// readers of the file don't have to infer default vs. unset.
-			language := strings.TrimSpace(cmd.String("language"))
+			language := languageFlag
 			if language == "" && !sddExists && isTerminal(os.Stdin) {
 				prompted, err := promptLanguage("en")
 				if err != nil {
@@ -1490,67 +1538,35 @@ func initCmd() *cli.Command {
 				language = prompted
 			}
 
-			// `--scope` carries two pieces of information: the literal value
-			// (validated against the known set below) and whether the operator
-			// passed it at all. The handler uses ScopeExplicit to gate the
-			// contradiction check against any value already persisted in
-			// .sdd/config.yaml — a default fallback never contradicts.
-			scope := model.Scope(cmd.String("scope"))
-			scopeExplicit := cmd.IsSet("scope")
-			if scope != model.ScopeUser && scope != model.ScopeProject {
-				return fmt.Errorf("invalid --scope: %s (use user or project)", scope)
-			}
-
 			// Run the scope selector when no value has been recorded and the
-			// operator didn't pass --scope. Interactive: prompt with
-			// project default-highlighted (per d-tac-07q). Non-interactive:
-			// error pointing at --scope so the user can re-invoke. Either
-			// branch produces a deliberate choice that flows through to
-			// the handler with ScopeExplicit=true; the handler's
-			// contradiction check is a no-op against an absent recorded
-			// value, so flipping the bool doesn't change behavior.
-			if !scopeExplicit {
-				var recorded model.Scope
-				if sddExists {
-					recorded = readRecordedSkillScope(sddDir)
+			// operator didn't pass --scope. The non-interactive branch is
+			// already handled by the aggregated error above; here we only
+			// reach the prompt when stdin is a TTY. The choice flows
+			// through with ScopeExplicit=true; the handler's contradiction
+			// check is a no-op against an absent recorded value, so
+			// flipping the bool doesn't change behavior.
+			if !scopeExplicit && recordedScope == "" {
+				chosen, err := promptScope()
+				if err != nil {
+					return fmt.Errorf("prompt: %w", err)
 				}
-				if recorded == "" {
-					if isTerminal(os.Stdin) {
-						chosen, err := promptScope()
-						if err != nil {
-							return fmt.Errorf("prompt: %w", err)
-						}
-						scope = chosen
-						scopeExplicit = true
-					} else {
-						return fmt.Errorf(
-							"no skill_scope recorded in .sdd/config.yaml and stdin is not a TTY; pass --scope project or --scope user to choose non-interactively",
-						)
-					}
-				}
+				scope = chosen
+				scopeExplicit = true
 			}
 			userHome, _ := os.UserHomeDir()
 
 			// Resolve participant name: explicit flag wins; otherwise we
 			// only prompt when the config doesn't already carry a
-			// participant *and* stdin is interactive. Re-runs with a
-			// populated config stay silent (idempotent housekeeping).
-			participant := strings.TrimSpace(cmd.String("participant"))
-			if participant == "" {
-				var existing *model.Config
-				if sddExists {
-					existing, _ = meta.ReadConfig(sddDir)
+			// participant. Non-interactive runs are caught by the
+			// aggregated error above; here we only prompt on a TTY.
+			participant := participantFlag
+			if participant == "" && recordedParticipant == "" && isTerminal(os.Stdin) {
+				def := gitUserName()
+				prompted, err := promptParticipant(def)
+				if err != nil {
+					return fmt.Errorf("prompt: %w", err)
 				}
-				if existing == nil || existing.Participant == "" {
-					if isTerminal(os.Stdin) {
-						def := gitUserName()
-						prompted, err := promptParticipant(def)
-						if err != nil {
-							return fmt.Errorf("prompt: %w", err)
-						}
-						participant = prompted
-					}
-				}
+				participant = prompted
 			}
 
 			icmd := &command.InitCmd{
