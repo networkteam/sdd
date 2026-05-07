@@ -3,3 +3,4 @@
 
 # Graph directory relative to repository root.
 graph_dir: .sdd/graph
+skill_scope: project
