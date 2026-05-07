@@ -107,3 +107,41 @@ func renderEntryLine(e *model.Entry, g *model.Graph) string {
 	presenters.EntryLine(&buf, e, g)
 	return buf.String()
 }
+
+func TestEntryLineWithScore(t *testing.T) {
+	// Score injection lands as `{score: X.XXX}` between status and
+	// topics. Curly braces because score is per-rendering computed —
+	// adjacent to status, the other graph-derived segment.
+	e := entry("20260416-151058-d-tac-n6y",
+		withKind(model.KindPlan),
+		withConfidence("medium"),
+		withParticipants("Christopher", "Claude"),
+		withSummary("Add background sync awareness"))
+	g := model.NewGraph([]*model.Entry{e})
+
+	var buf bytes.Buffer
+	presenters.EntryLineWithScore(&buf, e, g, 4.572)
+	got := buf.String()
+	want := "  20260416-151058-d-tac-n6y tactical plan decision [confidence: medium] (Christopher, Claude) {status: active} {score: 4.572} Add background sync awareness\n"
+	if got != want {
+		t.Errorf("EntryLineWithScore mismatch:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestEntryLineWithScore_Zero(t *testing.T) {
+	// Score of 0 still renders — distinct from "no score". The score
+	// segment appears whenever EntryLineWithScore is called.
+	e := entry("20260101-100000-d-tac-zer",
+		withKind(model.KindDirective),
+		withParticipants("Christopher"),
+		withSummary("zero score entry"))
+	g := model.NewGraph([]*model.Entry{e})
+
+	var buf bytes.Buffer
+	presenters.EntryLineWithScore(&buf, e, g, 0)
+	got := buf.String()
+	want := "  20260101-100000-d-tac-zer tactical directive decision (Christopher) {status: active} {score: 0.000} zero score entry\n"
+	if got != want {
+		t.Errorf("EntryLineWithScore zero mismatch:\n  got:  %q\n  want: %q", got, want)
+	}
+}

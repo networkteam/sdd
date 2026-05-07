@@ -22,8 +22,14 @@ type SectionData interface {
 // FlatList is an ordered sequence of entries — the shape consumed by the
 // as-list presenter. Used for top(N), topic(L), and any pipeline that ends
 // in as-list.
+//
+// Scores is parallel to Entries when the section was ranked: Scores[i]
+// is the rank score of Entries[i]. When unranked (no rank() in the
+// pipeline, or by(date) which sorts without scoring), Scores is nil.
+// The renderer detects ranked output via len(Scores) == len(Entries).
 type FlatList struct {
 	Entries []*Entry
+	Scores  []float64
 }
 
 // Shape implements SectionData.

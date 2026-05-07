@@ -10,6 +10,7 @@ package presenters
 import (
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
 	"github.com/networkteam/sdd/internal/model"
@@ -18,7 +19,7 @@ import (
 // EntryLine writes a single entry summary line — used by status, list, and
 // other surfaces that show entries in a flat list.
 //
-// Format: `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) {status: <status>}? <topics>? <summary>`
+// Format: `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) {status: <status>}? {score: <score>}? <topics>? <summary>`
 // Kind renders as a qualifier alongside layer/type — it's identity, not an
 // attribute (d-cpt-omm's two-type redesign makes every entry carry a kind).
 // Square brackets denote stored attributes (today: confidence); curly braces
@@ -26,8 +27,20 @@ import (
 // angle brackets denote topic membership (also derived — inline topics merged
 // with annotation declarations). Participants are always present — empty is
 // rendered as `()`. Status is present for signals and decisions; omitted for
-// actions. Topics are omitted entirely when the effective set is empty.
+// done signals (terminal). Topics are omitted entirely when the effective set
+// is empty. Score is per-rendering, computed by a rank algorithm; emitted
+// only via EntryLineWithScore (slice 3 — d-tac-uww).
 func EntryLine(w io.Writer, e *model.Entry, g *model.Graph) {
+	entryLineCore(w, e, g, math.NaN())
+}
+
+// EntryLineWithScore is EntryLine plus a `{score: X.XXX}` segment after
+// status. Used by the as-list renderer when the section was ranked.
+func EntryLineWithScore(w io.Writer, e *model.Entry, g *model.Graph, score float64) {
+	entryLineCore(w, e, g, score)
+}
+
+func entryLineCore(w io.Writer, e *model.Entry, g *model.Graph, score float64) {
 	var sb strings.Builder
 	sb.WriteString("  ")
 	sb.WriteString(e.ID)
@@ -50,6 +63,10 @@ func EntryLine(w io.Writer, e *model.Entry, g *model.Graph) {
 		sb.WriteString(" ")
 		sb.WriteString(s)
 	}
+	if !math.IsNaN(score) {
+		sb.WriteString(" ")
+		sb.WriteString(FormatScore(score))
+	}
 	if topics := FormatTopics(g.EffectiveTopics(e)); topics != "" {
 		sb.WriteString(" ")
 		sb.WriteString(topics)
@@ -62,6 +79,15 @@ func EntryLine(w io.Writer, e *model.Entry, g *model.Graph) {
 	sb.WriteString(desc)
 	sb.WriteString("\n")
 	fmt.Fprint(w, sb.String())
+}
+
+// FormatScore renders a per-rendering rank score in curly-brace notation
+// alongside the other derived-attribute segments. Three decimal places
+// balance precision with line length — heat scores are typically small
+// floats (a few units) and three places preserves enough resolution to
+// distinguish similar entries.
+func FormatScore(score float64) string {
+	return fmt.Sprintf("{score: %.3f}", score)
 }
 
 // FormatTopics renders an entry's effective topic set in angle-bracket

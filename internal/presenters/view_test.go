@@ -91,3 +91,59 @@ func renderView(r *query.ViewResult) string {
 	presenters.RenderView(&buf, r)
 	return buf.String()
 }
+
+func TestRenderView_RankedAsList(t *testing.T) {
+	// When FlatList.Scores aligns with Entries, renderAsList emits a
+	// `{score: X.XXX}` segment per entry. Verifies the scored vs
+	// unscored branch in render_list.go.
+	a := entry("20260101-100000-d-tac-aaa",
+		withKind(model.KindDirective),
+		withParticipants("Christopher"),
+		withSummary("First"))
+	b := entry("20260101-110000-d-tac-bbb",
+		withKind(model.KindDirective),
+		withParticipants("Christopher"),
+		withSummary("Second"))
+	g := model.NewGraph([]*model.Entry{a, b})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-list",
+			Data: model.FlatList{
+				Entries: []*model.Entry{a, b},
+				Scores:  []float64{4.572, 1.230},
+			},
+		}},
+	}
+	got := renderView(result)
+	want := "" +
+		"  20260101-100000-d-tac-aaa tactical directive decision (Christopher) {status: active} {score: 4.572} First\n" +
+		"  20260101-110000-d-tac-bbb tactical directive decision (Christopher) {status: active} {score: 1.230} Second\n"
+	if got != want {
+		t.Errorf("ranked render mismatch:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestRenderView_UnrankedAsList_NoScoreSegment(t *testing.T) {
+	// FlatList without Scores should render plain EntryLine output —
+	// no score segment. Belt-and-suspenders against the scored branch
+	// firing on by(date) results, which leave Scores nil.
+	a := entry("20260101-100000-d-tac-aaa",
+		withKind(model.KindDirective),
+		withParticipants("Christopher"),
+		withSummary("Plain"))
+	g := model.NewGraph([]*model.Entry{a})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-list",
+			Data:   model.FlatList{Entries: []*model.Entry{a}}, // Scores nil
+		}},
+	}
+	got := renderView(result)
+	if strings.Contains(got, "score:") {
+		t.Errorf("unranked output should not contain 'score:', got:\n%s", got)
+	}
+}

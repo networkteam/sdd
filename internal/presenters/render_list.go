@@ -6,16 +6,20 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-// renderAsList writes one EntryLine per entry in the flat list. Reuses the
-// canonical entry-line format shared with `sdd list` and the section
+// renderAsList writes one entry-line per entry in the flat list. Reuses
+// the canonical EntryLine format shared with `sdd list` and the section
 // helpers in `sdd status` so output stays consistent across surfaces.
-//
-// When score becomes meaningful (slice 2 lands ranking), an extra `[score:
-// X.XXX]` segment will inject before the participants — until then,
-// EntryLine's existing format covers the AC's "ID, type/kind/layer,
-// summary" requirements as a strict superset.
+// When the section is ranked (FlatList.Scores populated and aligned),
+// each line carries a `{score: X.XXX}` segment via EntryLineWithScore.
+// by(date) leaves Scores nil, falling back to plain EntryLine — sort
+// without per-entry rendering noise.
 func renderAsList(w io.Writer, g *model.Graph, flat model.FlatList) {
-	for _, e := range flat.Entries {
-		EntryLine(w, e, g)
+	scored := len(flat.Scores) == len(flat.Entries) && len(flat.Scores) > 0
+	for i, e := range flat.Entries {
+		if scored {
+			EntryLineWithScore(w, e, g, flat.Scores[i])
+		} else {
+			EntryLine(w, e, g)
+		}
 	}
 }

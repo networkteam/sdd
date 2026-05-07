@@ -3,6 +3,7 @@ package finders
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
@@ -43,7 +44,7 @@ var renderFunctions = map[string]bool{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"active", "kind", "n", "as-list"}
+var knownFunctions = []string{"active", "kind", "n", "rank", "as-list"}
 
 // executeSection walks one section's pipeline left-to-right. Each
 // non-render function contributes to one of three intent buckets:
@@ -58,6 +59,7 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 	var (
 		filter     model.GraphFilter
 		kindFilter []model.Kind // accumulated disjunction across kind(...) calls
+		rankPlan   *rankSpec    // last-write-wins per d-tac-uww §2
 		pageN      = -1         // -1 = no page limit
 		renderName string
 	)
@@ -76,6 +78,13 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 				return query.SectionResult{}, fmt.Errorf("kind: %w", err)
 			}
 			kindFilter = append(kindFilter, kinds...)
+
+		case fn.Name == "rank":
+			spec, err := parseRankArg(fn.Args)
+			if err != nil {
+				return query.SectionResult{}, err
+			}
+			rankPlan = spec
 
 		case fn.Name == "n":
 			page, err := parseIntegerArg("n", fn.Args)
@@ -107,18 +116,25 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 			"section must end with a render function (one of: as-list)")
 	}
 
-	// Apply intent in canonical pipeline order: filter → page → render.
+	// Apply intent in canonical pipeline order: filter → rank → page → render.
 	entries := g.Filter(filter)
 	if len(kindFilter) > 0 {
 		entries = filterByKinds(entries, kindFilter)
 	}
+	var scores []float64
+	if rankPlan != nil {
+		entries, scores = applyRanking(g, entries, rankPlan, time.Now())
+	}
 	if pageN >= 0 && len(entries) > pageN {
 		entries = entries[:pageN]
+		if scores != nil {
+			scores = scores[:pageN]
+		}
 	}
 
 	return query.SectionResult{
 		Render: renderName,
-		Data:   model.FlatList{Entries: entries},
+		Data:   model.FlatList{Entries: entries, Scores: scores},
 	}, nil
 }
 

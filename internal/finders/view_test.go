@@ -457,6 +457,255 @@ func TestView_NRejectsNegative(t *testing.T) {
 	}
 }
 
+// --- Slice 3: rank() primitive ---
+
+// TestView_RankInDegree builds a graph with known in-degrees and
+// verifies rank(in-degree) sorts entries descending by reference count.
+// Uses in-degree (not heat) so the test is independent of wall-clock
+// time — the score math is decay-insensitive.
+func TestView_RankInDegree(t *testing.T) {
+	target := entry("20260101-100000-d-tac-trg", withKind(model.KindDirective))
+	popular := entry("20260101-110000-d-tac-pop", withKind(model.KindDirective))
+	// Three refs pointing at popular, one ref pointing at target.
+	r1 := entry("20260101-120000-d-tac-rf1", withKind(model.KindDirective), withRefs(popular.ID))
+	r2 := entry("20260101-130000-d-tac-rf2", withKind(model.KindDirective), withRefs(popular.ID))
+	r3 := entry("20260101-140000-d-tac-rf3", withKind(model.KindDirective), withRefs(popular.ID))
+	r4 := entry("20260101-150000-d-tac-rf4", withKind(model.KindDirective), withRefs(target.ID))
+
+	g := model.NewGraph([]*model.Entry{target, popular, r1, r2, r3, r4})
+
+	layout := mustParseLayout(t, "rank(in-degree):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+
+	// Expect popular (in-degree 3) first, target (in-degree 1) second,
+	// then the four refs (in-degree 0) in stable order.
+	if len(flat.Entries) == 0 {
+		t.Fatalf("expected non-empty result")
+	}
+	if flat.Entries[0].ID != popular.ID {
+		t.Errorf("first entry: got %s, want %s (highest in-degree)", flat.Entries[0].ID, popular.ID)
+	}
+	if flat.Entries[1].ID != target.ID {
+		t.Errorf("second entry: got %s, want %s (in-degree 1)", flat.Entries[1].ID, target.ID)
+	}
+	// Scores parallel to entries.
+	if len(flat.Scores) != len(flat.Entries) {
+		t.Errorf("scores length: got %d, want %d", len(flat.Scores), len(flat.Entries))
+	}
+	if flat.Scores[0] != 3 {
+		t.Errorf("first score: got %v, want 3", flat.Scores[0])
+	}
+	if flat.Scores[1] != 1 {
+		t.Errorf("second score: got %v, want 1", flat.Scores[1])
+	}
+}
+
+// TestView_RankByDate verifies by(date) sorts entries by Time descending
+// and leaves Scores nil — by(date) is a sort, not a ranking.
+func TestView_RankByDate(t *testing.T) {
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	b := entry("20260102-100000-d-tac-bbb", withKind(model.KindDirective))
+	c := entry("20260103-100000-d-tac-ccc", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a, b, c})
+
+	layout := mustParseLayout(t, "rank(by(date)):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+
+	want := []string{c.ID, b.ID, a.ID}
+	got := idsOf(flat.Entries)
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+	if flat.Scores != nil {
+		t.Errorf("by(date) should leave Scores nil, got %v", flat.Scores)
+	}
+}
+
+// TestView_RankHeatDefaultDecay smoke-tests rank(heat) — verifies it
+// runs without error and produces a sorted result with scores. Score
+// math itself is tested in model.HeatScore tests.
+func TestView_RankHeatDefaultDecay(t *testing.T) {
+	target := entry("20260101-100000-d-tac-trg", withKind(model.KindDirective))
+	ref := entry("20260101-110000-d-tac-ref", withKind(model.KindDirective), withRefs(target.ID))
+	g := model.NewGraph([]*model.Entry{target, ref})
+
+	layout := mustParseLayout(t, "rank(heat):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if len(flat.Scores) != len(flat.Entries) {
+		t.Errorf("scores length: got %d, want %d", len(flat.Scores), len(flat.Entries))
+	}
+	// target (1 incoming ref) should rank above ref (0 incoming refs).
+	if flat.Entries[0].ID != target.ID {
+		t.Errorf("first entry: got %s, want %s (has incoming ref)", flat.Entries[0].ID, target.ID)
+	}
+}
+
+// TestView_RankHeatExplicitDecay confirms rank(heat(exp-7d)) parses and
+// executes without error — the model's decay tests cover the math.
+func TestView_RankHeatExplicitDecay(t *testing.T) {
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a})
+
+	layout := mustParseLayout(t, "rank(heat(exp-7d)):as-list")
+	f := New(Options{})
+	if _, err := f.View(query.ViewQuery{Graph: g, Layout: layout}); err != nil {
+		t.Fatalf("View: %v", err)
+	}
+}
+
+// TestView_RankHeatNoneDecay covers heat(none) — heat with no decay
+// collapses to weighted in-degree, useful for "structurally central
+// regardless of recency" per the design's sample invocations.
+func TestView_RankHeatNoneDecay(t *testing.T) {
+	target := entry("20260101-100000-d-tac-trg", withKind(model.KindDirective))
+	r1 := entry("20260101-110000-d-tac-rf1", withKind(model.KindDirective), withRefs(target.ID))
+	r2 := entry("20260101-120000-d-tac-rf2", withKind(model.KindDirective), withRefs(target.ID))
+	g := model.NewGraph([]*model.Entry{target, r1, r2})
+
+	layout := mustParseLayout(t, "rank(heat(none)):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if flat.Entries[0].ID != target.ID {
+		t.Errorf("first entry: got %s, want %s (highest weighted in-degree)", flat.Entries[0].ID, target.ID)
+	}
+	// With none decay, heat == in-degree exactly.
+	if flat.Scores[0] != 2 {
+		t.Errorf("first score: got %v, want 2 (heat=in-degree under none decay)", flat.Scores[0])
+	}
+}
+
+// TestView_RankComposesWithFilterAndPage verifies the canonical
+// filter→rank→page order. Pagination is applied AFTER ranking so the
+// "top N by score" semantics work.
+func TestView_RankComposesWithFilterAndPage(t *testing.T) {
+	target := entry("20260101-100000-d-tac-trg", withKind(model.KindPlan))
+	popular := entry("20260101-110000-d-tac-pop", withKind(model.KindPlan))
+	other := entry("20260101-120000-d-tac-oth", withKind(model.KindPlan))
+	directive := entry("20260101-130000-d-tac-dir", withKind(model.KindDirective))
+	r1 := entry("20260101-140000-d-tac-rf1", withKind(model.KindDirective), withRefs(popular.ID))
+	r2 := entry("20260101-150000-d-tac-rf2", withKind(model.KindDirective), withRefs(popular.ID))
+	r3 := entry("20260101-160000-d-tac-rf3", withKind(model.KindDirective), withRefs(target.ID))
+
+	g := model.NewGraph([]*model.Entry{target, popular, other, directive, r1, r2, r3})
+
+	// kind(plan) limits to 3 plans; rank(in-degree) orders by in-degree;
+	// n(2) takes top 2 → popular (2 refs), target (1 ref). 'other' and
+	// 'directive' are filtered out.
+	layout := mustParseLayout(t, "kind(plan):rank(in-degree):n(2):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	want := []string{popular.ID, target.ID}
+	got := idsOf(flat.Entries)
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+	if len(flat.Scores) != 2 {
+		t.Errorf("scores length: got %d, want 2", len(flat.Scores))
+	}
+}
+
+// Error paths — argument validation and unknown algorithms/decays.
+
+func TestView_RankUnknownAlgorithm(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "rank(future-algo):as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for unknown algorithm, got nil")
+	}
+	for _, want := range []string{"unknown rank algorithm", "future-algo", "heat", "in-degree"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing substring %q", err.Error(), want)
+		}
+	}
+}
+
+func TestView_RankUnknownDecay(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "rank(heat(exp-99d)):as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for unknown decay, got nil")
+	}
+	if !strings.Contains(err.Error(), "exp-99d") {
+		t.Errorf("error %q does not mention 'exp-99d'", err.Error())
+	}
+}
+
+func TestView_RankBareIdentifierAcceptedAsShorthand(t *testing.T) {
+	// rank(heat) is shorthand for rank(heat()) — the algorithm with no
+	// decay, picking up the default. Verifies the bare-identifier path
+	// reaches the same algorithm dispatch as the function-call path.
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a})
+
+	layout := mustParseLayout(t, "rank(in-degree):as-list")
+	f := New(Options{})
+	if _, err := f.View(query.ViewQuery{Graph: g, Layout: layout}); err != nil {
+		t.Fatalf("View: %v (rank(in-degree) shorthand should work)", err)
+	}
+}
+
+func TestView_RankNoArgs(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "rank():as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for rank with no args, got nil")
+	}
+}
+
+func TestView_RankByOnlyDate(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "rank(by(name)):as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for by(name), got nil")
+	}
+	if !strings.Contains(err.Error(), "by(date)") {
+		t.Errorf("error %q does not mention 'by(date)'", err.Error())
+	}
+}
+
+func TestView_RankInDegreeIgnoresDecayArg(t *testing.T) {
+	// in-degree silently ignores a decay arg per the design — it has no
+	// recency component to weight, so the grammar accepts but the
+	// executor discards.
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "rank(in-degree(exp-7d)):as-list")
+	f := New(Options{})
+	if _, err := f.View(query.ViewQuery{Graph: g, Layout: layout}); err != nil {
+		t.Fatalf("View: %v (in-degree should ignore decay)", err)
+	}
+}
+
 // helpers
 
 func mustParseLayout(t *testing.T, s string) model.Layout {
