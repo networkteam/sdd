@@ -102,6 +102,7 @@ Skills are **source-of-truth in `internal/bundledskills/claude/`** and compiled 
 ## Git rules
 
 - **Never commit compiled binaries.** `bin/sdd` is in `.gitignore` and must stay there. Rebuild locally.
+- **Never use `git add -A` or `git add .`.** Stage individual files by path (`git add path/to/file`). Wide-net staging sweeps in unrelated work from concurrent sessions or active WIP markers and binds it to the wrong commit narrative — the contamination is invisible until the commit lands and is hard to untangle without rewriting history.
 
 ## Auto-memory
 
