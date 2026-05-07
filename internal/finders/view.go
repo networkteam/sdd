@@ -14,10 +14,16 @@ import (
 // section must terminate in a render function (e.g. as-list); render is
 // always the pipeline's terminus.
 //
-// Slice 2 vocabulary: `active`, `kind(K[, K2, ...])`, `n(N)` (filters and
-// paging) plus `as-list` (render). Unknown function names return an error
-// listing the valid set so users (and future-slice tests) get a clear
-// signal.
+// Currently implemented vocabulary (d-tac-uww, slices 1-4):
+//
+//   - Filters: active, kind(K[, K2, ...]), layer(L), since(spec), topic(L)
+//   - Rank:    rank(<algorithm>) with heat/in-degree/mult/add/log/by(date)
+//     and decay names exp-/linear-{7,14,30}d, none
+//   - Page:    n(N)
+//   - Render:  as-list
+//
+// Unknown function names return an error listing the valid set so users
+// (and future-slice tests) get a clear signal.
 func (f *Finder) View(q query.ViewQuery) (*query.ViewResult, error) {
 	if q.Graph == nil {
 		return nil, fmt.Errorf("graph is required")
@@ -36,32 +42,40 @@ func (f *Finder) View(q query.ViewQuery) (*query.ViewResult, error) {
 }
 
 // renderFunctions enumerates the function names that terminate a section.
-// Slice 2 has only as-list; later slices add as-grouped, as-focus-block,
-// as-participants-block, as-wip-list.
+// Slices 1-4 have only as-list; later slices add as-grouped (slice 5),
+// as-focus-block (slice 7), as-participants-block / as-wip-list (slice 8).
 var renderFunctions = map[string]bool{
 	"as-list": true,
 }
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"active", "kind", "n", "rank", "as-list"}
+var knownFunctions = []string{"active", "kind", "layer", "since", "topic", "n", "rank", "as-list"}
 
-// executeSection walks one section's pipeline left-to-right. Each
-// non-render function contributes to one of three intent buckets:
-// graph filter (active, kind), pagination (n), or render terminator
-// (as-list). The buckets apply in canonical filter→page→render order
-// regardless of source ordering — last-write-wins per modifier kind.
+// executeSection walks one section's pipeline left-to-right, accumulating
+// each function's intent into one of these buckets:
+//
+//   - graph filter      (active, kind, layer, since, topic)
+//   - rank              (rank(<algo>), last-write-wins)
+//   - pagination        (n(N), last-write-wins)
+//   - render terminator (as-list, must be last)
+//
+// Buckets apply in canonical filter → rank → page → render order
+// regardless of source ordering — last-write-wins per modifier kind, per
+// d-tac-uww §2.
 func executeSection(g *model.Graph, section model.Section) (query.SectionResult, error) {
 	if len(section.Functions) == 0 {
 		return query.SectionResult{}, fmt.Errorf("empty section")
 	}
 
 	var (
-		filter     model.GraphFilter
-		kindFilter []model.Kind // accumulated disjunction across kind(...) calls
-		rankPlan   *rankSpec    // last-write-wins per d-tac-uww §2
-		pageN      = -1         // -1 = no page limit
-		renderName string
+		filter      model.GraphFilter
+		kindFilter  []model.Kind // accumulated disjunction across kind(...) calls
+		sinceCutoff *time.Time   // pointer so we can distinguish "no since()" from "since(0d)"
+		topicPrefix model.TopicPath
+		rankPlan    *rankSpec // last-write-wins per d-tac-uww §2
+		pageN       = -1      // -1 = no page limit
+		renderName  string
 	)
 
 	for i, fn := range section.Functions {
@@ -78,6 +92,48 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 				return query.SectionResult{}, fmt.Errorf("kind: %w", err)
 			}
 			kindFilter = append(kindFilter, kinds...)
+
+		case fn.Name == "layer":
+			if len(fn.Args) != 1 {
+				return query.SectionResult{}, fmt.Errorf("layer: requires exactly one argument (e.g. layer(tac) or layer(tactical))")
+			}
+			s, err := argString(fn.Args[0])
+			if err != nil {
+				return query.SectionResult{}, fmt.Errorf("layer: %w", err)
+			}
+			if abbrev, ok := model.LayerFromAbbrev[s]; ok {
+				filter.Layer = abbrev
+			} else {
+				filter.Layer = model.Layer(s)
+			}
+
+		case fn.Name == "since":
+			if len(fn.Args) != 1 {
+				return query.SectionResult{}, fmt.Errorf("since: requires exactly one argument (e.g. since(\"7d\") or since(\"2026-04-01\"))")
+			}
+			s, err := argString(fn.Args[0])
+			if err != nil {
+				return query.SectionResult{}, fmt.Errorf("since: %w", err)
+			}
+			cutoff, err := model.ResolveSinceSpec(s, time.Now())
+			if err != nil {
+				return query.SectionResult{}, err
+			}
+			sinceCutoff = &cutoff
+
+		case fn.Name == "topic":
+			if len(fn.Args) != 1 {
+				return query.SectionResult{}, fmt.Errorf("topic: requires exactly one argument (e.g. topic(catch-up-scaling) or topic(\"infrastructure/cli\"))")
+			}
+			s, err := argString(fn.Args[0])
+			if err != nil {
+				return query.SectionResult{}, fmt.Errorf("topic: %w", err)
+			}
+			path, err := model.ParseTopicPath(s)
+			if err != nil {
+				return query.SectionResult{}, fmt.Errorf("topic: %w", err)
+			}
+			topicPrefix = path
 
 		case fn.Name == "rank":
 			spec, err := parseRankArg(fn.Args)
@@ -117,9 +173,18 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 	}
 
 	// Apply intent in canonical pipeline order: filter → rank → page → render.
+	// Within filter: GraphFilter (active, layer) → kind disjunction → since → topic.
+	// Order among post-Graph.Filter() narrowings doesn't affect the result;
+	// chosen here to keep cheaper structural checks before time/topic walks.
 	entries := g.Filter(filter)
 	if len(kindFilter) > 0 {
 		entries = filterByKinds(entries, kindFilter)
+	}
+	if sinceCutoff != nil {
+		entries = filterBySince(entries, *sinceCutoff)
+	}
+	if !topicPrefix.IsZero() {
+		entries = TopicFilter{Prefix: topicPrefix}.FilterEntries(g, entries)
 	}
 	var scores []float64
 	if rankPlan != nil {
@@ -136,6 +201,19 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 		Render: renderName,
 		Data:   model.FlatList{Entries: entries, Scores: scores},
 	}, nil
+}
+
+// filterBySince returns entries whose creation time is on or after the
+// cutoff. Entries with zero Time fall through (kept) so synthetic test
+// fixtures without explicit times don't get silently dropped.
+func filterBySince(entries []*model.Entry, cutoff time.Time) []*model.Entry {
+	var out []*model.Entry
+	for _, e := range entries {
+		if e.Time.IsZero() || !e.Time.Before(cutoff) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // parseKindArgs validates kind()'s args and returns the kind values.

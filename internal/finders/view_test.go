@@ -3,6 +3,7 @@ package finders
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
@@ -706,6 +707,294 @@ func TestView_RankInDegreeIgnoresDecayArg(t *testing.T) {
 	}
 }
 
+// --- Slice 4: layer() / since() / topic() filter primitives ---
+
+func TestView_LayerFilterAbbrev(t *testing.T) {
+	stg := entry("20260101-100000-d-stg-aaa", withKind(model.KindAspiration))
+	cpt := entry("20260101-110000-d-cpt-bbb", withKind(model.KindContract))
+	tac := entry("20260101-120000-d-tac-ccc", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{stg, cpt, tac})
+
+	layout := mustParseLayout(t, "layer(tac):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{tac.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_LayerFilterFullName(t *testing.T) {
+	// layer(tactical) should resolve to the same set as layer(tac).
+	stg := entry("20260101-100000-d-stg-aaa", withKind(model.KindAspiration))
+	tac := entry("20260101-120000-d-tac-ccc", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{stg, tac})
+
+	layout := mustParseLayout(t, "layer(tactical):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	if len(got) != 1 || got[0] != tac.ID {
+		t.Errorf("layer(tactical): got %v, want [%s]", got, tac.ID)
+	}
+}
+
+func TestView_LayerFilterStringForm(t *testing.T) {
+	// Quoted form should work too: layer("tac").
+	tac := entry("20260101-120000-d-tac-ccc", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{tac})
+
+	layout := mustParseLayout(t, `layer("tac"):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if len(flat.Entries) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(flat.Entries))
+	}
+}
+
+func TestView_LayerWrongArgs(t *testing.T) {
+	g := model.NewGraph(nil)
+	cases := []string{
+		"layer():as-list",
+		"layer(tac, ops):as-list",
+	}
+	for _, layoutStr := range cases {
+		t.Run(layoutStr, func(t *testing.T) {
+			// "tac, ops" has whitespace which the parser rejects, so use
+			// no-whitespace form. Just test arg-count errors.
+			ls := layoutStr
+			if ls == "layer(tac, ops):as-list" {
+				ls = "layer(tac,ops):as-list"
+			}
+			layout := mustParseLayout(t, ls)
+			f := New(Options{})
+			if _, err := f.View(query.ViewQuery{Graph: g, Layout: layout}); err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+		})
+	}
+}
+
+// TestView_SinceDuration uses synthetic entries with deliberate times so
+// the duration cutoff produces deterministic results without needing to
+// inject a clock — the cutoff is computed from time.Now() at execution,
+// and the fixture sets entry times relative to a fixed past anchor with
+// large enough offsets that the test stays stable regardless of when
+// it runs.
+func TestView_SinceDuration(t *testing.T) {
+	// Far past: 2020-01-01 — well outside any reasonable since() window.
+	old := entry("20200101-100000-d-tac-old", withKind(model.KindDirective))
+	// Recent past: 2 days ago, which 7d will include.
+	recentTime := time.Now().Add(-2 * 24 * time.Hour)
+	recent := &model.Entry{
+		ID:    "20260101-100000-d-tac-rec",
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindDirective,
+		Time:  recentTime,
+	}
+	g := model.NewGraph([]*model.Entry{old, recent})
+
+	layout := mustParseLayout(t, `since("7d"):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	if len(got) != 1 || got[0] != recent.ID {
+		t.Errorf("since(7d): got %v, want [%s]", got, recent.ID)
+	}
+}
+
+func TestView_SinceISODate(t *testing.T) {
+	// since("2026-01-01") includes entries dated 2026-01-01 onward.
+	a := entry("20251215-100000-d-tac-old", withKind(model.KindDirective))
+	b := entry("20260201-100000-d-tac-new", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a, b})
+
+	layout := mustParseLayout(t, `since("2026-01-01"):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	if len(got) != 1 || got[0] != b.ID {
+		t.Errorf("since(2026-01-01): got %v, want [%s]", got, b.ID)
+	}
+}
+
+func TestView_SinceMalformedSpec(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, `since("not-a-spec"):as-list`)
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for malformed since spec, got nil")
+	}
+	if !strings.Contains(err.Error(), "since") {
+		t.Errorf("error %q does not mention 'since'", err.Error())
+	}
+}
+
+func TestView_TopicFilterInline(t *testing.T) {
+	// Entry with inline topic 'catch-up-scaling' matches topic(catch-up-scaling).
+	tagged := &model.Entry{
+		ID:     "20260101-100000-s-cpt-aaa",
+		Type:   model.TypeSignal,
+		Kind:   model.KindGap,
+		Layer:  model.LayerConceptual,
+		Topics: []model.TopicPath{mustParseTopic(t, "catch-up-scaling")},
+	}
+	other := &model.Entry{
+		ID:    "20260101-110000-s-cpt-bbb",
+		Type:  model.TypeSignal,
+		Kind:  model.KindGap,
+		Layer: model.LayerConceptual,
+	}
+	g := model.NewGraph([]*model.Entry{tagged, other})
+
+	layout := mustParseLayout(t, "topic(catch-up-scaling):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	if len(got) != 1 || got[0] != tagged.ID {
+		t.Errorf("topic(catch-up-scaling): got %v, want [%s]", got, tagged.ID)
+	}
+}
+
+func TestView_TopicFilterStringForm(t *testing.T) {
+	// Topic paths with `/` need string form.
+	tagged := &model.Entry{
+		ID:     "20260101-100000-s-cpt-aaa",
+		Type:   model.TypeSignal,
+		Kind:   model.KindGap,
+		Layer:  model.LayerConceptual,
+		Topics: []model.TopicPath{mustParseTopic(t, "infrastructure/cli")},
+	}
+	g := model.NewGraph([]*model.Entry{tagged})
+
+	layout := mustParseLayout(t, `topic("infrastructure/cli"):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if len(flat.Entries) != 1 {
+		t.Errorf("expected 1 entry, got %d", len(flat.Entries))
+	}
+}
+
+func TestView_TopicFilterPrefixComponent(t *testing.T) {
+	// Component-wise prefix: topic("UX") matches "UX/CLI" but not "UXTesting".
+	uxCli := &model.Entry{
+		ID:     "20260101-100000-s-cpt-aaa",
+		Type:   model.TypeSignal,
+		Kind:   model.KindGap,
+		Layer:  model.LayerConceptual,
+		Topics: []model.TopicPath{mustParseTopic(t, "UX/CLI")},
+	}
+	uxTesting := &model.Entry{
+		ID:     "20260101-110000-s-cpt-bbb",
+		Type:   model.TypeSignal,
+		Kind:   model.KindGap,
+		Layer:  model.LayerConceptual,
+		Topics: []model.TopicPath{mustParseTopic(t, "UXTesting")},
+	}
+	g := model.NewGraph([]*model.Entry{uxCli, uxTesting})
+
+	layout := mustParseLayout(t, "topic(UX):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	if len(got) != 1 || got[0] != uxCli.ID {
+		t.Errorf("topic(UX): got %v, want [%s] (component-wise prefix)", got, uxCli.ID)
+	}
+}
+
+func TestView_AllFiltersCompose(t *testing.T) {
+	// Full slice-4 composition: active + kind + layer + since + topic + rank + page.
+	// Verifies every primitive is reachable in the same pipeline.
+	plan := &model.Entry{
+		ID:     "20260420-100000-d-tac-pln",
+		Type:   model.TypeDecision,
+		Layer:  model.LayerTactical,
+		Kind:   model.KindPlan,
+		Time:   time.Now().Add(-3 * 24 * time.Hour),
+		Topics: []model.TopicPath{mustParseTopic(t, "infrastructure")},
+	}
+	otherKind := &model.Entry{
+		ID:     "20260420-110000-d-tac-dir",
+		Type:   model.TypeDecision,
+		Layer:  model.LayerTactical,
+		Kind:   model.KindDirective,
+		Time:   time.Now().Add(-3 * 24 * time.Hour),
+		Topics: []model.TopicPath{mustParseTopic(t, "infrastructure")},
+	}
+	wrongLayer := &model.Entry{
+		ID:     "20260420-120000-d-stg-pln",
+		Type:   model.TypeDecision,
+		Layer:  model.LayerStrategic,
+		Kind:   model.KindPlan,
+		Time:   time.Now().Add(-3 * 24 * time.Hour),
+		Topics: []model.TopicPath{mustParseTopic(t, "infrastructure")},
+	}
+	tooOld := &model.Entry{
+		ID:     "20200101-100000-d-tac-old",
+		Type:   model.TypeDecision,
+		Layer:  model.LayerTactical,
+		Kind:   model.KindPlan,
+		Time:   time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+		Topics: []model.TopicPath{mustParseTopic(t, "infrastructure")},
+	}
+	wrongTopic := &model.Entry{
+		ID:    "20260420-130000-d-tac-pl2",
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindPlan,
+		Time:  time.Now().Add(-3 * 24 * time.Hour),
+	}
+	g := model.NewGraph([]*model.Entry{plan, otherKind, wrongLayer, tooOld, wrongTopic})
+
+	layout := mustParseLayout(t, `active:kind(plan):layer(tac):since("7d"):topic(infrastructure):n(10):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{plan.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("composed filter:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
 // helpers
 
 func mustParseLayout(t *testing.T, s string) model.Layout {
@@ -715,6 +1004,15 @@ func mustParseLayout(t *testing.T, s string) model.Layout {
 		t.Fatalf("ParseLayout(%q): %v", s, err)
 	}
 	return l
+}
+
+func mustParseTopic(t *testing.T, s string) model.TopicPath {
+	t.Helper()
+	p, err := model.ParseTopicPath(s)
+	if err != nil {
+		t.Fatalf("ParseTopicPath(%q): %v", s, err)
+	}
+	return p
 }
 
 func idsOf(entries []*model.Entry) []string {

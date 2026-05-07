@@ -30,6 +30,16 @@ Currently implemented vocabulary (more arrives in later slices):
   Filters:
     active                 Entries not closed and not superseded
     kind(K[, K2, ...])     Entries whose kind matches any of the listed kinds
+    layer(L)               Entries at the given layer (stg, cpt, tac, ops, prc;
+                           full names also accepted)
+    since(spec)            Entries on/after a cutoff. Spec is ISO date
+                           ("2026-04-01") or duration ("7d", "2w", "1m", "1y").
+                           m and y use calendar arithmetic; d and w use 24h
+                           offsets. Argument must be a quoted string.
+    topic(L)               Entries whose effective topic set has L as a
+                           component-wise prefix (case-insensitive). Use
+                           bare identifiers for simple labels (catch-up-scaling)
+                           and quoted strings for paths ("infrastructure/cli").
 
   Rank:
     rank(<algorithm>)      Sort by computed score, descending. Adds
@@ -75,6 +85,15 @@ Examples:
   sdd view --layout=active:rank(heat(exp-7d)):n(10):as-list,active:rank(heat(exp-30d)):n(10):as-list
     Two sections: top 10 by short-half-life heat, then top 10 by long-half-life heat —
     useful for comparing "what's hot now" against "what's been hot for a while".
+
+  sdd view --layout=active:layer(tac):since("7d"):rank(heat):n(10):as-list
+    Top 10 active tactical entries from the last week, ranked by heat.
+
+  sdd view --layout=active:topic(catch-up-scaling):rank(heat):as-list
+    Active entries clustered under the catch-up-scaling topic, ranked by heat.
+
+  sdd view --layout=topic("infrastructure/cli"):rank(by(date)):n(20):as-list
+    Most recent 20 entries tagged anywhere under infrastructure/cli.
 
 See the d-tac-uww plan for the full grammar; primitives not yet implemented
 return a clear "unknown function" error listing what is available.

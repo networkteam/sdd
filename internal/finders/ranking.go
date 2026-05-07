@@ -64,9 +64,9 @@ func parseAlgorithm(fn model.Function) (*rankSpec, error) {
 		case 0:
 			spec.Decay = model.DefaultDecayName
 		case 1:
-			name, err := identOrStringArg(fn.Args[0], fn.Name)
+			name, err := argString(fn.Args[0])
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("rank %s: %w", fn.Name, err)
 			}
 			if _, err := model.DecayByName(name); err != nil {
 				return nil, fmt.Errorf("rank %s: %w", fn.Name, err)
@@ -86,9 +86,9 @@ func parseAlgorithm(fn model.Function) (*rankSpec, error) {
 		if len(fn.Args) != 1 {
 			return nil, fmt.Errorf("rank by: requires exactly one field argument (e.g. by(date))")
 		}
-		field, err := identOrStringArg(fn.Args[0], "by")
+		field, err := argString(fn.Args[0])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("rank by: %w", err)
 		}
 		if field != "date" {
 			return nil, fmt.Errorf("rank by: only by(date) is supported (got by(%s))", field)
@@ -102,12 +102,14 @@ func parseAlgorithm(fn model.Function) (*rankSpec, error) {
 	return spec, nil
 }
 
-// identOrStringArg accepts either an identifier or a string arg,
-// returning the underlying value. Mirrors kind()'s arg leniency so
-// users can quote when they want and skip quotes when they don't.
-func identOrStringArg(a model.FunctionArg, fnName string) (string, error) {
+// argString returns the string content of an argument that should be
+// either a bare identifier or a quoted string. Used by primitives whose
+// args accept both forms (kind, layer, topic, rank's algorithm and
+// decay names). Callers wrap the returned error with their primitive's
+// name for clear diagnostics.
+func argString(a model.FunctionArg) (string, error) {
 	if a.Kind != model.ArgKindIdent && a.Kind != model.ArgKindString {
-		return "", fmt.Errorf("rank %s: argument must be an identifier or string, got %s", fnName, a.Kind)
+		return "", fmt.Errorf("argument must be an identifier or string, got %s", a.Kind)
 	}
 	return a.String, nil
 }
