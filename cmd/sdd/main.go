@@ -1235,6 +1235,119 @@ func promptLanguage(defaultValue string) (string, error) {
 	return value, nil
 }
 
+// scopePromptModel is a bubbletea model for the skill-scope selector. Two
+// fixed options (project, user) navigated by ↑/↓ or j/k; Enter confirms.
+// Per d-tac-07q the cursor starts on `project` so the keystroke-free path
+// installs into the repo-local tree — friction-minimising for contributors
+// cloning an SDD-instrumented repo.
+type scopePromptModel struct {
+	options []scopeOption
+	cursor  int
+	done    bool
+}
+
+type scopeOption struct {
+	value model.Scope
+	label string
+	hint  string
+}
+
+func newScopePromptModel() scopePromptModel {
+	return scopePromptModel{
+		options: []scopeOption{
+			{value: model.ScopeProject, label: "project", hint: ".claude/skills/ in this repo (recommended for shared SDD-instrumented repos)"},
+			{value: model.ScopeUser, label: "user", hint: "~/.claude/skills/ shared across all projects on this machine"},
+		},
+		cursor: 0,
+	}
+}
+
+func (m scopePromptModel) Init() tea.Cmd { return nil }
+
+func (m scopePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.Type {
+		case tea.KeyEnter:
+			m.done = true
+			return m, tea.Quit
+		case tea.KeyCtrlC, tea.KeyEsc:
+			return m, tea.Quit
+		case tea.KeyUp:
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case tea.KeyDown:
+			if m.cursor < len(m.options)-1 {
+				m.cursor++
+			}
+		case tea.KeyRunes:
+			switch string(key.Runes) {
+			case "k":
+				if m.cursor > 0 {
+					m.cursor--
+				}
+			case "j":
+				if m.cursor < len(m.options)-1 {
+					m.cursor++
+				}
+			}
+		}
+	}
+	return m, nil
+}
+
+func (m scopePromptModel) View() string {
+	var b strings.Builder
+	b.WriteString("Where should skills be installed? (↑/↓ to navigate, enter to confirm)\n")
+	for i, opt := range m.options {
+		marker := "  "
+		if i == m.cursor {
+			marker = "› "
+		}
+		fmt.Fprintf(&b, "%s%s — %s\n", marker, opt.label, opt.hint)
+	}
+	return b.String()
+}
+
+// promptScope runs the interactive scope selector. Returns the chosen scope
+// or an error on cancellation. The caller is responsible for the
+// non-interactive branch — this function unconditionally opens a TTY.
+func promptScope() (model.Scope, error) {
+	m := newScopePromptModel()
+	result, err := tea.NewProgram(m).Run()
+	if err != nil {
+		return "", err
+	}
+	final := result.(scopePromptModel)
+	if !final.done {
+		return "", fmt.Errorf("prompt cancelled")
+	}
+	return final.options[final.cursor].value, nil
+}
+
+// readRecordedSkillScope reads the persisted skill_scope value from
+// .sdd/config.yaml only (no overlay from config.local.yaml). Returns empty
+// when the file is missing, unparseable, or the field is absent — every
+// non-empty case means the operator (or a prior init) made a deliberate
+// choice we should honor.
+//
+// The CLI uses this before deciding whether to prompt; the handler does
+// the same check to gate persistence and the contradiction error. Both
+// callers stick to the shared file because skill_scope is a project-level
+// decision (everyone on the repo installs to the same place) — local
+// override is undefined behavior.
+func readRecordedSkillScope(sddDir string) model.Scope {
+	data, err := os.ReadFile(filepath.Join(sddDir, "config.yaml"))
+	if err != nil {
+		return ""
+	}
+	cfg, err := model.ParseConfig(data)
+	if err != nil || cfg == nil {
+		return ""
+	}
+	return cfg.SkillScope
+}
+
 // gitUserName reads git config user.name, returning an empty string when
 // git is unavailable or the setting isn't configured. Best-effort — used
 // only as a pre-filled default for the sdd init participant prompt.
@@ -1386,6 +1499,35 @@ func initCmd() *cli.Command {
 			scopeExplicit := cmd.IsSet("scope")
 			if scope != model.ScopeUser && scope != model.ScopeProject {
 				return fmt.Errorf("invalid --scope: %s (use user or project)", scope)
+			}
+
+			// Run the scope selector when no value has been recorded and the
+			// operator didn't pass --scope. Interactive: prompt with
+			// project default-highlighted (per d-tac-07q). Non-interactive:
+			// error pointing at --scope so the user can re-invoke. Either
+			// branch produces a deliberate choice that flows through to
+			// the handler with ScopeExplicit=true; the handler's
+			// contradiction check is a no-op against an absent recorded
+			// value, so flipping the bool doesn't change behavior.
+			if !scopeExplicit {
+				var recorded model.Scope
+				if sddExists {
+					recorded = readRecordedSkillScope(sddDir)
+				}
+				if recorded == "" {
+					if isTerminal(os.Stdin) {
+						chosen, err := promptScope()
+						if err != nil {
+							return fmt.Errorf("prompt: %w", err)
+						}
+						scope = chosen
+						scopeExplicit = true
+					} else {
+						return fmt.Errorf(
+							"no skill_scope recorded in .sdd/config.yaml and stdin is not a TTY; pass --scope project or --scope user to choose non-interactively",
+						)
+					}
+				}
 			}
 			userHome, _ := os.UserHomeDir()
 
