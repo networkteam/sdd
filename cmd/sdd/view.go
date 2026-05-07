@@ -72,6 +72,17 @@ Currently implemented vocabulary (more arrives in later slices):
     as-grouped             One ### header per group, then entry lines (terminator;
                            requires a preceding group(by(<field>)))
 
+  Macros (named pipelines, recognised at section start; user modifiers append):
+    top(N)                 active:n(N):rank(heat(exp-14d)):as-list
+    topic(L)               topic(L):rank(heat(exp-14d)):as-list
+    decisions              active:kind(plan,directive,activity,contract,aspiration)
+                           :group(by(kind)):as-grouped
+    signals                active:kind(gap,question):group(by(kind)):as-grouped
+    insights               active:kind(insight):since("30d"):rank(by(date)):as-list
+    done                   kind(done):since("30d"):rank(by(date)):as-list
+    aspirations            active:kind(aspiration):as-list
+    contracts              active:kind(contract):as-list
+
 Examples:
 
   sdd view --layout=active:as-list
@@ -109,6 +120,20 @@ Examples:
   sdd view --layout=active:kind(gap,question):group(by(kind)):as-grouped
     Active signals grouped by kind — open gaps and questions, side by side.
 
+  sdd view --layout=top(20)
+    Twenty most-warm active entries (the catch-up "what's hot" view).
+
+  sdd view --layout=top(20):rank(in-degree)
+    Same shape as top(20) but ranked by structural in-degree — user modifier
+    overrides the macro's rank() per last-write-wins.
+
+  sdd view --layout=decisions,signals
+    Active decisions grouped by kind, then active gaps and questions grouped
+    by kind. Two macros, two sections, one invocation.
+
+  sdd view --layout=top(15),decisions,insights
+    Mixed macros: warm top-15, decisions block, last-30-days insights.
+
 See the d-tac-uww plan for the full grammar; primitives not yet implemented
 return a clear "unknown function" error listing what is available.
 `
@@ -139,6 +164,14 @@ func viewCmd() *cli.Command {
 			}
 
 			layout, err := query.ParseLayout(spec)
+			if err != nil {
+				return err
+			}
+			// Macro expansion is a separate query-layer pass: the parser
+			// only deals with grammar, the expander substitutes named
+			// pipelines like `top(N)` and `decisions` with their canonical
+			// primitive sequences. User-supplied modifiers append.
+			layout, err = query.ExpandMacros(layout)
 			if err != nil {
 				return err
 			}

@@ -79,8 +79,8 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 
 	var (
 		filter      model.GraphFilter
-		kindFilter  []model.Kind // accumulated disjunction across kind(...) calls
-		sinceCutoff *time.Time   // pointer so we can distinguish "no since()" from "since(0d)"
+		kindFilters [][]model.Kind // each kind() call is a disjunction set; multiple calls intersect (d-tac-uww §2)
+		sinceCutoff *time.Time     // pointer so we can distinguish "no since()" from "since(0d)"
 		topicPrefix model.TopicPath
 		rankPlan    *rankSpec // last-write-wins per d-tac-uww §2
 		pageN       = -1      // -1 = no page limit
@@ -88,7 +88,7 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 		renderName  string
 	)
 
-	for i, fn := range section.Functions {
+	for _, fn := range section.Functions {
 		switch {
 		case fn.Name == "active":
 			if len(fn.Args) > 0 {
@@ -101,7 +101,10 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 			if err != nil {
 				return query.SectionResult{}, fmt.Errorf("kind: %w", err)
 			}
-			kindFilter = append(kindFilter, kinds...)
+			// Each kind() call is a disjunction; storing them as separate
+			// sets lets the application stage intersect across calls per
+			// d-tac-uww §2.
+			kindFilters = append(kindFilters, kinds)
 
 		case fn.Name == "layer":
 			if len(fn.Args) != 1 {
@@ -167,11 +170,14 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 			groupField = field
 
 		case isRenderFunction(fn.Name):
-			if i != len(section.Functions)-1 {
-				return query.SectionResult{}, fmt.Errorf(
-					"render function %q must be the last function in a section, found at position %d of %d",
-					fn.Name, i+1, len(section.Functions))
-			}
+			// Render is treated like other non-filter modifiers: last-write-
+			// wins per d-tac-uww §2. This lets macro expansion + user
+			// modifier append work — e.g. `top(N)`'s `as-list` lands inside
+			// the expansion, then user `:rank(...)` appends after it without
+			// erroring on syntactic position. The canonical bucket order
+			// (filter → rank → page → group → render) means the "render is
+			// the terminus" property holds semantically regardless of where
+			// the render token sits in source order.
 			if len(fn.Args) > 0 {
 				return query.SectionResult{}, fmt.Errorf("%s takes no arguments", fn.Name)
 			}
@@ -224,8 +230,8 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 	// narrowings doesn't affect the result; chosen here to keep cheaper
 	// structural checks before time/topic walks.
 	entries := g.Filter(filter)
-	if len(kindFilter) > 0 {
-		entries = filterByKinds(entries, kindFilter)
+	for _, kinds := range kindFilters {
+		entries = filterByKinds(entries, kinds)
 	}
 	if sinceCutoff != nil {
 		entries = filterBySince(entries, *sinceCutoff)

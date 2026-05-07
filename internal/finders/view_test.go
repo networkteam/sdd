@@ -140,18 +140,84 @@ func TestView_MissingRender(t *testing.T) {
 	}
 }
 
-func TestView_RenderNotLast(t *testing.T) {
-	g := model.NewGraph(nil)
-	// as-list appears mid-section instead of at the end — render is
-	// always the terminus per the design.
+func TestView_RenderCanAppearMidSection(t *testing.T) {
+	// Per d-tac-uww §2 "non-filter modifiers (rank, page, name, render)
+	// apply last-write-wins per modifier kind." Render is logically the
+	// terminus but doesn't need to be syntactically last — the executor
+	// uses canonical bucket order regardless of source ordering. This is
+	// what lets macro expansion + user modifier append work: `top(N)`'s
+	// `as-list` lands inside the expansion, then user `:rank(...)` may
+	// append after it without erroring.
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a})
+
 	layout := mustParseLayout(t, "as-list:active")
 	f := New(Options{})
-	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
-	if err == nil {
-		t.Fatalf("expected error for render not last, got nil")
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
 	}
-	if !strings.Contains(err.Error(), "render") {
-		t.Errorf("error %q does not mention render", err.Error())
+	flat, ok := result.Sections[0].Data.(model.FlatList)
+	if !ok {
+		t.Fatalf("section data: got %T, want model.FlatList", result.Sections[0].Data)
+	}
+	if got := idsOf(flat.Entries); len(got) != 1 || got[0] != a.ID {
+		t.Errorf("entries: got %v, want [%s]", got, a.ID)
+	}
+}
+
+func TestView_MultipleRendersLastWins(t *testing.T) {
+	// Last-write-wins applies to render too: `as-list:as-grouped` is a
+	// degenerate but valid section that resolves to as-grouped. Concrete
+	// regression for the macro composition `top(N):rank(...)` which now
+	// passes through after this relaxation, but as-list:as-grouped is the
+	// minimal expression of the rule.
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a})
+	// Pair as-list with a group()/as-grouped tail so the section is
+	// shape-consistent with the chosen render. as-list alone followed
+	// by as-grouped without a group() would be a render-shape mismatch.
+	layout := mustParseLayout(t, "as-list:group(by(kind)):as-grouped")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	if got := result.Sections[0].Render; got != "as-grouped" {
+		t.Errorf("render: got %q, want as-grouped (last-write-wins)", got)
+	}
+}
+
+func TestView_MacroExpansion_TopWithRankModifier(t *testing.T) {
+	// Regression for slice 6: `top(N):rank(...)` after macro expansion
+	// produces `active:n(N):rank(heat(exp-14d)):as-list:rank(...)`.
+	// Without the render-position relaxation this would error; with it
+	// the second rank() last-write-wins-overrides the macro's heat rank.
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	b := entry("20260101-110000-d-tac-bbb", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a, b})
+
+	layout := mustParseLayoutAndExpand(t, "top(2):rank(in-degree)")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat, ok := result.Sections[0].Data.(model.FlatList)
+	if !ok {
+		t.Fatalf("section data: got %T, want model.FlatList", result.Sections[0].Data)
+	}
+	if len(flat.Entries) != 2 {
+		t.Errorf("entries: got %d, want 2", len(flat.Entries))
+	}
+	// rank(in-degree) ignores decay — score is integer-valued.
+	if len(flat.Scores) != 2 {
+		t.Fatalf("scores: got %d, want 2", len(flat.Scores))
+	}
+	for i, s := range flat.Scores {
+		if s != float64(int64(s)) {
+			t.Errorf("score[%d] = %v, want integer (in-degree)", i, s)
+		}
 	}
 }
 
@@ -203,6 +269,52 @@ func TestView_KindFilter_Disjunction(t *testing.T) {
 	want := []string{plan.ID, directive.ID, activity.ID}
 	if !equalIDs(got, want) {
 		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_KindFilter_MultipleCallsIntersect(t *testing.T) {
+	// Per d-tac-uww §2: "Multiple kind(...) filters intersect; kind(K1, K2)
+	// within one filter is disjunction." This makes macro composition
+	// behave as the design states — a `decisions` macro expanding to
+	// kind(plan,directive,...) followed by a user kind(plan) modifier
+	// narrows to plans, not all five.
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	directive := entry("20260101-110000-d-tac-dir", withKind(model.KindDirective))
+	activity := entry("20260101-120000-d-tac-act", withKind(model.KindActivity))
+	g := model.NewGraph([]*model.Entry{plan, directive, activity})
+
+	layout := mustParseLayout(t, "kind(plan,directive,activity):kind(plan,directive):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	// Intersection of {plan, directive, activity} and {plan, directive}
+	// is {plan, directive}.
+	want := []string{plan.ID, directive.ID}
+	got := idsOf(flat.Entries)
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_KindFilter_DisjointIntersection(t *testing.T) {
+	// kind(plan):kind(directive) — disjoint single-element disjunctions.
+	// No entry has both kinds, so the intersection is empty.
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	directive := entry("20260101-110000-d-tac-dir", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{plan, directive})
+
+	layout := mustParseLayout(t, "kind(plan):kind(directive):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if len(flat.Entries) != 0 {
+		t.Errorf("entries: got %v, want []", idsOf(flat.Entries))
 	}
 }
 
@@ -1202,6 +1314,22 @@ func mustParseLayout(t *testing.T, s string) model.Layout {
 		t.Fatalf("ParseLayout(%q): %v", s, err)
 	}
 	return l
+}
+
+// mustParseLayoutAndExpand mirrors the CLI's two-step pipeline: parse
+// grammar, then expand macros. Tests that exercise macros use this so
+// the resulting Layout matches what `sdd view` actually executes.
+func mustParseLayoutAndExpand(t *testing.T, s string) model.Layout {
+	t.Helper()
+	l, err := query.ParseLayout(s)
+	if err != nil {
+		t.Fatalf("ParseLayout(%q): %v", s, err)
+	}
+	expanded, err := query.ExpandMacros(l)
+	if err != nil {
+		t.Fatalf("ExpandMacros(%q): %v", s, err)
+	}
+	return expanded
 }
 
 func mustParseTopic(t *testing.T, s string) model.TopicPath {
