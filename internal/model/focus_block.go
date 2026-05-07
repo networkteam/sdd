@@ -62,18 +62,3 @@ type FocusTarget struct {
 
 // Shape implements SectionData.
 func (FocusBlock) Shape() RenderShape { return ShapeFocusBlock }
-
-// TargetIDs returns every target entry ID listed in the FocusBlock,
-// across all focuses. Used by the layout-level dedup pass that strips
-// focus-shown entries from subsequent as-list sections (AC 13).
-func (fb FocusBlock) TargetIDs() map[string]struct{} {
-	out := make(map[string]struct{})
-	for _, fg := range fb.Focuses {
-		for _, ft := range fg.Targets {
-			if ft.Target != nil {
-				out[ft.Target.ID] = struct{}{}
-			}
-		}
-	}
-	return out
-}

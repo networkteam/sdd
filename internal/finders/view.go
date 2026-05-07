@@ -53,28 +53,19 @@ func (f *Finder) View(q query.ViewQuery) (*query.ViewResult, error) {
 		}
 	}
 
-	// shownIDs tracks every entry surfaced in an as-focus-block section so
-	// far. Subsequent as-list sections strip these IDs out — AC 13's
-	// "as-list deduplicates entries already shown in any focus block in
-	// the same layout." Sections execute in source order so a focus block
-	// appearing later can't influence an earlier as-list (the focus macro
-	// is conventionally first; users who place it after as-list sections
-	// see the natural ordering reflected).
-	shownIDs := make(map[string]struct{})
+	// Sections render independently — each surface carries its own
+	// per-section metadata (state in focus-block, heat score in
+	// ranked lists, kind header in grouped). Cross-section dedup is
+	// captured as an open design question in s-cpt-tn0; the previous
+	// AC 13 mechanism (focus → as-list strip) was removed pending
+	// resolution of that question.
 	now := time.Now()
 
 	sections := make([]query.SectionResult, 0, len(q.Layout.Sections))
 	for i, section := range q.Layout.Sections {
-		sr, err := executeSection(q.Graph, wipMarkers, section, shownIDs, now)
+		sr, err := executeSection(q.Graph, wipMarkers, section, now)
 		if err != nil {
 			return nil, fmt.Errorf("section %d: %w", i+1, err)
-		}
-		// Update shownIDs from this section's focus-block targets so
-		// later as-list sections can strip them.
-		if fb, ok := sr.Data.(model.FocusBlock); ok {
-			for id := range fb.TargetIDs() {
-				shownIDs[id] = struct{}{}
-			}
 		}
 		sections = append(sections, sr)
 	}
@@ -161,11 +152,9 @@ func parseSourceArg(args []model.FunctionArg) (string, error) {
 //   - expand(involvement) with rank() or n() or group() — focus-block has
 //     no per-target ranking and can't aggregate
 //
-// shownIDs is the running set of entry IDs already surfaced in earlier
-// as-focus-block sections; flat-list sections drop these entries (AC 13
-// dedup). now is the clock used for focus-block heat scoring (test
-// determinism via injection).
-func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model.Section, shownIDs map[string]struct{}, now time.Time) (query.SectionResult, error) {
+// now is the clock used for focus-block heat scoring (test determinism
+// via injection).
+func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model.Section, now time.Time) (query.SectionResult, error) {
 	if len(section.Functions) == 0 {
 		return query.SectionResult{}, fmt.Errorf("empty section")
 	}
@@ -281,13 +270,10 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 			Data:   block,
 		}, nil
 	}
-	// Flat-list output: apply the focus-target dedup pass (AC 13) before
-	// returning. Entries surfaced in any earlier as-focus-block in the
-	// same layout are skipped so the as-list section shows what's
-	// "warm but not yet declared in focus."
-	if len(shownIDs) > 0 {
-		entries, scores = stripShown(entries, scores, shownIDs)
-	}
+	// Flat-list output: each section renders independently. Cross-
+	// section repetition (same entry in focus-block and top-N) is
+	// intentional under the current design pending resolution of
+	// s-cpt-tn0; readers see per-section metadata for each occurrence.
 	return query.SectionResult{
 		Render: spec.render,
 		Name:   spec.sectionName(),
@@ -484,26 +470,6 @@ func participantsBlockFromEntries(g *model.Graph, entries []*model.Entry) model.
 		groups = append(groups, model.ParticipantsGroup{Actor: a, Roles: bound})
 	}
 	return model.ParticipantsBlock{Groups: groups}
-}
-
-// stripShown removes entries whose ID is in shownIDs, keeping scores
-// aligned. Returned slices are fresh — input is not mutated.
-func stripShown(entries []*model.Entry, scores []float64, shownIDs map[string]struct{}) ([]*model.Entry, []float64) {
-	out := make([]*model.Entry, 0, len(entries))
-	var outScores []float64
-	if scores != nil {
-		outScores = make([]float64, 0, len(entries))
-	}
-	for i, e := range entries {
-		if _, hit := shownIDs[e.ID]; hit {
-			continue
-		}
-		out = append(out, e)
-		if outScores != nil {
-			outScores = append(outScores, scores[i])
-		}
-	}
-	return out, outScores
 }
 
 // parseExpandArgs validates the `expand(<field>)` primitive's argument.

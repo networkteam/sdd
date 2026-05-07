@@ -1216,11 +1216,12 @@ func TestView_FocusBlock_EndToEnd(t *testing.T) {
 	}
 }
 
-func TestView_FocusBlock_DedupesAsListInLaterSections(t *testing.T) {
-	// AC 13: as-list deduplicates entries already shown in any focus
-	// block in the same layout. Two-section layout: focus block first,
-	// then as-list pulling all directives. The focus's target should
-	// not appear in the as-list output.
+func TestView_SectionsRenderIndependently(t *testing.T) {
+	// Per s-cpt-tn0: each section renders independently; an entry in
+	// both a focus block and a subsequent as-list appears in both.
+	// Cross-section dedup is captured as an open design question;
+	// this test pins the conservative no-dedup default the revert
+	// established.
 	target := entry("20260101-100000-d-tac-tgt", withKind(model.KindDirective))
 	other := entry("20260101-110000-d-tac-oth", withKind(model.KindDirective))
 	focus := entry("20260101-120000-d-prc-foc",
@@ -1244,40 +1245,11 @@ func TestView_FocusBlock_DedupesAsListInLaterSections(t *testing.T) {
 		t.Fatalf("section 2 data: got %T, want FlatList", result.Sections[1].Data)
 	}
 	got := idsOf(flat.Entries)
-	// target is in the focus block; only `other` should appear in as-list.
-	if len(got) != 1 || got[0] != other.ID {
-		t.Errorf("as-list after dedup: got %v, want [%s]", got, other.ID)
-	}
-}
-
-func TestView_FocusBlock_DoesNotDedupeAsGrouped(t *testing.T) {
-	// AC 13 dedup applies only to as-list; as-grouped sections are
-	// independent. A target in a focus block can reappear in a kind-
-	// grouped decisions section without conflict.
-	target := entry("20260101-100000-d-tac-tgt", withKind(model.KindDirective))
-	focus := entry("20260101-110000-d-prc-foc",
-		withKind(model.KindFocus),
-		withFocusActors("Christopher"),
-		withInvolvement(target.ID, nil, false),
-	)
-	g := model.NewGraph([]*model.Entry{target, focus})
-
-	layout := mustParseLayout(t,
-		"kind(focus):active:expand(involvement):as-focus-block,kind(directive):group(by(kind)):as-grouped")
-	f := New(Options{})
-	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
-	if err != nil {
-		t.Fatalf("View: %v", err)
-	}
-	grouped := result.Sections[1].Data.(model.Grouped)
-	// target survives in the as-grouped section despite being in the
-	// focus block.
-	totalEntries := 0
-	for _, gr := range grouped.Groups {
-		totalEntries += len(gr.Entries)
-	}
-	if totalEntries != 1 {
-		t.Errorf("as-grouped after focus block: got %d entries, want 1", totalEntries)
+	// Both directives appear — `target` is in the focus block AND in
+	// the as-list. The previous AC 13 dedup that stripped target
+	// from the as-list is intentionally gone.
+	if len(got) != 2 {
+		t.Errorf("as-list after focus block: got %d entries, want 2 (no cross-section dedup)", len(got))
 	}
 }
 
