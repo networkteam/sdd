@@ -201,13 +201,52 @@ func TestExpandMacros_Insights(t *testing.T) {
 	}
 }
 
+func TestExpandMacros_Focus(t *testing.T) {
+	// `focus` → `kind(focus):active:expand(involvement):as-focus-block` per d-tac-uww §5.
+	layout := mustParseLayoutHelper(t, "focus")
+	got, err := ExpandMacros(layout)
+	if err != nil {
+		t.Fatalf("ExpandMacros: %v", err)
+	}
+	wantNames := []string{"kind", "active", "expand", "as-focus-block"}
+	gotNames := functionNames(got.Sections[0])
+	if !equalStringSlices(gotNames, wantNames) {
+		t.Fatalf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)
+	}
+	// kind(focus)
+	kindFn := got.Sections[0].Functions[0]
+	if len(kindFn.Args) != 1 || kindFn.Args[0].String != "focus" {
+		t.Errorf("kind args: got %+v, want one ident 'focus'", kindFn.Args)
+	}
+	// expand(involvement)
+	expandFn := got.Sections[0].Functions[2]
+	if len(expandFn.Args) != 1 || expandFn.Args[0].String != "involvement" {
+		t.Errorf("expand args: got %+v, want one ident 'involvement'", expandFn.Args)
+	}
+}
+
+func TestExpandMacros_FocusWithModifiers(t *testing.T) {
+	// User modifiers append; the focus macro is overridable like any
+	// other (e.g. `focus:stalled(0.5):name("Active focuses")`).
+	layout := mustParseLayoutHelper(t, `focus:stalled(0.5):name("Active focuses")`)
+	got, err := ExpandMacros(layout)
+	if err != nil {
+		t.Fatalf("ExpandMacros: %v", err)
+	}
+	wantNames := []string{"kind", "active", "expand", "as-focus-block", "stalled", "name"}
+	gotNames := functionNames(got.Sections[0])
+	if !equalStringSlices(gotNames, wantNames) {
+		t.Errorf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)
+	}
+}
+
 func TestExpandMacros_NullaryMacrosRejectArgs(t *testing.T) {
 	// Nullary macros (decisions, signals, etc.) must error if called with
 	// args — `decisions(plan)` could mean "filter to plan" but the current
 	// shape has no parameter slot. Surface as error so the user reaches
 	// for `decisions:kind(plan)` (modifier append) or composes the
 	// pipeline manually.
-	for _, name := range []string{"decisions", "signals", "insights", "done", "aspirations", "contracts"} {
+	for _, name := range []string{"decisions", "signals", "insights", "done", "aspirations", "contracts", "focus"} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ExpandMacros(mustParseLayoutHelper(t, name+"(plan)"))
 			if err == nil {

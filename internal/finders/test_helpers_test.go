@@ -52,3 +52,21 @@ func withContent(c string) entryOpt {
 func withAttachments(paths ...string) entryOpt {
 	return func(e *model.Entry) { e.Attachments = paths }
 }
+
+// withFocusActors sets the focus-level default actor list (kind: focus only).
+func withFocusActors(actors ...string) entryOpt {
+	return func(e *model.Entry) { e.FocusActors = actors }
+}
+
+// withInvolvement appends one involvement triple with optional explicit
+// actors. ActorsExplicit must be true when callers want to test the
+// "actors: []" pull-available case versus the unset "inherit default" case.
+func withInvolvement(target string, actors []string, actorsExplicit bool) entryOpt {
+	return func(e *model.Entry) {
+		e.Involvement = append(e.Involvement, model.Involvement{
+			Target:    target,
+			Actors:    actors,
+			ActorsSet: actorsExplicit,
+		})
+	}
+}

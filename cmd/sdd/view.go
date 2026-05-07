@@ -67,14 +67,33 @@ Currently implemented vocabulary (more arrives in later slices):
                            of kind, layer, type. Buckets emit alphabetically.
                            Mutually exclusive with rank() and n() in this slice.
 
+  Transform:
+    expand(<field>)        Explode a list-valued frontmatter field into per-row
+                           sub-rows. Slice 7 recognizes only expand(involvement)
+                           — focus-block construction. Mutually exclusive with
+                           rank(), n(), and group().
+
+  Output:
+    name(<string>)         Render '## <string>' as the section header. Last
+                           call wins. Without name(), the section emits no
+                           outer header.
+    stalled(<value>)       Configure the heat-score threshold below which a
+                           focus target with assigned actors is classified
+                           "stalled". Default 1.0; applies only to
+                           as-focus-block sections.
+
   Render:
     as-list                One line per entry (terminator)
     as-grouped             One ### header per group, then entry lines (terminator;
                            requires a preceding group(by(<field>)))
+    as-focus-block         Per-focus header + per-target lines with state
+                           (pull-available / stalled / driving) and score
+                           (terminator; requires expand(involvement))
 
   Macros (named pipelines, recognised at section start; user modifiers append):
     top(N)                 active:n(N):rank(heat(exp-14d)):as-list
     topic(L)               topic(L):rank(heat(exp-14d)):as-list
+    focus                  kind(focus):active:expand(involvement):as-focus-block
     decisions              active:kind(plan,directive,activity,contract,aspiration)
                            :group(by(kind)):as-grouped
     signals                active:kind(gap,question):group(by(kind)):as-grouped

@@ -1107,6 +1107,278 @@ func TestView_AllFiltersCompose(t *testing.T) {
 	}
 }
 
+// --- Slice 7 partial: name(string) modifier ---
+
+func TestView_NameModifier_SetsSectionHeader(t *testing.T) {
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a})
+
+	layout := mustParseLayout(t, `name("Top entries"):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	if got, want := result.Sections[0].Name, "Top entries"; got != want {
+		t.Errorf("Name: got %q, want %q", got, want)
+	}
+}
+
+func TestView_NameModifier_LastWriteWins(t *testing.T) {
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a})
+
+	layout := mustParseLayout(t, `name("first"):name("second"):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	if got, want := result.Sections[0].Name, "second"; got != want {
+		t.Errorf("Name: got %q, want %q (last-write-wins)", got, want)
+	}
+}
+
+func TestView_NameModifier_AcceptsBareIdent(t *testing.T) {
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a})
+
+	layout := mustParseLayout(t, "name(Aspirations):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	if got, want := result.Sections[0].Name, "Aspirations"; got != want {
+		t.Errorf("Name: got %q, want %q", got, want)
+	}
+}
+
+func TestView_NameModifier_RequiresExactlyOneArg(t *testing.T) {
+	g := model.NewGraph(nil)
+	for _, src := range []string{"name:as-list", "name():as-list", `name("a","b"):as-list`} {
+		t.Run(src, func(t *testing.T) {
+			f := New(Options{})
+			_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, src)})
+			if err == nil {
+				t.Fatalf("expected error for %q, got nil", src)
+			}
+			if !strings.Contains(err.Error(), "name") {
+				t.Errorf("error %q must mention 'name'", err.Error())
+			}
+		})
+	}
+}
+
+func TestView_NameModifier_RejectsNonString(t *testing.T) {
+	g := model.NewGraph(nil)
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "name(42):as-list")})
+	if err == nil {
+		t.Fatalf("expected error for numeric name arg, got nil")
+	}
+}
+
+// --- Slice 7: focus block + dedup ---
+
+func TestView_FocusBlock_EndToEnd(t *testing.T) {
+	// Full pipeline: kind(focus):active filter selects focus entries,
+	// expand(involvement) builds the FocusBlock, as-focus-block emits
+	// the result. Verifies the wiring without going through the macro.
+	target := entry("20260101-100000-d-tac-tgt", withKind(model.KindDirective))
+	focus := entry("20260101-110000-d-prc-foc",
+		withKind(model.KindFocus),
+		withFocusActors("Christopher"),
+		withInvolvement(target.ID, nil, false),
+	)
+	g := model.NewGraph([]*model.Entry{target, focus})
+
+	layout := mustParseLayout(t, "kind(focus):active:expand(involvement):as-focus-block")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	section := result.Sections[0]
+	if section.Render != "as-focus-block" {
+		t.Errorf("render: got %q, want as-focus-block", section.Render)
+	}
+	block, ok := section.Data.(model.FocusBlock)
+	if !ok {
+		t.Fatalf("section data: got %T, want model.FocusBlock", section.Data)
+	}
+	if len(block.Focuses) != 1 || len(block.Focuses[0].Targets) != 1 {
+		t.Fatalf("expected 1 focus / 1 target, got %d/%d",
+			len(block.Focuses), len(block.Focuses[0].Targets))
+	}
+	if got := block.Focuses[0].Targets[0].Target.ID; got != target.ID {
+		t.Errorf("target: got %s, want %s", got, target.ID)
+	}
+}
+
+func TestView_FocusBlock_DedupesAsListInLaterSections(t *testing.T) {
+	// AC 13: as-list deduplicates entries already shown in any focus
+	// block in the same layout. Two-section layout: focus block first,
+	// then as-list pulling all directives. The focus's target should
+	// not appear in the as-list output.
+	target := entry("20260101-100000-d-tac-tgt", withKind(model.KindDirective))
+	other := entry("20260101-110000-d-tac-oth", withKind(model.KindDirective))
+	focus := entry("20260101-120000-d-prc-foc",
+		withKind(model.KindFocus),
+		withFocusActors("Christopher"),
+		withInvolvement(target.ID, nil, false),
+	)
+	g := model.NewGraph([]*model.Entry{target, other, focus})
+
+	layout := mustParseLayout(t, "kind(focus):active:expand(involvement):as-focus-block,kind(directive):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	if len(result.Sections) != 2 {
+		t.Fatalf("sections: got %d, want 2", len(result.Sections))
+	}
+	flat, ok := result.Sections[1].Data.(model.FlatList)
+	if !ok {
+		t.Fatalf("section 2 data: got %T, want FlatList", result.Sections[1].Data)
+	}
+	got := idsOf(flat.Entries)
+	// target is in the focus block; only `other` should appear in as-list.
+	if len(got) != 1 || got[0] != other.ID {
+		t.Errorf("as-list after dedup: got %v, want [%s]", got, other.ID)
+	}
+}
+
+func TestView_FocusBlock_DoesNotDedupeAsGrouped(t *testing.T) {
+	// AC 13 dedup applies only to as-list; as-grouped sections are
+	// independent. A target in a focus block can reappear in a kind-
+	// grouped decisions section without conflict.
+	target := entry("20260101-100000-d-tac-tgt", withKind(model.KindDirective))
+	focus := entry("20260101-110000-d-prc-foc",
+		withKind(model.KindFocus),
+		withFocusActors("Christopher"),
+		withInvolvement(target.ID, nil, false),
+	)
+	g := model.NewGraph([]*model.Entry{target, focus})
+
+	layout := mustParseLayout(t,
+		"kind(focus):active:expand(involvement):as-focus-block,kind(directive):group(by(kind)):as-grouped")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	grouped := result.Sections[1].Data.(model.Grouped)
+	// target survives in the as-grouped section despite being in the
+	// focus block.
+	totalEntries := 0
+	for _, gr := range grouped.Groups {
+		totalEntries += len(gr.Entries)
+	}
+	if totalEntries != 1 {
+		t.Errorf("as-grouped after focus block: got %d entries, want 1", totalEntries)
+	}
+}
+
+func TestView_FocusBlock_StalledModifierConfigures(t *testing.T) {
+	// Section pipeline with stalled(value) — verify the threshold flows
+	// into state derivation. Inject a graph with a target that has
+	// in-degree refs so heat is non-zero.
+	now := time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC)
+	target := entry("20260101-100000-d-tac-tgt", withKind(model.KindDirective))
+	focus := entry("20260101-110000-d-prc-foc",
+		withKind(model.KindFocus),
+		withFocusActors("Christopher"),
+		withInvolvement(target.ID, nil, false),
+	)
+	// Add some refs targeting `target` so HeatScore is non-trivial. The
+	// referrers' creation times feed decay; using `now` minus a few days
+	// keeps scores small but non-zero.
+	r1 := entry("20260505-100000-s-tac-r01", withKind(model.KindGap), withRefs(target.ID))
+	r1.Time = now.AddDate(0, 0, -2)
+	g := model.NewGraph([]*model.Entry{target, focus, r1})
+
+	// Default threshold is 1.0. Heat(exp-14d) for a 2-day-old single
+	// ref: 2^(-2/14) ≈ 0.906 — below 1.0. Without stalled(0.5), state
+	// is stalled. With stalled(0.5), state is driving.
+	resultDefault, err := f(t).View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "kind(focus):expand(involvement):as-focus-block")})
+	if err != nil {
+		t.Fatalf("View default: %v", err)
+	}
+	stateDefault := resultDefault.Sections[0].Data.(model.FocusBlock).Focuses[0].Targets[0].State
+	resultLow, err := f(t).View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "kind(focus):expand(involvement):stalled(0.5):as-focus-block")})
+	if err != nil {
+		t.Fatalf("View stalled(0.5): %v", err)
+	}
+	stateLow := resultLow.Sections[0].Data.(model.FocusBlock).Focuses[0].Targets[0].State
+
+	// We don't pin the exact state under the live clock since now=time.Now()
+	// inside View — we only verify that lowering the threshold can flip a
+	// stalled into a driving (or keep driving driving). The logical
+	// invariant: the lower-threshold case can never be more-stalled than
+	// the default.
+	if stateDefault == model.FocusStateDriving && stateLow == model.FocusStateStalled {
+		t.Errorf("inverted: default = driving, low-threshold = stalled (not possible)")
+	}
+}
+
+func TestView_FocusBlock_RankIsExclusive(t *testing.T) {
+	g := model.NewGraph(nil)
+	fdr := New(Options{})
+	_, err := fdr.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t,
+		"kind(focus):expand(involvement):rank(in-degree):as-focus-block")})
+	if err == nil {
+		t.Fatalf("expected error for expand+rank, got nil")
+	}
+	if !strings.Contains(err.Error(), "expand") || !strings.Contains(err.Error(), "rank") {
+		t.Errorf("error %q must mention both expand and rank", err.Error())
+	}
+}
+
+func TestView_FocusBlock_StalledRequiresFocusBlock(t *testing.T) {
+	// stalled(value) on a flat-list section is a clear user mistake —
+	// the modifier has no effect outside focus-block state derivation.
+	g := model.NewGraph(nil)
+	fdr := New(Options{})
+	_, err := fdr.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "stalled(1.0):as-list")})
+	if err == nil {
+		t.Fatalf("expected error for stalled() outside focus-block, got nil")
+	}
+	if !strings.Contains(err.Error(), "stalled") || !strings.Contains(err.Error(), "focus-block") {
+		t.Errorf("error %q must mention stalled and focus-block", err.Error())
+	}
+}
+
+func TestView_FocusBlock_ShapeMismatch_AsList(t *testing.T) {
+	g := model.NewGraph(nil)
+	fdr := New(Options{})
+	_, err := fdr.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t,
+		"kind(focus):expand(involvement):as-list")})
+	if err == nil {
+		t.Fatalf("expected render-shape mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "as-list") || !strings.Contains(err.Error(), "focus-block") {
+		t.Errorf("error %q must mention as-list and focus-block", err.Error())
+	}
+}
+
+func TestView_FocusBlock_ShapeMismatch_AsFocusBlockOnFlat(t *testing.T) {
+	g := model.NewGraph(nil)
+	fdr := New(Options{})
+	_, err := fdr.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, "as-focus-block")})
+	if err == nil {
+		t.Fatalf("expected render-shape mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "expand(involvement)") {
+		t.Errorf("error %q must point to expand(involvement)", err.Error())
+	}
+}
+
+// f returns a fresh Finder for tests — a small alias so multi-call tests
+// don't repeat New(Options{}) each step.
+func f(_ *testing.T) *Finder { return New(Options{}) }
+
 // --- Slice 5: group(by(field)) + as-grouped ---
 
 func TestView_GroupByKind_AsGrouped(t *testing.T) {

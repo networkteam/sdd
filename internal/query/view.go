@@ -21,7 +21,12 @@ type ViewResult struct {
 // Render names the presenter that should consume Data; Data carries the
 // shape-tagged result. The presenter validates that Data.Shape() matches
 // what Render expects before rendering.
+//
+// Name carries the section header set by `name(string)`. Empty Name means
+// the section renders without a `## <title>` header (the slice 5/6 default
+// for as-list and as-grouped).
 type SectionResult struct {
 	Render string            // render function name (e.g. "as-list")
+	Name   string            // section header set by `name(string)`; empty = no header
 	Data   model.SectionData // shape-tagged data variant produced by the finder
 }

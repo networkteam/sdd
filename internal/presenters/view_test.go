@@ -188,6 +188,92 @@ func TestRenderView_AsGroupedEmpty(t *testing.T) {
 	}
 }
 
+func TestRenderView_NameModifier_EmitsHeader(t *testing.T) {
+	// A non-empty SectionResult.Name renders as a `## <title>` line
+	// before the section body. Used by the `name(string)` modifier and
+	// (eventually) by auto-derived headers.
+	a := entry("20260101-100000-d-tac-aaa",
+		withKind(model.KindDirective),
+		withParticipants("Christopher"),
+		withSummary("First"))
+	g := model.NewGraph([]*model.Entry{a})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-list",
+			Name:   "Top entries",
+			Data:   model.FlatList{Entries: []*model.Entry{a}},
+		}},
+	}
+	got := renderView(result)
+	if !strings.HasPrefix(got, "## Top entries\n\n") {
+		t.Errorf("expected `## Top entries\\n\\n` prefix, got:\n%s", got)
+	}
+}
+
+func TestRenderView_AsFocusBlock(t *testing.T) {
+	// Smoke-shape test for the focus-block render: a `### <focus line>`
+	// header followed by per-target lines with `{state: ...}` segments.
+	target := entry("20260101-100000-d-tac-tgt",
+		withKind(model.KindDirective),
+		withParticipants("Christopher"),
+		withSummary("Target one"))
+	pull := entry("20260101-110000-s-tac-pul",
+		withKind(model.KindGap),
+		withParticipants("Christopher"),
+		withSummary("Pull-available target"))
+	focus := entry("20260101-120000-d-prc-foc",
+		withKind(model.KindFocus),
+		withParticipants("Christopher"),
+		withSummary("This week's focus"))
+	g := model.NewGraph([]*model.Entry{target, pull, focus})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-focus-block",
+			Data: model.FocusBlock{
+				Focuses: []model.FocusGroup{{
+					Focus:  focus,
+					Actors: []string{"Christopher"},
+					Targets: []model.FocusTarget{
+						{
+							Target:         target,
+							ResolvedActors: []string{"Christopher"},
+							ActorsExplicit: false,
+							Score:          5.0,
+							State:          model.FocusStateDriving,
+						},
+						{
+							Target:         pull,
+							ResolvedActors: nil,
+							ActorsExplicit: true,
+							Score:          0.0,
+							State:          model.FocusStatePullAvailable,
+						},
+					},
+				}},
+			},
+		}},
+	}
+
+	got := renderView(result)
+
+	for _, want := range []string{
+		"### 20260101-120000-d-prc-foc",
+		"actors: Christopher\n",
+		"{state: driving}",
+		"20260101-100000-d-tac-tgt",
+		"{state: pull-available}",
+		"20260101-110000-s-tac-pul",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected output to contain %q, got:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderView_UnrankedAsList_NoScoreSegment(t *testing.T) {
 	// FlatList without Scores should render plain EntryLine output —
 	// no score segment. Belt-and-suspenders against the scored branch

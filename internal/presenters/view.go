@@ -10,8 +10,9 @@ import (
 
 // RenderView writes one section per SectionResult, dispatching to the
 // per-render helper based on the section's Render name. Sections are
-// separated by a blank line so visual clusters are obvious; section
-// headers from the `name(...)` modifier arrive in slice 5.
+// separated by a blank line so visual clusters are obvious. A non-empty
+// Section.Name renders as a `## <name>` header before the section body;
+// empty Name omits the header (the as-list / as-grouped default).
 //
 // Render names are matched against the slice's known set; unknown names
 // silently produce no output for that section. The finder validates the
@@ -22,6 +23,9 @@ func RenderView(w io.Writer, result *query.ViewResult) {
 	for i, section := range result.Sections {
 		if i > 0 {
 			fmt.Fprintln(w)
+		}
+		if section.Name != "" {
+			fmt.Fprintf(w, "## %s\n\n", section.Name)
 		}
 		renderSection(w, result.Graph, section)
 	}
@@ -41,5 +45,11 @@ func renderSection(w io.Writer, g *model.Graph, section query.SectionResult) {
 			return
 		}
 		renderAsGrouped(w, g, grouped)
+	case "as-focus-block":
+		block, ok := section.Data.(model.FocusBlock)
+		if !ok {
+			return
+		}
+		renderAsFocusBlock(w, g, block)
 	}
 }

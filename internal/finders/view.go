@@ -30,11 +30,28 @@ func (f *Finder) View(q query.ViewQuery) (*query.ViewResult, error) {
 		return nil, fmt.Errorf("graph is required")
 	}
 
+	// shownIDs tracks every entry surfaced in an as-focus-block section so
+	// far. Subsequent as-list sections strip these IDs out — AC 13's
+	// "as-list deduplicates entries already shown in any focus block in
+	// the same layout." Sections execute in source order so a focus block
+	// appearing later can't influence an earlier as-list (the focus macro
+	// is conventionally first; users who place it after as-list sections
+	// see the natural ordering reflected).
+	shownIDs := make(map[string]struct{})
+	now := time.Now()
+
 	sections := make([]query.SectionResult, 0, len(q.Layout.Sections))
 	for i, section := range q.Layout.Sections {
-		sr, err := executeSection(q.Graph, section)
+		sr, err := executeSection(q.Graph, section, shownIDs, now)
 		if err != nil {
 			return nil, fmt.Errorf("section %d: %w", i+1, err)
+		}
+		// Update shownIDs from this section's focus-block targets so
+		// later as-list sections can strip them.
+		if fb, ok := sr.Data.(model.FocusBlock); ok {
+			for id := range fb.TargetIDs() {
+				shownIDs[id] = struct{}{}
+			}
 		}
 		sections = append(sections, sr)
 	}
@@ -47,16 +64,16 @@ func (f *Finder) View(q query.ViewQuery) (*query.ViewResult, error) {
 // result, as-list over a grouped result) is the AC 16 render-shape error
 // the executor emits before the presenter sees the data.
 //
-// Later slices add as-focus-block (slice 7) and as-participants-block /
-// as-wip-list (slice 8).
+// Slice 8 will add as-participants-block / as-wip-list.
 var renderFunctions = map[string]model.RenderShape{
-	"as-list":    model.ShapeFlatList,
-	"as-grouped": model.ShapeGrouped,
+	"as-list":        model.ShapeFlatList,
+	"as-grouped":     model.ShapeGrouped,
+	"as-focus-block": model.ShapeFocusBlock,
 }
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"active", "kind", "layer", "since", "topic", "n", "rank", "group", "as-list", "as-grouped"}
+var knownFunctions = []string{"active", "kind", "layer", "since", "topic", "n", "rank", "group", "expand", "name", "stalled", "as-list", "as-grouped", "as-focus-block"}
 
 // executeSection walks one section's pipeline left-to-right, accumulating
 // each function's intent into one of these buckets:
@@ -65,27 +82,43 @@ var knownFunctions = []string{"active", "kind", "layer", "since", "topic", "n", 
 //   - rank                (rank(<algo>), last-write-wins)
 //   - pagination          (n(N), last-write-wins)
 //   - aggregation         (group(by(<field>)), last-write-wins)
-//   - render terminator   (as-list / as-grouped, must be last)
+//   - transform           (expand(<field>), last-write-wins)
+//   - state classifier    (stalled(value), last-write-wins; focus-block only)
+//   - section header      (name(<string>), last-write-wins)
+//   - render terminator   (as-list / as-grouped / as-focus-block)
 //
-// Buckets apply in canonical filter → rank → page → group → render order
-// regardless of source ordering — last-write-wins per modifier kind, per
-// d-tac-uww §2. group() is mutually exclusive with rank() and n() in
-// slice 5: per-group sort and per-group pagination are reserved for a
-// later slice.
-func executeSection(g *model.Graph, section model.Section) (query.SectionResult, error) {
+// Buckets apply in canonical filter → rank → page → group/expand → render
+// order regardless of source ordering — last-write-wins per modifier kind,
+// per d-tac-uww §2.
+//
+// Mutual exclusivity in this slice:
+//   - group() with rank() or n() — per-group sort/pagination reserved
+//   - expand(involvement) with rank() or n() or group() — focus-block has
+//     no per-target ranking and can't aggregate
+//
+// shownIDs is the running set of entry IDs already surfaced in earlier
+// as-focus-block sections; flat-list sections drop these entries (AC 13
+// dedup). now is the clock used for focus-block heat scoring (test
+// determinism via injection).
+func executeSection(g *model.Graph, section model.Section, shownIDs map[string]struct{}, now time.Time) (query.SectionResult, error) {
 	if len(section.Functions) == 0 {
 		return query.SectionResult{}, fmt.Errorf("empty section")
 	}
 
 	var (
-		filter      model.GraphFilter
-		kindFilters [][]model.Kind // each kind() call is a disjunction set; multiple calls intersect (d-tac-uww §2)
-		sinceCutoff *time.Time     // pointer so we can distinguish "no since()" from "since(0d)"
-		topicPrefix model.TopicPath
-		rankPlan    *rankSpec // last-write-wins per d-tac-uww §2
-		pageN       = -1      // -1 = no page limit
-		groupField  string    // empty = no group; non-empty = group(by(<field>))
-		renderName  string
+		filter           model.GraphFilter
+		kindFilters      [][]model.Kind // each kind() call is a disjunction set; multiple calls intersect (d-tac-uww §2)
+		sinceCutoff      *time.Time     // pointer so we can distinguish "no since()" from "since(0d)"
+		topicPrefix      model.TopicPath
+		rankPlan         *rankSpec // last-write-wins per d-tac-uww §2
+		pageN            = -1      // -1 = no page limit
+		groupField       string    // empty = no group; non-empty = group(by(<field>))
+		expandField      string    // empty = no expand; non-empty = expand(<field>) (slice 7: only "involvement")
+		stalledThreshold = DefaultStalledThreshold
+		stalledSet       bool   // user-supplied threshold via stalled(value)
+		nameSet          bool   // tracks whether name(...) was called (allows last-write-wins on empty string)
+		nameValue        string // section header from name(<string>)
+		renderName       string
 	)
 
 	for _, fn := range section.Functions {
@@ -169,6 +202,29 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 			}
 			groupField = field
 
+		case fn.Name == "name":
+			s, err := parseNameArgs(fn.Args)
+			if err != nil {
+				return query.SectionResult{}, err
+			}
+			nameValue = s
+			nameSet = true
+
+		case fn.Name == "expand":
+			field, err := parseExpandArgs(fn.Args)
+			if err != nil {
+				return query.SectionResult{}, err
+			}
+			expandField = field
+
+		case fn.Name == "stalled":
+			v, err := parseStalledArgs(fn.Args)
+			if err != nil {
+				return query.SectionResult{}, err
+			}
+			stalledThreshold = v
+			stalledSet = true
+
 		case isRenderFunction(fn.Name):
 			// Render is treated like other non-filter modifiers: last-write-
 			// wins per d-tac-uww §2. This lets macro expansion + user
@@ -195,11 +251,11 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 			"section must end with a render function (one of: %s)", renderFunctionsList())
 	}
 
-	// Mutual-exclusivity: slice 5 doesn't sort or paginate within groups.
-	// rank() and n() over a grouped result both have plausible meanings
-	// (per-group, across groups, capped at N groups) — error rather than
-	// pick one silently. A future slice can introduce explicit per-group
-	// modifiers if needed.
+	// Mutual-exclusivity: per-group/per-target sort and pagination are not
+	// shipped in slice 5/7. group() and expand() both produce non-flat
+	// shapes that don't compose with rank()/n() the way a flat list does
+	// — error rather than pick a meaning silently. A future slice can
+	// introduce explicit per-bucket modifiers if needed.
 	if groupField != "" && rankPlan != nil {
 		return query.SectionResult{}, fmt.Errorf(
 			"group is mutually exclusive with rank in slice 5; per-group ranking is reserved for a future slice")
@@ -208,20 +264,44 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 		return query.SectionResult{}, fmt.Errorf(
 			"group is mutually exclusive with n in slice 5; per-group pagination is reserved for a future slice")
 	}
+	if expandField != "" && rankPlan != nil {
+		return query.SectionResult{}, fmt.Errorf(
+			"expand is mutually exclusive with rank; focus-block targets render in involvement order, and heat for stalled classification is fixed at heat(exp-14d)")
+	}
+	if expandField != "" && pageN >= 0 {
+		return query.SectionResult{}, fmt.Errorf(
+			"expand is mutually exclusive with n; focus-block target lists are bounded by the focus's involvement frontmatter, not by pagination")
+	}
+	if expandField != "" && groupField != "" {
+		return query.SectionResult{}, fmt.Errorf(
+			"expand is mutually exclusive with group; focus-block has its own per-focus grouping shape")
+	}
+	if stalledSet && expandField == "" {
+		return query.SectionResult{}, fmt.Errorf(
+			"stalled() applies only to focus-block sections; pair it with expand(involvement):as-focus-block")
+	}
 
 	// Render-shape contract: every render expects a specific result shape.
-	// as-list expects flat; as-grouped expects grouped. The check here is
-	// AC 16's render-shape mismatch error — fired before computing the
-	// result so the user sees the structural error first.
+	// The check fires before computing the result so the user sees the
+	// structural error first (AC 16).
 	expectedShape := renderFunctions[renderName]
 	if groupField != "" && expectedShape != model.ShapeGrouped {
 		return query.SectionResult{}, fmt.Errorf(
 			"render-shape mismatch: %s expects flat-list result, but group(by(...)) produces a grouped result (use as-grouped)",
 			renderName)
 	}
+	if expandField != "" && expectedShape != model.ShapeFocusBlock {
+		return query.SectionResult{}, fmt.Errorf(
+			"render-shape mismatch: %s expects flat-list result, but expand(involvement) produces a focus-block result (use as-focus-block)",
+			renderName)
+	}
 	if groupField == "" && expectedShape == model.ShapeGrouped {
 		return query.SectionResult{}, fmt.Errorf(
 			"render-shape mismatch: as-grouped expects a grouped result, but the section produces a flat-list (add group(by(<field>)) before as-grouped)")
+	}
+	if expandField == "" && expectedShape == model.ShapeFocusBlock {
+		return query.SectionResult{}, fmt.Errorf(
+			"render-shape mismatch: as-focus-block expects a focus-block result, but the section produces a flat-list (add expand(involvement) before as-focus-block, with kind(focus) filter)")
 	}
 
 	// Apply intent in canonical pipeline order: filter → rank → page →
@@ -250,6 +330,10 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 		}
 	}
 
+	var sectionName string
+	if nameSet {
+		sectionName = nameValue
+	}
 	if groupField != "" {
 		groups, err := groupBy(entries, groupField)
 		if err != nil {
@@ -257,13 +341,93 @@ func executeSection(g *model.Graph, section model.Section) (query.SectionResult,
 		}
 		return query.SectionResult{
 			Render: renderName,
+			Name:   sectionName,
 			Data:   model.Grouped{Field: groupField, Groups: groups},
 		}, nil
 	}
+	if expandField != "" {
+		// `entries` here is the filtered focus list; expand it into a
+		// FocusBlock by walking each focus's involvement and resolving
+		// targets. Score is fixed at heat(exp-14d) per slice-7 design;
+		// stalled threshold takes the user-supplied value if set.
+		block := expandInvolvement(g, entries, focusBlockScorer(g, now), stalledThreshold)
+		return query.SectionResult{
+			Render: renderName,
+			Name:   sectionName,
+			Data:   block,
+		}, nil
+	}
+	// Flat-list output: apply the focus-target dedup pass (AC 13) before
+	// returning. Entries surfaced in any earlier as-focus-block in the
+	// same layout are skipped so the as-list section shows what's
+	// "warm but not yet declared in focus."
+	if len(shownIDs) > 0 {
+		entries, scores = stripShown(entries, scores, shownIDs)
+	}
 	return query.SectionResult{
 		Render: renderName,
+		Name:   sectionName,
 		Data:   model.FlatList{Entries: entries, Scores: scores},
 	}, nil
+}
+
+// stripShown removes entries whose ID is in shownIDs, keeping scores
+// aligned. Returned slices are fresh — input is not mutated.
+func stripShown(entries []*model.Entry, scores []float64, shownIDs map[string]struct{}) ([]*model.Entry, []float64) {
+	out := make([]*model.Entry, 0, len(entries))
+	var outScores []float64
+	if scores != nil {
+		outScores = make([]float64, 0, len(entries))
+	}
+	for i, e := range entries {
+		if _, hit := shownIDs[e.ID]; hit {
+			continue
+		}
+		out = append(out, e)
+		if outScores != nil {
+			outScores = append(outScores, scores[i])
+		}
+	}
+	return out, outScores
+}
+
+// parseExpandArgs validates the `expand(<field>)` primitive's argument.
+// Slice 7 recognizes only `expand(involvement)` — the focus-block
+// transform. Other field names error with a listed-valid-set message
+// so users see what's available without grepping the executor.
+func parseExpandArgs(args []model.FunctionArg) (string, error) {
+	if len(args) != 1 {
+		return "", fmt.Errorf("expand: requires exactly one field argument (e.g. expand(involvement))")
+	}
+	a := args[0]
+	if a.Kind != model.ArgKindIdent && a.Kind != model.ArgKindString {
+		return "", fmt.Errorf("expand: argument must be an identifier or string, got %s", a.Kind)
+	}
+	switch a.String {
+	case "involvement":
+		return a.String, nil
+	default:
+		return "", fmt.Errorf("expand: unknown field %q (known: involvement)", a.String)
+	}
+}
+
+// parseStalledArgs validates the `stalled(<value>)` modifier. The
+// argument is a numeric threshold; non-negative floats are accepted
+// (zero is valid — "anything below zero heat is stalled" reduces to
+// "stalled never fires"). Strings/idents reject so users don't pass
+// names by mistake.
+func parseStalledArgs(args []model.FunctionArg) (float64, error) {
+	if len(args) != 1 {
+		return 0, fmt.Errorf("stalled: requires exactly one numeric argument (e.g. stalled(1.0))")
+	}
+	a := args[0]
+	if a.Kind != model.ArgKindNumber {
+		return 0, fmt.Errorf("stalled: argument must be a number, got %s", a.Kind)
+	}
+	if a.Number < 0 {
+		return 0, fmt.Errorf("stalled: argument must be non-negative, got %v", a.Number)
+	}
+	return a.Number, nil
 }
 
 // isRenderFunction reports whether name terminates a section. Reads the
@@ -283,6 +447,24 @@ func renderFunctionsList() string {
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
+}
+
+// parseNameArgs validates name()'s single string argument. Empty strings
+// are accepted — `name("")` clears any prior name() in the section
+// (last-write-wins). Identifiers are accepted interchangeably with
+// strings to keep the call site flexible: `name(Aspirations)` and
+// `name("Aspirations")` are equivalent.
+func parseNameArgs(args []model.FunctionArg) (string, error) {
+	if len(args) != 1 {
+		return "", fmt.Errorf("name: requires exactly one string argument (e.g. name(\"Top\"))")
+	}
+	a := args[0]
+	switch a.Kind {
+	case model.ArgKindString, model.ArgKindIdent:
+		return a.String, nil
+	default:
+		return "", fmt.Errorf("name: argument must be a string or identifier, got %s", a.Kind)
+	}
 }
 
 // parseGroupArgs validates and extracts the field name from group()'s

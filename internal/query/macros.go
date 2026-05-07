@@ -68,6 +68,7 @@ func expandSection(section model.Section) (model.Section, error) {
 var macros = map[string]func(args []model.FunctionArg) ([]model.Function, error){
 	"top":         expandTop,
 	"topic":       expandTopicMacro,
+	"focus":       expandFocus,
 	"decisions":   expandDecisions,
 	"signals":     expandSignals,
 	"insights":    expandInsights,
@@ -184,6 +185,23 @@ func expandAspirations(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("aspiration")},
 		{Name: "as-list"},
+	}, nil
+}
+
+// expandFocus expands `focus` to `kind(focus):active:expand(involvement):as-focus-block`
+// per d-tac-uww §5. The state derivation algorithm and stalled threshold
+// live downstream in the executor; the macro just wires the canonical
+// pipeline. Users override the threshold via `focus:stalled(<value>)`
+// and the section title via `focus:name("<title>")`.
+func expandFocus(args []model.FunctionArg) ([]model.Function, error) {
+	if err := requireNoArgs(args); err != nil {
+		return nil, err
+	}
+	return []model.Function{
+		{Name: "kind", Args: identArgs("focus")},
+		{Name: "active"},
+		{Name: "expand", Args: []model.FunctionArg{identArg("involvement")}},
+		{Name: "as-focus-block"},
 	}, nil
 }
 
