@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd status *) Bash(sdd wip list *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 29df0d218422d82737fbba99a34d365d1f12d0f32e75142ec4edef0537c8ea25
+sdd-content-hash: 54321b2135b5f437c991518f4dc3b0c5cc79ab859a9c647423945b7e52d83f03
 sdd-version: dev
 ---
 
@@ -199,13 +199,12 @@ You don't ask "which mode?" — you read the situation and act accordingly. The 
 | Bootstrap | Empty graph; lacking actors or aspirations | invokes `/sdd-bootstrap` sub-skill |
 | Check-in | Session start; "where are we?" | [references/playbook-catchup.md](references/playbook-catchup.md) |
 | Capture | User shares observation, insight, finding | inline (see below) |
-| Evaluate | A done signal landed; user asks about it | [references/playbook-catchup.md](references/playbook-catchup.md) |
 | Reflect/Dialogue | Open exploration, no specific entry | inline (see below) |
 | Decide | Open signals or tensions need resolution | inline (see below) |
-| Explore | "Dig into N", entry ID named, topic pointed at | invokes `/sdd-explore`, then [references/playbook-explore.md](references/playbook-explore.md) |
-| Act/Implement | "Let's build this" | [references/playbook-implementation.md](references/playbook-implementation.md) |
+| Engage | Entry ID named, topic pointed at, "let's build / dig into N" — anything anchored on a specific entry | [references/playbook-engage.md](references/playbook-engage.md) (loads first; the playbook itself invokes `/sdd-explore` as a tool when chain + neighbors would bloat the outer) |
+| Evaluate | A done signal landed; user asks about it | [references/playbook-engage.md](references/playbook-engage.md) (engage on the done signal or on the closed commitment — dedicated lens-flavor `playbook-evaluate.md` queued behind the engage refactor) |
 | Augment plan | Refinement mid-implementation | [references/playbook-augment-plan.md](references/playbook-augment-plan.md) |
-| Groom | "Let's groom"; user-suggested cleanup | invokes `/sdd-groom`, then [references/playbook-groom.md](references/playbook-groom.md) |
+| Groom | "Let's groom"; user-suggested cleanup | [references/playbook-groom.md](references/playbook-groom.md) (loads first, then invokes `/sdd-groom` sub-skill) |
 
 The three inline modes below have no reference because the always-loaded surface (capture discipline, decision-kind tests, framework concepts) already covers their mechanics. The brief notes below define each mode's posture.
 

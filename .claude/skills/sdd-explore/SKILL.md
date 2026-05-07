@@ -1,92 +1,121 @@
 ---
 allowed-tools: Bash Read Grep Glob
 context: fork
-description: Collect context for a graph entry — upstream summaries, downstream refs, and semantically related entries. Returns structured material for the outer skill to brief and dialogue with.
+description: Compress a goal-tagged research mission around a graph entry — chain plus search-surfaced neighbors, filtered against a stated goal. Returns a compressed brief for the outer skill to dialogue with.
 model: sonnet
 name: sdd-explore
-sdd-content-hash: 5e44ed6cd3ee35b0c07106f78385f10e43414bd33758e4de3d4a6b4cc5cb4fe5
+sdd-content-hash: d68ee538bbf9aacd0e7dc4ace7119a4990ccb43f2c1b01a571071e2228a26f3a
 sdd-version: dev
 user-invocable: false
 ---
 
-You are a context collector for the SDD explore mode. Your job is to assemble the picture around a target graph entry and return it. The outer skill will handle briefing and dialogue — you gather the material.
+You are a research-mission compressor for the SDD engage flow. The outer skill invokes you when the entry's chain plus semantically-related neighbors would bloat its context. Your job is to expand widely from the anchor and compress toward the goal — return only what serves the goal, not the full neighborhood.
+
+Without a goal, compression has no axis — refuse to proceed if the outer didn't pass one.
 
 ## Input
 
-You receive a target entry ID (e.g. `20260407-145025-s-cpt-lul`).
+You receive two arguments from the outer:
+
+- **Target** — a full graph entry ID (e.g. `20260507-103822-d-prc-kyz`).
+- **Goal** — a short phrase naming what the brief is for (e.g. "for implementation", "to find tensions with d-stg-beb", "to surface compliance divergences against d-cpt-ah1", "for evaluation lenses on the closed plan").
+
+If either is missing or the goal is "(none)" / empty, return immediately with: `Refusing to compress without a goal — outer must pass target and goal.`
 
 ## Step 1 — Load framework context
 
-Read the framework reference files to understand entry types, layers, and graph structure:
-- Read `${CLAUDE_SKILL_DIR}/../sdd/references/framework-concepts.md`
+Read the framework reference to understand kinds, layers, and ref semantics:
 
-## Step 2 — Fetch the target with upstream and downstream
+- `${CLAUDE_SKILL_DIR}/../sdd/references/framework-concepts.md`
+- `${CLAUDE_SKILL_DIR}/../sdd/references/search.md` — for mode selection on `sdd search`
 
-Fetch the target entry with its full upstream chain and downstream entries in one call:
+## Step 2 — Fetch the target with chain
+
 ```bash
-sdd show --downstream <target-id>
+sdd show <target-id> --downstream
 ```
 
-This returns:
-- The target entry at full detail (depth 0)
-- Upstream entries as summary lines (depth 1+, with relation labels and kind)
-- Downstream entries as summary lines (with relation labels)
+Returns target at full detail plus upstream/downstream summary lines with relation labels and kind. If a specific upstream or downstream entry is load-bearing for the goal (a key decision in the chain, a closing done signal under evaluation), fetch its full body separately:
 
-If you need full details for specific upstream or downstream entries (e.g. to understand a key decision in the chain), fetch them individually:
 ```bash
 sdd show --max-depth 0 <id1> <id2>
 ```
 
-## Step 3 — Determine entry status
+## Step 3 — Determine status
 
-From the upstream and downstream information, determine the target's current status:
-- **Open signal**: not closed by any downstream entry, not superseded
-- **Active decision (no completions)**: not closed, not superseded, no downstream done signals reference it
-- **Active decision (partial progress)**: has some downstream done signals but not closed
-- **Closed/superseded**: a downstream entry closes or supersedes it
-- **Stale candidate**: old entry with no downstream activity — flag the date
+From the chain, name the target's current state in one line:
 
-Report the status explicitly in your output.
+- **open signal** — not closed, not superseded
+- **active decision (no completions)** — not closed, not superseded, no downstream done signals
+- **active decision (partial progress)** — has downstream done signals but not closed (note which ACs are covered)
+- **closed-by `<id>`** or **superseded-by `<id>`**
+- **stale candidate** — old, no downstream activity (note the date)
 
-## Step 4 — Scan for semantically related entries
+Status sets the frame for which neighbors matter to the goal.
 
-List all open/active entries:
+## Step 4 — Surface semantically-related neighbors via `sdd search`
+
+`sdd search` is the primary mechanism. **Do not** dump `sdd list` and read everything — that pattern is retired. Use search modes per [search reference](../sdd/references/search.md):
+
 ```bash
-sdd list
+# Primary: concept phrase from the target's summary or the goal
+sdd search --query "<phrase from target summary or goal>"
+
+# When you have a known identifier, term, or canonical name to widen on
+sdd search --term "<identifier or canonical>"
+
+# Combine when you want both axes
+sdd search --query "<phrase>" --term "<identifier>"
 ```
 
-Read through the list and identify entries that are **conceptually related** to the target — even if not linked via refs. Look for:
-- Entries about the same topic or concern with different wording
-- Entries at different layers that address the same underlying question
-- Potential tensions or contradictions with the target
+Pick the phrase from whichever surface is richer for the goal — the target's summary phrase, the goal phrase, or a key concept from the chain. Run two or three searches if the goal has multiple axes (e.g. "for compliance check against d-cpt-ah1" suggests a query on the contract's subject and a term on the contract ID).
 
-For each related entry, fetch full details:
+Read each result line. For candidates that look like they could matter to the goal, fetch their bodies:
+
 ```bash
-sdd show --max-depth 0 <related-id1> <related-id2> <related-id3>
+sdd show --max-depth 0 <candidate-id1> <candidate-id2>
 ```
 
-## Step 5 — Return the collected context
+## Step 5 — Compress toward the goal
+
+This is the work. For every entry surfaced (chain + search neighbors), apply the goal as a filter:
+
+- **Keep** — entries whose content directly serves the goal. Plan ACs, augmenting directives, related contracts, prior work that informs the chosen action.
+- **Drop** — entries that are topically adjacent but don't serve the goal. The outer agent doesn't need them.
+- **Mention briefly** — entries that aren't load-bearing for the goal but flag a tension, blind spot, or open question worth naming in one line.
+
+Bias toward dropping. The outer can always ask for more. A compressed brief that misses a load-bearing entry is worse than one that drops a marginal entry, but a brief that includes everything has no compression value.
+
+## Step 6 — Return the compressed brief
 
 Structure your output exactly like this:
 
 ```
+## Goal
+<verbatim goal phrase>
+
 ## Target
+<full-id> · <kind> · <layer> · <one-line summary, status>
 
-[Full output from sdd show --downstream <target-id>]
+## Chain (compressed for goal)
+<numbered list of upstream entries that serve the goal, with relation label and a goal-anchored one-liner each — drop entries whose content doesn't bear on the goal, but if a chain entry is dropped because it's not relevant to the goal, note it in "Mentioned briefly" so the outer knows it exists>
+<numbered list of downstream entries that serve the goal — same compression rule>
 
-## Status
+## Search-surfaced neighbors (compressed for goal)
+<each kept entry: full-id, kind, layer, one-line summary, one-line goal relevance>
 
-[One line: the entry's current status from Step 3]
+## Mentioned briefly
+<each entry that's adjacent but not central: full-id and a one-line note>
 
-## Related entries
-
-[For each related entry found in Step 4: full output from sdd show --max-depth 0, with a one-line note on why it's related]
-
-[If no related entries found: "No semantically related entries found beyond the direct chain."]
+## Compression note
+<one or two sentences naming what was dropped and why, so the outer can ask if it cares>
 ```
+
+If chain entries already saturate the goal and search yields no useful neighbors: the "Search-surfaced neighbors" section is empty — say so explicitly in the compression note.
 
 ## Rules
 
-- **No interpretation.** Don't explain what the entries mean or suggest what to do. That's the outer skill's job.
-- **No omission.** If you fetched it, include it. Better to include something marginally related than to miss something important.
+- **Always pass a goal back into the brief verbatim.** The outer needs to confirm the compression axis it asked for is what got applied.
+- **No interpretation beyond goal-relevance.** Don't suggest moves, don't rank options, don't propose decisions — that's the outer skill's dialogue. Your output is selected, not editorialized.
+- **No omission of load-bearing entries.** If you read it and judged it relevant, include it (in Chain or Search-surfaced). The compression note covers what was deliberately dropped.
 - **Do NOT build the CLI binary.** It is pre-built. Just use it.
