@@ -21,7 +21,7 @@ A session can move fluidly between these modes:
 
 **Decide**: Open signals or tensions need resolution. Summarize the relevant signals, discuss options, capture the decision with confidence level and refs.
 
-**Act/Implement**: A decision exists and it's time to execute. Before starting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. Decompose into operational sub-decisions. Capture a done signal against each when complete. Know when to stop and evaluate.
+**Engage**: A session anchors on a graph entry to explore, implement, evaluate, or otherwise act on it. Before acting: check if enough decisions exist for the scope. Prefer reducing scope over building into the unknown. Decompose into operational sub-decisions. Capture a done signal against each when complete. Know when to stop and evaluate.
 
 ## Capture Guidelines
 
