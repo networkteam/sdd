@@ -11,31 +11,42 @@ import (
 )
 
 // viewHelpText is shown when `sdd view` runs without `--layout`. It
-// documents only what slice 1 actually executes; later slices expand the
+// documents only what is currently implemented; later slices expand the
 // vocabulary and bring this text up to the full d-tac-uww grammar.
 const viewHelpText = `Usage: sdd view --layout=<spec>
 
 Compose a pipeline of primitives separated by colons; multiple sections
 are separated by commas. Render is always the terminus of each section.
 
-Slice 1 vocabulary (more arrives in later slices):
+Args use parens: kind(plan), n(10). Multi-arg disjunction: kind(plan,directive).
+Strings use quotes: topic("infrastructure/cli"). No whitespace anywhere
+except inside quoted strings.
+
+Currently implemented vocabulary (more arrives in later slices):
 
   Filters:
-    active            Entries not closed and not superseded
+    active                 Entries not closed and not superseded
+    kind(K[, K2, ...])     Entries whose kind matches any of the listed kinds
+
+  Page:
+    n(N)                   Take first N entries (after filtering)
 
   Render:
-    as-list           One line per entry (terminator)
+    as-list                One line per entry (terminator)
 
 Examples:
 
   sdd view --layout=active:as-list
     Show all active and open entries.
 
-  sdd view --layout=as-list
-    Show every entry, including closed and superseded.
+  sdd view --layout=active:kind(plan):n(10):as-list
+    First 10 active plans.
 
-  sdd view --layout=active:as-list,as-list
-    Two sections: active entries, then everything (separated by a blank line).
+  sdd view --layout=kind(plan,directive,activity):as-list
+    All plans, directives, and activities (any status).
+
+  sdd view --layout=active:kind(plan):n(5):as-list,active:kind(directive):n(5):as-list
+    Two sections: top 5 active plans, then top 5 active directives.
 
 See the d-tac-uww plan for the full grammar; primitives not yet implemented
 return a clear "unknown function" error listing what is available.

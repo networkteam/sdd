@@ -162,6 +162,301 @@ func TestView_NilGraph(t *testing.T) {
 	}
 }
 
+// --- Slice 2: kind() and n() primitives ---
+
+func TestView_KindFilter_Single(t *testing.T) {
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	directive := entry("20260101-110000-d-tac-dir", withKind(model.KindDirective))
+	gap := entry("20260101-120000-s-tac-gap", withKind(model.KindGap))
+	g := model.NewGraph([]*model.Entry{plan, directive, gap})
+
+	layout := mustParseLayout(t, "kind(plan):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{plan.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_KindFilter_Disjunction(t *testing.T) {
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	directive := entry("20260101-110000-d-tac-dir", withKind(model.KindDirective))
+	activity := entry("20260101-120000-d-tac-act", withKind(model.KindActivity))
+	gap := entry("20260101-130000-s-tac-gap", withKind(model.KindGap))
+	g := model.NewGraph([]*model.Entry{plan, directive, activity, gap})
+
+	layout := mustParseLayout(t, "kind(plan,directive,activity):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{plan.ID, directive.ID, activity.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_KindFilter_StringArg(t *testing.T) {
+	// kind() should accept string-quoted args interchangeably with idents
+	// so users can write either kind(plan) or kind("plan").
+	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
+	directive := entry("20260101-110000-d-tac-dir", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{plan, directive})
+
+	layout := mustParseLayout(t, `kind("plan"):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	if len(got) != 1 || got[0] != plan.ID {
+		t.Errorf("entries: got %v, want [%s]", got, plan.ID)
+	}
+}
+
+func TestView_NPagination(t *testing.T) {
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	b := entry("20260101-110000-d-tac-bbb", withKind(model.KindDirective))
+	c := entry("20260101-120000-d-tac-ccc", withKind(model.KindDirective))
+	d := entry("20260101-130000-d-tac-ddd", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a, b, c, d})
+
+	layout := mustParseLayout(t, "n(2):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{a.ID, b.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_NLargerThanResult(t *testing.T) {
+	// n(N) with N greater than the available result returns everything,
+	// not an error — pagination caps at result length.
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	b := entry("20260101-110000-d-tac-bbb", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a, b})
+
+	layout := mustParseLayout(t, "n(100):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if len(flat.Entries) != 2 {
+		t.Errorf("entries: got %d, want 2", len(flat.Entries))
+	}
+}
+
+func TestView_NZero(t *testing.T) {
+	// n(0) returns empty — degenerate but valid (no negative page sizes).
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a})
+
+	layout := mustParseLayout(t, "n(0):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if len(flat.Entries) != 0 {
+		t.Errorf("entries: got %d, want 0", len(flat.Entries))
+	}
+}
+
+func TestView_KindThenN_Compose(t *testing.T) {
+	plan1 := entry("20260101-100000-d-tac-pl1", withKind(model.KindPlan))
+	plan2 := entry("20260101-110000-d-tac-pl2", withKind(model.KindPlan))
+	plan3 := entry("20260101-120000-d-tac-pl3", withKind(model.KindPlan))
+	directive := entry("20260101-130000-d-tac-dir", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{plan1, plan2, plan3, directive})
+
+	// kind first, then n: filter to plans, page first 2.
+	layout := mustParseLayout(t, "kind(plan):n(2):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{plan1.ID, plan2.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_NThenKind_SameAsKindThenN(t *testing.T) {
+	// Pipeline order in source doesn't change the canonical
+	// filter→page→render order — the executor accumulates intent and
+	// applies in canonical sequence so n(2):kind(plan) == kind(plan):n(2).
+	plan1 := entry("20260101-100000-d-tac-pl1", withKind(model.KindPlan))
+	plan2 := entry("20260101-110000-d-tac-pl2", withKind(model.KindPlan))
+	plan3 := entry("20260101-120000-d-tac-pl3", withKind(model.KindPlan))
+	directive := entry("20260101-130000-d-tac-dir", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{plan1, plan2, plan3, directive})
+
+	layout := mustParseLayout(t, "n(2):kind(plan):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{plan1.ID, plan2.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_ActiveKindNCompose(t *testing.T) {
+	// active + kind + n composed end-to-end on a representative graph.
+	activePlan1 := entry("20260101-100000-d-tac-ap1", withKind(model.KindPlan))
+	activePlan2 := entry("20260101-110000-d-tac-ap2", withKind(model.KindPlan))
+	closedPlan := entry("20260101-120000-d-tac-clp", withKind(model.KindPlan))
+	closer := entry("20260101-130000-s-tac-clo",
+		withKind(model.KindDone),
+		withCloses(closedPlan.ID))
+	directive := entry("20260101-140000-d-tac-dir", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{activePlan1, activePlan2, closedPlan, closer, directive})
+
+	layout := mustParseLayout(t, "active:kind(plan):n(5):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{activePlan1.ID, activePlan2.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+// Error paths — argument validation lives in the executor (the parser is
+// permissive). Each case checks the error mentions the offending function
+// so users can locate the issue in their layout string.
+
+func TestView_ActiveTakesNoArgs(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "active(plan):as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for active with args, got nil")
+	}
+	if !strings.Contains(err.Error(), "active") {
+		t.Errorf("error %q does not mention 'active'", err.Error())
+	}
+}
+
+func TestView_KindRequiresArgs(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "kind():as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for kind with no args, got nil")
+	}
+	if !strings.Contains(err.Error(), "kind") {
+		t.Errorf("error %q does not mention 'kind'", err.Error())
+	}
+}
+
+func TestView_KindRejectsNonIdentifier(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "kind(10):as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for kind with numeric arg, got nil")
+	}
+	if !strings.Contains(err.Error(), "kind") {
+		t.Errorf("error %q does not mention 'kind'", err.Error())
+	}
+}
+
+func TestView_NRequiresExactlyOneArg(t *testing.T) {
+	g := model.NewGraph(nil)
+	cases := []string{
+		"n():as-list",
+		"n(1,2):as-list",
+	}
+	for _, layoutStr := range cases {
+		t.Run(layoutStr, func(t *testing.T) {
+			layout := mustParseLayout(t, layoutStr)
+			f := New(Options{})
+			_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), "n") {
+				t.Errorf("error %q does not mention 'n'", err.Error())
+			}
+		})
+	}
+}
+
+func TestView_NRejectsNonNumber(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "n(abc):as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for n with identifier arg, got nil")
+	}
+	if !strings.Contains(err.Error(), "n") {
+		t.Errorf("error %q does not mention 'n'", err.Error())
+	}
+}
+
+func TestView_NRejectsNonInteger(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "n(2.5):as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for non-integer n, got nil")
+	}
+	if !strings.Contains(err.Error(), "integer") {
+		t.Errorf("error %q does not mention 'integer'", err.Error())
+	}
+}
+
+func TestView_NRejectsNegative(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "n(-1):as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatalf("expected error for negative n, got nil")
+	}
+	if !strings.Contains(err.Error(), "negative") &&
+		!strings.Contains(err.Error(), "non-negative") {
+		t.Errorf("error %q does not mention non-negativity", err.Error())
+	}
+}
+
 // helpers
 
 func mustParseLayout(t *testing.T, s string) model.Layout {
