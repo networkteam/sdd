@@ -123,3 +123,28 @@ func indexOf(b []byte, s string) int {
 	}
 	return -1
 }
+
+func TestShouldBumpMinimumVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		current string
+		binary  string
+		want    bool
+	}{
+		{"empty current with released binary", "", "v0.5.0", true},
+		{"binary higher than current", "v0.5.0", "v0.6.0", true},
+		{"binary equal to current", "v0.5.0", "v0.5.0", false},
+		{"binary lower than current", "v0.6.0", "v0.5.0", false},
+		{"dev binary never bumps", "v0.5.0", "dev", false},
+		{"dev binary even with empty current", "", "dev", false},
+		{"malformed current is replaced", "garbage", "v0.5.0", true},
+		{"bare numeric current", "0.5.0", "v0.6.0", true},
+	}
+	for _, tt := range tests {
+		got := ShouldBumpMinimumVersion(tt.current, tt.binary)
+		if got != tt.want {
+			t.Errorf("%s: ShouldBumpMinimumVersion(%q, %q) = %v, want %v",
+				tt.name, tt.current, tt.binary, got, tt.want)
+		}
+	}
+}

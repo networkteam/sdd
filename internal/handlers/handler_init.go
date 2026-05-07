@@ -199,6 +199,34 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		return fmt.Errorf("writing schema meta: %w", err)
 	}
 
+	// `sdd init --bump` raises minimum_version to the running binary
+	// after meta.json is in place. Runs before the skill install so a
+	// rejected dev-build bump doesn't leave the install dir half-written.
+	// The handler enforces the dev-build refusal; the CLI also fast-fails
+	// before invoking us, but the second guard keeps the contract clean
+	// when the API is consumed directly.
+	if cmd.Bump {
+		err := h.BumpMinimumVersion(ctx, &command.BumpMinimumVersionCmd{
+			SDDDir:        sddDir,
+			BinaryVersion: cmd.BinaryVersion,
+			OnBumped: func(previous, current string) {
+				metaPath := filepath.Join(sddDir, model.SchemaMetaFileName)
+				touched = append(touched, metaPath)
+				if cmd.OnMinimumVersionBumped != nil {
+					cmd.OnMinimumVersionBumped(previous, current)
+				}
+			},
+			OnUnchanged: func(current string) {
+				if cmd.OnMinimumVersionUnchanged != nil {
+					cmd.OnMinimumVersionUnchanged(current)
+				}
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("bumping minimum_version: %w", err)
+		}
+	}
+
 	// Install (or refresh) the embedded skill bundle. Track every written
 	// file for the eventual commit.
 	err = h.InstallSkills(ctx, &command.InstallSkillsCmd{

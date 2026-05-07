@@ -85,6 +85,27 @@ func normalizeSemver(v string) string {
 	return v
 }
 
+// ShouldBumpMinimumVersion reports whether a recorded minimum_version
+// value should be raised to match a running binary. Returns true when the
+// binary is a released semver strictly higher than current, when current
+// is empty (no floor recorded), or when current is malformed. Returns
+// false for dev binaries — callers should reject the bump path before
+// reaching this check, but the helper is conservative.
+func ShouldBumpMinimumVersion(current, binaryVersion string) bool {
+	if IsDevVersion(binaryVersion) {
+		return false
+	}
+	if current == "" {
+		return true
+	}
+	binN := normalizeSemver(binaryVersion)
+	curN := normalizeSemver(current)
+	if !semver.IsValid(curN) {
+		return true
+	}
+	return semver.Compare(binN, curN) > 0
+}
+
 // CheckCompatibility evaluates meta against the binary's own version and
 // declared schema version.
 //

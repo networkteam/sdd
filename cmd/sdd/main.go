@@ -1452,8 +1452,18 @@ func initCmd() *cli.Command {
 				Name:  "force",
 				Usage: "Overwrite user-modified skill files without prompting",
 			},
+			&cli.BoolFlag{
+				Name:  "bump",
+				Usage: "Raise .sdd/meta.json minimum_version to this binary's version (released builds only)",
+			},
 		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
+			// `--bump` cannot be honoured from a dev build — fail before
+			// any other side effects so the operator gets the explicit
+			// guidance instead of a partial run.
+			if cmd.Bool("bump") && model.IsDevVersion(version) {
+				return fmt.Errorf("cannot bump from a dev build, use a released sdd binary")
+			}
 			repoRoot, err := findRepoRoot()
 			if err != nil {
 				return fmt.Errorf("finding repo root: %w", err)
@@ -1580,6 +1590,17 @@ func initCmd() *cli.Command {
 				ScopeExplicit: scopeExplicit,
 				UserHome:      userHome,
 				Force:         cmd.Bool("force"),
+				Bump:          cmd.Bool("bump"),
+				OnMinimumVersionBumped: func(previous, current string) {
+					if previous == "" {
+						fmt.Printf("  minimum_version: → %s\n", current)
+					} else {
+						fmt.Printf("  minimum_version: %s → %s\n", previous, current)
+					}
+				},
+				OnMinimumVersionUnchanged: func(current string) {
+					fmt.Printf("  minimum_version: %s (unchanged)\n", current)
+				},
 				PromptOverwrite: func(path string) (bool, error) {
 					if !isTerminal(os.Stdin) {
 						return false, nil
@@ -1621,7 +1642,7 @@ func initCmd() *cli.Command {
 				Committer: gitCommitterFunc(gitCommit),
 			})
 			return handler.Init(ctx, icmd)
-		},
+		}),
 	}
 }
 

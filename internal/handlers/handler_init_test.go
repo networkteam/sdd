@@ -589,3 +589,114 @@ func TestInit_MatchingExplicitScopeIsNoop(t *testing.T) {
 		t.Errorf("config.yaml rewritten on matching scope; before:\n%s\nafter:\n%s", before, after)
 	}
 }
+
+// TestInit_BumpRaisesMinimumVersion verifies AC 7: `sdd init --bump` from a
+// released binary higher than the recorded minimum updates meta.json.
+func TestInit_BumpRaisesMinimumVersion(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	// First run stamps minimum_version v0.5.0.
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.5.0",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Bump from a higher binary.
+	var bumped struct{ prev, cur string }
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.6.0",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+		Bump:          true,
+		OnMinimumVersionBumped: func(p, c string) {
+			bumped.prev = p
+			bumped.cur = c
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if bumped.prev != "v0.5.0" || bumped.cur != "v0.6.0" {
+		t.Errorf("bump callback got prev=%q cur=%q; want v0.5.0, v0.6.0", bumped.prev, bumped.cur)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, model.SDDDirName, model.SchemaMetaFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := model.ParseSchemaMeta(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.MinimumVersion == nil || *meta.MinimumVersion != "v0.6.0" {
+		t.Errorf("minimum_version: got %+v, want v0.6.0", meta.MinimumVersion)
+	}
+}
+
+// TestInit_BumpEqualIsNoop verifies AC 7's no-op clause: --bump from a
+// binary equal to the recorded minimum does not rewrite meta.json.
+func TestInit_BumpEqualIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.5.0",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var unchanged string
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:                  tmp,
+		BinaryVersion:             "v0.5.0",
+		Scope:                     model.ScopeProject,
+		ScopeExplicit:             true,
+		Bump:                      true,
+		OnMinimumVersionUnchanged: func(c string) { unchanged = c },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if unchanged != "v0.5.0" {
+		t.Errorf("unchanged callback got %q; want v0.5.0", unchanged)
+	}
+}
+
+// TestInit_BumpDevBuildErrors verifies AC 7's dev-build refusal with the
+// exact error string the plan calls out.
+func TestInit_BumpDevBuildErrors(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	// Fresh init from a dev build leaves minimum_version absent — exactly
+	// the case where someone might be tempted to "bump" by accident.
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "dev",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "dev",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+		Bump:          true,
+	})
+	if err == nil {
+		t.Fatal("expected error on --bump from dev build, got nil")
+	}
+	if !strings.Contains(err.Error(), "cannot bump from a dev build") {
+		t.Errorf("error should match plan wording: %v", err)
+	}
+}

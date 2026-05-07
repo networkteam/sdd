@@ -64,6 +64,21 @@ type InitCmd struct {
 	// bypassing PromptOverwrite entirely.
 	Force bool
 
+	// Bump asks the handler to raise .sdd/meta.json's minimum_version to
+	// the running binary's version after the regular init flow runs. Dev
+	// builds are rejected with the fixed message defined on
+	// BumpMinimumVersionCmd; equal versions are a no-op.
+	Bump bool
+
+	// OnMinimumVersionBumped fires when minimum_version was raised by a
+	// `sdd init --bump` invocation, carrying the previous value (empty
+	// when no floor was recorded) and the new value.
+	OnMinimumVersionBumped func(previous, current string)
+
+	// OnMinimumVersionUnchanged fires when --bump was passed but the
+	// binary version already matched the recorded minimum (no-op).
+	OnMinimumVersionUnchanged func(current string)
+
 	// PromptOverwrite is invoked for each skill file whose on-disk copy
 	// has been user-edited. Return true to overwrite, false to preserve.
 	// If nil (and Force is false), modified skill files are preserved
