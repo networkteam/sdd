@@ -1377,7 +1377,13 @@ func initCmd() *cli.Command {
 				language = prompted
 			}
 
+			// `--scope` carries two pieces of information: the literal value
+			// (validated against the known set below) and whether the operator
+			// passed it at all. The handler uses ScopeExplicit to gate the
+			// contradiction check against any value already persisted in
+			// .sdd/config.yaml — a default fallback never contradicts.
 			scope := model.Scope(cmd.String("scope"))
+			scopeExplicit := cmd.IsSet("scope")
 			if scope != model.ScopeUser && scope != model.ScopeProject {
 				return fmt.Errorf("invalid --scope: %s (use user or project)", scope)
 			}
@@ -1413,6 +1419,7 @@ func initCmd() *cli.Command {
 				BinaryVersion: version,
 				Target:        model.DefaultAgentTarget,
 				Scope:         scope,
+				ScopeExplicit: scopeExplicit,
 				UserHome:      userHome,
 				Force:         cmd.Bool("force"),
 				PromptOverwrite: func(path string) (bool, error) {
@@ -1438,8 +1445,12 @@ func initCmd() *cli.Command {
 					fmt.Printf("  participant: %s → %s\n", name, path)
 				},
 				OnSkillsInstalled: func(result command.SkillInstallResult) {
-					installDir := scopeInstallDir(repoRoot, userHome, scope)
-					presenters.RenderInitSkills(os.Stdout, installDir, result)
+					// result.InstallDir reflects the scope the handler
+					// actually used — which may be the recorded value
+					// rather than the flag default — so it stays
+					// authoritative even when the CLI's local `scope`
+					// variable is just the fallback.
+					presenters.RenderInitSkills(os.Stdout, result.InstallDir, result)
 				},
 			}
 
@@ -1454,17 +1465,6 @@ func initCmd() *cli.Command {
 			return handler.Init(ctx, icmd)
 		},
 	}
-}
-
-// scopeInstallDir resolves the install directory for the selected scope.
-// Errors are swallowed because this is a display-only derivation — the
-// handler already validated the scope.
-func scopeInstallDir(repoRoot, userHome string, scope model.Scope) string {
-	d, err := model.SkillInstallDir(model.DefaultAgentTarget, scope, repoRoot, userHome)
-	if err != nil {
-		return ""
-	}
-	return d
 }
 
 func wipCmd() *cli.Command {

@@ -52,6 +52,17 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		return err
 	}
 
+	// Reconcile skill_scope before any filesystem mutation so a contradiction
+	// fails the run before partial state lands. recordedScope is read from
+	// the existing config.yaml when present; effectiveScope is what the
+	// install pass uses; persistScope is true when we need to write the
+	// chosen value back to config (fresh init or upgrade from a config that
+	// predates the field).
+	effectiveScope, persistScope, err := resolveSkillScope(sddExisted, configPath, cmd.Scope, cmd.ScopeExplicit)
+	if err != nil {
+		return err
+	}
+
 	// Tracks paths we touch so the final git commit covers exactly what
 	// changed. A repeat init that changes nothing yields no commit.
 	var touched []string
@@ -60,7 +71,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		if err := os.MkdirAll(sddDir, 0o755); err != nil {
 			return fmt.Errorf("creating %s: %w", sddDir, err)
 		}
-		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.Config{GraphDir: graphDir, Language: cmd.Language})), 0o644); err != nil {
+		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.Config{GraphDir: graphDir, Language: cmd.Language, SkillScope: effectiveScope})), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", configPath, err)
 		}
 		touched = append(touched, configPath)
@@ -95,6 +106,27 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 		if err := os.MkdirAll(absGraphDir, 0o755); err != nil {
 			return fmt.Errorf("creating graph dir %s: %w", absGraphDir, err)
+		}
+
+		// Upgrade case: an existing config.yaml predates the skill_scope
+		// field. Upsert it now so subsequent runs read the recorded value
+		// rather than guessing. Comments and other keys round-trip via
+		// SetYAMLField.
+		if persistScope {
+			existing, readErr := os.ReadFile(configPath)
+			if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+				return fmt.Errorf("reading %s: %w", configPath, readErr)
+			}
+			updated, err := model.SetYAMLField(existing, "skill_scope", string(effectiveScope))
+			if err != nil {
+				return fmt.Errorf("updating %s: %w", configPath, err)
+			}
+			if !bytes.Equal(existing, updated) {
+				if err := os.WriteFile(configPath, updated, 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", configPath, err)
+				}
+				touched = append(touched, configPath)
+			}
 		}
 	}
 
@@ -171,7 +203,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	// file for the eventual commit.
 	err = h.InstallSkills(ctx, &command.InstallSkillsCmd{
 		Target:          cmd.Target,
-		Scope:           cmd.Scope,
+		Scope:           effectiveScope,
 		RepoRoot:        cmd.RepoRoot,
 		UserHome:        cmd.UserHome,
 		BinaryVersion:   cmd.BinaryVersion,
@@ -204,6 +236,61 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	}
 
 	return nil
+}
+
+// resolveSkillScope picks the scope `sdd init` should install under and
+// reports whether the chosen value needs to be persisted.
+//
+// Precedence:
+//
+//   - Fresh `.sdd/`: use the explicit flag value if given, otherwise the
+//     default. Always persisted (the new config gets the field on first
+//     write).
+//   - Existing config with skill_scope recorded: the recorded value wins.
+//     If the caller passed --scope and it disagrees, error out before
+//     touching the filesystem; manual edit of .sdd/config.yaml is the
+//     resolution path (per AC 2). Same value passed explicitly is a no-op.
+//   - Existing config missing skill_scope (upgrade path): use the
+//     explicit flag value if given, otherwise the default. Persisted so
+//     subsequent runs round-trip without re-deriving.
+func resolveSkillScope(sddExisted bool, configPath string, flagScope model.Scope, flagExplicit bool) (effective model.Scope, persist bool, err error) {
+	requested := flagScope
+	if requested == "" {
+		requested = model.DefaultScope
+	}
+
+	if !sddExisted {
+		return requested, true, nil
+	}
+
+	data, readErr := os.ReadFile(configPath)
+	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+		return "", false, fmt.Errorf("reading %s: %w", configPath, readErr)
+	}
+	var recorded model.Scope
+	if len(data) > 0 {
+		cfg, parseErr := model.ParseConfig(data)
+		if parseErr != nil {
+			return "", false, fmt.Errorf("parsing %s: %w", configPath, parseErr)
+		}
+		if cfg != nil {
+			recorded = cfg.SkillScope
+		}
+	}
+
+	if recorded != "" {
+		if flagExplicit && flagScope != "" && flagScope != recorded {
+			return "", false, fmt.Errorf(
+				"--scope=%s contradicts skill_scope=%s recorded in %s; edit the file directly to change scope",
+				flagScope, recorded, configPath,
+			)
+		}
+		return recorded, false, nil
+	}
+
+	// Upgrade: config.yaml exists but predates skill_scope. Persist whatever
+	// the operator chose (or the default) so the next run is deterministic.
+	return requested, true, nil
 }
 
 // pathExists reports whether path is accessible. A non-existence error is

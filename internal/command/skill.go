@@ -34,6 +34,10 @@ type InstallSkillsCmd struct {
 // handler runs. AbsPath values are returned (not relative) so presenters can
 // surface them directly to the user.
 type SkillInstallResult struct {
+	// InstallDir is the absolute directory the bundle was written into.
+	// Surfaced so presenters and callers don't have to recompute the path
+	// from scope + repoRoot + userHome — the handler already knows it.
+	InstallDir      string
 	Installed       []string // entry was missing, now written
 	Refreshed       []string // entry was pristine (user hadn't edited), now rewritten with fresh stamps
 	Overwritten     []string // entry was modified, prompt returned true

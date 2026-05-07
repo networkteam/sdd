@@ -402,3 +402,190 @@ func TestInit_PreservesExistingMeta(t *testing.T) {
 		t.Errorf("minimum_version must be preserved as v0.2.0, got %+v", meta.MinimumVersion)
 	}
 }
+
+// TestInit_PersistsSkillScopeOnFreshInit verifies that the scope chosen on
+// initial setup lands in .sdd/config.yaml so subsequent runs (and clones)
+// reinstall to the same place without re-prompting.
+func TestInit_PersistsSkillScopeOnFreshInit(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, model.SDDDirName, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := model.ParseConfig(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SkillScope != model.ScopeProject {
+		t.Errorf("config.yaml skill_scope: got %q, want %q", cfg.SkillScope, model.ScopeProject)
+	}
+}
+
+// TestInit_UpgradeUpsertsSkillScope verifies the upgrade path: a config.yaml
+// that predates skill_scope (no field) gets the value written on the next
+// init, picking up the explicit flag value.
+func TestInit_UpgradeUpsertsSkillScope(t *testing.T) {
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, model.SDDDirName)
+	if err := os.MkdirAll(sddDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing config without skill_scope (mimicking an older sdd init).
+	preExisting := "# SDD configuration\ngraph_dir: .sdd/graph\n"
+	configPath := filepath.Join(sddDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(preExisting), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := model.ParseConfig(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SkillScope != model.ScopeProject {
+		t.Errorf("upgraded config.yaml skill_scope: got %q, want %q", cfg.SkillScope, model.ScopeProject)
+	}
+	// Original graph_dir entry must round-trip — SetYAMLField preserves
+	// surrounding keys and comments.
+	if !strings.Contains(string(data), "graph_dir: .sdd/graph") {
+		t.Errorf("original graph_dir not preserved; got:\n%s", data)
+	}
+}
+
+// TestInit_RecordedScopeWinsOverFlagDefault verifies that a re-init with no
+// explicit --scope uses the recorded value, even when the caller passes a
+// different default in cmd.Scope.
+func TestInit_RecordedScopeWinsOverFlagDefault(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	// First run: record skill_scope: project explicitly.
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second run: caller passes Scope: ScopeUser as a default (no explicit
+	// flag). The recorded value must win, and the install dir must reflect it.
+	var skills command.SkillInstallResult
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:          tmp,
+		BinaryVersion:     "v0.2.0",
+		Scope:             model.ScopeUser,
+		ScopeExplicit:     false,
+		UserHome:          tmp, // unused but required when Scope==User would route
+		OnSkillsInstalled: func(r command.SkillInstallResult) { skills = r },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	wantPrefix := filepath.Join(tmp, ".claude", "skills")
+	if !strings.HasPrefix(skills.InstallDir, wantPrefix) {
+		t.Errorf("install dir should reflect recorded project scope; got %q, want prefix %q", skills.InstallDir, wantPrefix)
+	}
+}
+
+// TestInit_ContradictingExplicitScopeErrors verifies AC 2: when the operator
+// passes --scope on a re-init and it disagrees with the value persisted in
+// .sdd/config.yaml, the run errors with a message naming the conflict and
+// pointing at the file.
+func TestInit_ContradictingExplicitScopeErrors(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	// First run records skill_scope: project.
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second run passes --scope=user explicitly. Must error.
+	err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeUser,
+		ScopeExplicit: true,
+		UserHome:      tmp,
+	})
+	if err == nil {
+		t.Fatal("expected error when explicit --scope contradicts recorded value, got nil")
+	}
+	if !strings.Contains(err.Error(), "skill_scope") {
+		t.Errorf("error should name skill_scope: %v", err)
+	}
+	if !strings.Contains(err.Error(), "config.yaml") {
+		t.Errorf("error should point at config.yaml: %v", err)
+	}
+}
+
+// TestInit_MatchingExplicitScopeIsNoop verifies that re-init with the same
+// scope explicitly passed (the common case for documented invocations) does
+// not error and does not rewrite the config.
+func TestInit_MatchingExplicitScopeIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	configPath := filepath.Join(tmp, model.SDDDirName, "config.yaml")
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+		ScopeExplicit: true,
+	}); err != nil {
+		t.Fatalf("matching explicit scope should not error: %v", err)
+	}
+
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("config.yaml rewritten on matching scope; before:\n%s\nafter:\n%s", before, after)
+	}
+}

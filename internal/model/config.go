@@ -53,6 +53,13 @@ type Config struct {
 	// language; the /sdd skill renders translated vocabulary to users via
 	// bundled translation references. Empty means English (default).
 	Language string `yaml:"language,omitempty"`
+	// SkillScope records where the project's skills were installed: user
+	// (~/.claude/skills/) or project (.claude/skills/). `sdd init` writes
+	// it the first time scope is chosen and reads it on every subsequent
+	// run so the installed location stays stable for every contributor on
+	// the repo. Empty means "no recorded preference" — typical of graphs
+	// initialized before the readiness-check work landed.
+	SkillScope Scope `yaml:"skill_scope,omitempty"`
 }
 
 // SyncConfig governs background sync awareness: the auto-fetch cooldown and
@@ -192,6 +199,9 @@ func MergeConfig(base, overlay *Config) *Config {
 	if overlay.Language != "" {
 		out.Language = overlay.Language
 	}
+	if overlay.SkillScope != "" {
+		out.SkillScope = overlay.SkillScope
+	}
 	out.LLM = mergeLLMConfig(base.LLM, overlay.LLM)
 	out.Embedding = mergeEmbeddingConfig(base.Embedding, overlay.Embedding)
 	out.Sync = mergeSyncConfig(base.Sync, overlay.Sync)
@@ -306,6 +316,16 @@ func FormatConfig(cfg Config) string {
 	} else {
 		languageBlock += "# language: de\n"
 	}
+	skillScopeBlock := "# Skill installation scope — where `sdd init` extracts the agent skill\n" +
+		"# bundle. `user` installs into the user-global directory (e.g.\n" +
+		"# ~/.claude/skills/); `project` installs into the repo-local\n" +
+		"# .claude/skills/ tree. Recorded on first run so subsequent runs (and\n" +
+		"# clones) reinstall to the same place without re-prompting.\n"
+	if cfg.SkillScope != "" {
+		skillScopeBlock += "skill_scope: " + string(cfg.SkillScope) + "\n"
+	} else {
+		skillScopeBlock += "# skill_scope: project\n"
+	}
 	return "# SDD configuration\n" +
 		"# See https://github.com/networkteam/sdd for documentation.\n" +
 		"\n" +
@@ -313,6 +333,8 @@ func FormatConfig(cfg Config) string {
 		"graph_dir: " + graphDir + "\n" +
 		"\n" +
 		languageBlock +
+		"\n" +
+		skillScopeBlock +
 		"\n" +
 		"# LLM provider settings (defaults shown — override here or in config.local.yaml).\n" +
 		"# llm:\n" +

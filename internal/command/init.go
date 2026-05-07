@@ -43,8 +43,18 @@ type InitCmd struct {
 	Target model.AgentTarget
 
 	// Scope selects user-global vs project-local skill installation. Empty
-	// defaults to model.DefaultScope (User).
+	// defaults to model.DefaultScope (User). When ScopeExplicit is false the
+	// handler treats Scope as a fallback and prefers any value already
+	// recorded under skill_scope in .sdd/config.yaml; when true the handler
+	// rejects a value that contradicts the recorded scope (AC 2).
 	Scope model.Scope
+
+	// ScopeExplicit reports whether the caller passed --scope on the
+	// command line versus letting it default. Used at the handler boundary
+	// to distinguish "user opted in to this scope" from "no choice has
+	// been made yet" — the contradiction check (AC 2) only applies when
+	// the operator typed a value.
+	ScopeExplicit bool
 
 	// UserHome is the absolute path to the user's home directory. Required
 	// when Scope = User.

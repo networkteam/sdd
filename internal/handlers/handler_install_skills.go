@@ -42,7 +42,7 @@ func (h *Handler) InstallSkills(ctx context.Context, cmd *command.InstallSkillsC
 		return fmt.Errorf("creating install dir %s: %w", status.InstallDir, err)
 	}
 
-	result := command.SkillInstallResult{}
+	result := command.SkillInstallResult{InstallDir: status.InstallDir}
 
 	for _, entry := range status.Entries {
 		switch entry.Status {
