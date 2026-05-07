@@ -79,10 +79,10 @@ var macros = map[string]func(args []model.FunctionArg) ([]model.Function, error)
 	"wip":          expandWIP,
 }
 
-// expandTop expands `top(N)` to `active:n(N):rank(heat(exp-14d)):as-list`.
-// N is required and must be a non-negative integer; failures here would
-// otherwise surface as obscure n() errors after expansion, so the macro
-// catches them with a top-prefixed message.
+// expandTop expands `top(N)` with a baked `name-prefix("Top")` so the
+// rendered header reads "Top by heat (exp-14d)" by default and
+// "Top by in-degree" (etc.) when the user overrides rank — the prefix
+// stays constant while the rank suffix tracks the user's modifier.
 func expandTop(args []model.FunctionArg) ([]model.Function, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("requires one integer argument N (e.g. top(20))")
@@ -101,14 +101,17 @@ func expandTop(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "active"},
 		{Name: "n", Args: []model.FunctionArg{a}},
 		{Name: "rank", Args: []model.FunctionArg{funcArg("heat", identArg("exp-14d"))}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Top")}},
 		{Name: "as-list"},
 	}, nil
 }
 
-// expandTopicMacro expands `topic(L)` to `topic(L):rank(heat(exp-14d)):as-list`.
-// The label arg is forwarded verbatim to the topic filter primitive — both
-// bare identifiers (catch-up-scaling) and quoted strings (paths with /)
-// pass through unchanged.
+// expandTopicMacro expands `topic(L)` with a baked `name-prefix("Topic:
+// <L>")` so the rendered header reads e.g.
+// "Topic: infrastructure/cli by heat (exp-14d)" — both the topic label
+// and the rank suffix surface, addressing the slice-8 evaluation
+// finding that the previous derive ignored L. The label arg is also
+// forwarded verbatim to the topic filter primitive.
 func expandTopicMacro(args []model.FunctionArg) ([]model.Function, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("requires one label argument L (e.g. topic(catch-up-scaling))")
@@ -120,6 +123,7 @@ func expandTopicMacro(args []model.FunctionArg) ([]model.Function, error) {
 	return []model.Function{
 		{Name: "topic", Args: []model.FunctionArg{a}},
 		{Name: "rank", Args: []model.FunctionArg{funcArg("heat", identArg("exp-14d"))}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Topic: " + a.String)}},
 		{Name: "as-list"},
 	}, nil
 }
@@ -130,16 +134,16 @@ func expandTopicMacro(args []model.FunctionArg) ([]model.Function, error) {
 // has no parameter slot), so they error early rather than silently
 // drop the args.
 
-// Macros that don't terminate in a ranked as-list section bake a default
-// `name("<title>")` so their rendered output carries a `## <title>`
-// header symmetric with rank-based auto-derive. Without baked names,
-// non-rank shapes (focus-block, participants-block, wip-list, grouped)
-// rendered headerless because auto-derive (per d-tac-jgi) only fires
-// when rank is configured. Users override via `<macro>:name("Custom")`
-// — last-write-wins keeps the override path identical to what works on
-// ranked sections. Ranked macros (top, topic, insights, done) skip the
-// baked name so auto-derive's more informative output ("Top by heat
-// (exp-14d)", "Most recent") still shows.
+// Macros bake a `name-prefix("<title>")` step so the rendered section
+// carries a `## <title>` header. The executor's auto-derive resolver
+// (sectionSpec.resolveSectionHeader) composes the prefix with the rank
+// suffix when rank is set ("Top by heat (exp-14d)", "Topic: foo by
+// in-degree", "Done by date") and uses just the prefix when there's
+// no rank ("Focus", "Participants", "WIP"). User-supplied `name(...)`
+// always wins (final, no auto-append); user `name-prefix(...)` plays
+// by the same compose rules as the macro bake. The prefix-vs-final
+// split keeps macros expressing *what* the section is about while
+// rank() expresses *how* it's sorted.
 
 func expandDecisions(args []model.FunctionArg) ([]model.Function, error) {
 	if err := requireNoArgs(args); err != nil {
@@ -149,7 +153,7 @@ func expandDecisions(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("plan", "directive", "activity", "contract", "aspiration")},
 		{Name: "group", Args: []model.FunctionArg{funcArg("by", identArg("kind"))}},
-		{Name: "name", Args: []model.FunctionArg{stringArg("Decisions")}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Decisions")}},
 		{Name: "as-grouped"},
 	}, nil
 }
@@ -162,11 +166,15 @@ func expandSignals(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("gap", "question")},
 		{Name: "group", Args: []model.FunctionArg{funcArg("by", identArg("kind"))}},
-		{Name: "name", Args: []model.FunctionArg{stringArg("Signals")}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Signals")}},
 		{Name: "as-grouped"},
 	}, nil
 }
 
+// expandInsights / expandDone bake `name-prefix("Insights")` and
+// `name-prefix("Done")`. Combined with `rank(by(date))`, the resolver
+// produces "Insights by date" and "Done by date" — uniform "by <thing>"
+// suffix shape across all rank algorithms.
 func expandInsights(args []model.FunctionArg) ([]model.Function, error) {
 	if err := requireNoArgs(args); err != nil {
 		return nil, err
@@ -176,6 +184,7 @@ func expandInsights(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "kind", Args: identArgs("insight")},
 		{Name: "since", Args: []model.FunctionArg{stringArg("30d")}},
 		{Name: "rank", Args: []model.FunctionArg{funcArg("by", identArg("date"))}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Insights")}},
 		{Name: "as-list"},
 	}, nil
 }
@@ -188,6 +197,7 @@ func expandDone(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "kind", Args: identArgs("done")},
 		{Name: "since", Args: []model.FunctionArg{stringArg("30d")}},
 		{Name: "rank", Args: []model.FunctionArg{funcArg("by", identArg("date"))}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Done")}},
 		{Name: "as-list"},
 	}, nil
 }
@@ -199,17 +209,14 @@ func expandAspirations(args []model.FunctionArg) ([]model.Function, error) {
 	return []model.Function{
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("aspiration")},
-		{Name: "name", Args: []model.FunctionArg{stringArg("Aspirations")}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Aspirations")}},
 		{Name: "as-list"},
 	}, nil
 }
 
-// expandFocus expands `focus` to `kind(focus):active:expand(involvement):
-// name("Focus"):as-focus-block` per d-tac-uww §5 plus the baked-name
-// pattern. The state derivation algorithm and stalled threshold live
-// downstream in the executor; the macro wires the canonical pipeline
-// and the default header. Users override via `focus:stalled(<value>)`
-// or `focus:name("<title>")` (last-write-wins).
+// expandFocus expands `focus` with a baked `name-prefix("Focus")`.
+// No rank applies (focus-block has its own scoring), so the resolver
+// uses the prefix alone — header reads "## Focus".
 func expandFocus(args []model.FunctionArg) ([]model.Function, error) {
 	if err := requireNoArgs(args); err != nil {
 		return nil, err
@@ -218,7 +225,7 @@ func expandFocus(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "kind", Args: identArgs("focus")},
 		{Name: "active"},
 		{Name: "expand", Args: []model.FunctionArg{identArg("involvement")}},
-		{Name: "name", Args: []model.FunctionArg{stringArg("Focus")}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Focus")}},
 		{Name: "as-focus-block"},
 	}, nil
 }
@@ -230,17 +237,17 @@ func expandContracts(args []model.FunctionArg) ([]model.Function, error) {
 	return []model.Function{
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("contract")},
-		{Name: "name", Args: []model.FunctionArg{stringArg("Contracts")}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Contracts")}},
 		{Name: "as-list"},
 	}, nil
 }
 
-// expandParticipants expands `participants` to
-// `active:kind(actor):name("Participants"):as-participants-block` per
-// d-tac-uww §5 plus the baked-name pattern. The active+kind(actor)
-// filters narrow which actors surface; the renderer derives the role
-// cascade from full chain history per d-cpt-d34 (within-chain canonical
-// corrections still bind to the current head).
+// expandParticipants bakes a `name-prefix("Participants")`. No rank,
+// so the resolver uses the prefix alone — header reads "## Participants".
+// The active+kind(actor) filters narrow which actors surface; the
+// renderer derives the role cascade from full chain history per
+// d-cpt-d34 (within-chain canonical corrections still bind to the
+// current head).
 func expandParticipants(args []model.FunctionArg) ([]model.Function, error) {
 	if err := requireNoArgs(args); err != nil {
 		return nil, err
@@ -248,15 +255,14 @@ func expandParticipants(args []model.FunctionArg) ([]model.Function, error) {
 	return []model.Function{
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("actor")},
-		{Name: "name", Args: []model.FunctionArg{stringArg("Participants")}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("Participants")}},
 		{Name: "as-participants-block"},
 	}, nil
 }
 
-// expandWIP expands `wip` to `source(wip):name("WIP"):as-wip-list` per
-// d-tac-uww §5 plus the baked-name pattern. Markers come from disk
-// (the wip/ subdirectory of the graph) rather than the graph itself,
-// so the macro switches sources before terminating in as-wip-list.
+// expandWIP bakes a `name-prefix("WIP")`. Markers come from disk (the
+// wip/ subdirectory of the graph) rather than the graph itself, so
+// the macro switches sources before terminating in as-wip-list.
 // Filter primitives are not part of the expansion — slice 8 surfaces
 // every active marker; user-supplied modifiers like name() append.
 func expandWIP(args []model.FunctionArg) ([]model.Function, error) {
@@ -265,7 +271,7 @@ func expandWIP(args []model.FunctionArg) ([]model.Function, error) {
 	}
 	return []model.Function{
 		{Name: "source", Args: []model.FunctionArg{identArg("wip")}},
-		{Name: "name", Args: []model.FunctionArg{stringArg("WIP")}},
+		{Name: "name-prefix", Args: []model.FunctionArg{stringArg("WIP")}},
 		{Name: "as-wip-list"},
 	}, nil
 }

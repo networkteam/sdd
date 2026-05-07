@@ -102,33 +102,39 @@ func parseAlgorithm(fn model.Function) (*rankSpec, error) {
 	return spec, nil
 }
 
-// derivedHeader synthesizes a section header from the rank's algorithm
-// and decay context — the auto-derive branch of AC 14 per d-tac-jgi.
-// Called when no name() modifier is supplied: "Top by heat (exp-14d)",
-// "Top by in-degree", "Most recent" for by(date), etc. Keeps section-
-// pipeline introspection at the finder boundary so downstream
-// SectionResult/renderer types don't need to know rank context — the
-// derived string lands in the same Name slot a user-supplied name()
-// would populate.
-func (s *rankSpec) derivedHeader() string {
+// suffix returns the rank-context fragment that follows a header
+// prefix — always shaped as "by <thing>" so concatenation with any
+// prefix produces a readable label:
+//
+//	"Top"                    + "by heat (exp-14d)"  → "Top by heat (exp-14d)"
+//	"Topic: infrastructure/cli" + "by in-degree"    → "Topic: infrastructure/cli by in-degree"
+//	"Done"                   + "by date"            → "Done by date"
+//	"Insights"               + "by date"            → "Insights by date"
+//
+// Returning the suffix without the implicit "Top " prefix lets the
+// resolver in section_spec.go compose flexibly: a baked prefix gets
+// the suffix appended; bare rank() (no prefix) gets "Top " prepended
+// at resolution time. Centralizing the suffix shape here keeps the
+// rank-vs-display contract narrow (the suffix is purely "what the
+// algorithm sorts by"; the prefix is "what the section is about").
+func (s *rankSpec) suffix() string {
 	if s == nil {
 		return ""
 	}
 	switch s.Algorithm {
 	case "by":
-		if s.ByField == "date" {
-			return "Most recent"
-		}
-		return "Sorted by " + s.ByField
+		// by(date) is the only ByField shape today; future ByFields
+		// fall through to the same "by <field>" form.
+		return "by " + s.ByField
 	case "in-degree":
-		return "Top by in-degree"
+		return "by in-degree"
 	case "heat", "mult", "add", "log":
 		if s.Decay != "" {
-			return fmt.Sprintf("Top by %s (%s)", s.Algorithm, s.Decay)
+			return fmt.Sprintf("by %s (%s)", s.Algorithm, s.Decay)
 		}
-		return "Top by " + s.Algorithm
+		return "by " + s.Algorithm
 	default:
-		return "Top by " + s.Algorithm
+		return "by " + s.Algorithm
 	}
 }
 

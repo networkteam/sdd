@@ -115,7 +115,7 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "kind", "layer", "since", "topic", "n", "rank", "group", "expand", "name", "stalled", "as-list", "as-grouped", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "kind", "layer", "since", "topic", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-focus-block", "as-participants-block", "as-wip-list"}
 
 // knownSources is the user-facing list of valid `source(<name>)` arguments,
 // shown in the unknown-source error message. Mirrors the data-source
@@ -181,18 +181,12 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 			"section must end with a render function (one of: %s)", renderFunctionsList())
 	}
 
-	// Auto-derive section header (AC 14 per d-tac-jgi). When the user
-	// supplies no name() modifier and the section carries a rank()
-	// specification, synthesize a header from the rank algorithm and
-	// decay so the rendered section reads e.g. "## Top by heat (exp-14d)"
-	// instead of being headerless. Explicit name() always wins (including
-	// the empty-string clear via name("")), so we only derive when
-	// nameSet is false. Keeping the derivation at the executor boundary
-	// means SectionResult / renderer types don't need rank context.
-	if !spec.nameSet && spec.rank != nil {
-		spec.nameValue = spec.rank.derivedHeader()
-		spec.nameSet = true
-	}
+	// Auto-derive section header (AC 14 per d-tac-jgi, refined by the
+	// name-prefix primitive). The resolver composes macro-baked
+	// name-prefix() with rank()'s suffix when both are set, falls back
+	// to either alone, or to bare-rank's implicit "Top" prefix.
+	// Explicit name(...) wins — already in spec.nameValue.
+	spec.resolveSectionHeader()
 
 	// Source-specific dispatch. source(wip) takes a fundamentally different
 	// data path — markers from disk, not graph entries — and supports a
@@ -401,6 +395,14 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 		}
 		spec.nameValue = s
 		spec.nameSet = true
+
+	case fn.Name == "name-prefix":
+		s, err := parseNameArgs(fn.Args)
+		if err != nil {
+			return fmt.Errorf("name-prefix: %s", strings.TrimPrefix(err.Error(), "name: "))
+		}
+		spec.prefixValue = s
+		spec.prefixSet = true
 
 	case fn.Name == "expand":
 		field, err := parseExpandArgs(fn.Args)

@@ -39,9 +39,16 @@ type sectionSpec struct {
 	stalledThreshold float64
 	stalledSet       bool // user-supplied threshold via stalled(value)
 
-	// Section header (last-write-wins, including empty-string clears).
-	nameSet   bool
-	nameValue string
+	// Section header — two distinct slots resolved at executor time:
+	//   - name(string)        → final title, suppresses any auto-suffix
+	//   - name-prefix(string) → prefix that auto-derive may extend with
+	//                            the rank suffix (when rank is set)
+	// Both follow last-write-wins independently. Macros bake name-prefix
+	// so user `name(...)` overrides cleanly without surprise auto-append.
+	nameSet     bool
+	nameValue   string
+	prefixSet   bool
+	prefixValue string
 
 	// Render terminator — required.
 	render string
@@ -163,4 +170,41 @@ func (s *sectionSpec) sectionName() string {
 		return ""
 	}
 	return s.nameValue
+}
+
+// resolveSectionHeader populates spec.nameValue / spec.nameSet from the
+// auto-derive rules. Called after the parse loop so all bake/override
+// signals are visible. Resolution order, top of pipeline first:
+//
+//  1. Explicit name(...) was called → already in spec.nameValue; respect.
+//  2. name-prefix(...) baked + rank set → "<prefix> <suffix>"
+//     (e.g. macro-baked "Top" + rank(in-degree) → "Top by in-degree")
+//  3. name-prefix(...) baked, no rank → just the prefix
+//     (e.g. focus macro → "Focus")
+//  4. No prefix, rank set → "Top <suffix>" (covers raw `rank(heat):as-list`
+//     without a macro — the implicit "Top" prefix matches the top(N) idiom)
+//  5. Neither → no header.
+//
+// Centralizing the rule here keeps the executor's main flow as a
+// sequence of named checks; macros and users only need to know the
+// observable behaviour, not the resolver internals.
+func (s *sectionSpec) resolveSectionHeader() {
+	if s.nameSet {
+		return
+	}
+	suffix := ""
+	if s.rank != nil {
+		suffix = s.rank.suffix()
+	}
+	switch {
+	case s.prefixSet && suffix != "":
+		s.nameValue = s.prefixValue + " " + suffix
+		s.nameSet = true
+	case s.prefixSet:
+		s.nameValue = s.prefixValue
+		s.nameSet = true
+	case suffix != "":
+		s.nameValue = "Top " + suffix
+		s.nameSet = true
+	}
 }

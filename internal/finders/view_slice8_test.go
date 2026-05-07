@@ -250,11 +250,48 @@ func TestView_AutoDeriveSectionName(t *testing.T) {
 		{"heat-default", "rank(heat):as-list", "Top by heat (exp-14d)"},
 		{"heat-explicit-decay", "rank(heat(exp-7d)):as-list", "Top by heat (exp-7d)"},
 		{"in-degree", "rank(in-degree):as-list", "Top by in-degree"},
-		{"by-date", "rank(by(date)):as-list", "Most recent"},
+		{"by-date", "rank(by(date)):as-list", "Top by date"},
 		{"mult", "rank(mult):as-list", "Top by mult (exp-14d)"},
 		{"explicit-name-wins", "rank(heat):name(\"Custom\"):as-list", "Custom"},
 		{"no-rank-no-name", "active:as-list", ""},
 		{"empty-name-clears", "rank(heat):name(\"\"):as-list", ""},
+	}
+	g := model.NewGraph([]*model.Entry{
+		entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective)),
+	})
+	f := New(Options{})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			layout := mustParseLayout(t, tc.layout)
+			result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+			if err != nil {
+				t.Fatalf("View(%q): %v", tc.layout, err)
+			}
+			if got := result.Sections[0].Name; got != tc.wantHdr {
+				t.Errorf("name: got %q, want %q", got, tc.wantHdr)
+			}
+		})
+	}
+}
+
+func TestView_NamePrefixComposesWithRank(t *testing.T) {
+	// name-prefix(...) is the macro-side bake; auto-derive composes
+	// "<prefix> <suffix>" when rank is set, falls back to prefix-only
+	// when not, and explicit name(...) overrides both.
+	cases := []struct {
+		name    string
+		layout  string
+		wantHdr string
+	}{
+		{"prefix+rank", `name-prefix("Top"):rank(heat):as-list`, "Top by heat (exp-14d)"},
+		{"prefix+in-degree", `name-prefix("Top"):rank(in-degree):as-list`, "Top by in-degree"},
+		{"prefix+by-date", `name-prefix("Done"):rank(by(date)):as-list`, "Done by date"},
+		{"prefix-only", `name-prefix("Focus"):as-list`, "Focus"},
+		{"explicit-name-wins-over-prefix", `name-prefix("Top"):name("Custom"):rank(heat):as-list`, "Custom"},
+		{"prefix-with-spaces", `name-prefix("Topic: infrastructure/cli"):rank(heat):as-list`, "Topic: infrastructure/cli by heat (exp-14d)"},
+		{"empty-prefix-with-rank", `name-prefix(""):rank(heat):as-list`, " by heat (exp-14d)"},
+		{"empty-prefix-alone", `name-prefix(""):as-list`, ""},
+		{"last-write-wins-prefix", `name-prefix("First"):name-prefix("Second"):as-list`, "Second"},
 	}
 	g := model.NewGraph([]*model.Entry{
 		entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective)),

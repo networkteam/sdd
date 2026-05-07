@@ -96,7 +96,7 @@ Vector mode reads from a per-participant local index at `.sdd/index/` (gitignore
 
 ## Use in playbooks
 
-**Explore (`/sdd-explore` and the Explore Playbook)** — when the briefing question is "what's related to this concept?" or "what entries already touch this area?", `sdd search --query "<concept phrase>"` surfaces seed candidates. Combine with `--term` when you have a known identifier or canonical name.
+**Engage (`playbook-engage.md` and the `/sdd-explore` compressor)** — during the universal entry move, when the briefing question widens to "what's related to this concept?" or "what entries already touch this area?", `sdd search --query "<concept phrase>"` surfaces seed candidates. Combine with `--term` when you have a known identifier or canonical name. The `/sdd-explore` sub-skill uses these same search modes when invoked from inside engage to compress a goal-tagged neighborhood.
 
 **Groom (`/sdd-groom` and the Grooming Playbook)** — when checking for **Pattern B** (superseded in practice but no explicit `--supersedes` link), `sdd search --query` over the candidate's summary phrase often surfaces the newer entry. Same for hunting siblings before capturing a fresh signal that might re-frame existing ground.
 

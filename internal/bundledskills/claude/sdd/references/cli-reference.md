@@ -64,10 +64,18 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 |---|---|
 | `rank(<algorithm>)` | Sort by computed score, descending. Adds `{score: X.XXX}` to rendered entries |
 | `n(N)` | Take first N entries (after filtering and ranking) |
-| `name(<string>)` | Override section header. Last call wins; `name("")` clears any prior name |
+| `name(<string>)` | Final section header — overrides any prefix and any rank-based auto-derive. Last call wins; `name("")` clears any prior name |
+| `name-prefix(<string>)` | Prefix the auto-derive composer extends with the rank suffix. Macros bake this so `top(N)` reads "Top by heat (exp-14d)" by default and "Top by in-degree" after `:rank(in-degree)` — the prefix stays, the suffix tracks rank |
 | `expand(involvement)` | Per row, explode involvement triples into focus-block sub-rows (focus-block only) |
 | `group(by(<field>))` | Bucket entries by field; produces grouped shape (consume with `as-grouped`) |
 | `stalled(<value>)` | Threshold below which a focus target with assigned actors is "stalled" (default 1.0) |
+
+**Section header resolution:** the executor picks the header in this order:
+1. Explicit `name(...)` → final, no auto-append.
+2. `name-prefix(...)` set + `rank(...)` set → `"<prefix> by <algorithm>"` (e.g. "Top by heat (exp-14d)", "Done by date").
+3. `name-prefix(...)` set, no rank → just the prefix (e.g. "Focus", "Participants").
+4. No prefix, rank set → `"Top by <algorithm>"` (covers raw `rank(heat):as-list` without a macro).
+5. Neither → headerless section.
 
 ### Algorithms (used inside `rank(...)`)
 
@@ -100,21 +108,28 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 
 ### Macros
 
+Each macro bakes a `name-prefix(...)` so the rendered section gets a header automatically; for ranked macros the resolver appends the rank suffix.
+
 | Macro | Expansion | Default header |
 |---|---|---|
-| `top(N)` | `active:n(N):rank(heat(exp-14d)):as-list` | auto-derived from rank |
-| `topic(L)` | `topic(L):rank(heat(exp-14d)):as-list` | auto-derived from rank |
-| `focus` | `kind(focus):active:expand(involvement):name("Focus"):as-focus-block` | `## Focus` |
-| `decisions` | `active:kind(plan,directive,activity,contract,aspiration):group(by(kind)):name("Decisions"):as-grouped` | `## Decisions` |
-| `signals` | `active:kind(gap,question):group(by(kind)):name("Signals"):as-grouped` | `## Signals` |
-| `insights` | `active:kind(insight):since("30d"):rank(by(date)):as-list` | auto-derived (`Most recent`) |
-| `done` | `kind(done):since("30d"):rank(by(date)):as-list` | auto-derived (`Most recent`) |
-| `aspirations` | `active:kind(aspiration):name("Aspirations"):as-list` | `## Aspirations` |
-| `contracts` | `active:kind(contract):name("Contracts"):as-list` | `## Contracts` |
-| `participants` | `active:kind(actor):name("Participants"):as-participants-block` | `## Participants` |
-| `wip` | `source(wip):name("WIP"):as-wip-list` | `## WIP` |
+| `top(N)` | `active:n(N):rank(heat(exp-14d)):name-prefix("Top"):as-list` | `## Top by heat (exp-14d)` |
+| `topic(L)` | `topic(L):rank(heat(exp-14d)):name-prefix("Topic: <L>"):as-list` | `## Topic: <L> by heat (exp-14d)` |
+| `focus` | `kind(focus):active:expand(involvement):name-prefix("Focus"):as-focus-block` | `## Focus` |
+| `decisions` | `active:kind(plan,directive,activity,contract,aspiration):group(by(kind)):name-prefix("Decisions"):as-grouped` | `## Decisions` |
+| `signals` | `active:kind(gap,question):group(by(kind)):name-prefix("Signals"):as-grouped` | `## Signals` |
+| `insights` | `active:kind(insight):since("30d"):rank(by(date)):name-prefix("Insights"):as-list` | `## Insights by date` |
+| `done` | `kind(done):since("30d"):rank(by(date)):name-prefix("Done"):as-list` | `## Done by date` |
+| `aspirations` | `active:kind(aspiration):name-prefix("Aspirations"):as-list` | `## Aspirations` |
+| `contracts` | `active:kind(contract):name-prefix("Contracts"):as-list` | `## Contracts` |
+| `participants` | `active:kind(actor):name-prefix("Participants"):as-participants-block` | `## Participants` |
+| `wip` | `source(wip):name-prefix("WIP"):as-wip-list` | `## WIP` |
 
-User modifiers append after macro expansion and resolve via last-write-wins, so `top(20):rank(in-degree)` overrides the macro's default rank, and `focus:name("Active focuses")` overrides the baked header.
+User modifiers append after macro expansion and resolve via last-write-wins. Examples:
+
+- `top(20):rank(in-degree)` → `## Top by in-degree` (prefix "Top" stays; suffix tracks the override)
+- `top(20):name("My summary")` → `## My summary` (explicit `name(...)` is final, no auto-append)
+- `focus:name("Active focuses")` → `## Active focuses` (final override)
+- `focus:name-prefix("Active")` → `## Active` (prefix override; no rank to append)
 
 ### Worked examples
 
