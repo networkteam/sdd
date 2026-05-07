@@ -171,16 +171,32 @@ The binary ends up at `./bin/sdd`. Add it to your `$PATH`, or reference it by ab
 
 ## Quickstart
 
-### 1. Initialize the project
+### 1. Run `sdd init`
+
+This is always the first step — whether you cloned an SDD-instrumented repo or you're adding SDD to a project from scratch. `sdd init` is idempotent: it figures out where you are and does only what's needed.
+
+**Cloned an SDD-instrumented repo?** Run `sdd init` in the repo before any other workflow:
+
+```bash
+git clone <your-repo>
+cd <your-repo>
+sdd init
+```
+
+It reads the project's recorded scope from `.sdd/config.yaml` and installs the Claude Code skills at the same place every contributor uses, then prompts for your canonical participant name (saved to the gitignored `.sdd/config.local.yaml`). No `--scope` flag, no remembering where skills go — `sdd init` is the answer.
+
+**Instrumenting a new project?** Run `sdd init` in the project root:
 
 ```bash
 cd your-project
 sdd init
 ```
 
-One idempotent command. On a fresh tree it prompts for the graph directory (default `.sdd/graph`), your name as the canonical participant, and the graph authoring language (default `en`; see [Multilingual graphs](#multilingual-graphs) below). It writes `.sdd/config.yaml` and `.sdd/meta.json`, adds `.sdd/tmp/` to `.gitignore`, and installs the Claude Code skills under `~/.claude/skills/` (the default, user-global scope). Pass `--scope project` to install into this repo's `.claude/skills/` instead.
+It prompts for the graph directory (default `.sdd/graph`), the graph authoring language (default `en`; see [Multilingual graphs](#multilingual-graphs) below), where to install Claude Code skills (`project` recommended for shared repos so every contributor lands in the same place; `user` for solo use across many projects), and your canonical participant name. It writes `.sdd/config.yaml` and `.sdd/meta.json`, adds `.sdd/tmp/` and the per-machine files to `.gitignore`, and installs the skills.
 
-Run `sdd init` again after a binary upgrade to refresh drifted skill files. Pristine files update silently; files you've edited yourself are preserved (add `--force` to overwrite them, or `--scope project` + `--force` to rebuild a repo-local installation).
+**Re-running.** `sdd init` is safe to run again — after a binary upgrade to refresh drifted skill files, after a colleague adds something to `.sdd/`, or just to confirm the repo is set up. Pristine skill files update silently; files you've edited are preserved (`--force` to overwrite). Pass `--bump` from a released binary to raise `.sdd/meta.json`'s `minimum_version` to your version (locks older binaries out of the graph after a breaking change).
+
+**Non-interactive.** Pass every required flag explicitly to run without prompts: `sdd init --scope project --participant <name> --language en`. Missing flags produce a single error naming what's still needed.
 
 ### 2. Start a session
 
