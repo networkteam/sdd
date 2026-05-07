@@ -130,6 +130,17 @@ func expandTopicMacro(args []model.FunctionArg) ([]model.Function, error) {
 // has no parameter slot), so they error early rather than silently
 // drop the args.
 
+// Macros that don't terminate in a ranked as-list section bake a default
+// `name("<title>")` so their rendered output carries a `## <title>`
+// header symmetric with rank-based auto-derive. Without baked names,
+// non-rank shapes (focus-block, participants-block, wip-list, grouped)
+// rendered headerless because auto-derive (per d-tac-jgi) only fires
+// when rank is configured. Users override via `<macro>:name("Custom")`
+// — last-write-wins keeps the override path identical to what works on
+// ranked sections. Ranked macros (top, topic, insights, done) skip the
+// baked name so auto-derive's more informative output ("Top by heat
+// (exp-14d)", "Most recent") still shows.
+
 func expandDecisions(args []model.FunctionArg) ([]model.Function, error) {
 	if err := requireNoArgs(args); err != nil {
 		return nil, err
@@ -138,6 +149,7 @@ func expandDecisions(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("plan", "directive", "activity", "contract", "aspiration")},
 		{Name: "group", Args: []model.FunctionArg{funcArg("by", identArg("kind"))}},
+		{Name: "name", Args: []model.FunctionArg{stringArg("Decisions")}},
 		{Name: "as-grouped"},
 	}, nil
 }
@@ -150,6 +162,7 @@ func expandSignals(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("gap", "question")},
 		{Name: "group", Args: []model.FunctionArg{funcArg("by", identArg("kind"))}},
+		{Name: "name", Args: []model.FunctionArg{stringArg("Signals")}},
 		{Name: "as-grouped"},
 	}, nil
 }
@@ -186,15 +199,17 @@ func expandAspirations(args []model.FunctionArg) ([]model.Function, error) {
 	return []model.Function{
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("aspiration")},
+		{Name: "name", Args: []model.FunctionArg{stringArg("Aspirations")}},
 		{Name: "as-list"},
 	}, nil
 }
 
-// expandFocus expands `focus` to `kind(focus):active:expand(involvement):as-focus-block`
-// per d-tac-uww §5. The state derivation algorithm and stalled threshold
-// live downstream in the executor; the macro just wires the canonical
-// pipeline. Users override the threshold via `focus:stalled(<value>)`
-// and the section title via `focus:name("<title>")`.
+// expandFocus expands `focus` to `kind(focus):active:expand(involvement):
+// name("Focus"):as-focus-block` per d-tac-uww §5 plus the baked-name
+// pattern. The state derivation algorithm and stalled threshold live
+// downstream in the executor; the macro wires the canonical pipeline
+// and the default header. Users override via `focus:stalled(<value>)`
+// or `focus:name("<title>")` (last-write-wins).
 func expandFocus(args []model.FunctionArg) ([]model.Function, error) {
 	if err := requireNoArgs(args); err != nil {
 		return nil, err
@@ -203,6 +218,7 @@ func expandFocus(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "kind", Args: identArgs("focus")},
 		{Name: "active"},
 		{Name: "expand", Args: []model.FunctionArg{identArg("involvement")}},
+		{Name: "name", Args: []model.FunctionArg{stringArg("Focus")}},
 		{Name: "as-focus-block"},
 	}, nil
 }
@@ -214,15 +230,17 @@ func expandContracts(args []model.FunctionArg) ([]model.Function, error) {
 	return []model.Function{
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("contract")},
+		{Name: "name", Args: []model.FunctionArg{stringArg("Contracts")}},
 		{Name: "as-list"},
 	}, nil
 }
 
 // expandParticipants expands `participants` to
-// `active:kind(actor):as-participants-block` per d-tac-uww §5. The
-// active+kind(actor) filters narrow which actors surface; the renderer
-// then derives the role cascade from full chain history per d-cpt-d34
-// (within-chain canonical corrections still bind to the current head).
+// `active:kind(actor):name("Participants"):as-participants-block` per
+// d-tac-uww §5 plus the baked-name pattern. The active+kind(actor)
+// filters narrow which actors surface; the renderer derives the role
+// cascade from full chain history per d-cpt-d34 (within-chain canonical
+// corrections still bind to the current head).
 func expandParticipants(args []model.FunctionArg) ([]model.Function, error) {
 	if err := requireNoArgs(args); err != nil {
 		return nil, err
@@ -230,22 +248,24 @@ func expandParticipants(args []model.FunctionArg) ([]model.Function, error) {
 	return []model.Function{
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("actor")},
+		{Name: "name", Args: []model.FunctionArg{stringArg("Participants")}},
 		{Name: "as-participants-block"},
 	}, nil
 }
 
-// expandWIP expands `wip` to `source(wip):as-wip-list` per d-tac-uww §5.
-// Markers come from disk (the wip/ subdirectory of the graph) rather
-// than the graph itself, so the macro switches sources before
-// terminating in as-wip-list. Filter primitives are not part of the
-// expansion — slice 8 surfaces every active marker; user-supplied
-// modifiers like name() append.
+// expandWIP expands `wip` to `source(wip):name("WIP"):as-wip-list` per
+// d-tac-uww §5 plus the baked-name pattern. Markers come from disk
+// (the wip/ subdirectory of the graph) rather than the graph itself,
+// so the macro switches sources before terminating in as-wip-list.
+// Filter primitives are not part of the expansion — slice 8 surfaces
+// every active marker; user-supplied modifiers like name() append.
 func expandWIP(args []model.FunctionArg) ([]model.Function, error) {
 	if err := requireNoArgs(args); err != nil {
 		return nil, err
 	}
 	return []model.Function{
 		{Name: "source", Args: []model.FunctionArg{identArg("wip")}},
+		{Name: "name", Args: []model.FunctionArg{stringArg("WIP")}},
 		{Name: "as-wip-list"},
 	}, nil
 }

@@ -126,7 +126,7 @@ func TestExpandMacros_Decisions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpandMacros: %v", err)
 	}
-	wantNames := []string{"active", "kind", "group", "as-grouped"}
+	wantNames := []string{"active", "kind", "group", "name", "as-grouped"}
 	gotNames := functionNames(got.Sections[0])
 	if !equalStringSlices(gotNames, wantNames) {
 		t.Fatalf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)
@@ -159,7 +159,7 @@ func TestExpandMacros_Signals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpandMacros: %v", err)
 	}
-	wantNames := []string{"active", "kind", "group", "as-grouped"}
+	wantNames := []string{"active", "kind", "group", "name", "as-grouped"}
 	gotNames := functionNames(got.Sections[0])
 	if !equalStringSlices(gotNames, wantNames) {
 		t.Errorf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)
@@ -208,7 +208,7 @@ func TestExpandMacros_Focus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpandMacros: %v", err)
 	}
-	wantNames := []string{"kind", "active", "expand", "as-focus-block"}
+	wantNames := []string{"kind", "active", "expand", "name", "as-focus-block"}
 	gotNames := functionNames(got.Sections[0])
 	if !equalStringSlices(gotNames, wantNames) {
 		t.Fatalf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)
@@ -233,7 +233,10 @@ func TestExpandMacros_FocusWithModifiers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpandMacros: %v", err)
 	}
-	wantNames := []string{"kind", "active", "expand", "as-focus-block", "stalled", "name"}
+	// The macro bakes a default `name("Focus")`; the user-supplied
+	// `name("Active focuses")` appends after — last-write-wins resolves
+	// to the override at execute time.
+	wantNames := []string{"kind", "active", "expand", "name", "as-focus-block", "stalled", "name"}
 	gotNames := functionNames(got.Sections[0])
 	if !equalStringSlices(gotNames, wantNames) {
 		t.Errorf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)
@@ -301,7 +304,7 @@ func TestExpandMacros_MultipleSections(t *testing.T) {
 	}
 	for i, sec := range got.Sections {
 		gotNames := functionNames(sec)
-		wantNames := []string{"active", "kind", "group", "as-grouped"}
+		wantNames := []string{"active", "kind", "group", "name", "as-grouped"}
 		if !equalStringSlices(gotNames, wantNames) {
 			t.Errorf("section %d names:\n  got:  %v\n  want: %v", i, gotNames, wantNames)
 		}
@@ -318,7 +321,7 @@ func TestExpandMacros_Participants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpandMacros: %v", err)
 	}
-	wantNames := []string{"active", "kind", "as-participants-block"}
+	wantNames := []string{"active", "kind", "name", "as-participants-block"}
 	gotNames := functionNames(got.Sections[0])
 	if !equalStringSlices(gotNames, wantNames) {
 		t.Fatalf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)
@@ -326,6 +329,10 @@ func TestExpandMacros_Participants(t *testing.T) {
 	kindFn := got.Sections[0].Functions[1]
 	if len(kindFn.Args) != 1 || kindFn.Args[0].String != "actor" {
 		t.Errorf("kind arg: got %+v, want actor ident", kindFn.Args)
+	}
+	nameFn := got.Sections[0].Functions[2]
+	if len(nameFn.Args) != 1 || nameFn.Args[0].String != "Participants" {
+		t.Errorf("name arg: got %+v, want \"Participants\"", nameFn.Args)
 	}
 }
 
@@ -339,7 +346,7 @@ func TestExpandMacros_WIP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpandMacros: %v", err)
 	}
-	wantNames := []string{"source", "as-wip-list"}
+	wantNames := []string{"source", "name", "as-wip-list"}
 	gotNames := functionNames(got.Sections[0])
 	if !equalStringSlices(gotNames, wantNames) {
 		t.Fatalf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)

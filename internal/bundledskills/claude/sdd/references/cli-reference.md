@@ -100,21 +100,21 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 
 ### Macros
 
-| Macro | Expansion |
-|---|---|
-| `top(N)` | `active:n(N):rank(heat(exp-14d)):as-list` |
-| `topic(L)` | `topic(L):rank(heat(exp-14d)):as-list` |
-| `focus` | `kind(focus):active:expand(involvement):as-focus-block` |
-| `decisions` | `active:kind(plan,directive,activity,contract,aspiration):group(by(kind)):as-grouped` |
-| `signals` | `active:kind(gap,question):group(by(kind)):as-grouped` |
-| `insights` | `active:kind(insight):since("30d"):rank(by(date)):as-list` |
-| `done` | `kind(done):since("30d"):rank(by(date)):as-list` |
-| `aspirations` | `active:kind(aspiration):as-list` |
-| `contracts` | `active:kind(contract):as-list` |
-| `participants` | `active:kind(actor):as-participants-block` |
-| `wip` | `source(wip):as-wip-list` |
+| Macro | Expansion | Default header |
+|---|---|---|
+| `top(N)` | `active:n(N):rank(heat(exp-14d)):as-list` | auto-derived from rank |
+| `topic(L)` | `topic(L):rank(heat(exp-14d)):as-list` | auto-derived from rank |
+| `focus` | `kind(focus):active:expand(involvement):name("Focus"):as-focus-block` | `## Focus` |
+| `decisions` | `active:kind(plan,directive,activity,contract,aspiration):group(by(kind)):name("Decisions"):as-grouped` | `## Decisions` |
+| `signals` | `active:kind(gap,question):group(by(kind)):name("Signals"):as-grouped` | `## Signals` |
+| `insights` | `active:kind(insight):since("30d"):rank(by(date)):as-list` | auto-derived (`Most recent`) |
+| `done` | `kind(done):since("30d"):rank(by(date)):as-list` | auto-derived (`Most recent`) |
+| `aspirations` | `active:kind(aspiration):name("Aspirations"):as-list` | `## Aspirations` |
+| `contracts` | `active:kind(contract):name("Contracts"):as-list` | `## Contracts` |
+| `participants` | `active:kind(actor):name("Participants"):as-participants-block` | `## Participants` |
+| `wip` | `source(wip):name("WIP"):as-wip-list` | `## WIP` |
 
-User modifiers append after macro expansion and resolve via last-write-wins, so `top(20):rank(in-degree)` overrides the macro's default rank.
+User modifiers append after macro expansion and resolve via last-write-wins, so `top(20):rank(in-degree)` overrides the macro's default rank, and `focus:name("Active focuses")` overrides the baked header.
 
 ### Worked examples
 
