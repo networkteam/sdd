@@ -252,6 +252,7 @@ func main() {
 			statusCmd(),
 			showCmd(),
 			listCmd(),
+			viewCmd(),
 			newCmd(),
 			rewriteCmd(),
 			wipCmd(),
