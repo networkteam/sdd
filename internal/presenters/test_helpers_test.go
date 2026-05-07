@@ -67,3 +67,11 @@ func withConfidence(c string) entryOpt {
 func withParticipants(p ...string) entryOpt {
 	return func(e *model.Entry) { e.Participants = p }
 }
+
+func withCanonical(c string) entryOpt {
+	return func(e *model.Entry) { e.Canonical = c }
+}
+
+func withActor(a string) entryOpt {
+	return func(e *model.Entry) { e.Actor = a }
+}

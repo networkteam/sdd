@@ -195,17 +195,20 @@ func viewCmd() *cli.Command {
 				return err
 			}
 
-			g, err := loadGraph(cmd)
+			dir, err := resolveGraphDir(cmd)
 			if err != nil {
 				return err
 			}
-
 			f, err := newReadFinder()
 			if err != nil {
 				return err
 			}
+			g, err := f.LoadGraph(dir)
+			if err != nil {
+				return err
+			}
 
-			result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+			result, err := f.View(query.ViewQuery{Graph: g, Layout: layout, GraphDir: dir})
 			if err != nil {
 				return err
 			}

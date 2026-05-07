@@ -308,6 +308,62 @@ func TestExpandMacros_MultipleSections(t *testing.T) {
 	}
 }
 
+func TestExpandMacros_Participants(t *testing.T) {
+	// `participants` → `active:kind(actor):as-participants-block` per
+	// d-tac-uww §5. The macro narrows to active actor entries; the
+	// renderer then derives the role cascade from full chain history
+	// (d-cpt-d34) without further ceremony in the layout string.
+	layout := mustParseLayoutHelper(t, "participants")
+	got, err := ExpandMacros(layout)
+	if err != nil {
+		t.Fatalf("ExpandMacros: %v", err)
+	}
+	wantNames := []string{"active", "kind", "as-participants-block"}
+	gotNames := functionNames(got.Sections[0])
+	if !equalStringSlices(gotNames, wantNames) {
+		t.Fatalf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)
+	}
+	kindFn := got.Sections[0].Functions[1]
+	if len(kindFn.Args) != 1 || kindFn.Args[0].String != "actor" {
+		t.Errorf("kind arg: got %+v, want actor ident", kindFn.Args)
+	}
+}
+
+func TestExpandMacros_WIP(t *testing.T) {
+	// `wip` → `source(wip):as-wip-list` per d-tac-uww §5. The macro
+	// switches data sources before terminating in as-wip-list; the
+	// argument shape mirrors `source(wip)` parsed manually so executor
+	// dispatch sees the same form regardless of how the section arrived.
+	layout := mustParseLayoutHelper(t, "wip")
+	got, err := ExpandMacros(layout)
+	if err != nil {
+		t.Fatalf("ExpandMacros: %v", err)
+	}
+	wantNames := []string{"source", "as-wip-list"}
+	gotNames := functionNames(got.Sections[0])
+	if !equalStringSlices(gotNames, wantNames) {
+		t.Fatalf("function names:\n  got:  %v\n  want: %v", gotNames, wantNames)
+	}
+	sourceFn := got.Sections[0].Functions[0]
+	if len(sourceFn.Args) != 1 || sourceFn.Args[0].String != "wip" {
+		t.Errorf("source arg: got %+v, want wip ident", sourceFn.Args)
+	}
+}
+
+func TestExpandMacros_ParticipantsAndWipNoArgs(t *testing.T) {
+	// Both macros are nullary — passing args is a clear mistake (the
+	// macro shape has no parameter slot), so they error early rather
+	// than silently drop the args.
+	for _, src := range []string{"participants(foo)", "wip(graph)"} {
+		t.Run(src, func(t *testing.T) {
+			_, err := ExpandMacros(mustParseLayoutHelper(t, src))
+			if err == nil {
+				t.Fatalf("expected error for %q, got nil", src)
+			}
+		})
+	}
+}
+
 // --- helpers ---
 
 func mustParseLayoutHelper(t *testing.T, s string) model.Layout {

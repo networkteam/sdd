@@ -51,5 +51,17 @@ func renderSection(w io.Writer, g *model.Graph, section query.SectionResult) {
 			return
 		}
 		renderAsFocusBlock(w, g, block)
+	case "as-participants-block":
+		block, ok := section.Data.(model.ParticipantsBlock)
+		if !ok {
+			return
+		}
+		renderAsParticipantsBlock(w, g, block)
+	case "as-wip-list":
+		list, ok := section.Data.(model.WipList)
+		if !ok {
+			return
+		}
+		renderAsWipList(w, list)
 	}
 }

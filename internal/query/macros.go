@@ -66,15 +66,17 @@ func expandSection(section model.Section) (model.Section, error) {
 // macros maps macro names to their expand function. A macro consumes its
 // own call arguments and returns the function sequence to substitute.
 var macros = map[string]func(args []model.FunctionArg) ([]model.Function, error){
-	"top":         expandTop,
-	"topic":       expandTopicMacro,
-	"focus":       expandFocus,
-	"decisions":   expandDecisions,
-	"signals":     expandSignals,
-	"insights":    expandInsights,
-	"done":        expandDone,
-	"aspirations": expandAspirations,
-	"contracts":   expandContracts,
+	"top":          expandTop,
+	"topic":        expandTopicMacro,
+	"focus":        expandFocus,
+	"decisions":    expandDecisions,
+	"signals":      expandSignals,
+	"insights":     expandInsights,
+	"done":         expandDone,
+	"aspirations":  expandAspirations,
+	"contracts":    expandContracts,
+	"participants": expandParticipants,
+	"wip":          expandWIP,
 }
 
 // expandTop expands `top(N)` to `active:n(N):rank(heat(exp-14d)):as-list`.
@@ -213,6 +215,38 @@ func expandContracts(args []model.FunctionArg) ([]model.Function, error) {
 		{Name: "active"},
 		{Name: "kind", Args: identArgs("contract")},
 		{Name: "as-list"},
+	}, nil
+}
+
+// expandParticipants expands `participants` to
+// `active:kind(actor):as-participants-block` per d-tac-uww §5. The
+// active+kind(actor) filters narrow which actors surface; the renderer
+// then derives the role cascade from full chain history per d-cpt-d34
+// (within-chain canonical corrections still bind to the current head).
+func expandParticipants(args []model.FunctionArg) ([]model.Function, error) {
+	if err := requireNoArgs(args); err != nil {
+		return nil, err
+	}
+	return []model.Function{
+		{Name: "active"},
+		{Name: "kind", Args: identArgs("actor")},
+		{Name: "as-participants-block"},
+	}, nil
+}
+
+// expandWIP expands `wip` to `source(wip):as-wip-list` per d-tac-uww §5.
+// Markers come from disk (the wip/ subdirectory of the graph) rather
+// than the graph itself, so the macro switches sources before
+// terminating in as-wip-list. Filter primitives are not part of the
+// expansion — slice 8 surfaces every active marker; user-supplied
+// modifiers like name() append.
+func expandWIP(args []model.FunctionArg) ([]model.Function, error) {
+	if err := requireNoArgs(args); err != nil {
+		return nil, err
+	}
+	return []model.Function{
+		{Name: "source", Args: []model.FunctionArg{identArg("wip")}},
+		{Name: "as-wip-list"},
 	}, nil
 }
 
