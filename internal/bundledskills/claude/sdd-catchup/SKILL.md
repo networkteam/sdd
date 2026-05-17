@@ -159,9 +159,9 @@ For focus: render a single italic summary line at the top, in plain language: "C
 
 The four blocks below are injected fresh each invocation. Read them as your sole input.
 
-## Just landed
+## Recent done
 
-!`sdd view --layout='kind(done):since("3d"):rank(by(date)):n(10):name("Just landed"):as-list'`
+!`sdd view --layout='kind(done):rank(by(date)):n(10):name("Recent done"):as-list'`
 
 ## Active and hot
 
