@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./bin/sdd *)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go vet *)",
+      "Bash(golangci-lint run *)",
+      "Bash(sdd *)",
+      "Skill(sdd-catchup)",
+      "Skill(sdd-explore)",
+      "Skill(sdd-groom)",
+      "Skill(sdd)"
+    ]
+  }
+}
