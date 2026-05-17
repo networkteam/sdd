@@ -258,6 +258,7 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			initCmd(),
+			infoCmd(),
 			statusCmd(),
 			showCmd(),
 			listCmd(),
@@ -289,6 +290,25 @@ func loadGraph(cmd *cli.Command) (*model.Graph, error) {
 		return nil, err
 	}
 	return f.LoadGraph(dir)
+}
+
+func infoCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "info",
+		Usage: "Show session framing — participant, language, search capability",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			f, err := newReadFinder()
+			if err != nil {
+				return err
+			}
+			result, err := f.Info(query.InfoQuery{})
+			if err != nil {
+				return err
+			}
+			presenters.RenderInfo(os.Stdout, result)
+			return nil
+		},
+	}
 }
 
 func statusCmd() *cli.Command {
