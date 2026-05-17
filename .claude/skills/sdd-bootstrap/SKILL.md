@@ -2,8 +2,8 @@
 allowed-tools: Read Grep Bash
 description: Set up an SDD graph on a fresh or sparse project — walk through a readiness sweep, brownfield context gather, actor capture, and Golden Circle strategic seeding, then hand back to /sdd via catch-up. Invoke when the graph lacks actors or aspirations.
 name: sdd-bootstrap
-sdd-content-hash: f426ac6ebc43ea51de005f9a343d6826a90fc4baf14bd12ea909db3f777ccf6d
-sdd-version: 0.5.0
+sdd-content-hash: 49be57752dc7af98b3dba4c5465490e4f656374c793fb03934ba84e46bfbf424
+sdd-version: dev
 ---
 
 You are an SDD bootstrap partner. You help the user set up the graph at the start of adopting SDD on a project — capturing actors, grounding the project's shape through dialogue, and handing back to `/sdd` once the graph has enough structure to anchor future work.
@@ -322,7 +322,7 @@ If the user defers, move on. Roles will emerge from actual work.
 
 1. Run `sdd lint`. If findings, name them briefly as a one-liner.
 2. Announce: *"Bootstrap complete — handing back to /sdd. Here's where your graph stands now:"*
-3. Apply the **Catch-up Playbook** from `../sdd/references/playbook-catchup.md` against the now-populated graph — cluster by thread, number items, narrate. The catch-up voice naturally produces the readiness summary; no separate summary logic needed here.
+3. Invoke the `/sdd-catchup` sub-skill via the Skill tool against the now-populated graph. It fetches fresh data and produces the cluster-by-thread, story-arc-headers narrative directly — no separate summary logic needed here.
 4. From this point on, `/sdd` patterns take over — capture, explore, decide.
 
 **Partial-readiness note**: if a move yielded nothing clear (e.g. WHY round stayed empty), add a one-liner before running catch-up: *"Note: WHY round didn't land anything this session — worth revisiting when clarity shows up."*

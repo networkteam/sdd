@@ -2,7 +2,7 @@
 allowed-tools: Bash(sdd *)
 description: Produce a colleague-style catch-up briefing on the SDD project. Threads recent activity, active work, and warm gaps into 2–4 story-arc clusters with action-tight numbered items. Use as the check-in mode when starting a session or whenever a fresh briefing is wanted.
 name: sdd-catchup
-sdd-content-hash: 43c5f5265ad4fd04ba2c8c1a0cb0ad7ac444694d21fa65962f4c369ba4191999
+sdd-content-hash: 1d7b038fef26570b79f9154284f5b9e9faf2ed70cb137a0bc3cb66ec0a5e5835
 sdd-version: dev
 ---
 
@@ -161,9 +161,9 @@ For focus: render a single italic summary line at the top, in plain language: "C
 
 The four blocks below are injected fresh each invocation. Read them as your sole input.
 
-## Just landed
+## Recent done
 
-!`sdd view --layout='kind(done):since("3d"):rank(by(date)):n(10):name("Just landed"):as-list'`
+!`sdd view --layout='kind(done):rank(by(date)):n(10):name("Recent done"):as-list'`
 
 ## Active and hot
 
