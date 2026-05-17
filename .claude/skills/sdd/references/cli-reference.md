@@ -1,12 +1,13 @@
 ---
-sdd-content-hash: 22ce966a3d0d8498fa93437fa9672e2fecaa38bd22743c143d31c48c3f329a3f
+sdd-content-hash: c6ae1c57f071078398450f4c7eaa702739d767f7448e53a921cb205b148952df
 sdd-version: dev
 ---
 # SDD CLI Reference
 
 ## Commands
 
-- `sdd status` — overview grouped by decision kind (Aspirations, Contracts, Plans, Activities, Directives), plus Gaps and Questions, Recent Insights, and Recent Done Signals (uses summaries)
+- `sdd info` — session framing only: `Local participant: ...`, `Language: ...` (when configured), `Search: ...`. Stable surface for skill `!`sdd ...`` injections that need the agent to see who's local and which retrieval modes are available without the rest of `sdd status`.
+- `sdd status` — overview grouped by decision kind (Aspirations, Contracts, Plans, Activities, Directives), plus Gaps and Questions, Recent Insights, and Recent Done Signals (uses summaries). Header lines match `sdd info` byte-for-byte.
 - `sdd view --layout=<spec>` — composable pipeline of primitives (source, filter, transform, aggregate, rank, page, render) with named macros as sugar. Mechanical catch-up at scale; bare `sdd view` prints help with vocabulary tables. See "`sdd view` pipeline" below.
 - `sdd show <id>` — full entry with upstream summary chain (depth-limited)
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
