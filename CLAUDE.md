@@ -11,12 +11,12 @@ SDD is a CLI-driven framework for building and traversing decision graphs throug
 The project uses Devbox + direnv for the toolchain (Go 1.26, GNU sed, etc.). In a fresh clone:
 
 ```bash
-direnv allow                      # loads devbox environment
-go build -o bin/sdd ./cmd/sdd
-./bin/sdd init --scope project    # refresh .claude/skills from the embedded bundle
+direnv allow                  # loads devbox environment
+go build -o bin/sdd ./cmd/sdd # build fresh local sdd dev version
+sdd init --scope project      # refresh .claude/skills from the embedded bundle
 ```
 
-The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never commit). `sdd init` is idempotent: on a fresh checkout it creates `.sdd/meta.json` and installs skills; on subsequent runs it refreshes whatever drifted.
+The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never commit, added to PATH via devbox.json). `sdd init` is idempotent: on a fresh checkout it creates `.sdd/meta.json` and installs skills; on subsequent runs it refreshes whatever drifted.
 
 ## Commands
 
@@ -24,7 +24,7 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never com
 - `go test ./...` — run all tests
 - `go fmt ./...` — format code
 - `golangci-lint run ./...` — lint (must be clean; CI enforces)
-- `./bin/sdd status` — smoke-test the binary against the graph at `.sdd/graph/`
+- `sdd status` — smoke-test the binary against the graph at `.sdd/graph/`
 - `goreleaser check` — validate `.goreleaser.yaml`
 - `devbox run gen-installer` — regenerate the curl installer (`install.sh`) from `.config/binstaller.yml`. Run this whenever `.goreleaser.yaml` changes its platform or asset surface, then commit the updated `install.sh`. Install binstaller separately (`go install github.com/binary-install/binstaller/cmd/binst@latest`) — it isn't in devbox's nixpkgs.
 
@@ -93,10 +93,10 @@ sdd/
 
 ## Skill source of truth
 
-Skills are **source-of-truth in `internal/bundledskills/claude/`** and compiled into the binary via `//go:embed`. The copy under `.claude/skills/` is the *installed* output for this repo — it is what Claude Code loads during a session.
+Skills are **source-of-truth in `internal/bundledskills/claude/`** and compiled into the binary via `//go:embed`. The copy under `.claude/skills/` is the _installed_ output for this repo — it is what Claude Code loads during a session.
 
 - **Never edit `.claude/skills/` directly.** Changes made there will be overwritten (or flagged as "modified") the next time `sdd init` runs.
-- Edit in `internal/bundledskills/claude/<skill>/` → rebuild (`go build -o bin/sdd ./cmd/sdd`) → reinstall (`./bin/sdd init --scope project`). The installed copy picks up the new bundle and refreshes `.claude/skills/` with fresh `sdd-version` + `sdd-content-hash` stamps.
+- Edit in `internal/bundledskills/claude/<skill>/` → rebuild (`go build -o bin/sdd ./cmd/sdd`) → reinstall (`sdd init --scope project`). The installed copy picks up the new bundle and refreshes `.claude/skills/` with fresh `sdd-version` + `sdd-content-hash` stamps.
 - Commits should include both locations when a skill changes: the source under `internal/bundledskills/claude/` and the re-stamped output under `.claude/skills/`.
 
 ## Git rules

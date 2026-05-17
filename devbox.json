@@ -1,13 +1,13 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
-  "packages": [
-    "go@1.26",
-    "golangci-lint@2.11"
-  ],
+  "packages": ["go@1.26", "golangci-lint@2.11"],
   "shell": {
     "init_hook": ["echo 'Welcome to devbox!' > /dev/null"],
     "scripts": {
       "gen-installer": "binst gen -o install.sh"
     }
+  },
+  "env": {
+    "PATH": "$DEVBOX_PROJECT_ROOT/bin:$PATH"
   }
 }
