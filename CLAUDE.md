@@ -16,7 +16,7 @@ go build -o bin/sdd ./cmd/sdd # build fresh local sdd dev version
 sdd init --scope project      # refresh .claude/skills from the embedded bundle
 ```
 
-The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never commit, added to PATH via devbox.json). `sdd init` is idempotent: on a fresh checkout it creates `.sdd/meta.json` and installs skills; on subsequent runs it refreshes whatever drifted.
+The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never commit, added to PATH via devbox.json, so call it via `sdd`). `sdd init` is idempotent: on a fresh checkout it creates `.sdd/meta.json` and installs skills; on subsequent runs it refreshes whatever drifted.
 
 ## Commands
 
