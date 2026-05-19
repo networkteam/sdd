@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 72ff23888c943a282b1b01a06e110d732c5a60c48e76cdd9f35668a3eee456fb
+sdd-content-hash: 98d20d210364bd54b550dd9a555ae7833c9a6e4764a5571f5a308ca1c8417e96
 sdd-version: dev
 ---
 
@@ -136,7 +136,7 @@ See [CLI reference](references/cli-reference.md) for full command syntax and fla
 - **Before capturing a done signal**: Ensure the artifacts it references are durable — either via a prior commit (code or system changes) or via `--attach` on the entry itself (research, synthesis, design docs; the `sdd new` commit carries entry and attachments together).
 - **Short-loop smell test**: when drafting a done signal that closes a gap directly (bypassing a decision), check the narrative. If you'd have to describe *a choice or rationale* to capture what was done, stop and capture the decision first — pre-flight will flag approach-shaped closures, strictly at higher layers.
 - **Right layer**: Strategic = why/direction. Conceptual = approach/shape. Tactical = structure/trade-offs. Operational = individual steps. Process = how we work.
-- **Refs matter**: Always link to the signals/decisions that led to this entry. Use `sdd show` and `sdd list` to find the right refs.
+- **Refs matter**: Always link to the signals/decisions that led to this entry. Use `sdd show` and `sdd list` to find the right refs. Every ref needs a **kind** that names why the reference exists — pick from `grounds` (anchors to a contract/aspiration/standing directive), `builds-on` (extends prior lineage), `addresses` (responds to a gap/question/insight), `surfaces` (created or discovered the referenced gap during this work), `evidence` (cites empirical fact/done), `depends-on` (functional prerequisite), or `related` (parallel sibling, no other axis fits). When the kind isn't obvious, name the relationship in dialogue before capture — guessing wrong gets caught by the LLM advisory check (slice 2) once the desc-vs-body comparison ships. CLI shape: one `--refs` flag per reference, JSON object `{"id":"<full-id>","kind":"<kind>","desc":"<optional why>"}`. The legacy CSV form was dropped — each ref now carries its own kind, so `--refs id1,id2` is rejected with guidance. Optional `desc` shows beneath the ref line on `sdd show` and gives readers per-ref rationale without diving into the body.
 - **Don't cite graph-mechanics rules in prose or refs**: Contracts that govern all entries (canonical-only participants, immutability, ref semantics) apply universally — citing them in an individual entry adds noise. Only cite a contract when the entry specifically operationalizes, refines, or tests that rule.
 - **Confidence is honest**: High = strong conviction. Medium = reasonable but unvalidated. Low = hypothesis/experiment.
 - **One idea per entry**: Keep entries digestible. If it needs more detail, split into multiple entries or reference an external file.
