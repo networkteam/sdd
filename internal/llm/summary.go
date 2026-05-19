@@ -127,6 +127,9 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 }
 
 // FormatEntryForPrompt formats an entry as readable text for inclusion in a prompt.
+// Refs render multi-line with per-ref kind and optional desc so the LLM can
+// reason about ref metadata (used by the desc-vs-body consistency check —
+// see ref_desc_consistency.tmpl).
 func FormatEntryForPrompt(e *model.Entry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ID: %s\n", e.ID)
@@ -136,7 +139,14 @@ func FormatEntryForPrompt(e *model.Entry) string {
 		fmt.Fprintf(&b, "Kind: %s\n", e.Kind)
 	}
 	if len(e.Refs) > 0 {
-		fmt.Fprintf(&b, "Refs: %s\n", strings.Join(model.RefIDs(e.Refs), ", "))
+		b.WriteString("Refs:\n")
+		for _, r := range e.Refs {
+			fmt.Fprintf(&b, "  - %s (kind: %s)", r.ID, r.Kind)
+			if r.Desc != "" {
+				fmt.Fprintf(&b, ": %s", r.Desc)
+			}
+			b.WriteByte('\n')
+		}
 	}
 	if len(e.Closes) > 0 {
 		fmt.Fprintf(&b, "Closes: %s\n", strings.Join(e.Closes, ", "))

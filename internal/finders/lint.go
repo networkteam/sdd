@@ -20,6 +20,14 @@ func (f *Finder) Lint(q query.LintQuery) (*query.LintResult, error) {
 	// Check summary hashes for staleness.
 	validateSummaryHashes(q.Graph)
 
+	// Lint per-ref kinds. Lives in the lint surface (not in
+	// ValidateEntry) so legacy entries with bare-string refs get flagged
+	// for re-authoring without blocking unrelated capture flows. Per
+	// plan d-tac-cs0 AC 11.
+	for _, e := range q.Graph.Entries {
+		model.LintRefKinds(e)
+	}
+
 	entries := q.Graph.Lint()
 	total := 0
 	for _, e := range entries {

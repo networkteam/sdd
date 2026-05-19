@@ -254,7 +254,7 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 		Type:    model.TypeSignal,
 		Kind:    model.KindDone,
 		Layer:   model.LayerTactical,
-		Refs:    []string{decision.ID},
+		Refs:    []model.Ref{{ID: decision.ID, Kind: model.RefKindAddresses}},
 		Closes:  []string{decision.ID},
 		Content: "Built sdd lint command with checks for dangling refs (non-existent entries), malformed IDs (short suffixes), type mismatches in closes (signal can't close, action can't be closed, decision can't close decision), and type mismatches in supersedes (must be same type). Warnings are populated during graph construction on the Entry struct so sdd show displays them inline. Running against the live graph found 4 issues in 3 entries. Does NOT yet cover broken or missing attachment references — that requirement from d-tac-kfo remains unimplemented.",
 	}
@@ -375,7 +375,7 @@ func TestPreflightEval_AugmentingDirective_CleanRefinement(t *testing.T) {
 		Type:    model.TypeDecision,
 		Layer:   model.LayerTactical,
 		Kind:    model.KindDirective,
-		Refs:    []string{plan.ID},
+		Refs:    []model.Ref{{ID: plan.ID, Kind: model.RefKindBuildsOn}},
 		Content: "The 200ms p95 latency target in d-tac-pln applies to query corpora up to 50k documents — beyond that we accept up to 350ms in the first iteration. The plan's AC stands for the bulk of expected production traffic; this directive sharpens the boundary so the closing done signal can address both regimes explicitly. Plan stays active; this directive is closed by the plan's done signal alongside the plan.",
 		Time:    time.Date(2026, 4, 15, 14, 0, 0, 0, time.UTC),
 	}
@@ -413,7 +413,7 @@ func TestPreflightEval_AugmentingDirective_GenuineSupersessionFlagged(t *testing
 		Type:    model.TypeDecision,
 		Layer:   model.LayerTactical,
 		Kind:    model.KindDirective,
-		Refs:    []string{plan.ID},
+		Refs:    []model.Ref{{ID: plan.ID, Kind: model.RefKindBuildsOn}},
 		Content: "The nightly cron-job AC in d-tac-pln is wrong. We will not run nightly ingestion at all — instead, ingestion will be event-driven from the source-of-truth write stream, with no scheduled runs. The dashboard stale-index warning AC also no longer applies because there is no scheduled cadence to fall behind. The plan's overall direction (move to elasticsearch) holds; the operational shape changes substantially.",
 		Time:    time.Date(2026, 4, 15, 14, 0, 0, 0, time.UTC),
 	}
@@ -470,10 +470,13 @@ func TestPreflightEval_AugmentingDirective_TopicFilterReconstruction(t *testing.
 	graph := model.NewGraph([]*model.Entry{plan1, plan2})
 
 	proposed := &model.Entry{
-		Type:    model.TypeDecision,
-		Layer:   model.LayerTactical,
-		Kind:    model.KindDirective,
-		Refs:    []string{plan1.ID, plan2.ID},
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindDirective,
+		Refs: []model.Ref{
+			{ID: plan1.ID, Kind: model.RefKindBuildsOn},
+			{ID: plan2.ID, Kind: model.RefKindBuildsOn},
+		},
 		Content: "Plan 1 (d-tac-gvn) ships the `topic(L)` filter primitive in shared internal packages as part of its `sdd list --topic` AC. Plan 2 (d-tac-uww) consumes the existing primitive rather than re-implementing it. This resolves an ambiguity in Plan 1's AC text — which described the primitive as living in Plan 2's shared internals — by clarifying ownership in Plan 1's favor, since Plan 1 is the first plan to need the primitive. Plan 1 stays active; this directive is scoped to Plan 1's AC contract and is closed by Plan 1's done signal alongside the plan.",
 		Time:    time.Date(2026, 5, 6, 15, 47, 59, 0, time.UTC),
 	}
@@ -484,4 +487,199 @@ func TestPreflightEval_AugmentingDirective_TopicFilterReconstruction(t *testing.
 	} else {
 		t.Logf("Correctly accepted reconstructed augmenting directive. Findings: %+v", result.Findings)
 	}
+}
+
+// mentionsRefMeta reports whether any finding's category or observation
+// mentions ref / kind / desc concerns — used by the ref-metadata consistency
+// tests to detect that the partial fired without binding to a specific
+// category string the template doesn't pin down.
+func mentionsRefMeta(findings []Finding) bool {
+	for _, f := range findings {
+		blob := strings.ToLower(f.Category + " " + f.Observation)
+		if strings.Contains(blob, "desc") ||
+			strings.Contains(blob, "kind") ||
+			strings.Contains(blob, "ref ") ||
+			strings.Contains(blob, "reference") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasFindingAtSeverity reports whether any finding matches the predicate at
+// the given severity.
+func hasFindingAtSeverity(findings []Finding, sev Severity, predicate func(Finding) bool) bool {
+	for _, f := range findings {
+		if f.Severity != sev {
+			continue
+		}
+		if predicate == nil || predicate(f) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestPreflightEval_RefMeta_DescConsistent_NoFinding is the positive case:
+// desc names the relationship the body actually carries. No ref-metadata
+// finding should fire.
+func TestPreflightEval_RefMeta_DescConsistent_NoFinding(t *testing.T) {
+	gap := &model.Entry{
+		ID:      "20260507-171914-s-cpt-zsd",
+		Type:    model.TypeSignal,
+		Kind:    model.KindGap,
+		Layer:   model.LayerConceptual,
+		Content: "Heat algorithm weighting in `sdd view` conflates grounding citations with extension or closure refs, causing standing entries to rank artificially high. Differentiating ref types via per-kind weights would let grounding citations decay and resolution citations weight fully.",
+		Time:    time.Date(2026, 5, 7, 17, 19, 14, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{gap})
+
+	proposed := &model.Entry{
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindDirective,
+		Refs: []model.Ref{
+			{ID: gap.ID, Kind: model.RefKindAddresses, Desc: "responds to the heat-conflation gap"},
+		},
+		Content: "Implement label-aware heat weighting in `sdd view`'s rank algorithm — multiply each reference's contribution by a per-kind weight (grounds 0.25, related 0.5, active engagement 1.0) before decay and summing, so grounding citations no longer dominate. This addresses the heat-conflation gap raised in s-cpt-zsd. Closure will include comparative findings validating or revising the starting weight values.",
+		Time:    time.Date(2026, 5, 17, 18, 1, 49, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	// No high finding expected; the metadata is consistent with the body.
+	if result.HasBlocking() {
+		t.Errorf("Expected no high findings (desc/kind consistent with body), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly accepted consistent ref metadata. Findings: %+v", result.Findings)
+	}
+}
+
+// TestPreflightEval_RefMeta_DescContradicts_High exercises the high-severity
+// branch: the desc characterizes the relationship one way; the body
+// affirmatively refutes it. The validator must flag this as `high` with a
+// finding that names the ref.
+func TestPreflightEval_RefMeta_DescContradicts_High(t *testing.T) {
+	contract := &model.Entry{
+		ID:      "20260408-120000-d-prc-iom",
+		Type:    model.TypeDecision,
+		Kind:    model.KindContract,
+		Layer:   model.LayerProcess,
+		Content: "Documents in the graph are never modified after creation. Updates land as new entries that supersede or close the prior one. This immutability is the precondition for the graph as durable record.",
+		Time:    time.Date(2026, 4, 8, 12, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{contract})
+
+	proposed := &model.Entry{
+		Type:  model.TypeDecision,
+		Layer: model.LayerProcess,
+		Kind:  model.KindDirective,
+		Refs: []model.Ref{
+			{ID: contract.ID, Kind: model.RefKindGrounds, Desc: "extends the immutability contract"},
+		},
+		Content: "This directive retires the immutability contract d-prc-iom. We will allow in-place edits to entry bodies when the change is purely editorial (typo, link repair) and recorded in a `revision_history` field on the entry. The original immutability framing was correct at the time but proved too rigid for low-stakes edits that don't change semantic content.",
+		Time:    time.Date(2026, 5, 19, 22, 0, 0, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	// Direct contradiction (desc "extends" vs body "retires") should be high.
+	if !hasFindingAtSeverity(result.Findings, SeverityHigh, mentionsRefMetaPredicate) {
+		t.Errorf("Expected a high finding mentioning the contradicting desc, got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly flagged desc contradiction as high. Findings: %+v", result.Findings)
+	}
+}
+
+// TestPreflightEval_RefMeta_WrongKind_High exercises the wrong-kind branch
+// of the high-severity rubric: the ref's kind misrepresents the relationship
+// the body uses; another kind in the closed set names it correctly.
+func TestPreflightEval_RefMeta_WrongKind_High(t *testing.T) {
+	gap := &model.Entry{
+		ID:      "20260505-100000-s-cpt-blur",
+		Type:    model.TypeSignal,
+		Kind:    model.KindGap,
+		Layer:   model.LayerConceptual,
+		Content: "Readers of catch-up output frequently miss state transitions in referenced entries because list rendering hides the derived status. The proposal: render a per-ref expansion that surfaces each reference's current status alongside its semantic kind, so a glance at any entry's outgoing refs makes lifecycle changes immediately visible without drilling.",
+		Time:    time.Date(2026, 5, 5, 10, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{gap})
+
+	proposed := &model.Entry{
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindPlan,
+		Refs: []model.Ref{
+			// Wrong kind: gap signals are addressed, not grounded against.
+			// `grounds` is for anchoring to standing structure (contracts,
+			// aspirations, standing directives).
+			{ID: gap.ID, Kind: model.RefKindGrounds},
+		},
+		Content: `Plan an ` + "`expand(refs)`" + ` render modifier for ` + "`sdd view`" + ` list outputs that displays each entry's outgoing references as indented sub-lines carrying derived status and semantic relationship kind. This addresses the temporal-blur gap (s-cpt-blur) where readers miss state changes in referenced entries.
+
+## Acceptance criteria
+
+- [ ] ` + "`expand(refs)`" + ` renders one sub-line per outgoing ref
+- [ ] Each sub-line shows derived status and ref kind
+`,
+		Time: time.Date(2026, 5, 19, 22, 5, 0, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if !hasFindingAtSeverity(result.Findings, SeverityHigh, mentionsRefMetaPredicate) {
+		t.Errorf("Expected a high finding mentioning the wrong kind (grounds on a gap signal), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly flagged wrong kind as high. Findings: %+v", result.Findings)
+	}
+}
+
+// TestPreflightEval_RefMeta_TopicalDrift_NotHigh exercises the softer
+// divergence band: desc emphasizes an aspect the body never mentions, while
+// the body still genuinely grounds in the referenced entry. No affirmative
+// refutation, so the rubric must not fire a `high` ref-metadata finding.
+// Whether the validator surfaces a low/medium observation or judges the
+// drift acceptable is left to its judgment — both are valid calibration
+// outcomes for the softer band.
+func TestPreflightEval_RefMeta_TopicalDrift_NotHigh(t *testing.T) {
+	aspiration := &model.Entry{
+		ID:      "20260422-122136-d-stg-beb",
+		Type:    model.TypeDecision,
+		Kind:    model.KindAspiration,
+		Layer:   model.LayerStrategic,
+		Content: "Decisions emerge from multi-party engagement. All tooling serves dialogue rather than replacing reasoning. Reasoning-first is a consequence of dialogue shaping decisions, not a separate aspiration.",
+		Time:    time.Date(2026, 4, 22, 12, 21, 36, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{aspiration})
+
+	proposed := &model.Entry{
+		Type:  model.TypeDecision,
+		Layer: model.LayerConceptual,
+		Kind:  model.KindDirective,
+		Refs: []model.Ref{
+			// Desc names "dialogue-first" — accurate at the aspiration level.
+			// The body grounds in the aspiration but frames the connection
+			// through "multi-author review" rather than naming dialogue-first.
+			// Topical drift (same axis, different focal length), not
+			// contradiction.
+			{ID: aspiration.ID, Kind: model.RefKindGrounds, Desc: "anchors to dialogue-first principle"},
+		},
+		Content: "Architecture-changing decisions in the SDD codebase must carry at least two distinct participants in `participants:` before the closing done signal lands. Per d-stg-beb (the aspiration the SDD project pulls toward), reasoning that shapes the framework should not emerge from a single author in isolation — multi-author review is the operational form that aspiration takes for non-trivial decisions. This applies to plan and directive decisions at the strategic and conceptual layers; tactical execution work is exempt because its decisions are typically scoped to a single workstream and reviewed at closing time against the parent plan.",
+		Time:    time.Date(2026, 5, 19, 22, 10, 0, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	// Direct contradiction is high; topical drift sits below the
+	// contradiction threshold. The validator must NOT block on metadata
+	// alone here.
+	if hasFindingAtSeverity(result.Findings, SeverityHigh, mentionsRefMetaPredicate) {
+		t.Errorf("Expected no high ref-metadata finding for topical drift (no affirmative refutation), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		// Whether a low/medium ref-meta finding fires is left to the
+		// validator's judgment; log either way for visibility.
+		t.Logf("Topical-drift case did not produce a high ref-metadata finding. Findings: %+v", result.Findings)
+	}
+}
+
+// mentionsRefMetaPredicate is the predicate form of mentionsRefMeta for use
+// with hasFindingAtSeverity.
+func mentionsRefMetaPredicate(f Finding) bool {
+	return mentionsRefMeta([]Finding{f})
 }

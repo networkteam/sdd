@@ -1,0 +1,26 @@
+{{ define "ref_meta_consistency" }}
+## Reference metadata consistency (apply when the entry has refs)
+
+Each ref carries a `kind` (from the closed vocabulary: grounds, builds-on, addresses, surfaces, evidence, depends-on, related) and an optional `desc` naming why the reference exists. Both must read consistently with how the entry body frames the reference. Skip the desc-side check when no ref carries a `desc`; the kind-side check applies whenever there are refs.
+
+Two axes of mismatch:
+
+- **Desc-vs-body** — what the desc claims about the relationship vs. what the body actually does with the reference.
+- **Kind-vs-body** — whether the chosen kind value names the body's framing correctly, or whether another kind in the closed set would name it better.
+
+## Calibration
+
+- `high` — Direct contradiction between ref metadata and body framing. Pre-flight blocks because a misleading desc or wrong kind degrades graph readability for every future reader. Two flavors:
+  - *Desc contradiction*: the body affirmatively refutes the relationship the desc claims. Example: ref `(kind: grounds, desc: "extends the predecessor contract")` on a contract; body says "this directive retires the predecessor contract." Both can't be true.
+  - *Wrong kind*: the chosen kind misrepresents the body's framing; another kind in the closed set names it correctly. Examples: ref `(kind: grounds)` on a gap signal whose body says "addresses the temporal-blur gap" — `addresses` is correct (gap signals aren't standing structure). Ref `(kind: evidence)` on a plan whose body says "depends on the per-ref kind taxonomy landing first" — `depends-on` is correct (functional prerequisite, not citation). Ref `(kind: builds-on)` on a contract the entry leans on without extending — `grounds` is correct (anchors to standing structure).
+
+  Cite the ref ID and the contradicting body excerpt so the author can resolve unambiguously.
+
+- `medium` — Significant divergence without affirmative refutation. The desc or kind is defensible but a future reader would reasonably misread the relationship from the metadata alone. Examples: desc "anchors to dialogue-first principle" while the body builds the case through a different principle without naming dialogue-first; kind `related` on a ref the body uses as a functional prerequisite (`depends-on` would be sharper but `related` isn't *wrong*).
+
+- `low` — Mild divergence the reader can reconcile from context. Examples: desc names a sub-claim ("extends the type-system kind taxonomy") while the body uses a broader frame ("builds on the d-cpt-ydf framework") — same axis, different focal length. Wording-level variation with equivalent meaning. Kind that fits but a slightly different kind from the closed set would also fit.
+
+- No finding — Desc is consistent with the body's framing **and** kind matches how the body uses the reference. Also no finding when no ref carries a `desc` and every kind reads correctly against the body.
+
+The metadata serves readers; the body is the source of truth. When desc and body disagree, the body wins — flag the desc so the author can repair it. When kind and body disagree, the kind value is the structural commitment that downstream consumers (heat ranking, render expansion) key on; getting it right matters more than getting the prose-level desc right.
+{{ end }}

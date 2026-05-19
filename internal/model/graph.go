@@ -726,6 +726,27 @@ func ValidateEntry(e *Entry, g *Graph) {
 	validateAttachmentLinks(e)
 }
 
+// LintRefKinds surfaces per-ref kind values that are not in the capturable
+// closed set — practically, this means RefKindUnknown (the legacy bare-string
+// fallback) since any other invalid kind value is rejected at YAML parse time.
+// Lives outside ValidateEntry so the warning only appears in lint output, not
+// in capture-time validation (where the mechanical pre-flight handles ref-kind
+// enforcement at high severity, blocking).
+//
+// Per d-tac-cs0 AC 11.
+func LintRefKinds(e *Entry) {
+	for _, r := range e.Refs {
+		if IsCapturableRefKind(r.Kind) {
+			continue
+		}
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "refs",
+			Value:   r.ID,
+			Message: fmt.Sprintf("ref %s carries kind %q (expected one of: %s) — likely a legacy bare-string ref; re-author with an explicit kind", r.ID, r.Kind, refKindList()),
+		})
+	}
+}
+
 // validateIDRefs checks that all IDs in the given field are well-formed and exist in the graph.
 func validateIDRefs(e *Entry, g *Graph, field string, ids []string) {
 	for _, id := range ids {
