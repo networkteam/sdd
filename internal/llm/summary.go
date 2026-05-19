@@ -99,7 +99,7 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 		}
 	}
 
-	addRelated(entry.Refs, "refs")
+	addRelated(model.RefIDs(entry.Refs), "refs")
 	addRelated(entry.Closes, "closes")
 	addRelated(entry.Supersedes, "supersedes")
 
@@ -136,7 +136,7 @@ func FormatEntryForPrompt(e *model.Entry) string {
 		fmt.Fprintf(&b, "Kind: %s\n", e.Kind)
 	}
 	if len(e.Refs) > 0 {
-		fmt.Fprintf(&b, "Refs: %s\n", strings.Join(e.Refs, ", "))
+		fmt.Fprintf(&b, "Refs: %s\n", strings.Join(model.RefIDs(e.Refs), ", "))
 	}
 	if len(e.Closes) > 0 {
 		fmt.Fprintf(&b, "Closes: %s\n", strings.Join(e.Closes, ", "))

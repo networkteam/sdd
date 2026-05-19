@@ -254,8 +254,8 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 	// Referenced entries
 	if len(entry.Refs) > 0 {
 		var parts []string
-		for _, id := range entry.Refs {
-			if e, ok := graph.ByID[id]; ok {
+		for _, ref := range entry.Refs {
+			if e, ok := graph.ByID[ref.ID]; ok {
 				parts = append(parts, FormatEntryForPrompt(e))
 			}
 		}

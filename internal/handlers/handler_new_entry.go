@@ -78,7 +78,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 
 	// Resolve short-form IDs in refs/closes/supersedes against the graph so
 	// validation and all downstream logic see full IDs.
-	if entry.Refs, err = graph.ResolveIDs(entry.Refs); err != nil {
+	if entry.Refs, err = graph.ResolveRefIDs(entry.Refs); err != nil {
 		return fmt.Errorf("resolving refs: %w", err)
 	}
 	if entry.Closes, err = graph.ResolveIDs(entry.Closes); err != nil {

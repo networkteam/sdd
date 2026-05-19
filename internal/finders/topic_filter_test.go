@@ -71,7 +71,7 @@ func TestTopicFilter_AnnotationMembership(t *testing.T) {
 		ID:               "20260506-000000-s-cpt-an1",
 		Type:             model.TypeSignal,
 		Kind:             model.KindAnnotation,
-		Refs:             []string{a.ID, b.ID, c.ID},
+		Refs:             refsOf(a.ID, b.ID, c.ID),
 		AnnotationTopics: []model.AnnotationTopic{{Label: "type-system/kinds"}},
 	}
 
@@ -80,7 +80,7 @@ func TestTopicFilter_AnnotationMembership(t *testing.T) {
 		ID:   "20260506-000001-s-cpt-an2",
 		Type: model.TypeSignal,
 		Kind: model.KindAnnotation,
-		Refs: []string{a.ID, b.ID, c.ID},
+		Refs: refsOf(a.ID, b.ID, c.ID),
 		AnnotationTopics: []model.AnnotationTopic{
 			{Label: "catch-up-scaling", Members: []string{a.ID, b.ID}},
 		},
@@ -131,7 +131,7 @@ func TestEffectiveTopics_MergesInlineAndAnnotation(t *testing.T) {
 		ID:   "20260506-000000-s-cpt-ann",
 		Type: model.TypeSignal,
 		Kind: model.KindAnnotation,
-		Refs: []string{target.ID},
+		Refs: refsOf(target.ID),
 		AnnotationTopics: []model.AnnotationTopic{
 			{Label: "annotation-topic"},
 			{Label: "Inline-Topic"}, // duplicate of inline; should fold-dedupe

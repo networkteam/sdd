@@ -24,6 +24,10 @@ import (
 //     kind: role decision, the Actor value must match the current head
 //     canonical of an active chain AND Refs must include that head entry's
 //     ID.
+//   - ref-kind-missing + ref-kind-invalid (d-tac-cs0 AC 8): every ref on a
+//     new entry must carry a kind from the closed set, rejecting the legacy
+//     `unknown` sentinel which is reserved for read-side bare-string round-
+//     trip and not authorable.
 //
 // Severity is strictly binary: SeverityHigh or absent. Mechanical checks
 // never emit medium or low; partial coverage is never "kind-of an actor".
@@ -34,6 +38,7 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph) []query.Finding
 	var findings []query.Finding
 
 	findings = append(findings, participantCoverageFindings(entry, graph)...)
+	findings = append(findings, refKindFindings(entry)...)
 
 	if entry.IsActor() {
 		findings = append(findings, actorWriteOnceFindings(entry, graph)...)
@@ -43,6 +48,42 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph) []query.Finding
 	}
 
 	return findings
+}
+
+// refKindFindings enforces d-tac-cs0 AC 8 mechanical pre-flight: every ref
+// on a new entry must carry a kind from the capturable closed set. Missing,
+// empty, the legacy `unknown` sentinel, and unknown vocabulary values all
+// produce a single high-severity finding per offending ref. The model layer
+// rejects malformed object form at unmarshal — this check covers in-memory
+// entries that bypass the YAML round-trip (CLI captures, programmatic flows).
+func refKindFindings(entry *model.Entry) []query.Finding {
+	var findings []query.Finding
+	for i, r := range entry.Refs {
+		switch {
+		case r.Kind == "":
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "ref-kind-missing",
+				Observation: fmt.Sprintf("refs[%d] (%s): missing required `kind` (one of: %s)", i, r.ID, capturableRefKindList()),
+			})
+		case !model.IsCapturableRefKind(r.Kind):
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "ref-kind-invalid",
+				Observation: fmt.Sprintf("refs[%d] (%s): kind %q is not allowed for new entries (expected one of: %s)", i, r.ID, r.Kind, capturableRefKindList()),
+			})
+		}
+	}
+	return findings
+}
+
+func capturableRefKindList() string {
+	values := model.RefKindValues()
+	parts := make([]string, 0, len(values))
+	for _, k := range values {
+		parts = append(parts, string(k))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // participantCoverageFindings enforces AC 6: every name listed in the
@@ -139,7 +180,7 @@ func roleMechanicalFindings(entry *model.Entry, graph *model.Graph) []query.Find
 
 	hasHeadRef := false
 	for _, r := range entry.Refs {
-		if r == matchedHead.ID {
+		if r.ID == matchedHead.ID {
 			hasHeadRef = true
 			break
 		}

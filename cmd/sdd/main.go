@@ -486,9 +486,9 @@ func newCmd() *cli.Command {
 		// JSON-bearing flags (--involvement, --topic) live here.
 		DisableSliceFlagSeparator: true,
 		Flags: []cli.Flag{
-			&cli.StringFlag{
+			&cli.StringSliceFlag{
 				Name:  "refs",
-				Usage: "Comma-separated list of referenced entry IDs",
+				Usage: "Reference (repeatable) — JSON object {\"id\":\"<id>\",\"kind\":\"<kind>\",\"desc\":\"<optional>\"}. Kind is one of: grounds, builds-on, addresses, surfaces, evidence, depends-on, related.",
 			},
 			&cli.StringFlag{
 				Name:  "supersedes",
@@ -669,6 +669,10 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			refs, err := parseRefFlags(cmd.StringSlice("refs"))
+			if err != nil {
+				return err
+			}
 
 			ncmd := &command.NewEntryCmd{
 				Type:             typ,
@@ -676,7 +680,7 @@ func newCmd() *cli.Command {
 				Kind:             kind,
 				Description:      description,
 				Participants:     participants,
-				Refs:             splitCSV(cmd.String("refs")),
+				Refs:             refs,
 				Supersedes:       splitCSV(cmd.String("supersedes")),
 				Closes:           splitCSV(cmd.String("closes")),
 				Confidence:       confidence,
@@ -2036,4 +2040,57 @@ func parseAnnotationTopicFlags(specs []string) ([]model.AnnotationTopic, error) 
 		out = append(out, model.AnnotationTopic{Label: spec})
 	}
 	return out, nil
+}
+
+// parseRefFlags parses each --refs JSON value into a model.Ref. The flag
+// is strictly JSON object form ({"id":"...","kind":"...","desc":"..."});
+// bare ID strings or comma-separated IDs are rejected with a clear error
+// pointing at the new shape. The kind value is required and must be one
+// of the capturable kinds (the legacy `unknown` sentinel is rejected at
+// capture).
+func parseRefFlags(specs []string) ([]model.Ref, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	out := make([]model.Ref, 0, len(specs))
+	for i, spec := range specs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		if !strings.HasPrefix(spec, "{") {
+			return nil, fmt.Errorf("--refs[%d]: expected JSON object like '{\"id\":\"<id>\",\"kind\":\"<kind>\"}'; got %q. Use one --refs flag per reference (the legacy comma-separated form was dropped because each ref now requires a `kind`)", i, spec)
+		}
+		var raw struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Desc string `json:"desc,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(spec), &raw); err != nil {
+			return nil, fmt.Errorf("--refs[%d]: invalid JSON: %w", i, err)
+		}
+		raw.ID = strings.TrimSpace(raw.ID)
+		raw.Kind = strings.TrimSpace(raw.Kind)
+		if raw.ID == "" {
+			return nil, fmt.Errorf("--refs[%d]: missing required `id`", i)
+		}
+		if raw.Kind == "" {
+			return nil, fmt.Errorf("--refs[%d]: missing required `kind` (one of: %s)", i, refKindsForUsage())
+		}
+		k := model.RefKind(raw.Kind)
+		if !model.IsCapturableRefKind(k) {
+			return nil, fmt.Errorf("--refs[%d]: invalid kind %q (expected one of: %s)", i, raw.Kind, refKindsForUsage())
+		}
+		out = append(out, model.Ref{ID: raw.ID, Kind: k, Desc: raw.Desc})
+	}
+	return out, nil
+}
+
+func refKindsForUsage() string {
+	values := model.RefKindValues()
+	parts := make([]string, len(values))
+	for i, k := range values {
+		parts[i] = string(k)
+	}
+	return strings.Join(parts, ", ")
 }

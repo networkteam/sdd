@@ -169,7 +169,7 @@ func TestView_AsParticipantsBlock(t *testing.T) {
 		Kind:  model.KindRole,
 		Layer: model.LayerProcess,
 		Actor: "Christopher",
-		Refs:  []string{actor.ID},
+		Refs:  refsOf(actor.ID),
 	}
 	g := model.NewGraph([]*model.Entry{actor, role})
 

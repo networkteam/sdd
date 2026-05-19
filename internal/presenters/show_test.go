@@ -120,6 +120,92 @@ func TestRenderShow_FallbackFirstSentence(t *testing.T) {
 	cupaloy.SnapshotT(t, renderShow(t, g, []string{b.ID}))
 }
 
+func TestRenderShow_RefKindAndDescOnMetadataAndSummary(t *testing.T) {
+	target := entry("20260410-100000-s-stg-aaa", withContent("Target observation"))
+	primary := &model.Entry{
+		ID:      "20260410-100100-d-tac-bbb",
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Content: "Primary entry referencing the target.",
+		Refs: []model.Ref{{
+			ID:   target.ID,
+			Kind: model.RefKindAddresses,
+			Desc: "resolves the target observation",
+		}},
+		Time: target.Time,
+	}
+	g := model.NewGraph([]*model.Entry{target, primary})
+	out := renderShow(t, g, []string{primary.ID})
+
+	// Metadata block: refs section with per-ref kind and desc inline.
+	wantMeta := []string{
+		"Refs:",
+		"- 20260410-100000-s-stg-aaa (addresses)",
+		"desc: resolves the target observation",
+	}
+	for _, w := range wantMeta {
+		if !contains(out, w) {
+			t.Errorf("metadata missing %q in:\n%s", w, out)
+		}
+	}
+
+	// Upstream summary: relation decorated with kind, desc rendered beneath.
+	wantSummary := []string{
+		"refs (addresses) 20260410-100000-s-stg-aaa",
+		"desc: resolves the target observation",
+	}
+	for _, w := range wantSummary {
+		if !contains(out, w) {
+			t.Errorf("summary missing %q in:\n%s", w, out)
+		}
+	}
+}
+
+func TestRenderShow_DownstreamCarriesRefKind(t *testing.T) {
+	primary := entry("20260410-100000-s-stg-tgt", withContent("Target"))
+	source := &model.Entry{
+		ID:      "20260410-100100-d-tac-src",
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Content: "Source decision",
+		Refs: []model.Ref{{
+			ID:   primary.ID,
+			Kind: model.RefKindGrounds,
+			Desc: "anchors to the standing observation",
+		}},
+		Time: primary.Time,
+	}
+	g := model.NewGraph([]*model.Entry{primary, source})
+	out := renderShow(t, g, []string{primary.ID}, withDownstream())
+
+	if !contains(out, "refd-by (grounds) 20260410-100100-d-tac-src") {
+		t.Errorf("downstream missing kind annotation in:\n%s", out)
+	}
+	if !contains(out, "desc: anchors to the standing observation") {
+		t.Errorf("downstream missing desc sub-line in:\n%s", out)
+	}
+}
+
+func TestRenderShow_LegacyRefsRenderAsSingleLine(t *testing.T) {
+	// Entries on disk with bare-string refs parse as kind: unknown. The
+	// renderer collapses to the single-line legacy shape for those rather
+	// than expanding to the multi-line metadata block.
+	target := entry("20260410-100000-s-stg-aaa", withContent("Target"))
+	primary := &model.Entry{
+		ID:      "20260410-100100-d-tac-bbb",
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Content: "Primary entry with legacy refs.",
+		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKindUnknown}},
+		Time:    target.Time,
+	}
+	g := model.NewGraph([]*model.Entry{target, primary})
+	out := renderShow(t, g, []string{primary.ID})
+	if !contains(out, "Refs:   20260410-100000-s-stg-aaa") {
+		t.Errorf("legacy refs should render as single line, got:\n%s", out)
+	}
+}
+
 func TestRenderShow_EntryNotFound(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{})
 

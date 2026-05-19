@@ -45,11 +45,14 @@ func renderShowGroup(w io.Writer, graph *model.Graph, g query.ShowGroup) {
 }
 
 // renderSummaryItem renders a single summary line at the appropriate indent.
-// Format: `<indent>- <relations> <id> <kind>? {status: S}?: "<summary>"`
-// Kind renders as a plain qualifier after the ID (identity, not attribute).
+// Format: `<indent>- <relations>(<refKind>)? <id> <kind>? {status: S}?: "<summary>"`
+// Per-ref kind decorates the relation when one of the relations is "refs"
+// or "refd-by" and the edge carries kind metadata; closes/supersedes (and
+// their inverses) never carry kind. When a desc is present it renders as
+// an indented sub-line beneath the summary.
 func renderSummaryItem(w io.Writer, graph *model.Graph, item model.ShowTreeItem, primaryID string) {
 	indent := strings.Repeat("  ", item.Depth)
-	relations := strings.Join(item.Relations, ",")
+	relations := formatRelations(item.Relations, item.RefKind)
 
 	var sb strings.Builder
 	sb.WriteString(item.Entry.ID)
@@ -80,11 +83,16 @@ func renderSummaryItem(w io.Writer, graph *model.Graph, item model.ShowTreeItem,
 		fmt.Fprintf(w, "%s- %s %s: %q\n", indent, relations, idPart, summary)
 	}
 
+	if item.RefDesc != "" {
+		descIndent := strings.Repeat("  ", item.Depth+1)
+		fmt.Fprintf(w, "%sdesc: %s\n", descIndent, item.RefDesc)
+	}
+
 	if len(item.Truncated) > 0 {
 		childIndent := strings.Repeat("  ", item.Depth+1)
 		parts := make([]string, len(item.Truncated))
 		for i, tr := range item.Truncated {
-			rels := strings.Join(tr.Relations, ",")
+			rels := formatRelations(tr.Relations, tr.RefKind)
 			k := ""
 			if tr.Kind != "" {
 				k = " " + string(tr.Kind)
@@ -93,6 +101,25 @@ func renderSummaryItem(w io.Writer, graph *model.Graph, item model.ShowTreeItem,
 		}
 		fmt.Fprintf(w, "%s[truncated: %s]\n", childIndent, strings.Join(parts, ", "))
 	}
+}
+
+// formatRelations builds the comma-joined relation label and decorates
+// the "refs" or "refd-by" entry with its per-ref kind in parens when set.
+// Other relations are left unannotated — closes/supersedes (and inverses)
+// carry uniform meaning and never accept per-edge metadata.
+func formatRelations(relations []string, refKind model.RefKind) string {
+	if refKind == "" {
+		return strings.Join(relations, ",")
+	}
+	out := make([]string, len(relations))
+	for i, r := range relations {
+		if r == "refs" || r == "refd-by" {
+			out[i] = r + " (" + string(refKind) + ")"
+		} else {
+			out[i] = r
+		}
+	}
+	return strings.Join(out, ",")
 }
 
 // kindForDisplay returns the kind to render for an entry. Decisions fall back
@@ -107,6 +134,39 @@ func kindForDisplay(e *model.Entry) model.Kind {
 		return model.KindDirective
 	}
 	return ""
+}
+
+// writeRefsBlock renders the metadata-block refs section. Single-kind no-desc
+// runs collapse to the legacy single-line "Refs: id1, id2" shape; once any ref
+// carries a kind or desc, each ref renders on its own line so readers can
+// scan kind and desc per reference.
+func writeRefsBlock(w io.Writer, refs []model.Ref) {
+	allLegacy := true
+	for _, r := range refs {
+		if r.Kind != "" && r.Kind != model.RefKindUnknown {
+			allLegacy = false
+			break
+		}
+		if r.Desc != "" {
+			allLegacy = false
+			break
+		}
+	}
+	if allLegacy {
+		fmt.Fprintf(w, "Refs:   %s\n", strings.Join(model.RefIDs(refs), ", "))
+		return
+	}
+	fmt.Fprintln(w, "Refs:")
+	for _, r := range refs {
+		kind := string(r.Kind)
+		if kind == "" {
+			kind = "(unset)"
+		}
+		fmt.Fprintf(w, "  - %s (%s)\n", r.ID, kind)
+		if r.Desc != "" {
+			fmt.Fprintf(w, "    desc: %s\n", r.Desc)
+		}
+	}
 }
 
 // firstSentence extracts the first sentence from content as a fallback summary.
@@ -144,7 +204,7 @@ func WriteEntryFull(w io.Writer, e *model.Entry, graph *model.Graph) {
 		fmt.Fprintf(w, "Who:    %s\n", strings.Join(e.Participants, ", "))
 	}
 	if len(e.Refs) > 0 {
-		fmt.Fprintf(w, "Refs:   %s\n", strings.Join(e.Refs, ", "))
+		writeRefsBlock(w, e.Refs)
 	}
 	if len(e.Closes) > 0 {
 		fmt.Fprintf(w, "Closes: %s\n", strings.Join(e.Closes, ", "))

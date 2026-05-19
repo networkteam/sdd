@@ -185,9 +185,9 @@ func (h *Handler) RewriteEntry(ctx context.Context, cmd *command.RewriteEntryCmd
 // refs, closes, and supersedes fields. Returns true if any field was mutated.
 func rewriteRefs(e *model.Entry, oldID, newID string) bool {
 	changed := false
-	for i, id := range e.Refs {
-		if id == oldID {
-			e.Refs[i] = newID
+	for i, ref := range e.Refs {
+		if ref.ID == oldID {
+			e.Refs[i].ID = newID
 			changed = true
 		}
 	}

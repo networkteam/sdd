@@ -321,7 +321,7 @@ func TestMechanical_RoleCanonicalMismatch_Blocks(t *testing.T) {
 		Kind:    model.KindRole,
 		Layer:   model.LayerProcess,
 		Actor:   "Claude", // no chain carries this canonical
-		Refs:    []string{actor.ID},
+		Refs:    refsOf(actor.ID),
 		Content: "contribution pattern",
 	}
 
@@ -347,7 +347,7 @@ func TestMechanical_RoleRefsMissingHead_Blocks(t *testing.T) {
 		Kind:    model.KindRole,
 		Layer:   model.LayerProcess,
 		Actor:   "Christopher",
-		Refs:    []string{other.ID}, // missing actor head
+		Refs:    refsOf(other.ID), // missing actor head
 		Content: "contribution pattern",
 	}
 
@@ -372,7 +372,7 @@ func TestMechanical_RoleValid_NoFindings(t *testing.T) {
 		Kind:         model.KindRole,
 		Layer:        model.LayerProcess,
 		Actor:        "Christopher",
-		Refs:         []string{actor.ID},
+		Refs:         refsOf(actor.ID),
 		Participants: []string{"Christopher"},
 		Content:      "contribution pattern",
 	}
@@ -381,6 +381,98 @@ func TestMechanical_RoleValid_NoFindings(t *testing.T) {
 	for _, f := range got {
 		if f.Severity == query.SeverityHigh {
 			t.Errorf("unexpected high finding: %+v", f)
+		}
+	}
+}
+
+func TestMechanical_RefKindMissing_Blocks(t *testing.T) {
+	target := entry("20260410-120000-s-cpt-tgt", withContent("target"))
+	graph := model.NewGraph([]*model.Entry{target})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindDirective,
+		Layer:   model.LayerTactical,
+		Content: "decision body",
+		Refs:    []model.Ref{{ID: target.ID}}, // kind omitted
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "ref-kind-missing" && f.Severity == query.SeverityHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected ref-kind-missing finding, got %+v", got)
+	}
+}
+
+func TestMechanical_RefKindUnknown_BlocksAtCapture(t *testing.T) {
+	target := entry("20260410-120000-s-cpt-tgt", withContent("target"))
+	graph := model.NewGraph([]*model.Entry{target})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindDirective,
+		Layer:   model.LayerTactical,
+		Content: "decision body",
+		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKindUnknown}},
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "ref-kind-invalid" && f.Severity == query.SeverityHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected ref-kind-invalid finding for unknown kind, got %+v", got)
+	}
+}
+
+func TestMechanical_RefKindInvalid_Blocks(t *testing.T) {
+	target := entry("20260410-120000-s-cpt-tgt", withContent("target"))
+	graph := model.NewGraph([]*model.Entry{target})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindDirective,
+		Layer:   model.LayerTactical,
+		Content: "decision body",
+		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKind("bogus")}},
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "ref-kind-invalid" && f.Severity == query.SeverityHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected ref-kind-invalid finding for bogus kind, got %+v", got)
+	}
+}
+
+func TestMechanical_RefKindValid_NoFindings(t *testing.T) {
+	target := entry("20260410-120000-s-cpt-tgt", withContent("target"))
+	graph := model.NewGraph([]*model.Entry{target})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindDirective,
+		Layer:   model.LayerTactical,
+		Content: "decision body",
+		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKindAddresses, Desc: "addresses gap"}},
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	for _, f := range got {
+		if f.Category == "ref-kind-missing" || f.Category == "ref-kind-invalid" {
+			t.Errorf("unexpected ref-kind finding on valid entry: %+v", f)
 		}
 	}
 }

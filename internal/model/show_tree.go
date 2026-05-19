@@ -8,6 +8,8 @@ type ShowTreeItem struct {
 	Entry       *Entry
 	Depth       int
 	Relations   []string       // e.g. ["refs"], ["refs", "closes"], ["refd-by"]
+	RefKind     RefKind        // kind of the refs edge linking parent to this entry (empty when no refs relation or no kind metadata)
+	RefDesc     string         // desc of the refs edge (when present)
 	ShownAbove  bool           // already rendered earlier — "(see above)" marker
 	ShownBelow  bool           // future primary — "(see below)" marker
 	SummaryOnly bool           // true for depth > 0
@@ -19,6 +21,8 @@ type TruncatedRef struct {
 	ID        string
 	Relations []string
 	Kind      Kind
+	RefKind   RefKind // kind of the refs edge into this truncated entry
+	RefDesc   string  // desc of the refs edge
 }
 
 // ShowTree holds the upstream and downstream chains for a single primary entry.
@@ -44,7 +48,7 @@ func (g *Graph) BuildShowTree(id string, maxDepth int, includeDownstream bool, r
 	upVisited[id] = true // mark primary visited to prevent cycles back to it
 	var upstream []ShowTreeItem
 	for _, child := range upstreamChildren(e) {
-		upstream = append(upstream, g.buildUpstream(child.id, 1, child.relations, maxDepth, upVisited, rendered, primaries)...)
+		upstream = append(upstream, g.buildUpstream(child.id, 1, child.relations, child.refKind, child.refDesc, maxDepth, upVisited, rendered, primaries)...)
 	}
 
 	// Downstream: only when requested.
@@ -53,7 +57,7 @@ func (g *Graph) BuildShowTree(id string, maxDepth int, includeDownstream bool, r
 		downVisited := make(map[string]bool)
 		downVisited[id] = true
 		for _, child := range g.downstreamChildren(id) {
-			downstream = append(downstream, g.buildDownstream(child.id, 1, child.relations, maxDepth, downVisited, rendered, primaries)...)
+			downstream = append(downstream, g.buildDownstream(child.id, 1, child.relations, child.refKind, child.refDesc, maxDepth, downVisited, rendered, primaries)...)
 		}
 	}
 
@@ -78,35 +82,46 @@ func markRendered(items []ShowTreeItem, rendered map[string]bool) {
 }
 
 // childEdge represents an edge to a child entry with merged relations.
+// refKind / refDesc carry the per-ref metadata when one of the relations
+// is "refs" or "refd-by"; for closes/supersedes (and their inverses) the
+// fields stay empty because those relations are uniform by design.
 type childEdge struct {
 	id        string
 	relations []string
+	refKind   RefKind
+	refDesc   string
 	order     int // insertion order for stable sort
 }
 
 // upstreamChildren merges refs, closes, supersedes edges for an entry
-// into deduplicated children with combined relation labels.
+// into deduplicated children with combined relation labels. The Ref
+// metadata on the source entry flows through to the edge so renderers
+// can show why each reference exists.
 func upstreamChildren(e *Entry) []childEdge {
 	m := make(map[string]*childEdge)
 	var order int
 
-	add := func(id, relation string) {
+	add := func(id, relation string, kind RefKind, desc string) {
 		if ce, ok := m[id]; ok {
 			ce.relations = append(ce.relations, relation)
-		} else {
-			m[id] = &childEdge{id: id, relations: []string{relation}, order: order}
-			order++
+			if kind != "" && ce.refKind == "" {
+				ce.refKind = kind
+				ce.refDesc = desc
+			}
+			return
 		}
+		m[id] = &childEdge{id: id, relations: []string{relation}, order: order, refKind: kind, refDesc: desc}
+		order++
 	}
 
 	for _, ref := range e.Refs {
-		add(ref, "refs")
+		add(ref.ID, "refs", ref.Kind, ref.Desc)
 	}
 	for _, c := range e.Closes {
-		add(c, "closes")
+		add(c, "closes", "", "")
 	}
 	for _, s := range e.Supersedes {
-		add(s, "supersedes")
+		add(s, "supersedes", "", "")
 	}
 
 	result := make([]childEdge, 0, len(m))
@@ -120,26 +135,34 @@ func upstreamChildren(e *Entry) []childEdge {
 }
 
 // downstreamChildren merges refd-by, closed-by, superseded-by edges for an
-// entry into deduplicated children with combined relation labels, sorted by time.
+// entry into deduplicated children with combined relation labels, sorted
+// by time. For refd-by edges, the kind/desc from the source entry's Ref
+// pointing at id flows through so renderers can show why each downstream
+// entry references this target.
 func (g *Graph) downstreamChildren(id string) []childEdge {
 	m := make(map[string]*childEdge)
 
-	add := func(eid, relation string) {
+	add := func(eid, relation string, kind RefKind, desc string) {
 		if ce, ok := m[eid]; ok {
 			ce.relations = append(ce.relations, relation)
-		} else {
-			m[eid] = &childEdge{id: eid, relations: []string{relation}}
+			if kind != "" && ce.refKind == "" {
+				ce.refKind = kind
+				ce.refDesc = desc
+			}
+			return
 		}
+		m[eid] = &childEdge{id: eid, relations: []string{relation}, refKind: kind, refDesc: desc}
 	}
 
 	for _, eid := range g.RefsTo[id] {
-		add(eid, "refd-by")
+		kind, desc := refMetaFrom(g.ByID[eid], id)
+		add(eid, "refd-by", kind, desc)
 	}
 	for _, eid := range g.ClosedBy[id] {
-		add(eid, "closed-by")
+		add(eid, "closed-by", "", "")
 	}
 	for _, eid := range g.SupersededBy[id] {
-		add(eid, "superseded-by")
+		add(eid, "superseded-by", "", "")
 	}
 
 	result := make([]childEdge, 0, len(m))
@@ -157,9 +180,25 @@ func (g *Graph) downstreamChildren(id string) []childEdge {
 	return result
 }
 
+// refMetaFrom returns the kind and desc from source's Ref pointing at
+// target.id, or empty values when source is nil or carries no such ref.
+// Used to enrich downstream edges with the metadata that lives on the
+// referring entry rather than the target.
+func refMetaFrom(source *Entry, targetID string) (RefKind, string) {
+	if source == nil {
+		return "", ""
+	}
+	for _, r := range source.Refs {
+		if r.ID == targetID {
+			return r.Kind, r.Desc
+		}
+	}
+	return "", ""
+}
+
 // buildUpstream walks the upstream reference chain in DFS pre-order with
 // depth limit and summary-only rendering at depth > 0.
-func (g *Graph) buildUpstream(id string, depth int, relations []string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
+func (g *Graph) buildUpstream(id string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
 	e, ok := g.ByID[id]
 	if !ok {
 		return nil
@@ -169,6 +208,8 @@ func (g *Graph) buildUpstream(id string, depth int, relations []string, maxDepth
 		Entry:       e,
 		Depth:       depth,
 		Relations:   relations,
+		RefKind:     refKind,
+		RefDesc:     refDesc,
 		SummaryOnly: depth > 0,
 	}
 
@@ -194,13 +235,13 @@ func (g *Graph) buildUpstream(id string, depth int, relations []string, maxDepth
 
 	result := []ShowTreeItem{item}
 	for _, child := range children {
-		result = append(result, g.buildUpstream(child.id, depth+1, child.relations, maxDepth, visited, rendered, primaries)...)
+		result = append(result, g.buildUpstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, visited, rendered, primaries)...)
 	}
 	return result
 }
 
 // buildDownstream walks the downstream graph in DFS pre-order with depth limit.
-func (g *Graph) buildDownstream(id string, depth int, relations []string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
+func (g *Graph) buildDownstream(id string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
 	e, ok := g.ByID[id]
 	if !ok {
 		return nil
@@ -210,6 +251,8 @@ func (g *Graph) buildDownstream(id string, depth int, relations []string, maxDep
 		Entry:       e,
 		Depth:       depth,
 		Relations:   relations,
+		RefKind:     refKind,
+		RefDesc:     refDesc,
 		SummaryOnly: true,
 	}
 
@@ -235,7 +278,7 @@ func (g *Graph) buildDownstream(id string, depth int, relations []string, maxDep
 
 	result := []ShowTreeItem{item}
 	for _, child := range children {
-		result = append(result, g.buildDownstream(child.id, depth+1, child.relations, maxDepth, visited, rendered, primaries)...)
+		result = append(result, g.buildDownstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, visited, rendered, primaries)...)
 	}
 	return result
 }
@@ -245,7 +288,7 @@ func (g *Graph) unvisitedRefs(children []childEdge, visited, rendered map[string
 	var refs []TruncatedRef
 	for _, c := range children {
 		if !visited[c.id] && !rendered[c.id] {
-			ref := TruncatedRef{ID: c.id, Relations: c.relations}
+			ref := TruncatedRef{ID: c.id, Relations: c.relations, RefKind: c.refKind, RefDesc: c.refDesc}
 			if e, ok := g.ByID[c.id]; ok {
 				ref.Kind = e.Kind
 			}

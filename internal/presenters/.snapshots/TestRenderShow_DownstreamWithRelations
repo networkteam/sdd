@@ -12,7 +12,7 @@ Derived:
 Target signal
 
 ## downstream:
-  - refd-by 20260410-100100-d-cpt-bbb directive {status: active}: "Decision referencing target"
+  - refd-by (related) 20260410-100100-d-cpt-bbb directive {status: active}: "Decision referencing target"
   - closed-by 20260410-100200-a-tac-ccc: "Action closing target"
 
 

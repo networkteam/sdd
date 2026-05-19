@@ -36,7 +36,20 @@ func entry(id string, opts ...entryOpt) *Entry {
 type entryOpt func(*Entry)
 
 func withRefs(refs ...string) entryOpt {
-	return func(e *Entry) { e.Refs = refs }
+	return func(e *Entry) { e.Refs = refsOf(refs...) }
+}
+
+// refsOf builds a []Ref from bare IDs, tagging each with RefKindRelated so
+// tests construct entries that match the new-capture contract (kind required
+// from the closed set; legacy unknown is rejected by mechanical pre-flight).
+// Tests that specifically exercise legacy bare-string parsing use YAML
+// fixtures; tests that care about a specific kind construct Ref literals.
+func refsOf(ids ...string) []Ref {
+	out := make([]Ref, len(ids))
+	for i, id := range ids {
+		out[i] = Ref{ID: id, Kind: RefKindRelated}
+	}
+	return out
 }
 
 func withSupersedes(ids ...string) entryOpt {
@@ -94,7 +107,7 @@ Explore a novel process framework.`
 	if e.Layer != LayerStrategic {
 		t.Errorf("Layer = %q, want %q", e.Layer, LayerStrategic)
 	}
-	if len(e.Refs) != 1 || e.Refs[0] != "20260406-115516-s-stg-beh" {
+	if len(e.Refs) != 1 || e.Refs[0].ID != "20260406-115516-s-stg-beh" {
 		t.Errorf("Refs = %v, want [20260406-115516-s-stg-beh]", e.Refs)
 	}
 	if e.Confidence != "medium" {
@@ -940,7 +953,7 @@ func TestLintDanglingCloses(t *testing.T) {
 func TestLintMalformedID(t *testing.T) {
 	// Simulate an entry with a short/malformed ID in refs (like the s-stg-qg0 bug)
 	e := entry("20260406-100000-d-stg-aaa")
-	e.Refs = []string{"d-stg-0gh"} // short suffix, not a full ID
+	e.Refs = refsOf("d-stg-0gh") // short suffix, not a full ID
 	g := NewGraph([]*Entry{e})
 
 	lint := g.Lint()
@@ -1121,7 +1134,7 @@ func TestLintCleanGraph(t *testing.T) {
 
 func TestLintMultipleWarningsOnOneEntry(t *testing.T) {
 	e := entry("20260406-100000-d-stg-aaa")
-	e.Refs = []string{"bad-id"}
+	e.Refs = refsOf("bad-id")
 	e.Closes = []string{"also-bad"}
 	g := NewGraph([]*Entry{e})
 

@@ -175,7 +175,7 @@ The depth-0 `Summary:` section renders the same text shown in `sdd list` and `sd
 
 ## `sdd new` flags
 
-- `--refs id1,id2` — referenced entry IDs (context/foundation)
+- `--refs '{json}'` — referenced entry with semantic kind (repeatable). JSON object `{"id":"<id>","kind":"<kind>","desc":"<optional>"}`. Kind comes from the closed set below; the legacy CSV form `--refs id1,id2` was dropped because each ref now carries its own kind. `desc` is optional, used to explain *why* this ref exists in this entry's narrative.
 - `--supersedes id` — entry ID this replaces
 - `--closes id1,id2` — entry IDs this resolves/fulfills
 - `--participants p1,p2` — participant names
@@ -202,7 +202,9 @@ See the Entry IDs section above for how ID arguments are resolved across all com
 
 ```bash
 sdd new s cpt --kind annotation --confidence medium \
-  --refs 20260505-215340-s-cpt-rwd,20260505-215333-s-cpt-jq7,20260504-100323-s-cpt-8tu \
+  --refs '{"id":"20260505-215340-s-cpt-rwd","kind":"related"}' \
+  --refs '{"id":"20260505-215333-s-cpt-jq7","kind":"related"}' \
+  --refs '{"id":"20260504-100323-s-cpt-8tu","kind":"related"}' \
   --topics catch-up-scaling \
   "These three entries cluster around the catch-up-scaling concern that drove Plan 1 / Plan 2."
 ```
@@ -211,7 +213,8 @@ sdd new s cpt --kind annotation --confidence medium \
 
 ```bash
 sdd new s cpt --kind annotation --confidence medium \
-  --refs 20260423-203503-d-cpt-ygn,20260506-151849-d-tac-gvn \
+  --refs '{"id":"20260423-203503-d-cpt-ygn","kind":"related"}' \
+  --refs '{"id":"20260506-151849-d-tac-gvn","kind":"related"}' \
   --topic catch-up-scaling \
   --topic '{"label":"type-system/kinds","members":["20260423-203503-d-cpt-ygn"]}' \
   "Both refs are catch-up related; only ygn is also a type-system/kinds entry."
@@ -278,9 +281,41 @@ EOF
 )
 
 echo "$PLAN" | sdd new d tac --kind plan --confidence high \
-  --refs <id> --participants "Name,Claude" \
+  --refs '{"id":"<id>","kind":"addresses"}' \
+  --participants "Name,Claude" \
   --attach -:plan.md \
   "$DESC"
 ```
 
 Use quoted `'EOF'` so markdown content with `$`, backticks, or backslashes is preserved verbatim. For scratch files you do want on disk, `.sdd/tmp/` is gitignored.
+
+## Ref kinds
+
+Every reference (the `refs:` field) carries a semantic kind from a closed vocabulary, capturing *why* this entry points at the referenced one. Pre-flight rejects any new entry whose refs lack a kind from the set below.
+
+| Kind | When to use |
+|---|---|
+| `grounds` | Anchors to standing structure — a contract, aspiration, or active standing directive that the entry leans on |
+| `builds-on` | Extends prior lineage — a previous decision or plan that this entry continues |
+| `addresses` | Responds to a gap, question, or insight signal — the entry's purpose is to act on it |
+| `surfaces` | Created or discovered the referenced gap during this work — used when capture surfaces both the signal and the decision in one pass |
+| `evidence` | Empirical observation supporting the claim — a fact or done signal whose data the entry cites |
+| `depends-on` | Functional prerequisite — the referenced entry must land before this one is meaningful |
+| `related` | Parallel sibling, no other axis fits — neighborly context that doesn't ground, build on, address, or depend |
+
+`closes` and `supersedes` stay bare-string ID lists — those relationships carry uniform mechanical meaning and don't need per-edge metadata.
+
+**Legacy entries** with bare-string refs continue to parse for traversal (mapped to `kind: unknown` internally), but `sdd new` always writes object form with explicit kind. Once a binary on this codebase writes a new entry, *older binaries cannot read it* — keep binary and skill upgrades in sync across the team.
+
+**On-disk shape**:
+
+```yaml
+refs:
+  - id: 20260101-000000-s-cpt-aaa
+    kind: addresses
+    desc: resolves the gap surfaced in the bootstrap session
+  - id: 20260102-000000-d-cpt-bbb
+    kind: grounds
+```
+
+The optional `desc` is rendered on `sdd show` as a sub-line beneath the ref, giving readers per-ref rationale without parsing the body.

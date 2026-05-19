@@ -45,7 +45,7 @@ func TestHeatScore_OneFreshRef(t *testing.T) {
 	// regardless of decay function — every decay returns 1 at age 0.
 	target := minimalEntry("20260501-100000-d-tac-trg", daysAgo(30))
 	ref := minimalEntry("20260501-120000-d-tac-ref", fixedNow)
-	ref.Refs = []string{target.ID}
+	ref.Refs = refsOf(target.ID)
 
 	g := NewGraph([]*Entry{target, ref})
 
@@ -65,7 +65,7 @@ func TestHeatScore_OldRefDecays(t *testing.T) {
 	// none is 1.
 	target := minimalEntry("20260101-100000-d-tac-trg", daysAgo(60))
 	ref := minimalEntry("20260101-120000-d-tac-ref", daysAgo(14))
-	ref.Refs = []string{target.ID}
+	ref.Refs = refsOf(target.ID)
 
 	g := NewGraph([]*Entry{target, ref})
 
@@ -92,9 +92,9 @@ func TestHeatScore_MultipleRefsSum(t *testing.T) {
 	// Heat is a sum over incoming refs. Two fresh refs → 2.0 (with any decay).
 	target := minimalEntry("20260101-100000-d-tac-trg", daysAgo(30))
 	ref1 := minimalEntry("20260101-120000-d-tac-rf1", fixedNow)
-	ref1.Refs = []string{target.ID}
+	ref1.Refs = refsOf(target.ID)
 	ref2 := minimalEntry("20260101-130000-d-tac-rf2", fixedNow)
-	ref2.Refs = []string{target.ID}
+	ref2.Refs = refsOf(target.ID)
 
 	g := NewGraph([]*Entry{target, ref1, ref2})
 
@@ -108,9 +108,9 @@ func TestHeatScore_MultipleRefsSum(t *testing.T) {
 func TestInDegreeScore(t *testing.T) {
 	target := minimalEntry("20260101-100000-d-tac-trg", daysAgo(30))
 	ref1 := minimalEntry("20260101-120000-d-tac-rf1", fixedNow)
-	ref1.Refs = []string{target.ID}
+	ref1.Refs = refsOf(target.ID)
 	ref2 := minimalEntry("20260101-130000-d-tac-rf2", fixedNow)
-	ref2.Refs = []string{target.ID}
+	ref2.Refs = refsOf(target.ID)
 	unrelated := minimalEntry("20260101-140000-d-tac-unr", fixedNow)
 
 	g := NewGraph([]*Entry{target, ref1, ref2, unrelated})
@@ -127,9 +127,9 @@ func TestMultScore(t *testing.T) {
 	// Two fresh refs: heat(exp-14d)=2, in-degree=2, mult=4.
 	target := minimalEntry("20260101-100000-d-tac-trg", daysAgo(30))
 	ref1 := minimalEntry("20260101-120000-d-tac-rf1", fixedNow)
-	ref1.Refs = []string{target.ID}
+	ref1.Refs = refsOf(target.ID)
 	ref2 := minimalEntry("20260101-130000-d-tac-rf2", fixedNow)
-	ref2.Refs = []string{target.ID}
+	ref2.Refs = refsOf(target.ID)
 
 	g := NewGraph([]*Entry{target, ref1, ref2})
 
@@ -144,9 +144,9 @@ func TestAddScore(t *testing.T) {
 	// Two fresh refs: heat=2, in-degree=2, add=4.
 	target := minimalEntry("20260101-100000-d-tac-trg", daysAgo(30))
 	ref1 := minimalEntry("20260101-120000-d-tac-rf1", fixedNow)
-	ref1.Refs = []string{target.ID}
+	ref1.Refs = refsOf(target.ID)
 	ref2 := minimalEntry("20260101-130000-d-tac-rf2", fixedNow)
-	ref2.Refs = []string{target.ID}
+	ref2.Refs = refsOf(target.ID)
 
 	g := NewGraph([]*Entry{target, ref1, ref2})
 
@@ -161,7 +161,7 @@ func TestLogScore(t *testing.T) {
 	// One fresh ref: heat=1, in-degree=1, log=heat × log(1 + indeg) = 1 × log(2).
 	target := minimalEntry("20260101-100000-d-tac-trg", daysAgo(30))
 	ref := minimalEntry("20260101-120000-d-tac-ref", fixedNow)
-	ref.Refs = []string{target.ID}
+	ref.Refs = refsOf(target.ID)
 
 	g := NewGraph([]*Entry{target, ref})
 

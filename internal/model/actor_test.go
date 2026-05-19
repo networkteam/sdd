@@ -34,7 +34,7 @@ func roleHelper(id, actorCanonical, headID string) *Entry {
 		Kind:    KindRole,
 		Layer:   LayerProcess,
 		Actor:   actorCanonical,
-		Refs:    []string{headID},
+		Refs:    refsOf(headID),
 		Content: "role for " + actorCanonical,
 	}
 	parts, err := ParseID(id)

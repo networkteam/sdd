@@ -151,7 +151,7 @@ type Entry struct {
 	Type         EntryType
 	Layer        Layer
 	Kind         Kind // only meaningful for decisions; empty = directive (default)
-	Refs         []string
+	Refs         []Ref
 	Supersedes   []string
 	Closes       []string
 	Participants []string
@@ -236,9 +236,9 @@ type frontmatter struct {
 	Type         string            `yaml:"type"`
 	Layer        string            `yaml:"layer"`
 	Kind         string            `yaml:"kind,omitempty"`
-	Refs         []string          `yaml:"refs,omitempty"`
-	Supersedes   []string          `yaml:"supersedes,omitempty"`
-	Closes       []string          `yaml:"closes,omitempty"`
+	Refs         []Ref             `yaml:"refs,omitempty"`
+	Supersedes   idOnlyList        `yaml:"supersedes,omitempty"`
+	Closes       idOnlyList        `yaml:"closes,omitempty"`
 	Participants []string          `yaml:"participants,omitempty"`
 	Confidence   string            `yaml:"confidence,omitempty"`
 	Canonical    string            `yaml:"canonical,omitempty"`
@@ -294,8 +294,8 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Layer:        layer,
 		Kind:         Kind(fm.Kind),
 		Refs:         fm.Refs,
-		Supersedes:   fm.Supersedes,
-		Closes:       fm.Closes,
+		Supersedes:   []string(fm.Supersedes),
+		Closes:       []string(fm.Closes),
 		Participants: fm.Participants,
 		Confidence:   fm.Confidence,
 		Canonical:    fm.Canonical,
@@ -492,8 +492,8 @@ func FormatFrontmatter(e *Entry) string {
 		Layer:        string(e.Layer),
 		Kind:         string(e.Kind),
 		Refs:         e.Refs,
-		Supersedes:   e.Supersedes,
-		Closes:       e.Closes,
+		Supersedes:   idOnlyList(e.Supersedes),
+		Closes:       idOnlyList(e.Closes),
 		Participants: e.Participants,
 		Confidence:   e.Confidence,
 		Canonical:    e.Canonical,

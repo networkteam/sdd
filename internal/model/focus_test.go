@@ -268,7 +268,7 @@ func TestValidate_Annotation(t *testing.T) {
 			ID:               "20260506-000000-s-cpt-ann",
 			Type:             TypeSignal,
 			Kind:             KindAnnotation,
-			Refs:             []string{target1.ID, target2.ID},
+			Refs:             refsOf(target1.ID, target2.ID),
 			AnnotationTopics: []AnnotationTopic{{Label: "catch-up-scaling"}},
 		}
 		ValidateEntry(e, g)
@@ -282,7 +282,7 @@ func TestValidate_Annotation(t *testing.T) {
 			ID:   "20260506-000000-s-cpt-ann",
 			Type: TypeSignal,
 			Kind: KindAnnotation,
-			Refs: []string{target1.ID, target2.ID},
+			Refs: refsOf(target1.ID, target2.ID),
 			AnnotationTopics: []AnnotationTopic{
 				{Label: "x", Members: []string{target1.ID}},
 			},
@@ -311,7 +311,7 @@ func TestValidate_Annotation(t *testing.T) {
 			ID:   "20260506-000000-s-cpt-ann",
 			Type: TypeSignal,
 			Kind: KindAnnotation,
-			Refs: []string{target1.ID},
+			Refs: refsOf(target1.ID),
 		}
 		ValidateEntry(e, g)
 		if !hasWarningField(e, "topics") {
@@ -324,7 +324,7 @@ func TestValidate_Annotation(t *testing.T) {
 			ID:   "20260506-000000-s-cpt-ann",
 			Type: TypeSignal,
 			Kind: KindAnnotation,
-			Refs: []string{target1.ID},
+			Refs: refsOf(target1.ID),
 			AnnotationTopics: []AnnotationTopic{
 				{Label: "x", Members: []string{target2.ID}}, // not in refs
 			},
@@ -347,7 +347,7 @@ func TestValidate_Annotation(t *testing.T) {
 			ID:   "20260506-000000-s-cpt-ann",
 			Type: TypeSignal,
 			Kind: KindAnnotation,
-			Refs: []string{target1.ID},
+			Refs: refsOf(target1.ID),
 			AnnotationTopics: []AnnotationTopic{
 				{Label: "has spaces"},
 			},

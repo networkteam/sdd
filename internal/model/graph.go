@@ -34,7 +34,7 @@ func NewGraph(entries []*Entry) *Graph {
 	// Build reverse indexes
 	for _, e := range entries {
 		for _, ref := range e.Refs {
-			g.RefsTo[ref] = append(g.RefsTo[ref], e.ID)
+			g.RefsTo[ref.ID] = append(g.RefsTo[ref.ID], e.ID)
 		}
 		for _, c := range e.Closes {
 			g.ClosedBy[c] = append(g.ClosedBy[c], e.ID)
@@ -256,7 +256,7 @@ func (g *Graph) RefChain(id string) []*Entry {
 			return
 		}
 		for _, ref := range e.Refs {
-			walk(ref)
+			walk(ref.ID)
 		}
 		chain = append(chain, e)
 	}
@@ -403,7 +403,7 @@ func (g *Graph) TopologicalOrder() []*Entry {
 		}
 		maxDep := 0
 		for _, ref := range e.Refs {
-			if d := computeDepth(ref) + 1; d > maxDep {
+			if d := computeDepth(ref.ID) + 1; d > maxDep {
 				maxDep = d
 			}
 		}
@@ -502,6 +502,24 @@ func (g *Graph) ResolveIDs(inputs []string) ([]string, error) {
 			return nil, err
 		}
 		out[i] = resolved
+	}
+	return out, nil
+}
+
+// ResolveRefIDs resolves the ID component of each Ref against the graph,
+// preserving Kind and Desc. Used by the new-entry handler so refs flow
+// through the same short-form-to-full-form resolution as bare-ID fields.
+func (g *Graph) ResolveRefIDs(refs []Ref) ([]Ref, error) {
+	if len(refs) == 0 {
+		return refs, nil
+	}
+	out := make([]Ref, len(refs))
+	for i, r := range refs {
+		resolved, err := g.ResolveID(r.ID)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = Ref{ID: resolved, Kind: r.Kind, Desc: r.Desc}
 	}
 	return out, nil
 }
@@ -693,7 +711,7 @@ func validateAliasAmbiguity(g *Graph) {
 // ValidateEntry checks a single entry for integrity issues and populates its Warnings field.
 // Used both at lint time (all entries) and at write time (new entry before commit).
 func ValidateEntry(e *Entry, g *Graph) {
-	validateIDRefs(e, g, "refs", e.Refs)
+	validateIDRefs(e, g, "refs", RefIDs(e.Refs))
 	validateIDRefs(e, g, "closes", e.Closes)
 	validateIDRefs(e, g, "supersedes", e.Supersedes)
 	validateCloses(e, g)
@@ -906,7 +924,7 @@ func validateAnnotationFrontmatter(e *Entry) {
 	}
 	refSet := make(map[string]bool, len(e.Refs))
 	for _, r := range e.Refs {
-		refSet[r] = true
+		refSet[r.ID] = true
 	}
 	for i, t := range e.AnnotationTopics {
 		if t.Label == "" {

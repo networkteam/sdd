@@ -4,15 +4,18 @@ ID:     20260410-100100-s-tac-bbb
 Type:   signal
 Layer:  tactical
 Kind:   done
-Refs:   20260410-100000-s-tac-aaa, 20260410-100050-d-tac-ddd, 20260410-100055-d-tac-eee
+Refs:
+  - 20260410-100000-s-tac-aaa (related)
+  - 20260410-100050-d-tac-ddd (related)
+  - 20260410-100055-d-tac-eee (related)
 Closes: 20260410-100000-s-tac-aaa
 Time:   2026-04-10 10:01:00
 
 Done signal with combined relations
 
 ## upstream:
-  - refs,closes 20260410-100000-s-tac-aaa gap {status: closed-by 20260410-100100-s-tac-bbb}: "The signal"
-  - refs 20260410-100050-d-tac-ddd contract {status: active}: "A contract"
-  - refs 20260410-100055-d-tac-eee plan {status: active}: "A plan"
+  - refs (related),closes 20260410-100000-s-tac-aaa gap {status: closed-by 20260410-100100-s-tac-bbb}: "The signal"
+  - refs (related) 20260410-100050-d-tac-ddd contract {status: active}: "A contract"
+  - refs (related) 20260410-100055-d-tac-eee plan {status: active}: "A plan"
 
 

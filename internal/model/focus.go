@@ -171,7 +171,7 @@ func (g *Graph) EffectiveTopics(e *Entry) []TopicPath {
 func annotationMembers(ann *Entry, t AnnotationTopic, entryID string) bool {
 	pool := t.Members
 	if len(pool) == 0 {
-		pool = ann.Refs
+		pool = RefIDs(ann.Refs)
 	}
 	for _, m := range pool {
 		if m == entryID {

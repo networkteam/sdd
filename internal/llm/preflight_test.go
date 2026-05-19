@@ -71,7 +71,7 @@ func Test_selectCheckType(t *testing.T) {
 		},
 		{
 			name:     "aspiration decision with refs routes to aspiration-capture",
-			entry:    &model.Entry{Type: model.TypeDecision, Kind: model.KindAspiration, Refs: []string{signal.ID}},
+			entry:    &model.Entry{Type: model.TypeDecision, Kind: model.KindAspiration, Refs: refsOf(signal.ID)},
 			expected: checkAspirationCapture,
 		},
 		{
@@ -81,7 +81,7 @@ func Test_selectCheckType(t *testing.T) {
 		},
 		{
 			name:     "decision with refs only",
-			entry:    &model.Entry{Type: model.TypeDecision, Refs: []string{signal.ID}},
+			entry:    &model.Entry{Type: model.TypeDecision, Refs: refsOf(signal.ID)},
 			expected: checkDecisionRefs,
 		},
 		{
@@ -96,7 +96,7 @@ func Test_selectCheckType(t *testing.T) {
 		},
 		{
 			name:     "signal with refs",
-			entry:    &model.Entry{Type: model.TypeSignal, Refs: []string{decision.ID}},
+			entry:    &model.Entry{Type: model.TypeSignal, Refs: refsOf(decision.ID)},
 			expected: checkSignalCapture,
 		},
 		{
@@ -150,7 +150,7 @@ func Test_FormatEntryForPrompt(t *testing.T) {
 		Type:       model.TypeDecision,
 		Layer:      model.LayerTactical,
 		Kind:       model.KindPlan,
-		Refs:       []string{"20260410-110000-s-cpt-aaa"},
+		Refs:       refsOf("20260410-110000-s-cpt-aaa"),
 		Closes:     []string{"20260410-100000-s-stg-bbb"},
 		Confidence: "high",
 		Content:    "Build the validator.",
@@ -258,7 +258,7 @@ func Test_assembleContext_WithRefs(t *testing.T) {
 	proposed := &model.Entry{
 		Type:    model.TypeDecision,
 		Layer:   model.LayerTactical,
-		Refs:    []string{sig.ID},
+		Refs:    refsOf(sig.ID),
 		Content: "new decision",
 	}
 
@@ -332,7 +332,7 @@ func Test_assembleContext_OpenSignalsForDecisionRefs(t *testing.T) {
 	proposed := &model.Entry{
 		Type:    model.TypeDecision,
 		Layer:   model.LayerConceptual,
-		Refs:    []string{sig1.ID},
+		Refs:    refsOf(sig1.ID),
 		Content: "new decision",
 	}
 

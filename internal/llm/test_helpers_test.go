@@ -29,7 +29,18 @@ func entry(id string, opts ...entryOpt) *model.Entry {
 type entryOpt func(*model.Entry)
 
 func withRefs(refs ...string) entryOpt {
-	return func(e *model.Entry) { e.Refs = refs }
+	return func(e *model.Entry) { e.Refs = refsOf(refs...) }
+}
+
+// refsOf builds a []model.Ref from bare IDs, tagging each with
+// RefKindRelated so tests construct entries that satisfy the new-capture
+// contract. Tests asserting on specific kinds use Ref literals.
+func refsOf(ids ...string) []model.Ref {
+	out := make([]model.Ref, len(ids))
+	for i, id := range ids {
+		out[i] = model.Ref{ID: id, Kind: model.RefKindRelated}
+	}
+	return out
 }
 
 func withSupersedes(ids ...string) entryOpt {

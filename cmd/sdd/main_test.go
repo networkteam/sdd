@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // TestSplitCSV_TrimsWhitespaceAndDropsEmpty is the regression test for the
@@ -201,5 +203,110 @@ func TestParseAttachFlags_MultipleAttachments(t *testing.T) {
 	}
 	if string(atts[2].data) != "from stdin" {
 		t.Errorf("atts[2].data = %q, want %q", string(atts[2].data), "from stdin")
+	}
+}
+
+func TestParseRefFlags_ObjectForm(t *testing.T) {
+	specs := []string{
+		`{"id":"20260101-000000-s-cpt-aaa","kind":"grounds"}`,
+		`{"id":"20260102-000000-s-cpt-bbb","kind":"addresses","desc":"resolves the gap"}`,
+	}
+	got, err := parseRefFlags(specs)
+	if err != nil {
+		t.Fatalf("parseRefFlags: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	want0 := model.Ref{ID: "20260101-000000-s-cpt-aaa", Kind: model.RefKindGrounds}
+	if got[0] != want0 {
+		t.Errorf("got[0] = %+v, want %+v", got[0], want0)
+	}
+	want1 := model.Ref{ID: "20260102-000000-s-cpt-bbb", Kind: model.RefKindAddresses, Desc: "resolves the gap"}
+	if got[1] != want1 {
+		t.Errorf("got[1] = %+v, want %+v", got[1], want1)
+	}
+}
+
+func TestParseRefFlags_BareString_RejectedWithGuidance(t *testing.T) {
+	// AC 7: bare-string --refs id1,id2 is rejected with a clear error
+	// directing the user to the new JSON form.
+	cases := []string{
+		"20260101-000000-s-cpt-aaa",
+		"20260101-000000-s-cpt-aaa,20260102-000000-s-cpt-bbb",
+		"s-cpt-aaa",
+	}
+	for _, spec := range cases {
+		_, err := parseRefFlags([]string{spec})
+		if err == nil {
+			t.Errorf("parseRefFlags(%q): want error", spec)
+			continue
+		}
+		if !strings.Contains(err.Error(), "JSON object") {
+			t.Errorf("parseRefFlags(%q): error %q should mention JSON object form", spec, err.Error())
+		}
+	}
+}
+
+func TestParseRefFlags_MissingKind(t *testing.T) {
+	_, err := parseRefFlags([]string{`{"id":"20260101-000000-s-cpt-aaa"}`})
+	if err == nil {
+		t.Fatal("want error for missing kind")
+	}
+	if !strings.Contains(err.Error(), "kind") {
+		t.Errorf("error %q should mention kind", err.Error())
+	}
+}
+
+func TestParseRefFlags_MissingID(t *testing.T) {
+	_, err := parseRefFlags([]string{`{"kind":"grounds"}`})
+	if err == nil {
+		t.Fatal("want error for missing id")
+	}
+	if !strings.Contains(err.Error(), "id") {
+		t.Errorf("error %q should mention id", err.Error())
+	}
+}
+
+func TestParseRefFlags_InvalidKind(t *testing.T) {
+	_, err := parseRefFlags([]string{`{"id":"20260101-000000-s-cpt-aaa","kind":"bogus"}`})
+	if err == nil {
+		t.Fatal("want error for invalid kind")
+	}
+	if !strings.Contains(err.Error(), "invalid kind") {
+		t.Errorf("error %q should mention invalid kind", err.Error())
+	}
+}
+
+func TestParseRefFlags_UnknownKindRejectedAtCapture(t *testing.T) {
+	// The `unknown` sentinel exists for legacy bare-string round-trip on disk
+	// but is rejected at capture — new entries must use one of the seven
+	// semantic kinds.
+	_, err := parseRefFlags([]string{`{"id":"20260101-000000-s-cpt-aaa","kind":"unknown"}`})
+	if err == nil {
+		t.Fatal("want error for kind: unknown at capture")
+	}
+	if !strings.Contains(err.Error(), "invalid kind") {
+		t.Errorf("error %q should reject unknown at capture", err.Error())
+	}
+}
+
+func TestParseRefFlags_EmptyInput(t *testing.T) {
+	got, err := parseRefFlags(nil)
+	if err != nil {
+		t.Fatalf("parseRefFlags(nil): %v", err)
+	}
+	if got != nil {
+		t.Errorf("got = %v, want nil", got)
+	}
+}
+
+func TestParseRefFlags_MalformedJSON(t *testing.T) {
+	_, err := parseRefFlags([]string{`{"id":"a","kind":"grounds",`})
+	if err == nil {
+		t.Fatal("want error for malformed JSON")
+	}
+	if !strings.Contains(err.Error(), "invalid JSON") {
+		t.Errorf("error %q should mention invalid JSON", err.Error())
 	}
 }

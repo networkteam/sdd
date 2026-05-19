@@ -32,7 +32,7 @@ type NewEntryCmd struct {
 	Layer        model.Layer
 	Kind         model.Kind // empty is replaced by the type's default in BuildEntry
 	Description  string
-	Refs         []string
+	Refs         []model.Ref
 	Supersedes   []string
 	Closes       []string
 	Participants []string

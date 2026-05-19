@@ -76,5 +76,5 @@ func (e *Entry) MembersFor(t AnnotationTopic) []string {
 	if len(t.Members) > 0 {
 		return t.Members
 	}
-	return e.Refs
+	return RefIDs(e.Refs)
 }

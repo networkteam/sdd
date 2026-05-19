@@ -82,7 +82,7 @@ func TestNewEntry_DryRun_SavesStdinOnValidationFailure(t *testing.T) {
 		Type:        model.TypeSignal,
 		Layer:       model.LayerTactical,
 		Description: "test signal",
-		Refs:        []string{"nonexistent-dangling-ref"}, // triggers validation failure
+		Refs:        []model.Ref{{ID: "nonexistent-dangling-ref", Kind: model.RefKindUnknown}}, // triggers validation failure
 		Attachments: []command.Attachment{
 			{Source: "-", Target: "plan.md", Data: stdinContent},
 		},
@@ -285,7 +285,7 @@ func TestNewEntry_ResolvesShortRefs(t *testing.T) {
 		Layer:         model.LayerTactical,
 		Kind:          model.KindDirective,
 		Description:   "new decision referencing short-form ID",
-		Refs:          []string{"s-stg-aaa"},
+		Refs:          []model.Ref{{ID: "s-stg-aaa", Kind: model.RefKindUnknown}},
 		SkipPreflight: true,
 		DryRun:        true, // stop before writing; we only care about resolution + validation
 	}
@@ -326,7 +326,7 @@ func TestNewEntry_AmbiguousShortRefErrors(t *testing.T) {
 		Layer:         model.LayerTactical,
 		Kind:          model.KindDirective,
 		Description:   "decision with ambiguous short ref",
-		Refs:          []string{"s-stg-xyz"},
+		Refs:          []model.Ref{{ID: "s-stg-xyz", Kind: model.RefKindUnknown}},
 		SkipPreflight: true,
 		DryRun:        true,
 	}
@@ -519,7 +519,7 @@ func TestNewEntry_WritesEntryByKind(t *testing.T) {
 				Description: "Christopher reviews architectural decisions.",
 				Confidence:  "medium",
 				Actor:       "Christopher",
-				Refs:        []string{actorHeadID},
+				Refs:        []model.Ref{{ID: actorHeadID, Kind: model.RefKindUnknown}},
 			},
 			asserts: func(t *testing.T, e *model.Entry) {
 				if e.Kind != model.KindRole {
@@ -531,7 +531,7 @@ func TestNewEntry_WritesEntryByKind(t *testing.T) {
 				if e.Canonical != "" || len(e.Aliases) != 0 {
 					t.Errorf("role should not carry canonical/aliases, got canonical=%q aliases=%v", e.Canonical, e.Aliases)
 				}
-				if len(e.Refs) != 1 || e.Refs[0] != actorHeadID {
+				if len(e.Refs) != 1 || e.Refs[0].ID != actorHeadID {
 					t.Errorf("refs = %v, want [%s]", e.Refs, actorHeadID)
 				}
 			},

@@ -141,7 +141,7 @@ func TestEntry_MembersFor(t *testing.T) {
 	annotation := &Entry{
 		Type: TypeSignal,
 		Kind: KindAnnotation,
-		Refs: []string{"a", "b", "c"},
+		Refs: refsOf("a", "b", "c"),
 	}
 
 	t.Run("plain string applies to all refs", func(t *testing.T) {
