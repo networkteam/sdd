@@ -123,8 +123,6 @@ Every ref on a new entry must carry a kind from this closed vocabulary. Pre-flig
 
 **`refines` vs `builds-on`.** Both name a forward relationship to a prior entry; the test is *is the target still active, and does the new entry sharpen its commitments in place, or does it continue the chain in time?* Active + in-place refinement → `refines`. Closed (or next-step continuation) → `builds-on`. The augmenting-directive pattern always uses `refines`.
 
-**Legacy entries** with bare-string refs continue to parse for traversal (mapped internally to `kind: unknown`) but `sdd new` always writes object form with explicit kind. Legacy refs are an accepted permanent state — they are not flagged by lint and not retroactively backfilled. The upgrade path is supersession of the parent entry, not in-place edit.
-
 ## Retirement primitives
 
 Every entry is retireable. Two primitives:

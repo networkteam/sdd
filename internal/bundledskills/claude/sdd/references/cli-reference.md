@@ -175,7 +175,7 @@ The depth-0 `Summary:` section renders the same text shown in `sdd list` and `sd
 
 ## `sdd new` flags
 
-- `--refs '{json}'` — referenced entry with semantic kind (repeatable). JSON object `{"id":"<id>","kind":"<kind>","desc":"<optional>"}`. Kind comes from the closed set below; the legacy CSV form `--refs id1,id2` was dropped because each ref now carries its own kind. `desc` is optional, used to explain *why* this ref exists in this entry's narrative.
+- `--refs '{json}'` — referenced entry (repeatable). JSON object `{"id":"<id>","kind":"<kind>","desc":"<optional>"}`. `kind` is required from the closed set — see [framework-concepts → Ref kinds](framework-concepts.md). `desc` is optional and explains *why* this ref exists in the entry's narrative.
 - `--supersedes id` — entry ID this replaces
 - `--closes id1,id2` — entry IDs this resolves/fulfills
 - `--participants p1,p2` — participant names
@@ -289,23 +289,3 @@ echo "$PLAN" | sdd new d tac --kind plan --confidence high \
 
 Use quoted `'EOF'` so markdown content with `$`, backticks, or backslashes is preserved verbatim. For scratch files you do want on disk, `.sdd/tmp/` is gitignored.
 
-## Refs on-disk shape
-
-Ref kind meanings and the closed-set vocabulary live in [framework-concepts.md → Ref kinds](framework-concepts.md). This section covers the CLI and YAML surface only.
-
-The `refs:` field uses object form:
-
-```yaml
-refs:
-  - id: 20260101-000000-s-cpt-aaa
-    kind: addresses
-    desc: resolves the gap surfaced in the bootstrap session
-  - id: 20260102-000000-d-cpt-bbb
-    kind: grounds
-```
-
-`kind` is required from the closed set (see framework-concepts). `desc` is optional and renders on `sdd show` as a sub-line beneath the ref, giving readers per-ref rationale without parsing the body.
-
-**Legacy bare-string refs** still parse for traversal (mapped to `kind: unknown` internally) but `sdd new` always writes object form. Once a binary on this codebase writes a new entry, *older binaries cannot read it* — keep binary and skill upgrades in sync across the team.
-
-`closes` and `supersedes` stay bare-string ID lists — those relationships carry uniform mechanical meaning and don't need per-edge metadata.
