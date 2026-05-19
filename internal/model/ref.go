@@ -15,7 +15,8 @@ type RefKind string
 
 const (
 	RefKindGrounds   RefKind = "grounds"    // anchors to standing structure
-	RefKindBuildsOn  RefKind = "builds-on"  // extends prior lineage
+	RefKindBuildsOn  RefKind = "builds-on"  // extends prior lineage (forward continuation)
+	RefKindRefines   RefKind = "refines"    // sharpens, narrows, or clarifies an active target in place — the augmenting-directive pattern (d-prc-9ti)
 	RefKindAddresses RefKind = "addresses"  // responds to a gap, question, or signal
 	RefKindSurfaces  RefKind = "surfaces"   // created or discovered the referenced entry during this work
 	RefKindEvidence  RefKind = "evidence"   // empirical observation supporting the claim
@@ -27,6 +28,7 @@ const (
 var refKinds = map[RefKind]bool{
 	RefKindGrounds:   true,
 	RefKindBuildsOn:  true,
+	RefKindRefines:   true,
 	RefKindAddresses: true,
 	RefKindSurfaces:  true,
 	RefKindEvidence:  true,
@@ -56,6 +58,7 @@ func RefKindValues() []RefKind {
 	return []RefKind{
 		RefKindGrounds,
 		RefKindBuildsOn,
+		RefKindRefines,
 		RefKindAddresses,
 		RefKindSurfaces,
 		RefKindEvidence,

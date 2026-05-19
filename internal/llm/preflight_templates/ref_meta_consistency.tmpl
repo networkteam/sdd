@@ -1,7 +1,9 @@
 {{ define "ref_meta_consistency" }}
 ## Reference metadata consistency (apply when the entry has refs)
 
-Each ref carries a `kind` (from the closed vocabulary: grounds, builds-on, addresses, surfaces, evidence, depends-on, related) and an optional `desc` naming why the reference exists. Both must read consistently with how the entry body frames the reference. Skip the desc-side check when no ref carries a `desc`; the kind-side check applies whenever there are refs.
+Each ref carries a `kind` (from the closed vocabulary: grounds, builds-on, refines, addresses, surfaces, evidence, depends-on, related) and an optional `desc` naming why the reference exists. Both must read consistently with how the entry body frames the reference. Skip the desc-side check when no ref carries a `desc`; the kind-side check applies whenever there are refs.
+
+**Distinguishing `refines` from `builds-on`.** Both name a forward relationship. Use `refines` when the target is active and the body sharpens, narrows, or clarifies its commitments in place (the augmenting-directive pattern — target stays active, lifecycle is split). Use `builds-on` when the target is closed (next decision in the chain) or when the new entry stands alongside in a forward "next step" sense rather than refining in place. A `builds-on` ref on an active target whose body frames the relationship as "narrowing AC X" or "applying the plan's commitment to scope Y" is a wrong-kind finding; `refines` is the correct kind there.
 
 Two axes of mismatch:
 
