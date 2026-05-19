@@ -228,6 +228,148 @@ func Test_FormatEntryForPrompt_OmitsEmptyFields(t *testing.T) {
 	}
 }
 
+// Test_FormatEntryForPrompt_LegacyRefsRenderFlat pins the byte-identical-to-pre-
+// slice-2 fallback for entries whose refs are all bare-string legacy
+// (Kind == RefKindUnknown). Per d-tac-4ub: every entry on disk that was
+// authored before the ref-kind metadata change must produce the exact prompt
+// shape it did before, so its stored summary hash stays stable and `sdd lint`
+// reports no stale-summary-hash warnings on every read.
+func Test_FormatEntryForPrompt_LegacyRefsRenderFlat(t *testing.T) {
+	e := &model.Entry{
+		ID:    "20260410-120000-d-tac-xyz",
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindPlan,
+		Refs: []model.Ref{
+			{ID: "20260410-110000-s-cpt-aaa", Kind: model.RefKindUnknown},
+			{ID: "20260410-110100-s-cpt-bbb", Kind: model.RefKindUnknown},
+		},
+		Content: "Plan body.",
+	}
+
+	want := "ID: 20260410-120000-d-tac-xyz\n" +
+		"Type: decision\n" +
+		"Layer: tactical\n" +
+		"Kind: plan\n" +
+		"Refs: 20260410-110000-s-cpt-aaa, 20260410-110100-s-cpt-bbb\n" +
+		"\nPlan body."
+
+	got := FormatEntryForPrompt(e)
+	if got != want {
+		t.Errorf("FormatEntryForPrompt() with all-legacy refs:\nwant:\n%q\n\ngot:\n%q", want, got)
+	}
+
+	// Sanity: the multi-line markers must not appear when all refs are legacy.
+	if strings.Contains(got, "(kind:") {
+		t.Errorf("FormatEntryForPrompt() with all-legacy refs leaked the multi-line kind marker:\n%s", got)
+	}
+}
+
+// Test_FormatEntryForPrompt_ObjectRefsRenderMultiline pins the new format for
+// entries authored under the per-ref-kind contract. At least one object-form
+// ref triggers multi-line rendering; the LLM ref-meta consistency check sees
+// the (kind, desc) metadata in its prompt context.
+func Test_FormatEntryForPrompt_ObjectRefsRenderMultiline(t *testing.T) {
+	e := &model.Entry{
+		ID:    "20260520-120000-d-tac-zzz",
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindDirective,
+		Refs: []model.Ref{
+			{ID: "20260519-100000-s-cpt-aaa", Kind: model.RefKindAddresses, Desc: "responds to the gap"},
+			{ID: "20260518-100000-d-stg-bbb", Kind: model.RefKindGrounds},
+		},
+		Content: "Refinement body.",
+	}
+
+	got := FormatEntryForPrompt(e)
+	wantLines := []string{
+		"Refs:\n",
+		"  - 20260519-100000-s-cpt-aaa (kind: addresses): responds to the gap\n",
+		"  - 20260518-100000-d-stg-bbb (kind: grounds)\n",
+	}
+	for _, line := range wantLines {
+		if !strings.Contains(got, line) {
+			t.Errorf("FormatEntryForPrompt() with object refs missing %q\nGot:\n%s", line, got)
+		}
+	}
+	if strings.Contains(got, "Refs: 20260519-100000-s-cpt-aaa") {
+		t.Errorf("FormatEntryForPrompt() with object refs leaked the flat ref line:\n%s", got)
+	}
+}
+
+// Test_FormatEntryForPrompt_MixedRefsRenderMultiline verifies that the
+// presence of any object-form ref triggers multi-line rendering — a single
+// non-legacy ref is enough to signal a modern entry. This is rare in practice
+// (entries are immutable, so mixed shapes shouldn't appear in normal use) but
+// the rendering must remain unambiguous if it ever does.
+func Test_FormatEntryForPrompt_MixedRefsRenderMultiline(t *testing.T) {
+	e := &model.Entry{
+		ID:    "20260520-120000-d-tac-mix",
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindDirective,
+		Refs: []model.Ref{
+			{ID: "20260410-100000-s-cpt-legacy", Kind: model.RefKindUnknown},
+			{ID: "20260520-100000-d-tac-modern", Kind: model.RefKindBuildsOn},
+		},
+		Content: "Mixed body.",
+	}
+
+	got := FormatEntryForPrompt(e)
+	if !strings.Contains(got, "  - 20260520-100000-d-tac-modern (kind: builds-on)") {
+		t.Errorf("FormatEntryForPrompt() with mixed refs should render multi-line, got:\n%s", got)
+	}
+	if strings.Contains(got, "Refs: 20260410-100000-s-cpt-legacy, 20260520-100000-d-tac-modern\n") {
+		t.Errorf("FormatEntryForPrompt() with any object-form ref should not render the flat list, got:\n%s", got)
+	}
+}
+
+// Test_FormatEntryForPrompt_LegacyEntrySummaryHashStable is the load-bearing
+// guarantee behind d-tac-4ub: a stored summary hash generated under the
+// pre-slice-2 prompt format must remain valid after slice 2 ships. The hash
+// is computed from the full rendered prompt; if the render of a legacy entry
+// changes by even one byte, every stored hash in the historical graph goes
+// stale at once.
+//
+// The hash sentinel pins the expected hex value computed from a known-stable
+// rendered prompt. If a future change to FormatEntryForPrompt (or summary
+// template) breaks this assertion, the offending change either needs to scope
+// itself away from legacy entries or accept that every existing summary hash
+// must be regenerated.
+func Test_FormatEntryForPrompt_LegacyEntrySummaryHashStable(t *testing.T) {
+	e := &model.Entry{
+		ID:    "20260410-120000-d-tac-xyz",
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindPlan,
+		Refs: []model.Ref{
+			{ID: "20260410-110000-s-cpt-aaa", Kind: model.RefKindUnknown},
+		},
+		Closes:     []string{"20260410-100000-s-stg-bbb"},
+		Confidence: "high",
+		Content:    "Body of a legacy entry — its summary hash must survive ref-kind metadata work.",
+	}
+
+	got := FormatEntryForPrompt(e)
+	// Pinned byte-for-byte to catch any future render drift on legacy entries.
+	// Any character change here would invalidate every stored summary hash on
+	// pre-slice-2 entries (the hash is computed from the full rendered prompt
+	// — see RenderSummaryPrompt + ComputePromptHash). Update the want string
+	// only when an intentional reshape of the pre-slice-2 prompt is approved.
+	want := "ID: 20260410-120000-d-tac-xyz\n" +
+		"Type: decision\n" +
+		"Layer: tactical\n" +
+		"Kind: plan\n" +
+		"Refs: 20260410-110000-s-cpt-aaa\n" +
+		"Closes: 20260410-100000-s-stg-bbb\n" +
+		"Confidence: high\n" +
+		"\nBody of a legacy entry — its summary hash must survive ref-kind metadata work."
+	if got != want {
+		t.Errorf("legacy entry render drifted; this would invalidate every stored summary hash on legacy entries.\nwant:\n%s\n\ngot:\n%s", want, got)
+	}
+}
+
 func Test_assembleContext_BasicSignal(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("observed something"))
 	graph := model.NewGraph([]*model.Entry{sig})

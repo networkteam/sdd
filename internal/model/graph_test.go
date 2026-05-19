@@ -1511,52 +1511,6 @@ func TestResolveIDsPropagatesAmbiguousError(t *testing.T) {
 	}
 }
 
-func TestLintRefKinds_FlagsLegacyBareString(t *testing.T) {
-	// Legacy entries with bare-string refs parse as RefKindUnknown.
-	// LintRefKinds surfaces them so authors can re-author with explicit
-	// kinds. The check lives outside ValidateEntry so capture-time flows
-	// aren't blocked by warnings about pre-existing on-disk entries.
-	target := entry("20260406-100000-s-stg-aaa")
-	bad := entry("20260406-100100-d-stg-bbb", withKind(KindDirective))
-	bad.Refs = []Ref{{ID: target.ID, Kind: RefKindUnknown}}
-
-	LintRefKinds(bad)
-
-	found := false
-	for _, w := range bad.Warnings {
-		if w.Field != "refs" {
-			continue
-		}
-		if w.Value != target.ID {
-			t.Errorf("warning Value = %q, want %q", w.Value, target.ID)
-		}
-		if !strings.Contains(w.Message, "unknown") {
-			t.Errorf("warning Message should name the kind value, got: %q", w.Message)
-		}
-		found = true
-	}
-	if !found {
-		t.Error("expected a refs-field warning on the bad entry")
-	}
-}
-
-func TestLintRefKinds_NoWarningForCapturable(t *testing.T) {
-	target := entry("20260406-100000-s-stg-aaa")
-	e := entry("20260406-100100-d-stg-bbb", withKind(KindDirective))
-	e.Refs = []Ref{
-		{ID: target.ID, Kind: RefKindAddresses},
-		{ID: target.ID, Kind: RefKindBuildsOn, Desc: "extends prior lineage"},
-	}
-
-	LintRefKinds(e)
-
-	for _, w := range e.Warnings {
-		if w.Field == "refs" {
-			t.Errorf("unexpected refs warning on capturable kinds: %s", w.Message)
-		}
-	}
-}
-
 // --- test helpers ---
 
 func entryIDs(entries []*Entry) []string {

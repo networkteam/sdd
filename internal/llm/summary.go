@@ -127,9 +127,21 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 }
 
 // FormatEntryForPrompt formats an entry as readable text for inclusion in a prompt.
-// Refs render multi-line with per-ref kind and optional desc so the LLM can
-// reason about ref metadata (used by the desc-vs-body consistency check —
-// see ref_desc_consistency.tmpl).
+//
+// Refs rendering is conditional on the entry's ref shape, per d-tac-4ub:
+//
+//   - All-legacy (every ref has Kind == RefKindUnknown — bare-string YAML
+//     fallback): render the flat `Refs: id1, id2` format. This preserves the
+//     byte-identical prompt shape pre-slice-2, so legacy entries keep their
+//     stored summary hashes stable (no spurious "stale summary hash" warnings
+//     on every read).
+//   - Object-form (any ref carries a capturable kind): render multi-line
+//     `  - id (kind: K): desc` so the LLM sees ref metadata, enabling the
+//     ref-meta consistency check (see ref_meta_consistency.tmpl).
+//
+// Mixed entries (some refs legacy, some object) get the multi-line form —
+// the presence of any object-form ref signals an entry authored under the
+// new contract; rendering uniformly preserves clarity.
 func FormatEntryForPrompt(e *model.Entry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ID: %s\n", e.ID)
@@ -139,13 +151,17 @@ func FormatEntryForPrompt(e *model.Entry) string {
 		fmt.Fprintf(&b, "Kind: %s\n", e.Kind)
 	}
 	if len(e.Refs) > 0 {
-		b.WriteString("Refs:\n")
-		for _, r := range e.Refs {
-			fmt.Fprintf(&b, "  - %s (kind: %s)", r.ID, r.Kind)
-			if r.Desc != "" {
-				fmt.Fprintf(&b, ": %s", r.Desc)
+		if allLegacyRefs(e.Refs) {
+			fmt.Fprintf(&b, "Refs: %s\n", strings.Join(model.RefIDs(e.Refs), ", "))
+		} else {
+			b.WriteString("Refs:\n")
+			for _, r := range e.Refs {
+				fmt.Fprintf(&b, "  - %s (kind: %s)", r.ID, r.Kind)
+				if r.Desc != "" {
+					fmt.Fprintf(&b, ": %s", r.Desc)
+				}
+				b.WriteByte('\n')
 			}
-			b.WriteByte('\n')
 		}
 	}
 	if len(e.Closes) > 0 {
@@ -162,6 +178,19 @@ func FormatEntryForPrompt(e *model.Entry) string {
 	}
 	fmt.Fprintf(&b, "\n%s", e.Content)
 	return b.String()
+}
+
+// allLegacyRefs reports whether every ref in the slice is a legacy bare-string
+// ref (Kind == RefKindUnknown). Used by FormatEntryForPrompt to fall back to
+// the pre-slice-2 flat ref rendering so legacy entries' summary-hash stability
+// is preserved.
+func allLegacyRefs(refs []model.Ref) bool {
+	for _, r := range refs {
+		if r.Kind != model.RefKindUnknown {
+			return false
+		}
+	}
+	return true
 }
 
 // ComputePromptHash returns the hex-encoded SHA-256 hash of the rendered prompt.
