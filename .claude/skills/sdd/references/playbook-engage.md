@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 90475e27da7a4ee7284b67cca3e3c9ed694c70a27260a1359695312f0bf627db
+sdd-content-hash: f6e2987152c33d5a4a07ba6291664e70df83f5088db97336aa1cd74a62d2d768
 sdd-version: dev
 ---
 # Engage Playbook
@@ -57,7 +57,7 @@ The candidate moves to surface in step 4, keyed by the anchor's kind. **Bolded**
 
 Closed commitments stay evaluable — closure is not a terminal state for engagement, only for the open-status derivation. A closed plan can still be the lens for a retrospective or the subject of a follow-up signal.
 
-When the chosen move is **implement** (any decision kind), load [playbook-implementation.md](playbook-implementation.md) on demand and follow it. When the chosen move is **augment**, load [playbook-augment-plan.md](playbook-augment-plan.md). Other moves are handled by the outer skill's capture discipline directly.
+Load [playbook-implementation.md](playbook-implementation.md) as soon as the dialogue turns toward how to implement, not when the first step starts. Slicing, sequencing, and WIP-marker setup live inside its frame — loading later means that guidance arrives after the choices it should inform. When the chosen move is **augment**, load [playbook-augment-plan.md](playbook-augment-plan.md). Other moves are handled by the outer skill's capture discipline directly.
 
 ## Brief shapes
 
