@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 10c78160c9c0931448b58b3777ec236c95419562d6a21becf410cad6565d8cdd
+sdd-content-hash: c3115b188f45e46e2dac1787fa80710c31a0b229f5466b1fbf82965521c8752f
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -300,12 +300,15 @@ Every reference (the `refs:` field) carries a semantic kind from a closed vocabu
 | Kind | When to use |
 |---|---|
 | `grounds` | Anchors to standing structure — a contract, aspiration, or active standing directive that the entry leans on |
-| `builds-on` | Extends prior lineage — a previous decision or plan that this entry continues |
+| `builds-on` | Extends prior lineage — a previous decision or plan that this entry continues *after* the target (the target is closed, or the new entry adds work in a forward "next step" sense rather than refining in place) |
+| `refines` | Sharpens, narrows, or clarifies an **active** target's commitments **in place** — the augmenting-directive pattern. Target stays active; lifecycle is split (the refining entry closes alongside the target via the target's done signal) |
 | `addresses` | Responds to a gap, question, or insight signal — the entry's purpose is to act on it |
 | `surfaces` | Created or discovered the referenced gap during this work — used when capture surfaces both the signal and the decision in one pass |
 | `evidence` | Empirical observation supporting the claim — a fact or done signal whose data the entry cites |
 | `depends-on` | Functional prerequisite — the referenced entry must land before this one is meaningful |
 | `related` | Parallel sibling, no other axis fits — neighborly context that doesn't ground, build on, address, or depend |
+
+**Distinguishing `refines` from `builds-on`.** Both name a forward relationship to a prior entry, so the test is: *is the target still active, and does the new entry sharpen its commitments in place, or does it continue the chain in time?* If the target is active and the body narrows / clarifies / qualifies the target's existing commitments without superseding, use `refines`. If the target is closed (or the new entry stands alongside in a "next step" sense rather than refining in place), use `builds-on`. The augmenting-directive pattern always uses `refines`.
 
 `closes` and `supersedes` stay bare-string ID lists — those relationships carry uniform mechanical meaning and don't need per-edge metadata.
 
