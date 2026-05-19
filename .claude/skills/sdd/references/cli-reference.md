@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: c3115b188f45e46e2dac1787fa80710c31a0b229f5466b1fbf82965521c8752f
+sdd-content-hash: 1a4bb61818d7d8420525a53773bfdaa0ce2defae510f2d6fbd93539883e04e05
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -293,28 +293,11 @@ echo "$PLAN" | sdd new d tac --kind plan --confidence high \
 
 Use quoted `'EOF'` so markdown content with `$`, backticks, or backslashes is preserved verbatim. For scratch files you do want on disk, `.sdd/tmp/` is gitignored.
 
-## Ref kinds
+## Refs on-disk shape
 
-Every reference (the `refs:` field) carries a semantic kind from a closed vocabulary, capturing *why* this entry points at the referenced one. Pre-flight rejects any new entry whose refs lack a kind from the set below.
+Ref kind meanings and the closed-set vocabulary live in [framework-concepts.md → Ref kinds](framework-concepts.md). This section covers the CLI and YAML surface only.
 
-| Kind | When to use |
-|---|---|
-| `grounds` | Anchors to standing structure — a contract, aspiration, or active standing directive that the entry leans on |
-| `builds-on` | Extends prior lineage — a previous decision or plan that this entry continues *after* the target (the target is closed, or the new entry adds work in a forward "next step" sense rather than refining in place) |
-| `refines` | Sharpens, narrows, or clarifies an **active** target's commitments **in place** — the augmenting-directive pattern. Target stays active; lifecycle is split (the refining entry closes alongside the target via the target's done signal) |
-| `addresses` | Responds to a gap, question, or insight signal — the entry's purpose is to act on it |
-| `surfaces` | Created or discovered the referenced gap during this work — used when capture surfaces both the signal and the decision in one pass |
-| `evidence` | Empirical observation supporting the claim — a fact or done signal whose data the entry cites |
-| `depends-on` | Functional prerequisite — the referenced entry must land before this one is meaningful |
-| `related` | Parallel sibling, no other axis fits — neighborly context that doesn't ground, build on, address, or depend |
-
-**Distinguishing `refines` from `builds-on`.** Both name a forward relationship to a prior entry, so the test is: *is the target still active, and does the new entry sharpen its commitments in place, or does it continue the chain in time?* If the target is active and the body narrows / clarifies / qualifies the target's existing commitments without superseding, use `refines`. If the target is closed (or the new entry stands alongside in a "next step" sense rather than refining in place), use `builds-on`. The augmenting-directive pattern always uses `refines`.
-
-`closes` and `supersedes` stay bare-string ID lists — those relationships carry uniform mechanical meaning and don't need per-edge metadata.
-
-**Legacy entries** with bare-string refs continue to parse for traversal (mapped to `kind: unknown` internally), but `sdd new` always writes object form with explicit kind. Once a binary on this codebase writes a new entry, *older binaries cannot read it* — keep binary and skill upgrades in sync across the team.
-
-**On-disk shape**:
+The `refs:` field uses object form:
 
 ```yaml
 refs:
@@ -325,4 +308,8 @@ refs:
     kind: grounds
 ```
 
-The optional `desc` is rendered on `sdd show` as a sub-line beneath the ref, giving readers per-ref rationale without parsing the body.
+`kind` is required from the closed set (see framework-concepts). `desc` is optional and renders on `sdd show` as a sub-line beneath the ref, giving readers per-ref rationale without parsing the body.
+
+**Legacy bare-string refs** still parse for traversal (mapped to `kind: unknown` internally) but `sdd new` always writes object form. Once a binary on this codebase writes a new entry, *older binaries cannot read it* — keep binary and skill upgrades in sync across the team.
+
+`closes` and `supersedes` stay bare-string ID lists — those relationships carry uniform mechanical meaning and don't need per-edge metadata.

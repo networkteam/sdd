@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 9c41d4d9c81d6c71b65c01fe184a93f19f9e567809bf3251d523dcbdcf60192d
+sdd-content-hash: 2db1360e5200cbbabc28c487ff4f544a176cc9092704793325c8f9d8ad0d366a
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -104,11 +104,30 @@ Every entry has a layer describing the depth of thinking:
 
 Three fields with distinct semantics:
 
-- `refs`: "builds on / depends on" — context or foundation, **no status effect**
-- `supersedes`: "replaces" — the referenced entry is no longer active/open
-- `closes`: "resolves / fulfills" — the referenced entry is no longer active/open. Decisions close signals; done-kind signals close decisions and gap signals.
+- `refs`: "builds on / depends on" — context or foundation, **no status effect**. Each ref carries a `kind` from the closed set below; the kind names *why* the reference exists.
+- `supersedes`: "replaces" — the referenced entry is no longer active/open. Bare-string ID list; no per-edge metadata.
+- `closes`: "resolves / fulfills" — the referenced entry is no longer active/open. Decisions close signals; done-kind signals close decisions and gap signals. Bare-string ID list.
 
 **Open signal** = not superseded, not closed. **Active decision** = not superseded, not closed.
+
+### Ref kinds
+
+Every ref on a new entry must carry a kind from this closed vocabulary. Pre-flight rejects missing or invalid kinds at high severity; an LLM advisory check flags mismatches between kind/desc and the entry body.
+
+| Kind | When to use |
+|---|---|
+| `grounds` | Anchors to standing structure — a contract, aspiration, or active standing directive that the entry leans on |
+| `builds-on` | Extends prior lineage — the target is **closed**, or the new entry is the next step in time *after* it rather than refining in place |
+| `refines` | Sharpens, narrows, or clarifies an **active** target's commitments **in place** — the augmenting-directive pattern. Target stays active; lifecycle is split (the refining entry closes alongside the target via the target's done signal) |
+| `addresses` | Responds to a gap, question, or insight signal — the entry's purpose is to act on it |
+| `surfaces` | Created or discovered the referenced gap during this work — used when capture surfaces both the signal and the decision in one pass |
+| `evidence` | Empirical observation supporting the claim — a fact or done signal whose data the entry cites |
+| `depends-on` | Functional prerequisite — the referenced entry must land before this one is meaningful |
+| `related` | Parallel sibling, no other axis fits — neighborly context that doesn't ground, build on, address, or depend |
+
+**`refines` vs `builds-on`.** Both name a forward relationship to a prior entry; the test is *is the target still active, and does the new entry sharpen its commitments in place, or does it continue the chain in time?* Active + in-place refinement → `refines`. Closed (or next-step continuation) → `builds-on`. The augmenting-directive pattern always uses `refines`.
+
+**Legacy entries** with bare-string refs continue to parse for traversal (mapped internally to `kind: unknown`) but `sdd new` always writes object form with explicit kind. Legacy refs are an accepted permanent state — they are not flagged by lint and not retroactively backfilled. The upgrade path is supersession of the parent entry, not in-place edit.
 
 ## Retirement primitives
 
