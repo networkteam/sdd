@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 2db1360e5200cbbabc28c487ff4f544a176cc9092704793325c8f9d8ad0d366a
+sdd-content-hash: 6f5bc6b3cc3ad2f6ef95af39c6e8f327b2b3e1dc623619014be8a198dfff41b2
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -126,8 +126,6 @@ Every ref on a new entry must carry a kind from this closed vocabulary. Pre-flig
 | `related` | Parallel sibling, no other axis fits — neighborly context that doesn't ground, build on, address, or depend |
 
 **`refines` vs `builds-on`.** Both name a forward relationship to a prior entry; the test is *is the target still active, and does the new entry sharpen its commitments in place, or does it continue the chain in time?* Active + in-place refinement → `refines`. Closed (or next-step continuation) → `builds-on`. The augmenting-directive pattern always uses `refines`.
-
-**Legacy entries** with bare-string refs continue to parse for traversal (mapped internally to `kind: unknown`) but `sdd new` always writes object form with explicit kind. Legacy refs are an accepted permanent state — they are not flagged by lint and not retroactively backfilled. The upgrade path is supersession of the parent entry, not in-place edit.
 
 ## Retirement primitives
 
