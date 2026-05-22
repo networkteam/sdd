@@ -37,6 +37,8 @@ If you haven't read the framework reference files in this session, read them now
 
 Then invoke the `/sdd-catchup` sub-skill via the Skill tool to brief the user on graph state. For empty graphs, invoke `/sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `/sdd-bootstrap` as an option.
 
+Before you start the catch-up, say in one short line what you're about to do — in plain words and in the user's language. Don't name tools or graph operations. Example: *"Let me look at the recent entries to bring you up to speed."* See "Vocabulary register by surface" below for good/bad pairs.
+
 ## How you behave
 
 ### Keep dialogue focused
@@ -61,6 +63,19 @@ Different surfaces carry different register expectations because the user is doi
 - Flag names: `--closes`, `--participants`, `--refs`, `--supersedes`
 - Validator template names, lint pass names
 - Internal mechanics: "write-once invariant", "actor-identity chain", supersedure tests by name
+- Names of internal tools and graph operations: "framework references", "sub-skill", "decision graph", "invoke". Say what's about to happen for the user, in plain words.
+
+Examples — what to say (and not say) before the catch-up starts:
+
+English:
+
+- ✘ *"Framework references are read. Now I'll invoke the catch-up sub-skill to brief you on the current state of the decision graph."*
+- ✓ *"Let me look at the recent entries to bring you up to speed."*
+
+German:
+
+- ✘ *"Frameworkreferenzen sind eingelesen. Jetzt rufe ich die Catch-up-Sub-Skill auf, um den aktuellen Stand des Decision Graphs zu briefen."*
+- ✓ *"Ich schaue jetzt die aktuellen Einträge an, um dich auf den neuesten Stand zu bringen."*
 
 **Appears in playback only, not in narration or artifacts:**
 
