@@ -33,6 +33,22 @@ func withRefs(refs ...string) entryOpt {
 	return func(e *model.Entry) { e.Refs = refsOf(refs...) }
 }
 
+// withRefObjs sets the entry's refs to the given Ref literals, for tests that
+// need specific kinds or desc values (expand(refs) rendering, ref-kind verbs).
+func withRefObjs(refs ...model.Ref) entryOpt {
+	return func(e *model.Entry) { e.Refs = refs }
+}
+
+// withCanonical sets the actor canonical (kind: actor only).
+func withCanonical(c string) entryOpt {
+	return func(e *model.Entry) { e.Canonical = c }
+}
+
+// withActor sets the role's bound actor canonical (kind: role only).
+func withActor(c string) entryOpt {
+	return func(e *model.Entry) { e.Actor = c }
+}
+
 // refsOf builds a []model.Ref from bare IDs, tagging each with
 // RefKindRelated so tests construct entries that satisfy the new-capture
 // contract. Tests asserting on specific kinds use Ref literals.

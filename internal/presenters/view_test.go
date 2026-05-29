@@ -274,6 +274,105 @@ func TestRenderView_AsFocusBlock(t *testing.T) {
 	}
 }
 
+func TestRenderView_AsListExpandRefs_SubLineShapes(t *testing.T) {
+	// expand(refs) renders each entry's resolved refs as indented sub-lines:
+	// kind-as-verb, then status, then optional desc. Covers the three shapes
+	// from the AC — legacy bare-string (refs verb), object-form without desc,
+	// object-form with desc — plus status surfacing on the parent's refs.
+	parent := entry("20260101-100000-d-tac-par",
+		withKind(model.KindPlan),
+		withParticipants("Christopher"),
+		withSummary("Parent plan"))
+	g := model.NewGraph([]*model.Entry{parent})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-list",
+			Data: model.FlatList{
+				Entries: []*model.Entry{parent},
+				RefExpansions: [][]model.RefExpansion{{
+					{Kind: model.RefKindUnknown, ID: "20260101-090000-d-cpt-leg", Status: model.Status{Kind: model.StatusActive}},
+					{Kind: model.RefKindGrounds, ID: "20260101-090100-d-cpt-grd", Status: model.Status{Kind: model.StatusActive}},
+					{Kind: model.RefKindDependsOn, ID: "20260101-090200-d-tac-dep", Status: model.Status{Kind: model.StatusClosedBy, By: "20260101-091000-s-tac-don"}, Desc: "why this ref exists"},
+				}},
+			},
+		}},
+	}
+
+	got := renderView(result)
+	want := "" +
+		"  20260101-100000-d-tac-par tactical plan decision (Christopher) {status: active} Parent plan\n" +
+		"    → refs 20260101-090000-d-cpt-leg {status: active}\n" +
+		"    → grounds 20260101-090100-d-cpt-grd {status: active}\n" +
+		"    → depends-on 20260101-090200-d-tac-dep {status: closed-by 20260101-091000-s-tac-don}: \"why this ref exists\"\n"
+
+	if got != want {
+		t.Errorf("expand(refs) render mismatch:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestRenderView_AsListExpandRefs_DoneTargetOmitsStatus(t *testing.T) {
+	// A ref pointing at a done signal (terminal, StatusNone) renders without
+	// a status segment — matching how done signals render on every surface.
+	parent := entry("20260101-100000-d-tac-par",
+		withKind(model.KindPlan),
+		withParticipants("Christopher"),
+		withSummary("Parent"))
+	g := model.NewGraph([]*model.Entry{parent})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-list",
+			Data: model.FlatList{
+				Entries: []*model.Entry{parent},
+				RefExpansions: [][]model.RefExpansion{{
+					{Kind: model.RefKindEvidence, ID: "20260101-090000-s-tac-evd", Status: model.Status{Kind: model.StatusNone}},
+				}},
+			},
+		}},
+	}
+
+	got := renderView(result)
+	want := "" +
+		"  20260101-100000-d-tac-par tactical plan decision (Christopher) {status: active} Parent\n" +
+		"    → evidence 20260101-090000-s-tac-evd\n"
+	if got != want {
+		t.Errorf("done-target render mismatch:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
+func TestRenderView_AsListExpandRefs_ComposesWithScore(t *testing.T) {
+	// Ranked + expanded: the entry line keeps its {score: ...} segment and
+	// the ref sub-lines render beneath it.
+	parent := entry("20260101-100000-d-tac-par",
+		withKind(model.KindPlan),
+		withParticipants("Christopher"),
+		withSummary("Parent"))
+	g := model.NewGraph([]*model.Entry{parent})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-list",
+			Data: model.FlatList{
+				Entries:       []*model.Entry{parent},
+				Scores:        []float64{2.500},
+				RefExpansions: [][]model.RefExpansion{{{Kind: model.RefKindGrounds, ID: "20260101-090000-d-cpt-grd", Status: model.Status{Kind: model.StatusActive}}}},
+			},
+		}},
+	}
+
+	got := renderView(result)
+	want := "" +
+		"  20260101-100000-d-tac-par tactical plan decision (Christopher) {status: active} {score: 2.500} Parent\n" +
+		"    → grounds 20260101-090000-d-cpt-grd {status: active}\n"
+	if got != want {
+		t.Errorf("scored+expanded render mismatch:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
 func TestRenderView_UnrankedAsList_NoScoreSegment(t *testing.T) {
 	// FlatList without Scores should render plain EntryLine output —
 	// no score segment. Belt-and-suspenders against the scored branch

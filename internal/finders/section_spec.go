@@ -33,7 +33,13 @@ type sectionSpec struct {
 	rank        *rankSpec // last-write-wins per d-tac-uww §2
 	pageN       int       // -1 = no page limit
 	groupField  string    // empty = no group; non-empty = group(by(<field>))
-	expandField string    // empty = no expand; non-empty = expand(<field>) (slice 7: only "involvement")
+	expandField string    // empty = no expand; "involvement" (focus-block) or "refs" (per-row ref sub-lines on as-list)
+
+	// expandRefsInactive is set by expand(refs(inactive)) — narrows the
+	// per-entry ref sub-lines to refs whose target is currently inactive
+	// (closed, superseded, or a non-active role), the inverse of the
+	// `active` filter. Meaningful only when expandField == "refs".
+	expandRefsInactive bool
 
 	// Negation slots — populated by `not(<inner-filter>)` calls per
 	// d-tac-e1s. Each slot mirrors the semantic of its positive
@@ -114,24 +120,28 @@ func (s *sectionSpec) rejectGraphPrimitivesForWip() error {
 	return nil
 }
 
-// validateMutualExclusion enforces the slice-5/7 cross-primitive
-// constraints: group()/expand() each produce non-flat shapes that don't
-// compose with rank()/n() the way a flat list does, and group/expand
-// can't combine. stalled() applies only to focus-block sections.
-// Returning the first finding keeps the error focused.
+// validateMutualExclusion enforces the cross-primitive constraints:
+// group() produces a non-flat shape that doesn't compose with rank()/n();
+// expand(involvement) renders a focus-block whose target order and stalled
+// heat are fixed, so it can't combine with rank()/n() either. expand(refs)
+// is the exception — it modifies the flat list in place and deliberately
+// composes with rank()/n() (the catch-up layout ranks and pages before
+// expanding). Neither expand variant combines with group(). stalled()
+// applies only to the focus-block (expand(involvement)) section. Returning
+// the first finding keeps the error focused.
 func (s *sectionSpec) validateMutualExclusion() error {
 	switch {
 	case s.groupField != "" && s.rank != nil:
 		return fmt.Errorf("group is mutually exclusive with rank in slice 5; per-group ranking is reserved for a future slice")
 	case s.groupField != "" && s.pageN >= 0:
 		return fmt.Errorf("group is mutually exclusive with n in slice 5; per-group pagination is reserved for a future slice")
-	case s.expandField != "" && s.rank != nil:
-		return fmt.Errorf("expand is mutually exclusive with rank; focus-block targets render in involvement order, and heat for stalled classification is fixed at heat(exp-14d)")
-	case s.expandField != "" && s.pageN >= 0:
-		return fmt.Errorf("expand is mutually exclusive with n; focus-block target lists are bounded by the focus's involvement frontmatter, not by pagination")
+	case s.expandField == "involvement" && s.rank != nil:
+		return fmt.Errorf("expand(involvement) is mutually exclusive with rank; focus-block targets render in involvement order, and heat for stalled classification is fixed at heat(exp-14d)")
+	case s.expandField == "involvement" && s.pageN >= 0:
+		return fmt.Errorf("expand(involvement) is mutually exclusive with n; focus-block target lists are bounded by the focus's involvement frontmatter, not by pagination")
 	case s.expandField != "" && s.groupField != "":
-		return fmt.Errorf("expand is mutually exclusive with group; focus-block has its own per-focus grouping shape")
-	case s.stalledSet && s.expandField == "":
+		return fmt.Errorf("expand is mutually exclusive with group; both produce their own non-flat shape")
+	case s.stalledSet && s.expandField != "involvement":
 		return fmt.Errorf("stalled() applies only to focus-block sections; pair it with expand(involvement):as-focus-block")
 	}
 	return nil
@@ -155,14 +165,18 @@ func (s *sectionSpec) validateRenderShape() error {
 		return fmt.Errorf(
 			"render-shape mismatch: %s does not consume a grouped result, but group(by(...)) produces one (use as-grouped, or remove group)",
 			s.render)
-	case s.expandField != "" && expected != model.ShapeFocusBlock:
+	case s.expandField == "involvement" && expected != model.ShapeFocusBlock:
 		return fmt.Errorf(
 			"render-shape mismatch: %s does not consume a focus-block result, but expand(involvement) produces one (use as-focus-block, or remove expand)",
+			s.render)
+	case s.expandField == "refs" && expected != model.ShapeFlatList:
+		return fmt.Errorf(
+			"render-shape mismatch: %s does not consume a flat-list, but expand(refs) modifies one (use as-list, or remove expand)",
 			s.render)
 	case s.groupField == "" && expected == model.ShapeGrouped:
 		return fmt.Errorf(
 			"render-shape mismatch: as-grouped expects a grouped result, but the section produces a flat-list (add group(by(<field>)) before as-grouped)")
-	case s.expandField == "" && expected == model.ShapeFocusBlock:
+	case s.expandField != "involvement" && expected == model.ShapeFocusBlock:
 		return fmt.Errorf(
 			"render-shape mismatch: as-focus-block expects a focus-block result, but the section produces a flat-list (add expand(involvement) before as-focus-block, with kind(focus) filter)")
 	}

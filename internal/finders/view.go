@@ -273,7 +273,7 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 			Data:   model.Grouped{Field: spec.groupField, Groups: groups},
 		}, nil
 	}
-	if spec.expandField != "" {
+	if spec.expandField == "involvement" {
 		// `entries` here is the filtered focus list; expand it into a
 		// FocusBlock by walking each focus's involvement and resolving
 		// targets. Score is fixed at heat(exp-14d) per slice-7 design;
@@ -289,10 +289,18 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	// section repetition (same entry in focus-block and top-N) is
 	// intentional under the current design pending resolution of
 	// s-cpt-tn0; readers see per-section metadata for each occurrence.
+	//
+	// expand(refs) attaches per-entry ref sub-lines after ranking and
+	// pagination so the expansion follows the already-narrowed entry set
+	// (the as-list render path consumes RefExpansions when present).
+	flat := model.FlatList{Entries: entries, Scores: scores}
+	if spec.expandField == "refs" {
+		flat.RefExpansions = expandRefs(g, entries, spec.expandRefsInactive)
+	}
 	return query.SectionResult{
 		Render: spec.render,
 		Name:   spec.sectionName(),
-		Data:   model.FlatList{Entries: entries, Scores: scores},
+		Data:   flat,
 	}, nil
 }
 
@@ -411,11 +419,12 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 		spec.prefixSet = true
 
 	case fn.Name == "expand":
-		field, err := parseExpandArgs(fn.Args)
+		field, inactive, err := parseExpandArgs(fn.Args)
 		if err != nil {
 			return err
 		}
 		spec.expandField = field
+		spec.expandRefsInactive = inactive
 
 	case fn.Name == "stalled":
 		v, err := parseStalledArgs(fn.Args)
@@ -492,23 +501,51 @@ func participantsBlockFromEntries(g *model.Graph, entries []*model.Entry) model.
 	return model.ParticipantsBlock{Groups: groups}
 }
 
-// parseExpandArgs validates the `expand(<field>)` primitive's argument.
-// Slice 7 recognizes only `expand(involvement)` — the focus-block
-// transform. Other field names error with a listed-valid-set message
-// so users see what's available without grepping the executor.
-func parseExpandArgs(args []model.FunctionArg) (string, error) {
+// parseExpandArgs validates the `expand(<field>)` primitive's argument and
+// returns the field name plus, for the refs case, whether the optional
+// inactive filter is set. Three forms are recognized:
+//
+//   - expand(involvement)     — the focus-block transform (as-focus-block)
+//   - expand(refs)            — per-row ref sub-lines on as-list (all refs)
+//   - expand(refs(inactive))  — narrows to refs whose target is currently
+//     inactive (closed, superseded, or a non-active role) — the inverse of
+//     the `active` filter, for the lean catch-up mode
+//
+// The nested-call form follows the existing pattern (rank(heat(exp-14d)),
+// group(by(<field>))). Unknown fields and malformed nested calls error with
+// a listed-valid-set message so users see what's available.
+func parseExpandArgs(args []model.FunctionArg) (field string, refsInactive bool, err error) {
 	if len(args) != 1 {
-		return "", fmt.Errorf("expand: requires exactly one field argument (e.g. expand(involvement))")
+		return "", false, fmt.Errorf("expand: requires exactly one field argument (e.g. expand(involvement) or expand(refs))")
 	}
 	a := args[0]
-	if a.Kind != model.ArgKindIdent && a.Kind != model.ArgKindString {
-		return "", fmt.Errorf("expand: argument must be an identifier or string, got %s", a.Kind)
-	}
-	switch a.String {
-	case "involvement":
-		return a.String, nil
+	switch a.Kind {
+	case model.ArgKindIdent, model.ArgKindString:
+		switch a.String {
+		case "involvement":
+			return "involvement", false, nil
+		case "refs":
+			return "refs", false, nil
+		default:
+			return "", false, fmt.Errorf("expand: unknown field %q (known: involvement, refs)", a.String)
+		}
+	case model.ArgKindFunc:
+		// Nested-call form. Only expand(refs(inactive)) is defined;
+		// involvement takes no filter argument.
+		inner := a.Func
+		if inner == nil || inner.Name != "refs" {
+			return "", false, fmt.Errorf("expand: nested-call form is only valid as expand(refs(inactive))")
+		}
+		if len(inner.Args) != 1 {
+			return "", false, fmt.Errorf("expand: refs(...) takes exactly one filter argument (e.g. expand(refs(inactive)))")
+		}
+		fa := inner.Args[0]
+		if (fa.Kind != model.ArgKindIdent && fa.Kind != model.ArgKindString) || fa.String != "inactive" {
+			return "", false, fmt.Errorf("expand: refs(...) filter must be inactive (e.g. expand(refs(inactive)))")
+		}
+		return "refs", true, nil
 	default:
-		return "", fmt.Errorf("expand: unknown field %q (known: involvement)", a.String)
+		return "", false, fmt.Errorf("expand: argument must be an identifier or a nested filter call, got %s", a.Kind)
 	}
 }
 
