@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 74f1c44316237d92ea335db62da38f3366493261e9b760f678045def63cb2329
+sdd-content-hash: 251b3f431ff43d5fd28b6ed01da778010c7744634e6987b59bedc48609ca0c65
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -73,8 +73,17 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `name(<string>)` | Final section header — overrides any prefix and any rank-based auto-derive. Last call wins; `name("")` clears any prior name |
 | `name-prefix(<string>)` | Prefix the auto-derive composer extends with the rank suffix. Macros bake this so `top(N)` reads "Top by heat (exp-14d)" by default and "Top by in-degree" after `:rank(in-degree)` — the prefix stays, the suffix tracks rank |
 | `expand(involvement)` | Per row, explode involvement triples into focus-block sub-rows (focus-block only) |
+| `expand(refs)` | Per row, render each entry's outgoing refs as indented sub-lines (as-list only). Optional nested `expand(refs(state-changed))` narrows to refs whose target is closed or superseded. Composes with filters, `rank`, and `n` |
 | `group(by(<field>))` | Bucket entries by field; produces grouped shape (consume with `as-grouped`) |
 | `stalled(<value>)` | Threshold below which a focus target with assigned actors is "stalled" (default 1.0) |
+
+**`expand(refs)` sub-line shape.** Each ref renders as `→ <verb> <full-id> {status: …}` with an optional `: "<desc>"` clause when the ref carries a description. The verb is the per-ref kind (`grounds`, `builds-on`, `refines`, `addresses`, `surfaces`, `evidence`, `depends-on`, `related`); legacy bare-string refs (kind `unknown`) render with the generic verb `refs`. Status surfaces the referenced entry's *current* derived state, so a reader sees when a dependency has closed or been superseded since it was referenced. Done-signal targets carry no status segment (they are terminal). Three shapes:
+
+```
+→ refs 20260506-151345-d-tac-uww {status: closed-by 20260507-133746-s-tac-z2o}     # legacy bare-string ref
+→ grounds 20260413-142536-d-cpt-ah1 {status: active}                                # object-form, no desc
+→ depends-on 20260423-143213-d-tac-hsu {status: closed-by 20260423-144715-s-tac-2y0}: "wraps the sync infra"  # object-form with desc
+```
 
 **Section header resolution:** the executor picks the header in this order:
 1. Explicit `name(...)` → final, no auto-append.
@@ -164,6 +173,11 @@ sdd view --layout='top(10):rank(heat(exp-7d)):name("Hot last week"),top(10):rank
 
 sdd view --layout='top(20):not(kind(contract,aspiration))'
 # Top 20 by heat, excluding standing entries that anchor by structure
+
+sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(refs(state-changed)):as-list'
+# Top-8 active plans/activities by recent heat, each showing only the refs
+# whose target has since closed or been superseded — the lean catch-up
+# "what changed under me" view
 ```
 
 ## `sdd show` output format
