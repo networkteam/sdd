@@ -167,7 +167,7 @@ The four blocks below are injected fresh each invocation. Read them as your sole
 
 !`sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(refs(inactive)):name("Active and hot"):as-list'`
 
-Each active plan/activity may carry indented `→ <verb> <id> {status: …}` sub-lines for references whose target is now inactive (closed or superseded). Use them to spot resolved dependencies — an active plan whose blocker just closed is likely now unblocked, a strong thread. Don't render the sub-lines verbatim; fold the signal into the narrative.
+Each active plan/activity may carry indented `→ <verb> <id> {status: …}` sub-lines for references whose target is currently inactive (closed or superseded). The sub-line shows the referenced entry's present state only — no timestamp, and no relationship beyond the verb (which is the generic `refs` for older entries). Don't render the sub-lines verbatim.
 
 ## Open and warm
 
