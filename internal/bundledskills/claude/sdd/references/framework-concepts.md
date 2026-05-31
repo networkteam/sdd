@@ -212,6 +212,8 @@ Either path produces "membership" — the entry is in the topic. The graph compu
 - Comparison is case-insensitive on each component; first-seen casing wins for display.
 - Filter via `sdd list --topic <label>` does component-wise prefix match (case-insensitive). `--topic UX` matches `UX`, `UX/CLI`, `UX/CLI/Status` — but does not match `UXTesting` (because matching is component-wise, not raw-string).
 
+**Label stability.** Topic labels are stable identifiers, the same principle as canonical participant names: a label means the same cluster everywhere it appears, so the graph stays coherent only if labels are reused rather than reinvented. Before tagging, check what labels are already in use and reuse one that fits the cluster; create a new label only when no existing one does. Prefer hierarchical paths (`foo/bar`) when a label belongs to a family — `type-system/topics` and `type-system/kinds` cluster together under `type-system` without colliding. This stability is what the capture-time topic procedure in `/sdd` enforces by researching existing labels before proposing one.
+
 **No alias mechanism in v1.** If a topic label needs to evolve, capture a new annotation that re-assigns members under the new label rather than rewriting historical entries.
 
 The annotation kind is general — today it carries topics, but future annotation forms (other typed-edge metadata) can add their own frontmatter fields alongside `topics:` without requiring a new kind.

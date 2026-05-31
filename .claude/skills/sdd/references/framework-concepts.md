@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 14dfc9b867c4b1632367485fc91e1b148203a663ea7783ed6c08ebca7957c4bf
+sdd-content-hash: ee25bac382ac8b97bcbab811d592d6c6ebfe9907f53f25a4bcf6903f95cecda7
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -215,6 +215,8 @@ Either path produces "membership" — the entry is in the topic. The graph compu
 - Components match `[\p{L}\p{N}\-]+` (Unicode letter/digit plus hyphen). Empty components rejected.
 - Comparison is case-insensitive on each component; first-seen casing wins for display.
 - Filter via `sdd list --topic <label>` does component-wise prefix match (case-insensitive). `--topic UX` matches `UX`, `UX/CLI`, `UX/CLI/Status` — but does not match `UXTesting` (because matching is component-wise, not raw-string).
+
+**Label stability.** Topic labels are stable identifiers, the same principle as canonical participant names: a label means the same cluster everywhere it appears, so the graph stays coherent only if labels are reused rather than reinvented. Before tagging, check what labels are already in use and reuse one that fits the cluster; create a new label only when no existing one does. Prefer hierarchical paths (`foo/bar`) when a label belongs to a family — `type-system/topics` and `type-system/kinds` cluster together under `type-system` without colliding. This stability is what the capture-time topic procedure in `/sdd` enforces by researching existing labels before proposing one.
 
 **No alias mechanism in v1.** If a topic label needs to evolve, capture a new annotation that re-assigns members under the new label rather than rewriting historical entries.
 
