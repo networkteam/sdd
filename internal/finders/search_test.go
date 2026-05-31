@@ -165,6 +165,31 @@ func TestSearchFinder_TextModeMultiTermAND(t *testing.T) {
 	}
 }
 
+// TestSearchFinder_SuppressCitations confirms --max-citations 0 keeps the
+// matching entry in the result but strips its citation sub-lines — the
+// "headers only" mode the capture-time topic procedure uses to read topics
+// off matched entries without snippet noise.
+func TestSearchFinder_SuppressCitations(t *testing.T) {
+	t.Parallel()
+	g := buildSearchGraph(t)
+	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+
+	res, err := f.Search(context.Background(), query.SearchQuery{
+		Graph:             g,
+		Terms:             []string{"apple", "harvest"},
+		SuppressCitations: true,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].Entry.ID != "20260101-100002-d-tac-ccc" {
+		t.Fatalf("expected the directive hit, got %d entries", len(res.Entries))
+	}
+	if len(res.Entries[0].Citations) != 0 {
+		t.Errorf("expected citations suppressed, got %d", len(res.Entries[0].Citations))
+	}
+}
+
 func TestSearchFinder_TextModeRegexAlternation(t *testing.T) {
 	t.Parallel()
 	g := buildSearchGraph(t)

@@ -161,15 +161,25 @@ func (f *SearchFinder) textSearch(q query.SearchQuery) (*query.SearchResult, err
 		enriched = enriched[:limit]
 	}
 
+	// Text mode contributes a single best-snippet citation per entry, unless
+	// the caller suppressed citations (--max-citations 0), in which case the
+	// entry surfaces as a header line only. The cap path in selectCitations
+	// (vector/hybrid) already drops to nil for a zero cap; text mode builds
+	// its citation directly, so it honours the cap here.
+	showCitations := q.EffectiveMaxCitations() > 0
 	out := &query.SearchResult{Mode: query.SearchModeText}
 	for _, e := range enriched {
-		out.Entries = append(out.Entries, query.SearchEntry{
-			Entry: e.s.entry,
-			Score: e.adjusted,
-			Citations: []query.Citation{{
+		var citations []query.Citation
+		if showCitations {
+			citations = []query.Citation{{
 				Snippet: e.s.bestSnippet,
 				Score:   e.adjusted,
-			}},
+			}}
+		}
+		out.Entries = append(out.Entries, query.SearchEntry{
+			Entry:     e.s.entry,
+			Score:     e.adjusted,
+			Citations: citations,
 		})
 	}
 	return out, nil

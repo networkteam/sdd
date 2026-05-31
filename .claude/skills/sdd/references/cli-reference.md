@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 8f238d5b816e7a96054a68c93eed6b6849f84232519b8ce4f4f574b6d1d3054c
+sdd-content-hash: dc2b83af6886e493dbe74d24490859324849cc91e8dbfed2d85f361697a990f1
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -10,6 +10,7 @@ sdd-version: dev
 - `sdd status` — overview grouped by decision kind (Aspirations, Contracts, Plans, Activities, Directives), plus Gaps and Questions, Recent Insights, and Recent Done Signals (uses summaries). Header lines match `sdd info` byte-for-byte.
 - `sdd view --layout=<spec>` — composable pipeline of primitives (source, filter, transform, aggregate, rank, page, render) with named macros as sugar. Mechanical catch-up at scale; bare `sdd view` prints help with vocabulary tables. See "`sdd view` pipeline" below.
 - `sdd show <id>` — full entry with upstream summary chain (depth-limited)
+- `sdd show <id> [<id2> ...]` — multiple IDs in one call render their entries back to back (handy for comparing a cluster, e.g. the entries a new one will ref)
 - `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
 - `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
 - `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind <kind>] [--topic <label>]` — filtered listing. `--kind` accepts any signal kind (gap, fact, question, insight, done, actor, annotation) or decision kind (directive, activity, plan, contract, aspiration, role, focus); the two sets are disjoint. `--topic` filters to entries whose effective topic set (inline `topics:` ∪ topics declared by annotations whose refs include the entry) has any label with the given path as a component-wise, case-insensitive prefix. Uses summaries.
@@ -18,7 +19,7 @@ sdd-version: dev
 - `sdd summarize <id> --text "<summary>"` — write a user-supplied summary directly, bypassing the LLM. Use `--text -` to read from stdin. Single entry only; rejected with `--all` or multiple IDs. The hash is recomputed from the current prompt so subsequent automatic regenerations skip-by-hash unless `--force` is passed.
 - `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, stale summaries). When an embedding provider is configured, also reports the search index's fingerprint and drift count.
 - `sdd index` — warm up the per-participant search index at `.sdd/index/` over every entry on disk. Skips entries whose stored hash and embedder fingerprint match the manifest; `--force` re-embeds everything regardless. Required only on a fresh clone or after deliberate full rebuilds — `sdd search` lazy-fills missing/stale entries on demand.
-- `sdd search [--term <regex>...] [--query <phrase>] [--type d|s] [--layer ...] [--kind ...] [--include-superseded] [--limit N]` — three-mode retrieval. `--term` runs text mode (live grep with multi-term AND), `--query` runs vector mode, both flags together run hybrid (RRF fusion). At least one of `--term` / `--query` is required; vector and hybrid require `Search: vector,text` in `sdd status`. See [search reference](search.md) for citation reading and mode selection guidance.
+- `sdd search [--term <regex>...] [--query <phrase>] [--type d|s] [--layer ...] [--kind ...] [--include-superseded] [--limit N] [--max-citations N]` — three-mode retrieval. `--term` runs text mode (live grep with multi-term AND), `--query` runs vector mode, both flags together run hybrid (RRF fusion). At least one of `--term` / `--query` is required; vector and hybrid require `Search: vector,text` in `sdd status`. `--max-citations` caps the snippet sub-lines per entry (default 3); `--max-citations 0` suppresses them entirely, rendering entry headers only — the terse "which entries match, and what topics do they carry" lookup. See [search reference](search.md) for citation reading and mode selection guidance.
 - `sdd wip start <entry-id> --exclusive --participant <name> <description>` — create WIP marker
 - `sdd wip start <entry-id> --branch --exclusive --participant <name> <description>` — create WIP marker, create git branch and check out to it
 - `sdd wip done <marker-id>` — remove WIP marker (deletes branch if merged)
@@ -62,6 +63,8 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `layer(L)` | Entries at layer L (`stg`, `cpt`, `tac`, `ops`, `prc`; full names also accepted) |
 | `since(spec)` | ISO date `YYYY-MM-DD` or duration `Nd|Nw|Nm|Ny`. Quoted string. m/y use calendar arithmetic; d/w use 24h offsets |
 | `topic(L)` | Entries whose effective topic set has L as a component-wise prefix (case-insensitive) |
+| `untagged` | Entries whose effective topic set is empty — the inverse of having any topic. Counts annotation membership, not just inline `topics:`. The grooming/backfill entry point |
+| `id(ID[, ID2, ...])` | Keep only the listed entries (intersects like other filters). Short IDs work bare (`id(d-tac-6tz)`); full IDs start with digits so they must be quoted (`id("20260520-131326-d-tac-6tz")`). Resolves short→full, surfaces ambiguity; an ID that matches nothing drops out silently |
 | `not(<filter>)` | Excludes entries matched by the inner filter. Supported inner: `kind`, `layer`, `topic` |
 
 ### Rank, page, output, transforms
@@ -119,6 +122,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 |---|---|
 | `as-list` | Flat list — one line per entry. Auto-derives header from rank when no `name()` (e.g. "Top by heat (exp-14d)", "Most recent" for by(date)) |
 | `as-grouped` | Grouped result (requires `group(by(<field>))`); one `### <bucket>` per group |
+| `as-counts` | Per-topic aggregate rows over the filtered set: `<count>  <label>  heat <h>`, ordered count-descending then heat. Answers "what topics exist and how many entries each carries" without listing members. Mutually exclusive with `rank`/`n`/`group`/`expand` (it aggregates the whole filtered set; truncating entries first would miscount). Untagged entries contribute to no row |
 | `as-focus-block` | Focus-block result (requires `kind(focus):active:expand(involvement)`); per-focus header + per-target lines tagged `{state: pull-available|stalled|driving}` |
 | `as-participants-block` | Active actor heads + bound active roles (requires `kind(actor):active`); one `### <canonical>` per actor with bound role entries underneath |
 | `as-wip-list` | WIP marker rows (requires `source(wip)`) |
@@ -180,6 +184,17 @@ sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(ref
 # Top-8 active plans/activities by recent heat, each showing only the refs
 # whose target is now inactive (closed, superseded, or a retired role) — the
 # lean catch-up view that flags dependencies no longer live
+
+sdd view --layout='active:as-counts'
+# What topics exist across active entries and how many entries each carries —
+# the capture-time "which clusters are in use" overview.
+
+sdd view --layout='active:untagged:n(20):as-list'
+# Twenty active entries that carry no topic at all — the grooming/backfill worklist.
+
+sdd view --layout='id("20260520-003237-s-cpt-ghy","20260506-191632-d-cpt-ni0"):as-list'
+# The named entries (full IDs quoted), so their effective topics show inline —
+# how the capture procedure reads the topics on entries a new one will ref.
 ```
 
 ## `sdd show` output format

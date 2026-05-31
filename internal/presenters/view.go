@@ -45,6 +45,12 @@ func renderSection(w io.Writer, g *model.Graph, section query.SectionResult) {
 			return
 		}
 		renderAsGrouped(w, g, grouped)
+	case "as-counts":
+		counts, ok := section.Data.(model.Counts)
+		if !ok {
+			return
+		}
+		renderAsCounts(w, counts)
 	case "as-focus-block":
 		block, ok := section.Data.(model.FocusBlock)
 		if !ok {

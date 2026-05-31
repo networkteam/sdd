@@ -30,6 +30,8 @@ type sectionSpec struct {
 	kindFilters [][]model.Kind // each kind() call is a disjunction set; multiple calls intersect (d-tac-uww §2)
 	sinceCutoff *time.Time     // pointer so we can distinguish "no since()" from "since(0d)"
 	topicPrefix model.TopicPath
+	untagged    bool      // untagged: keep only entries whose effective topic set is empty
+	idFilter    []string  // id(<id>,...): keep only the listed entries (raw IDs, resolved at apply time)
 	rank        *rankSpec // last-write-wins per d-tac-uww §2
 	pageN       int       // -1 = no page limit
 	groupField  string    // empty = no group; non-empty = group(by(<field>))
@@ -131,6 +133,14 @@ func (s *sectionSpec) rejectGraphPrimitivesForWip() error {
 // the first finding keeps the error focused.
 func (s *sectionSpec) validateMutualExclusion() error {
 	switch {
+	case s.render == "as-counts" && s.groupField != "":
+		return fmt.Errorf("as-counts is mutually exclusive with group; both aggregate the entry set, in different shapes (per-topic counts vs per-field buckets)")
+	case s.render == "as-counts" && s.expandField != "":
+		return fmt.Errorf("as-counts is mutually exclusive with expand; it produces per-topic count rows, not entry rows")
+	case s.render == "as-counts" && s.rank != nil:
+		return fmt.Errorf("as-counts is mutually exclusive with rank; topic-count rows carry their own ordering (count, then heat)")
+	case s.render == "as-counts" && s.pageN >= 0:
+		return fmt.Errorf("as-counts is mutually exclusive with n; n truncates entries before aggregation, producing wrong counts — narrow the entry set with filters instead")
 	case s.groupField != "" && s.rank != nil:
 		return fmt.Errorf("group is mutually exclusive with rank in slice 5; per-group ranking is reserved for a future slice")
 	case s.groupField != "" && s.pageN >= 0:

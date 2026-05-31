@@ -56,8 +56,16 @@ type SearchQuery struct {
 	// may contribute. Zero means DefaultMaxCitationsPerEntry. Set to 1
 	// for one-citation-per-entry rendering; higher to surface more of
 	// an entry's matching surface (e.g. for explore-mode briefings
-	// where the breadth of why-it-matched is informative).
+	// where the breadth of why-it-matched is informative). To suppress
+	// citations entirely, set SuppressCitations (the field's zero value
+	// already means "default", so it can't also mean "none").
 	MaxCitationsPerEntry int
+
+	// SuppressCitations renders entry header lines only, with no citation
+	// sub-lines. Surfaced as `--max-citations 0` on the CLI: the mechanical
+	// "what entries match, and what topics do they carry" lookup the
+	// capture-time topic procedure uses, where the snippet chunks are noise.
+	SuppressCitations bool
 }
 
 // Mode resolves the SearchQuery's input shape to a SearchMode.
@@ -87,6 +95,9 @@ func (q SearchQuery) EffectiveLimit() int {
 // the default — the CLI surface validates earlier, but we degrade
 // gracefully for programmatic callers.
 func (q SearchQuery) EffectiveMaxCitations() int {
+	if q.SuppressCitations {
+		return 0
+	}
 	if q.MaxCitationsPerEntry > 0 {
 		return q.MaxCitationsPerEntry
 	}
