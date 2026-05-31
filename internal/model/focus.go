@@ -145,6 +145,23 @@ func (g *Graph) EffectiveTopics(e *Entry) []TopicPath {
 	var paths []TopicPath
 	paths = append(paths, e.Topics...)
 
+	// An annotation's own declared labels are its own topics — it is a
+	// member of every topic it assigns. Without this, an annotation that
+	// tags other entries with "catch-up-scaling" would not itself surface
+	// under topic("catch-up-scaling"), an asymmetry that left annotation
+	// entries invisible to topic filters and renders (d-tac-6tz). Members
+	// sub-selections only narrow which *refs* get a label; the annotation
+	// owns every label it declares regardless.
+	if e.IsAnnotation() {
+		for _, t := range e.AnnotationTopics {
+			p, err := ParseTopicPath(t.Label)
+			if err != nil {
+				continue // malformed label ignored here; lint surfaces it
+			}
+			paths = append(paths, p)
+		}
+	}
+
 	for _, refdByID := range g.RefsTo[e.ID] {
 		ann, ok := g.ByID[refdByID]
 		if !ok || !ann.IsAnnotation() {

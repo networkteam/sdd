@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 6f5bc6b3cc3ad2f6ef95af39c6e8f327b2b3e1dc623619014be8a198dfff41b2
+sdd-content-hash: 14dfc9b867c4b1632367485fc91e1b148203a663ea7783ed6c08ebca7957c4bf
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -208,7 +208,7 @@ Topics are hierarchical labels (`/`-joined paths, e.g. `infrastructure/cli`, `ty
 - **Inline `topics:`** in any entry's frontmatter — list of label strings. Zero-ceremony tagging at capture time.
 - **`kind: annotation` signals** — structural metadata entries that point at member entries via `refs:` and declare topic assignments via `topics:`. Each item in an annotation's `topics:` list is either a plain label string (applies to *all* of the annotation's refs) or a mapping `{label, members}` where `members` is a subset of refs.
 
-Either path produces "membership" — the entry is in the topic. The graph computes the **effective topic set** for any entry by merging its inline topics with topics declared by every annotation whose refs (or per-topic members sub-selection) include the entry. Effective topics render as `<label1, label2>` between `{status: ...}` and the summary on entry lines, and via the `Topics:` derived field on `sdd show`.
+Either path produces "membership" — the entry is in the topic. The graph computes the **effective topic set** for any entry by merging its inline topics with topics declared by every annotation whose refs (or per-topic members sub-selection) include the entry. An annotation is itself a member of every label it declares — its own labels join its effective topic set the same way inline `topics:` would, so an annotation surfaces under the topics it assigns (members sub-selections only narrow which *refs* receive a label, never whether the annotation carries it). Effective topics render as `<label1, label2>` between `{status: ...}` and the summary on entry lines, and via the `Topics:` derived field on `sdd show`.
 
 **Path semantics:**
 
