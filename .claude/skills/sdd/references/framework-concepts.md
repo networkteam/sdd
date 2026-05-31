@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: dda57955dd7de2fb0a3046ae55f30682a8bfea44286b8a21f3e5c4c3b20d69b5
+sdd-content-hash: 215fc77b5b6d547a8cfb9d434b9aa31af63e38634f3bf3d987c58bdaa9dda754
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -218,13 +218,15 @@ Topics are hierarchical labels (`/`-joined paths, e.g. `infrastructure/cli`, `ty
 - **Inline `topics:`** in any entry's frontmatter — list of label strings. Zero-ceremony tagging at capture time.
 - **`kind: annotation` signals** — structural metadata entries that point at member entries via `refs:` and declare topic assignments via `topics:`. Each item in an annotation's `topics:` list is either a plain label string (applies to *all* of the annotation's refs) or a mapping `{label, members}` where `members` is a subset of refs.
 
-Either path produces "membership" — the entry is in the topic. The graph computes the **effective topic set** for any entry by merging its inline topics with topics declared by every annotation whose refs (or per-topic members sub-selection) include the entry. Effective topics render as `<label1, label2>` between `{status: ...}` and the summary on entry lines, and via the `Topics:` derived field on `sdd show`.
+Either path produces "membership" — the entry is in the topic. The graph computes the **effective topic set** for any entry by merging its inline topics with topics declared by every annotation whose refs (or per-topic members sub-selection) include the entry. An annotation is itself a member of every label it declares — its own labels join its effective topic set the same way inline `topics:` would, so an annotation surfaces under the topics it assigns (members sub-selections only narrow which *refs* receive a label, never whether the annotation carries it). Effective topics render as `<label1, label2>` between `{status: ...}` and the summary on entry lines, and via the `Topics:` derived field on `sdd show`.
 
 **Path semantics:**
 
 - Components match `[\p{L}\p{N}\-]+` (Unicode letter/digit plus hyphen). Empty components rejected.
 - Comparison is case-insensitive on each component; first-seen casing wins for display.
 - Filter via `sdd list --topic <label>` does component-wise prefix match (case-insensitive). `--topic UX` matches `UX`, `UX/CLI`, `UX/CLI/Status` — but does not match `UXTesting` (because matching is component-wise, not raw-string).
+
+**Label stability.** Topic labels are stable identifiers, the same principle as canonical participant names: a label means the same cluster everywhere it appears, so the graph stays coherent only if labels are reused rather than reinvented. Before tagging, check what labels are already in use and reuse one that fits the cluster; create a new label only when no existing one does. Prefer hierarchical paths (`foo/bar`) when a label belongs to a family — `type-system/topics` and `type-system/kinds` cluster together under `type-system` without colliding. This stability is what the capture-time topic procedure in `/sdd` enforces by researching existing labels before proposing one.
 
 **No alias mechanism in v1.** If a topic label needs to evolve, capture a new annotation that re-assigns members under the new label rather than rewriting historical entries.
 

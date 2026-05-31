@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 760b556012c8abf03255fabafab8a2c548215fcabf6bd026d31a597495145ca3
+sdd-content-hash: e2168a97b8ebbd1c9360d2a7d785db071b2418343572ff9dc816f46be7b16047
 sdd-version: dev
 ---
 
@@ -96,7 +96,7 @@ Sub-skills refine this principle for their specific flows. `/sdd-bootstrap` adds
 
 Never silently create graph entries. When capturing anything:
 
-1. Play back what you'd capture: "I'd record this as a [type] at the [layer] layer: '[content]'. Refs: [entries]. Does that look right?"
+1. Play back what you'd capture: "I'd record this as a [type] at the [layer] layer: '[content]'. Refs: [entries]. Topics: [labels]. Does that look right?" (research the topics first — see "Propose topics during capture" below)
 2. **Fold substantive dialogue into the entry content.** If the conversation leading to capture involved trade-offs, rejected alternatives, or reasoning for the conclusion, include those in the entry description itself. The user confirms the play-back, so misrepresentations get caught. Future readers (and the pre-flight validator) get the *why*, not just the *what*.
 3. **Write a self-describing first sentence.** The opening sentence must work as a standalone summary — `sdd status` truncates descriptions, so "Plan for d-tac-1g4" tells a reader nothing. Lead with what the entry is about: "Improve pre-flight accuracy by flowing dialogue context into entries..."
 4. Assess whether an attachment is needed (see "Attachment assessment" below). If yes, include it in the play-back: "I'd attach a [document type] covering [scope]."
@@ -112,6 +112,16 @@ Never silently create graph entries. When capturing anything:
 Don't reflexively `--skip-preflight` on `medium` findings — they often surface genuine observations worth dialoguing. Only skip when confident the finding is wrong (e.g., the pre-flight argues with rationale that was already dialogued and confirmed — that's over-correction).
 
 When a `high` finding looks legitimate: read it as a prompt. What dialogue reasoning did we fail to include in the entry text? Revise to fold in the missing context, then retry. Don't just tweak wording.
+
+### Propose topics during capture
+
+Before playing back an entry, research what topics are already in use so the new entry joins existing clusters instead of starting drift. Labels are stable identifiers (see [framework-concepts](references/framework-concepts.md) → Topics) — reuse beats reinvention.
+
+1. **What clusters exist** — `sdd view --layout='active:as-counts'`. Lists every topic across active entries with its entry count and heat. Run once per session unless the set changes.
+2. **What connected entries carry** — `sdd view --layout='id("<full-id1>","<full-id2>"):as-list'` for the entries this one refs. Connected entries usually share a cluster, so matching their topics keeps the graph coherent. Full IDs start with digits, so quote them inside `id(...)`; short IDs (`d-tac-6tz`) work bare.
+3. **Only if 1+2 don't surface a clear fit** — `sdd search --query "<short cluster phrase>" --max-citations 0`. Returns semantically similar entries as header lines (topics shown inline, no snippet noise), catching clusters this entry doesn't ref.
+
+Then propose at least one topic in the play-back. Reuse an existing label when one fits; when none does, propose a new label and name the cluster it starts so the user can weigh it. They can adjust or skip. On confirmation, attach the agreed labels with `--topics label1,label2` on `sdd new` (CSV; prefer hierarchical paths like `type-system/topics` for families).
 
 ### Verify the captured summary
 
