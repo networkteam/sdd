@@ -52,20 +52,15 @@ type SearchQuery struct {
 	// DefaultSearchLimit.
 	Limit int
 
-	// MaxCitationsPerEntry caps the number of citations a single entry
-	// may contribute. Zero means DefaultMaxCitationsPerEntry. Set to 1
-	// for one-citation-per-entry rendering; higher to surface more of
-	// an entry's matching surface (e.g. for explore-mode briefings
-	// where the breadth of why-it-matched is informative). To suppress
-	// citations entirely, set SuppressCitations (the field's zero value
-	// already means "default", so it can't also mean "none").
+	// MaxCitationsPerEntry is the literal cap on citations a single entry
+	// may contribute. The value is taken as-is: 0 suppresses citations
+	// entirely (entry headers only — the mechanical "which entries match,
+	// and what topics do they carry" lookup), 1 renders one line per entry,
+	// higher surfaces more of the matching surface. Unlike EffectiveLimit's
+	// zero-means-default rule, zero here means zero — the default is applied
+	// at the CLI boundary via cmd.IsSet, so the struct field carries literal
+	// intent and programmatic callers must set the cap they want.
 	MaxCitationsPerEntry int
-
-	// SuppressCitations renders entry header lines only, with no citation
-	// sub-lines. Surfaced as `--max-citations 0` on the CLI: the mechanical
-	// "what entries match, and what topics do they carry" lookup the
-	// capture-time topic procedure uses, where the snippet chunks are noise.
-	SuppressCitations bool
 }
 
 // Mode resolves the SearchQuery's input shape to a SearchMode.
@@ -90,18 +85,15 @@ func (q SearchQuery) EffectiveLimit() int {
 	return DefaultSearchLimit
 }
 
-// EffectiveMaxCitations returns MaxCitationsPerEntry or
-// DefaultMaxCitationsPerEntry when zero. Negative values fall back to
-// the default — the CLI surface validates earlier, but we degrade
-// gracefully for programmatic callers.
+// EffectiveMaxCitations returns the citation cap, clamping negatives to
+// zero. Unlike EffectiveLimit, zero is NOT treated as "use the default":
+// the field carries literal intent (0 means zero citations), and the
+// default is resolved at the CLI boundary via cmd.IsSet.
 func (q SearchQuery) EffectiveMaxCitations() int {
-	if q.SuppressCitations {
+	if q.MaxCitationsPerEntry < 0 {
 		return 0
 	}
-	if q.MaxCitationsPerEntry > 0 {
-		return q.MaxCitationsPerEntry
-	}
-	return DefaultMaxCitationsPerEntry
+	return q.MaxCitationsPerEntry
 }
 
 // SearchResult carries the top-N entries with citations for rendering.

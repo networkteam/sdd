@@ -144,8 +144,9 @@ func TestSearchFinder_TextModeMultiTermAND(t *testing.T) {
 	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph: g,
-		Terms: []string{"apple", "harvest"},
+		Graph:                g,
+		Terms:                []string{"apple", "harvest"},
+		MaxCitationsPerEntry: query.DefaultMaxCitationsPerEntry,
 	})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
@@ -165,19 +166,19 @@ func TestSearchFinder_TextModeMultiTermAND(t *testing.T) {
 	}
 }
 
-// TestSearchFinder_SuppressCitations confirms --max-citations 0 keeps the
+// TestSearchFinder_ZeroMaxCitations confirms MaxCitationsPerEntry: 0 keeps the
 // matching entry in the result but strips its citation sub-lines — the
-// "headers only" mode the capture-time topic procedure uses to read topics
-// off matched entries without snippet noise.
-func TestSearchFinder_SuppressCitations(t *testing.T) {
+// "headers only" mode (--max-citations 0) the capture-time topic procedure
+// uses to read topics off matched entries without snippet noise.
+func TestSearchFinder_ZeroMaxCitations(t *testing.T) {
 	t.Parallel()
 	g := buildSearchGraph(t)
 	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph:             g,
-		Terms:             []string{"apple", "harvest"},
-		SuppressCitations: true,
+		Graph:                g,
+		Terms:                []string{"apple", "harvest"},
+		MaxCitationsPerEntry: 0, // literal zero — suppress citations
 	})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
@@ -288,8 +289,9 @@ func TestSearchFinder_VectorMode(t *testing.T) {
 	})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph:  g,
-		Phrase: "Need information about apples",
+		Graph:                g,
+		Phrase:               "Need information about apples",
+		MaxCitationsPerEntry: query.DefaultMaxCitationsPerEntry,
 	})
 	if err != nil {
 		t.Fatalf("vector Search: %v", err)
