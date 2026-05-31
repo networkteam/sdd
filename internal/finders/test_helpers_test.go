@@ -76,6 +76,30 @@ func withContent(c string) entryOpt {
 	return func(e *model.Entry) { e.Content = c }
 }
 
+// withTopics sets inline topic labels (any non-annotation kind). Labels are
+// parsed into TopicPaths so tests fail loudly on malformed fixtures.
+func withTopics(labels ...string) entryOpt {
+	return func(e *model.Entry) {
+		for _, l := range labels {
+			p, err := model.ParseTopicPath(l)
+			if err != nil {
+				panic(fmt.Sprintf("bad test topic %q: %v", l, err))
+			}
+			e.Topics = append(e.Topics, p)
+		}
+	}
+}
+
+// withAnnotationTopics sets an annotation's own topic assignments (kind:
+// annotation only). Each label applies to all of the annotation's refs.
+func withAnnotationTopics(labels ...string) entryOpt {
+	return func(e *model.Entry) {
+		for _, l := range labels {
+			e.AnnotationTopics = append(e.AnnotationTopics, model.AnnotationTopic{Label: l})
+		}
+	}
+}
+
 func withAttachments(paths ...string) entryOpt {
 	return func(e *model.Entry) { e.Attachments = paths }
 }

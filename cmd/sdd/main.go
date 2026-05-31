@@ -990,7 +990,11 @@ func gitCommit(message string, filePaths ...string) error {
 		return fmt.Errorf("git add: %s (%w)", out, err)
 	}
 
-	commit := exec.Command("git", "commit", "-m", message)
+	// Scope the commit to exactly the staged paths with an explicit pathspec.
+	// Without `-- <paths>`, `git commit` records the whole index, sweeping any
+	// pre-staged unrelated work into the CLI's own commit.
+	commitArgs := append([]string{"commit", "-m", message, "--"}, filePaths...)
+	commit := exec.Command("git", commitArgs...)
 	if out, err := commit.CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit: %s (%w)", out, err)
 	}
@@ -1856,7 +1860,10 @@ func gitRemoveAndCommit(message string, paths ...string) error {
 			}
 		}
 	}
-	commit := exec.Command("git", "commit", "-m", message)
+	// Scope to the given paths (see gitCommit) so an unrelated staged index
+	// isn't swept into the WIP-marker removal commit.
+	commitArgs := append([]string{"commit", "-m", message, "--"}, paths...)
+	commit := exec.Command("git", commitArgs...)
 	if out, err := commit.CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit: %s (%w)", out, err)
 	}

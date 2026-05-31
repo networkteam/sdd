@@ -184,8 +184,9 @@ func TestE2E_BuildAndVectorSearch(t *testing.T) {
 	g := s.loadGraph(t)
 
 	res, err := s.finder().Search(context.Background(), query.SearchQuery{
-		Graph:  g,
-		Phrase: "looking for apples",
+		Graph:                g,
+		Phrase:               "looking for apples",
+		MaxCitationsPerEntry: query.DefaultMaxCitationsPerEntry,
 	})
 	if err != nil {
 		t.Fatalf("Search: %v", err)

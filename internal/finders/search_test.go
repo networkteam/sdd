@@ -144,8 +144,9 @@ func TestSearchFinder_TextModeMultiTermAND(t *testing.T) {
 	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph: g,
-		Terms: []string{"apple", "harvest"},
+		Graph:                g,
+		Terms:                []string{"apple", "harvest"},
+		MaxCitationsPerEntry: query.DefaultMaxCitationsPerEntry,
 	})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
@@ -162,6 +163,31 @@ func TestSearchFinder_TextModeMultiTermAND(t *testing.T) {
 	}
 	if res.Entries[0].Citation().Snippet == "" {
 		t.Error("expected a non-empty citation snippet")
+	}
+}
+
+// TestSearchFinder_ZeroMaxCitations confirms MaxCitationsPerEntry: 0 keeps the
+// matching entry in the result but strips its citation sub-lines — the
+// "headers only" mode (--max-citations 0) the capture-time topic procedure
+// uses to read topics off matched entries without snippet noise.
+func TestSearchFinder_ZeroMaxCitations(t *testing.T) {
+	t.Parallel()
+	g := buildSearchGraph(t)
+	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+
+	res, err := f.Search(context.Background(), query.SearchQuery{
+		Graph:                g,
+		Terms:                []string{"apple", "harvest"},
+		MaxCitationsPerEntry: 0, // literal zero — suppress citations
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res.Entries) != 1 || res.Entries[0].Entry.ID != "20260101-100002-d-tac-ccc" {
+		t.Fatalf("expected the directive hit, got %d entries", len(res.Entries))
+	}
+	if len(res.Entries[0].Citations) != 0 {
+		t.Errorf("expected citations suppressed, got %d", len(res.Entries[0].Citations))
 	}
 }
 
@@ -263,8 +289,9 @@ func TestSearchFinder_VectorMode(t *testing.T) {
 	})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph:  g,
-		Phrase: "Need information about apples",
+		Graph:                g,
+		Phrase:               "Need information about apples",
+		MaxCitationsPerEntry: query.DefaultMaxCitationsPerEntry,
 	})
 	if err != nil {
 		t.Fatalf("vector Search: %v", err)

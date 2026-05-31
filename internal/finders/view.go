@@ -99,6 +99,7 @@ func layoutHasWipSource(layout model.Layout) bool {
 var renderFunctions = map[string]model.RenderShape{
 	"as-list":               model.ShapeFlatList,
 	"as-grouped":            model.ShapeGrouped,
+	"as-counts":             model.ShapeCounts,
 	"as-focus-block":        model.ShapeFocusBlock,
 	"as-participants-block": model.ShapeParticipantsBlock,
 	"as-wip-list":           model.ShapeWipList,
@@ -106,7 +107,7 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "kind", "layer", "since", "topic", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "kind", "layer", "since", "topic", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
 
 // supportedNotInner lists the inner filter names accepted by `not(<inner>)`
 // in d-tac-e1s's first cut. Pure set-shaped filters with unambiguous
@@ -236,6 +237,29 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	if !spec.excludeTopicPrefix.IsZero() {
 		entries = TopicFilter{Prefix: spec.excludeTopicPrefix}.ExcludeEntries(g, entries)
 	}
+	if spec.untagged {
+		entries = filterUntagged(g, entries)
+	}
+	if len(spec.idFilter) > 0 {
+		filtered, err := filterByIDs(g, entries, spec.idFilter)
+		if err != nil {
+			return query.SectionResult{}, err
+		}
+		entries = filtered
+	}
+
+	// as-counts aggregates the filtered entry set into per-topic rows. It
+	// consumes the entries directly (no rank/page/group/expand — those are
+	// rejected for as-counts in validateMutualExclusion), so it returns here
+	// before the ranking pipeline. now is the injected clock for heat scoring.
+	if spec.render == "as-counts" {
+		return query.SectionResult{
+			Render: spec.render,
+			Name:   spec.sectionName(),
+			Data:   g.TopicCounts(entries, now),
+		}, nil
+	}
+
 	var scores []float64
 	if spec.rank != nil {
 		entries, scores = applyRanking(g, entries, spec.rank, time.Now())
@@ -375,6 +399,22 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 			return fmt.Errorf("topic: %w", err)
 		}
 		spec.topicPrefix = path
+
+	case fn.Name == "untagged":
+		if len(fn.Args) > 0 {
+			return fmt.Errorf("untagged takes no arguments")
+		}
+		spec.untagged = true
+
+	case fn.Name == "id":
+		ids, err := parseIDArgs(fn.Args)
+		if err != nil {
+			return fmt.Errorf("id: %w", err)
+		}
+		// Multiple id() calls accumulate into one selection set — the
+		// realistic use is a single id(a,b,c) call, but repeats union
+		// rather than surprising the user with an empty intersection.
+		spec.idFilter = append(spec.idFilter, ids...)
 
 	case fn.Name == "not":
 		if err := parseNotArgs(spec, fn.Args); err != nil {
@@ -667,6 +707,26 @@ func parseKindArgs(args []model.FunctionArg) ([]model.Kind, error) {
 	return out, nil
 }
 
+// parseIDArgs validates id()'s args and returns the raw ID strings.
+// Identifier and string args are interchangeable so users can write either
+// id(20260520-131326-d-tac-6tz) or id("d-tac-6tz"). Resolution to full IDs
+// (and ambiguity/missing handling) happens at apply time against the graph.
+func parseIDArgs(args []model.FunctionArg) ([]string, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("requires at least one entry ID argument (e.g. id(20260520-131326-d-tac-6tz) or id(d-tac-6tz,d-cpt-ni0))")
+	}
+	out := make([]string, 0, len(args))
+	for i, a := range args {
+		switch a.Kind {
+		case model.ArgKindIdent, model.ArgKindString:
+			out = append(out, a.String)
+		default:
+			return nil, fmt.Errorf("argument %d must be an entry ID identifier or string, got %s", i+1, a.Kind)
+		}
+	}
+	return out, nil
+}
+
 // parseIntegerArg validates a single non-negative integer argument. Used
 // by n(N) and any future paging/numeric primitives where fractional or
 // negative values would be meaningless.
@@ -703,6 +763,44 @@ func filterByKinds(entries []*model.Entry, kinds []model.Kind) []*model.Entry {
 		}
 	}
 	return out
+}
+
+// filterUntagged returns entries whose effective topic set is empty — the
+// inverse of "has any topic". Relies on the same EffectiveTopics merge as the
+// topic() filter, so both inline topics and annotation memberships count as
+// "tagged". Used by the `untagged` primitive to surface entries that escaped
+// topic assignment — the grooming/backfill entry point.
+func filterUntagged(g *model.Graph, entries []*model.Entry) []*model.Entry {
+	var out []*model.Entry
+	for _, e := range entries {
+		if len(g.EffectiveTopics(e)) == 0 {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// filterByIDs resolves the raw id() arguments against the graph (short-form
+// to full-form, surfacing ambiguity) and returns the subset of entries whose
+// ID is in the resolved set. Order follows the input entry set, not the id()
+// argument order — id() is a filter, not a re-sort. An ID that resolves to
+// nothing simply matches no entry.
+func filterByIDs(g *model.Graph, entries []*model.Entry, rawIDs []string) ([]*model.Entry, error) {
+	resolved, err := g.ResolveIDs(rawIDs)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{}, len(resolved))
+	for _, id := range resolved {
+		set[id] = struct{}{}
+	}
+	var out []*model.Entry
+	for _, e := range entries {
+		if _, ok := set[e.ID]; ok {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 // excludeByKinds returns entries whose Kind is NOT in the exclusion set.

@@ -239,8 +239,7 @@ func searchCmd() *cli.Command {
 			},
 			&cli.IntFlag{
 				Name:  "max-citations",
-				Usage: "Maximum citations per entry — 1 for one-line-per-entry, 3 to surface multiple matching chunks per entry",
-				Value: query.DefaultMaxCitationsPerEntry,
+				Usage: "Maximum citations per entry (default 3) — 0 for entry headers only (no snippets), 1 for one-line-per-entry, higher to surface multiple matching chunks",
 			},
 		),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -328,6 +327,14 @@ func searchCmd() *cli.Command {
 				kind = model.Kind(k)
 			}
 
+			// The default is applied here, not in the struct: an unset flag
+			// uses DefaultMaxCitationsPerEntry, while an explicit value —
+			// including --max-citations 0 (headers only) — passes through
+			// literally. cmd.IsSet distinguishes "user gave 0" from "unset".
+			maxCitations := query.DefaultMaxCitationsPerEntry
+			if cmd.IsSet("max-citations") {
+				maxCitations = int(cmd.Int("max-citations"))
+			}
 			res, err := finder.Search(ctx, query.SearchQuery{
 				Graph:                g,
 				Terms:                terms,
@@ -335,7 +342,7 @@ func searchCmd() *cli.Command {
 				Filter:               model.GraphFilter{Type: typ, Layer: layer, Kind: kind},
 				IncludeSuperseded:    cmd.Bool("include-superseded"),
 				Limit:                int(cmd.Int("limit")),
-				MaxCitationsPerEntry: int(cmd.Int("max-citations")),
+				MaxCitationsPerEntry: maxCitations,
 			})
 			if err != nil {
 				return err
