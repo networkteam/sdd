@@ -73,11 +73,11 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `group(by(<field>))` | Bucket entries by field; produces grouped shape (consume with `as-grouped`) |
 | `stalled(<value>)` | Threshold below which a focus target with assigned actors is "stalled" (default 1.0) |
 
-**`expand(refs)` sub-line shape.** Each ref renders as `→ <verb> <full-id> {status: …}` with an optional `: "<desc>"` clause when the ref carries a description. The verb is the per-ref kind (`grounds`, `builds-on`, `refines`, `addresses`, `surfaces`, `evidence`, `depends-on`, `related`); legacy bare-string refs (kind `unknown`) render with the generic verb `refs`. Status surfaces the referenced entry's *current* derived state, so stale summary prose can't mislead a reader into treating a closed dependency as still open. Done-signal targets carry no status segment (they are terminal). Three shapes:
+**`expand(refs)` sub-line shape.** Each ref renders as `→ <verb> <full-id> {status: …}` with an optional `: "<desc>"` clause when the ref carries a description. The verb is the per-ref kind (`grounded-in`, `builds-on`, `refines`, `addresses`, `surfaces`, `depends-on`, `required-by`, `related`); legacy bare-string refs (kind `unknown`) render with the generic verb `refs`, and legacy on-disk `grounds`/`evidence` render as `grounded-in` (resolved at parse). Status surfaces the referenced entry's *current* derived state, so stale summary prose can't mislead a reader into treating a closed dependency as still open. Done-signal targets carry no status segment (they are terminal). Three shapes:
 
 ```
 → refs 20260506-151345-d-tac-uww {status: closed-by 20260507-133746-s-tac-z2o}     # legacy bare-string ref
-→ grounds 20260413-142536-d-cpt-ah1 {status: active}                                # object-form, no desc
+→ grounded-in 20260413-142536-d-cpt-ah1 {status: active}                            # object-form, no desc
 → depends-on 20260423-143213-d-tac-hsu {status: closed-by 20260423-144715-s-tac-2y0}: "wraps the sync infra"  # object-form with desc
 ```
 

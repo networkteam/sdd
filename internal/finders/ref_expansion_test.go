@@ -23,7 +23,7 @@ func refExpansionFixture() (*model.Graph, string) {
 	source := entry("20260101-100000-d-tac-src",
 		withKind(model.KindPlan),
 		withRefObjs(
-			model.Ref{ID: targetActive.ID, Kind: model.RefKindGrounds},
+			model.Ref{ID: targetActive.ID, Kind: model.RefKindGroundedIn},
 			model.Ref{ID: targetClosed.ID, Kind: model.RefKindDependsOn, Desc: "blocked on this"},
 			model.Ref{ID: targetSuperseded.ID, Kind: model.RefKindBuildsOn},
 			model.Ref{ID: "20260101-090300-d-cpt-leg", Kind: model.RefKindUnknown}, // legacy bare-string ref
@@ -78,7 +78,7 @@ func TestView_ExpandRefs_AllRefsWithStatusAndKind(t *testing.T) {
 
 	// Rows render in stored ref order. Verify kind, status, and desc on each.
 	want := []model.RefExpansion{
-		{Kind: model.RefKindGrounds, ID: "20260101-090000-d-cpt-act", Status: model.Status{Kind: model.StatusActive}},
+		{Kind: model.RefKindGroundedIn, ID: "20260101-090000-d-cpt-act", Status: model.Status{Kind: model.StatusActive}},
 		{Kind: model.RefKindDependsOn, ID: "20260101-090100-d-cpt-clo", Status: model.Status{Kind: model.StatusClosedBy, By: "20260101-091000-s-cpt-cls"}, Desc: "blocked on this"},
 		{Kind: model.RefKindBuildsOn, ID: "20260101-090200-d-cpt-sup", Status: model.Status{Kind: model.StatusSupersededBy, By: "20260101-092000-d-cpt-spr"}},
 		{Kind: model.RefKindUnknown, ID: "20260101-090300-d-cpt-leg", Status: model.Status{Kind: model.StatusActive}},
@@ -116,7 +116,7 @@ func TestView_ExpandRefs_InactiveIncludesCascadeClosedRole(t *testing.T) {
 	role := entry("20260101-081000-d-prc-rol", withKind(model.KindRole), withActor("Dana"))
 	source := entry("20260101-100000-d-tac-src",
 		withKind(model.KindPlan),
-		withRefObjs(model.Ref{ID: role.ID, Kind: model.RefKindGrounds}))
+		withRefObjs(model.Ref{ID: role.ID, Kind: model.RefKindGroundedIn}))
 	g := model.NewGraph([]*model.Entry{actorHead, retire, role, source})
 
 	// Sanity: the active filter drops the cascade-closed role.
@@ -154,7 +154,7 @@ func TestView_ExpandRefs_ComposesWithFiltersRankAndPage(t *testing.T) {
 	target := entry("20260101-080000-d-cpt-tgt", withKind(model.KindDirective))
 	planHot := entry("20260101-100000-d-tac-hot",
 		withKind(model.KindPlan),
-		withRefObjs(model.Ref{ID: target.ID, Kind: model.RefKindGrounds}))
+		withRefObjs(model.Ref{ID: target.ID, Kind: model.RefKindGroundedIn}))
 	planCold := entry("20260101-110000-d-tac-cld",
 		withKind(model.KindPlan),
 		withRefObjs(model.Ref{ID: target.ID, Kind: model.RefKindRelated}))

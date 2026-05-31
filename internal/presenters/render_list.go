@@ -37,7 +37,7 @@ func renderAsList(w io.Writer, g *model.Graph, flat model.FlatList) {
 }
 
 // writeRefExpansion renders one expand(refs) sub-line beneath its parent
-// entry. The per-ref kind becomes the verb (grounds, builds-on, addresses,
+// entry. The per-ref kind becomes the verb (grounded-in, builds-on, addresses,
 // …); legacy bare-string refs (kind unknown) render with the generic verb
 // `refs`. The referenced entry's derived status follows, then the optional
 // per-ref desc as a quoted clause. Done-signal targets carry no status (they

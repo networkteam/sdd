@@ -29,14 +29,39 @@ import (
 //go:embed all:claude
 var claudeSkillsFS embed.FS
 
-// Load returns the embedded skill bundle for the given agent target.
+// Load returns the embedded skill bundle for the given agent target, with
+// sdd:include directives resolved (see model.ResolveSkillIncludes). Resolving
+// here means every consumer — install (writeStampedEntry) and drift detection
+// (SkillStatus) — operates on identical resolved content.
 func Load(target model.AgentTarget) (*model.SkillBundle, error) {
 	switch target {
 	case model.AgentClaude:
-		return loadFromFS(claudeSkillsFS, "claude", target)
+		bundle, err := loadFromFS(claudeSkillsFS, "claude", target)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := model.ResolveSkillIncludes(bundle.Entries)
+		if err != nil {
+			return nil, err
+		}
+		bundle.Entries = resolved
+		return bundle, nil
 	default:
 		return nil, fmt.Errorf("unsupported agent target: %s", target)
 	}
+}
+
+// ReadReference returns the body (frontmatter stripped) of a reference file in
+// the embedded Claude skill bundle. Pre-flight uses this to inject the canonical
+// ref-kind vocabulary into its prompt from the same source the skill ships,
+// rather than restating it.
+func ReadReference(skill, relPath string) ([]byte, error) {
+	full := path.Join("claude", skill, relPath)
+	data, err := claudeSkillsFS.ReadFile(full)
+	if err != nil {
+		return nil, fmt.Errorf("reading bundled reference %s: %w", full, err)
+	}
+	return model.SkillFileBody(data), nil
 }
 
 // loadFromFS walks the embedded FS under root and builds a SkillBundle. Each

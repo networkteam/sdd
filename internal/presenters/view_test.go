@@ -293,7 +293,7 @@ func TestRenderView_AsListExpandRefs_SubLineShapes(t *testing.T) {
 				Entries: []*model.Entry{parent},
 				RefExpansions: [][]model.RefExpansion{{
 					{Kind: model.RefKindUnknown, ID: "20260101-090000-d-cpt-leg", Status: model.Status{Kind: model.StatusActive}},
-					{Kind: model.RefKindGrounds, ID: "20260101-090100-d-cpt-grd", Status: model.Status{Kind: model.StatusActive}},
+					{Kind: model.RefKindGroundedIn, ID: "20260101-090100-d-cpt-grd", Status: model.Status{Kind: model.StatusActive}},
 					{Kind: model.RefKindDependsOn, ID: "20260101-090200-d-tac-dep", Status: model.Status{Kind: model.StatusClosedBy, By: "20260101-091000-s-tac-don"}, Desc: "why this ref exists"},
 				}},
 			},
@@ -304,7 +304,7 @@ func TestRenderView_AsListExpandRefs_SubLineShapes(t *testing.T) {
 	want := "" +
 		"  20260101-100000-d-tac-par tactical plan decision (Christopher) {status: active} Parent plan\n" +
 		"    → refs 20260101-090000-d-cpt-leg {status: active}\n" +
-		"    → grounds 20260101-090100-d-cpt-grd {status: active}\n" +
+		"    → grounded-in 20260101-090100-d-cpt-grd {status: active}\n" +
 		"    → depends-on 20260101-090200-d-tac-dep {status: closed-by 20260101-091000-s-tac-don}: \"why this ref exists\"\n"
 
 	if got != want {
@@ -328,7 +328,7 @@ func TestRenderView_AsListExpandRefs_DoneTargetOmitsStatus(t *testing.T) {
 			Data: model.FlatList{
 				Entries: []*model.Entry{parent},
 				RefExpansions: [][]model.RefExpansion{{
-					{Kind: model.RefKindEvidence, ID: "20260101-090000-s-tac-evd", Status: model.Status{Kind: model.StatusNone}},
+					{Kind: model.RefKindGroundedIn, ID: "20260101-090000-s-tac-evd", Status: model.Status{Kind: model.StatusNone}},
 				}},
 			},
 		}},
@@ -337,7 +337,7 @@ func TestRenderView_AsListExpandRefs_DoneTargetOmitsStatus(t *testing.T) {
 	got := renderView(result)
 	want := "" +
 		"  20260101-100000-d-tac-par tactical plan decision (Christopher) {status: active} Parent\n" +
-		"    → evidence 20260101-090000-s-tac-evd\n"
+		"    → grounded-in 20260101-090000-s-tac-evd\n"
 	if got != want {
 		t.Errorf("done-target render mismatch:\n  got:  %q\n  want: %q", got, want)
 	}
@@ -359,7 +359,7 @@ func TestRenderView_AsListExpandRefs_ComposesWithScore(t *testing.T) {
 			Data: model.FlatList{
 				Entries:       []*model.Entry{parent},
 				Scores:        []float64{2.500},
-				RefExpansions: [][]model.RefExpansion{{{Kind: model.RefKindGrounds, ID: "20260101-090000-d-cpt-grd", Status: model.Status{Kind: model.StatusActive}}}},
+				RefExpansions: [][]model.RefExpansion{{{Kind: model.RefKindGroundedIn, ID: "20260101-090000-d-cpt-grd", Status: model.Status{Kind: model.StatusActive}}}},
 			},
 		}},
 	}
@@ -367,7 +367,7 @@ func TestRenderView_AsListExpandRefs_ComposesWithScore(t *testing.T) {
 	got := renderView(result)
 	want := "" +
 		"  20260101-100000-d-tac-par tactical plan decision (Christopher) {status: active} {score: 2.500} Parent\n" +
-		"    → grounds 20260101-090000-d-cpt-grd {status: active}\n"
+		"    → grounded-in 20260101-090000-d-cpt-grd {status: active}\n"
 	if got != want {
 		t.Errorf("scored+expanded render mismatch:\n  got:  %q\n  want: %q", got, want)
 	}

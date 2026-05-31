@@ -277,7 +277,7 @@ func Test_FormatEntryForPrompt_ObjectRefsRenderMultiline(t *testing.T) {
 		Kind:  model.KindDirective,
 		Refs: []model.Ref{
 			{ID: "20260519-100000-s-cpt-aaa", Kind: model.RefKindAddresses, Desc: "responds to the gap"},
-			{ID: "20260518-100000-d-stg-bbb", Kind: model.RefKindGrounds},
+			{ID: "20260518-100000-d-stg-bbb", Kind: model.RefKindGroundedIn},
 		},
 		Content: "Refinement body.",
 	}
@@ -286,7 +286,7 @@ func Test_FormatEntryForPrompt_ObjectRefsRenderMultiline(t *testing.T) {
 	wantLines := []string{
 		"Refs:\n",
 		"  - 20260519-100000-s-cpt-aaa (kind: addresses): responds to the gap\n",
-		"  - 20260518-100000-d-stg-bbb (kind: grounds)\n",
+		"  - 20260518-100000-d-stg-bbb (kind: grounded-in)\n",
 	}
 	for _, line := range wantLines {
 		if !strings.Contains(got, line) {
@@ -409,6 +409,77 @@ func Test_assembleContext_WithRefs(t *testing.T) {
 
 	if !strings.Contains(pctx.ReferencedEntries, "first signal") {
 		t.Error("ReferencedEntries should contain the referenced signal content")
+	}
+}
+
+// Test_assembleContext_RefsCarryDerivedStatus verifies that each referenced
+// entry in the pre-flight context carries its derived status — the signal the
+// ref-meta check needs to tell grounded-in / builds-on / refines apart.
+func Test_assembleContext_RefsCarryDerivedStatus(t *testing.T) {
+	gap := &model.Entry{ID: "20260410-120000-s-cpt-gap", Type: model.TypeSignal, Kind: model.KindGap, Content: "a gap"}
+	done := &model.Entry{ID: "20260410-121000-s-tac-don", Type: model.TypeSignal, Kind: model.KindDone, Closes: []string{gap.ID}, Content: "did it"}
+	active := &model.Entry{ID: "20260410-122000-d-tac-act", Type: model.TypeDecision, Kind: model.KindDirective, Content: "active directive"}
+	graph := model.NewGraph([]*model.Entry{gap, done, active})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Refs:    refsOf(gap.ID, active.ID),
+		Content: "new decision",
+	}
+
+	pctx := assembleContext(proposed, graph, checkDecisionRefs, "")
+
+	if !strings.Contains(pctx.ReferencedEntries, "Derived status: active") {
+		t.Errorf("expected active ref to carry 'Derived status: active'\n%s", pctx.ReferencedEntries)
+	}
+	if !strings.Contains(pctx.ReferencedEntries, "Derived status: closed by "+done.ID) {
+		t.Errorf("expected closed ref to carry 'Derived status: closed by %s'\n%s", done.ID, pctx.ReferencedEntries)
+	}
+}
+
+func Test_derivedStatusForPrompt(t *testing.T) {
+	cases := []struct {
+		status model.Status
+		want   string
+	}{
+		{model.Status{Kind: model.StatusActive}, "active"},
+		{model.Status{Kind: model.StatusOpen}, "open"},
+		{model.Status{Kind: model.StatusClosedBy, By: "20260101-000000-s-tac-xyz"}, "closed by 20260101-000000-s-tac-xyz"},
+		{model.Status{Kind: model.StatusSupersededBy, By: "20260101-000000-d-tac-abc"}, "superseded by 20260101-000000-d-tac-abc"},
+		{model.Status{Kind: model.StatusNone}, "terminal (done signal — no lifecycle status)"},
+		{model.Status{Kind: model.StatusCascadeClosedBy, By: "20260101-000000-s-prc-act"}, "role retired (bound actor chain closed by 20260101-000000-s-prc-act)"},
+		{model.Status{Kind: model.StatusCascadeOrphan}, "orphan role (no matching actor chain)"},
+	}
+	for _, c := range cases {
+		if got := derivedStatusForPrompt(c.status); got != c.want {
+			t.Errorf("derivedStatusForPrompt(%+v) = %q, want %q", c.status, got, c.want)
+		}
+	}
+}
+
+// Test_RenderSummaryPrompt_OmitsDerivedStatus guards AC 5: status threading is
+// pre-flight only. The summary prompt must NOT carry derived-status lines, so
+// adding the status to the pre-flight context never drifts summary-prompt
+// hashes (which would force graph-wide re-summarization).
+func Test_RenderSummaryPrompt_OmitsDerivedStatus(t *testing.T) {
+	sig := entry("20260410-120000-s-cpt-aaa", withContent("first signal"))
+	dec := &model.Entry{
+		ID:      "20260410-130000-d-tac-bbb",
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindDirective,
+		Refs:    refsOf(sig.ID),
+		Content: "decision content",
+	}
+	graph := model.NewGraph([]*model.Entry{sig, dec})
+
+	req, err := RenderSummaryPrompt(dec, graph)
+	if err != nil {
+		t.Fatalf("RenderSummaryPrompt: %v", err)
+	}
+	if strings.Contains(req.Combined(), "Derived status:") {
+		t.Errorf("summary prompt must not include derived status (pre-flight only)\n%s", req.Combined())
 	}
 }
 

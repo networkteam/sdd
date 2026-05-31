@@ -574,7 +574,7 @@ func TestPreflightEval_RefMeta_DescContradicts_High(t *testing.T) {
 		Layer: model.LayerProcess,
 		Kind:  model.KindDirective,
 		Refs: []model.Ref{
-			{ID: contract.ID, Kind: model.RefKindGrounds, Desc: "extends the immutability contract"},
+			{ID: contract.ID, Kind: model.RefKindGroundedIn, Desc: "extends the immutability contract"},
 		},
 		Content: "This directive retires the immutability contract d-prc-iom. We will allow in-place edits to entry bodies when the change is purely editorial (typo, link repair) and recorded in a `revision_history` field on the entry. The original immutability framing was correct at the time but proved too rigid for low-stakes edits that don't change semantic content.",
 		Time:    time.Date(2026, 5, 19, 22, 0, 0, 0, time.UTC),
@@ -609,9 +609,9 @@ func TestPreflightEval_RefMeta_WrongKind_High(t *testing.T) {
 		Kind:  model.KindPlan,
 		Refs: []model.Ref{
 			// Wrong kind: gap signals are addressed, not grounded against.
-			// `grounds` is for anchoring to standing structure (contracts,
-			// aspirations, standing directives).
-			{ID: gap.ID, Kind: model.RefKindGrounds},
+			// `grounded-in` is for a basis the source rests on (contract,
+			// aspiration, fact, prior decision) — not a gap the entry acts on.
+			{ID: gap.ID, Kind: model.RefKindGroundedIn},
 		},
 		Content: `Plan an ` + "`expand(refs)`" + ` render modifier for ` + "`sdd view`" + ` list outputs that displays each entry's outgoing references as indented sub-lines carrying derived status and semantic relationship kind. This addresses the temporal-blur gap (s-cpt-blur) where readers miss state changes in referenced entries.
 
@@ -632,48 +632,48 @@ func TestPreflightEval_RefMeta_WrongKind_High(t *testing.T) {
 }
 
 // TestPreflightEval_RefMeta_TopicalDrift_NotHigh exercises the softer
-// divergence band: desc emphasizes an aspect the body never mentions, while
-// the body still genuinely grounds in the referenced entry. No affirmative
-// refutation, so the rubric must not fire a `high` ref-metadata finding.
-// Whether the validator surfaces a low/medium observation or judges the
-// drift acceptable is left to its judgment — both are valid calibration
-// outcomes for the softer band.
+// divergence band: the desc emphasizes a narrower facet than the body argues
+// through, while the KIND is genuinely correct. No affirmative refutation and
+// no wrong kind, so the rubric must not fire a `high` ref-metadata finding;
+// a low "a sharper desc would help" observation is an acceptable outcome.
+//
+// The target is a `fact` so `grounded-in` is unambiguously correct — a fact is
+// a basis you reason from, never something you "realize" (the prior version of
+// this scenario grounded-in an aspiration the body *operationalized*, which the
+// principle vocabulary correctly reclassifies as `addresses`, confounding the
+// topical-drift band this case is meant to probe).
 func TestPreflightEval_RefMeta_TopicalDrift_NotHigh(t *testing.T) {
-	aspiration := &model.Entry{
-		ID:      "20260422-122136-d-stg-beb",
-		Type:    model.TypeDecision,
-		Kind:    model.KindAspiration,
-		Layer:   model.LayerStrategic,
-		Content: "Decisions emerge from multi-party engagement. All tooling serves dialogue rather than replacing reasoning. Reasoning-first is a consequence of dialogue shaping decisions, not a separate aspiration.",
-		Time:    time.Date(2026, 4, 22, 12, 21, 36, 0, time.UTC),
+	fact := &model.Entry{
+		ID:      "20260520-090000-s-prc-noise",
+		Type:    model.TypeSignal,
+		Kind:    model.KindFact,
+		Layer:   model.LayerProcess,
+		Content: "Across 12 sampled `related` refs, ~5 were correct siblings and ~7 were defensible-but-underspecified; zero were body contradictions. Medium-severity ref-kind findings caught no real errors in the sample.",
+		Time:    time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC),
 	}
-	graph := model.NewGraph([]*model.Entry{aspiration})
+	graph := model.NewGraph([]*model.Entry{fact})
 
 	proposed := &model.Entry{
 		Type:  model.TypeDecision,
-		Layer: model.LayerConceptual,
+		Layer: model.LayerProcess,
 		Kind:  model.KindDirective,
 		Refs: []model.Ref{
-			// Desc names "dialogue-first" — accurate at the aspiration level.
-			// The body grounds in the aspiration but frames the connection
-			// through "multi-author review" rather than naming dialogue-first.
-			// Topical drift (same axis, different focal length), not
-			// contradiction.
-			{ID: aspiration.ID, Kind: model.RefKindGrounds, Desc: "anchors to dialogue-first principle"},
+			// Correct kind: the directive reasons from the fact as its basis.
+			// The desc names "the zero-error finding" while the body argues
+			// through the broader "signal-to-noise" framing — topical drift
+			// (same fact, different focal length), not a wrong kind.
+			{ID: fact.ID, Kind: model.RefKindGroundedIn, Desc: "rests on the zero-error finding for medium ref-kind checks"},
 		},
-		Content: "Architecture-changing decisions in the SDD codebase must carry at least two distinct participants in `participants:` before the closing done signal lands. Per d-stg-beb (the aspiration the SDD project pulls toward), reasoning that shapes the framework should not emerge from a single author in isolation — multi-author review is the operational form that aspiration takes for non-trivial decisions. This applies to plan and directive decisions at the strategic and conceptual layers; tactical execution work is exempt because its decisions are typically scoped to a single workstream and reviewed at closing time against the parent plan.",
-		Time:    time.Date(2026, 5, 19, 22, 10, 0, 0, time.UTC),
+		Content: "Demote pre-flight's medium-severity ref-kind band to low for defensible-but-sharper choices. The measured signal-to-noise (s-prc-noise) is poor: the medium band costs read-and-respond cycles without catching genuine errors, so a defensible choice should not read as a blocking-adjacent finding. High stays for true contradictions; low carries the 'a sharper kind exists' nudge.",
+		Time:    time.Date(2026, 5, 20, 21, 0, 0, 0, time.UTC),
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	// Direct contradiction is high; topical drift sits below the
-	// contradiction threshold. The validator must NOT block on metadata
-	// alone here.
+	// A correct kind with mild desc drift sits below the contradiction
+	// threshold — the validator must not block on metadata here.
 	if hasFindingAtSeverity(result.Findings, SeverityHigh, mentionsRefMetaPredicate) {
-		t.Errorf("Expected no high ref-metadata finding for topical drift (no affirmative refutation), got: %+v\nRaw output:\n%s", result.Findings, raw)
+		t.Errorf("Expected no high ref-metadata finding for topical desc drift with a correct kind, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
-		// Whether a low/medium ref-meta finding fires is left to the
-		// validator's judgment; log either way for visibility.
 		t.Logf("Topical-drift case did not produce a high ref-metadata finding. Findings: %+v", result.Findings)
 	}
 }
@@ -682,4 +682,126 @@ func TestPreflightEval_RefMeta_TopicalDrift_NotHigh(t *testing.T) {
 // with hasFindingAtSeverity.
 func mentionsRefMetaPredicate(f Finding) bool {
 	return mentionsRefMeta([]Finding{f})
+}
+
+// The scenarios below pin the principle-based ref-kind calibration. Correct or
+// defensible choices must produce NO ref-meta finding (not a spurious medium —
+// the noise d-prc-2is and this plan target); a genuine wrong kind must be high.
+// Each maps to a row of the scenario→kind table or a known-debatable case.
+
+// Generalized `addresses`: a plan that operationalizes an active directive.
+// Under the principle vocabulary this is correct — addresses covers realizing a
+// decision's commitment, not only responding to a signal. This is the exact
+// shape that tripped a debatable medium on d-tac-6d4's own capture.
+func TestPreflightEval_RefMeta_AddressesRealizesDecision_NoFinding(t *testing.T) {
+	directive := &model.Entry{
+		ID: "20260531-160017-d-cpt-voc", Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerConceptual,
+		Content: "Redefine the ref-kind vocabulary by principle: rename, merge, and add kinds so each names why a pointer exists. Implementing the rename across CLI, skill, and rubric is the follow-up.",
+		Time:    time.Date(2026, 5, 31, 16, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{directive})
+	proposed := planWithACs("20260531-170000-d-tac-imp",
+		"Implement the principle-based ref-kind vocabulary from d-cpt-voc across model, pre-flight, and skill surfaces — the work that decision commits to.",
+		"The capturable set is the eight principle-based kinds",
+		"Legacy values resolve at parse with no history rewrite",
+	)
+	proposed.Refs = []model.Ref{{ID: directive.ID, Kind: model.RefKindAddresses, Desc: "implements the vocabulary redefinition this decision commits to"}}
+
+	result, raw := runEval(t, graph, proposed)
+	if mentionsRefMeta(result.Findings) {
+		t.Errorf("Expected NO ref-meta finding — addresses realizing a decision's commitment is correct under the generalized kind. Got: %+v\nRaw:\n%s", result.Findings, raw)
+	}
+}
+
+// Augmenting pattern: a directive that `refines` an active plan, sharpening its
+// approach in place. Correct (active target, in-place) — this is the shape that
+// tripped a debatable medium on d-tac-kxt's capture.
+func TestPreflightEval_RefMeta_RefinesActivePlan_NoFinding(t *testing.T) {
+	plan := planWithACs("20260531-164326-d-tac-pln",
+		"Implement the ref-kind vocabulary redefinition across model, pre-flight, and skill.",
+		"The vocabulary is the eight principle-based kinds",
+		"The skill and rubric define the vocabulary",
+	)
+	graph := model.NewGraph([]*model.Entry{plan})
+	proposed := &model.Entry{
+		Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective,
+		Refs:    []model.Ref{{ID: plan.ID, Kind: model.RefKindRefines, Desc: "single-sources the vocabulary instead of restating it across surfaces"}},
+		Content: "Single-source the ref-kind vocabulary rather than restating it in each surface, sharpening d-tac-pln's skill and rubric work. The eight kinds live in one canonical fragment that the skill install inlines and pre-flight injects, so the definitions exist once. The plan stays active; this directive closes alongside it.",
+		Time:    time.Date(2026, 5, 31, 18, 0, 0, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if mentionsRefMeta(result.Findings) {
+		t.Errorf("Expected NO ref-meta finding — refines on an active plan is the augmenting pattern. Got: %+v\nRaw:\n%s", result.Findings, raw)
+	}
+}
+
+// Status-sensitive wrong kind: the target is ACTIVE and the body sharpens its
+// commitments in place — that is `refines`, not `builds-on`. The validator must
+// use the target's Derived status (now threaded into the prompt) to catch this.
+func TestPreflightEval_RefMeta_BuildsOnActiveSharpened_High(t *testing.T) {
+	plan := planWithACs("20260531-164326-d-tac-pln",
+		"Implement the ref-kind vocabulary redefinition across model, pre-flight, and skill.",
+		"The vocabulary is the eight principle-based kinds",
+	)
+	graph := model.NewGraph([]*model.Entry{plan})
+	proposed := &model.Entry{
+		Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective,
+		Refs:    []model.Ref{{ID: plan.ID, Kind: model.RefKindBuildsOn, Desc: "narrows the plan's skill AC to a single canonical source"}},
+		Content: "Narrow d-tac-pln's skill acceptance criterion: the vocabulary must be single-sourced from one canonical fragment rather than restated per surface. This sharpens the plan's commitment in place — the plan stays active and this directive closes alongside it.",
+		Time:    time.Date(2026, 5, 31, 18, 0, 0, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if !hasFindingAtSeverity(result.Findings, SeverityHigh, mentionsRefMetaPredicate) {
+		t.Errorf("Expected a high finding — builds-on on an active target sharpened in place should be refines. Got: %+v\nRaw:\n%s", result.Findings, raw)
+	}
+}
+
+// `builds-on` is correct when the target is CLOSED and the new entry is the next
+// step after a finished line of work.
+func TestPreflightEval_RefMeta_BuildsOnClosedTarget_NoFinding(t *testing.T) {
+	oldPlan := planWithACs("20260501-100000-d-tac-old",
+		"Original ref-metadata plan: add per-ref kinds to the graph.",
+		"Refs carry a kind",
+	)
+	done := &model.Entry{
+		ID: "20260510-100000-s-tac-don", Type: model.TypeSignal, Kind: model.KindDone,
+		Closes: []string{oldPlan.ID}, Content: "Shipped per-ref kinds across the graph.",
+		Time:   time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{oldPlan, done})
+	proposed := planWithACs("20260531-170000-d-tac-new",
+		"Extend the now-shipped per-ref kind work (d-tac-old, closed) with label-aware heat weighting — the next step after that finished chain.",
+		"Heat weighting multiplies each ref by a per-kind weight",
+	)
+	proposed.Refs = []model.Ref{{ID: oldPlan.ID, Kind: model.RefKindBuildsOn, Desc: "extends the shipped per-ref kind work"}}
+
+	result, raw := runEval(t, graph, proposed)
+	if mentionsRefMeta(result.Findings) {
+		t.Errorf("Expected NO ref-meta finding — builds-on a closed target is correct. Got: %+v\nRaw:\n%s", result.Findings, raw)
+	}
+}
+
+// `related` is correct as the floor: a genuine sibling the entry accounts for
+// but does not act on, ground in, or depend on. Must not fire (the floor is not
+// an error when no sharper kind fits).
+func TestPreflightEval_RefMeta_RelatedFloor_NoFinding(t *testing.T) {
+	sibling := &model.Entry{
+		ID: "20260520-150000-d-tac-sib", Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical,
+		Content: "Heat-weighting directive: weight refs by kind in sdd view ranking.",
+		Time:    time.Date(2026, 5, 20, 15, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{sibling})
+	proposed := &model.Entry{
+		Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective,
+		Refs:    []model.Ref{{ID: sibling.ID, Kind: model.RefKindRelated, Desc: "parallel ref-metadata sibling, runs independently"}},
+		Content: "Add a refs-of() filter to sdd view for drill expansion. This runs in parallel with the heat-weighting work (d-tac-sib) — a sibling in the same ref-metadata cluster, but neither depends on nor realizes the other.",
+		Time:    time.Date(2026, 5, 31, 18, 0, 0, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if mentionsRefMeta(result.Findings) {
+		t.Errorf("Expected NO ref-meta finding — related is the correct floor for a genuine sibling. Got: %+v\nRaw:\n%s", result.Findings, raw)
+	}
 }

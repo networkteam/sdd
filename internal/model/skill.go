@@ -311,6 +311,83 @@ func RenderSkillFile(entry SkillBundleEntry, version, contentHash string) ([]byt
 	return buf.Bytes(), nil
 }
 
+// Skill include directive. A line of the form
+//
+//	<!-- sdd:include references/ref-kinds.md -->
+//
+// is replaced at bundle-load time with the body of the referenced file in the
+// same skill. This lets one canonical fragment be reused across skill files
+// without restating it. Resolution runs once at load (see ResolveSkillIncludes)
+// so drift detection (ComputeSkillStatus) and the install writer
+// (writeStampedEntry) both operate on identical resolved content.
+const (
+	skillIncludePrefix = "<!-- sdd:include "
+	skillIncludeSuffix = " -->"
+)
+
+// SkillFileBody returns the body of a skill file (frontmatter stripped). Bundle
+// sources carry no install stamps, so this is usually the whole content; the
+// strip keeps it correct if a fragment ever grows frontmatter.
+func SkillFileBody(content []byte) []byte {
+	_, body := splitFrontmatter(content)
+	return body
+}
+
+// ResolveSkillIncludes replaces sdd:include directives in each entry with the
+// body of the referenced file in the same skill. It runs once at bundle load so
+// every downstream consumer sees identical resolved content. Resolution is
+// single-pass: an included fragment is not itself rescanned for includes. A
+// directive whose target is absent from the bundle is an error.
+func ResolveSkillIncludes(entries []SkillBundleEntry) ([]SkillBundleEntry, error) {
+	bodies := make(map[string][]byte, len(entries))
+	for _, e := range entries {
+		bodies[e.Skill+"/"+e.RelPath] = SkillFileBody(e.Content)
+	}
+
+	out := make([]SkillBundleEntry, len(entries))
+	for i, e := range entries {
+		if !bytes.Contains(e.Content, []byte(skillIncludePrefix)) {
+			out[i] = e
+			continue
+		}
+		lines := strings.Split(string(e.Content), "\n")
+		var b strings.Builder
+		for j, line := range lines {
+			if j > 0 {
+				b.WriteByte('\n')
+			}
+			target, ok := parseSkillInclude(line)
+			if !ok {
+				b.WriteString(line)
+				continue
+			}
+			body, found := bodies[e.Skill+"/"+target]
+			if !found {
+				return nil, fmt.Errorf("skill %s/%s: include target %q not found in bundle", e.Skill, e.RelPath, target)
+			}
+			b.Write(bytes.TrimRight(body, "\n"))
+		}
+		resolved := e
+		resolved.Content = []byte(b.String())
+		out[i] = resolved
+	}
+	return out, nil
+}
+
+// parseSkillInclude returns the include target path when line is an sdd:include
+// directive (surrounding whitespace ignored), else ok=false.
+func parseSkillInclude(line string) (string, bool) {
+	t := strings.TrimSpace(line)
+	if !strings.HasPrefix(t, skillIncludePrefix) || !strings.HasSuffix(t, skillIncludeSuffix) {
+		return "", false
+	}
+	inner := strings.TrimSpace(t[len(skillIncludePrefix) : len(t)-len(skillIncludeSuffix)])
+	if inner == "" {
+		return "", false
+	}
+	return inner, true
+}
+
 // SkillInstallDir returns the absolute directory where skills install for a
 // given agent target and scope.
 //

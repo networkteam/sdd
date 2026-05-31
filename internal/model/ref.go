@@ -7,34 +7,59 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RefKind classifies the semantic relationship a reference describes.
-// The closed vocabulary is enforced at capture (pre-flight uses
-// IsCapturableRefKind); legacy entries with bare-string refs parse as
-// RefKindUnknown for traversal compatibility but cannot be authored anew.
+// RefKind classifies the semantic relationship a reference describes — why the
+// contextual pointer exists, chosen from what the entry body asserts. The
+// closed vocabulary is defined by principle (the relationship and its
+// direction), not by which target types a kind is allowed on. It is enforced at
+// capture (pre-flight uses IsCapturableRefKind). Legacy entries with bare-string
+// refs parse as RefKindUnknown for traversal compatibility but cannot be
+// authored anew; legacy alias kinds (grounds, evidence) resolve to their
+// canonical replacement at parse time (see refKindAliases).
 type RefKind string
 
 const (
-	RefKindGrounds   RefKind = "grounds"    // anchors to standing structure
-	RefKindBuildsOn  RefKind = "builds-on"  // extends prior lineage (forward continuation)
-	RefKindRefines   RefKind = "refines"    // sharpens, narrows, or clarifies an active target in place — the augmenting-directive pattern (d-prc-9ti)
-	RefKindAddresses RefKind = "addresses"  // responds to a gap, question, or signal
-	RefKindSurfaces  RefKind = "surfaces"   // created or discovered the referenced entry during this work
-	RefKindEvidence  RefKind = "evidence"   // empirical observation supporting the claim
-	RefKindDependsOn RefKind = "depends-on" // functional prerequisite
-	RefKindRelated   RefKind = "related"    // parallel sibling, no other axis fits
-	RefKindUnknown   RefKind = "unknown"    // legacy bare-string fallback — read-only, not authored
+	RefKindGroundedIn RefKind = "grounded-in" // founded on / reasons from the target — basis, premise, or empirical proof (absorbs legacy evidence)
+	RefKindBuildsOn   RefKind = "builds-on"   // continues / extends a closed prior line of work
+	RefKindRefines    RefKind = "refines"     // sharpens, narrows, or clarifies an active target in place — the augmenting-directive pattern (d-prc-9ti)
+	RefKindAddresses  RefKind = "addresses"   // acts on / realizes the target — responds to a signal or fulfils a decision's commitment
+	RefKindSurfaces   RefKind = "surfaces"    // forward class: created or discovered the target during this work
+	RefKindDependsOn  RefKind = "depends-on"  // functional prerequisite — source needs target first
+	RefKindRequiredBy RefKind = "required-by" // forward class: inverse of depends-on — target needs source first
+	RefKindRelated    RefKind = "related"     // parallel sibling / contextual neighbor — the floor, never a default
+
+	// Legacy alias kinds — never authored anew. Resolved to their canonical
+	// kind at parse time (refKindAliases) so nothing above the parser sees them,
+	// and absent from the capturable set so new captures are rejected. On-disk
+	// entries keep their original value; history is never rewritten.
+	RefKindGrounds  RefKind = "grounds"  // → grounded-in (renamed)
+	RefKindEvidence RefKind = "evidence" // → grounded-in (merged; empirical hardness reads from the target's kind)
+
+	RefKindUnknown RefKind = "unknown" // legacy bare-string fallback — read-only, not authored
 )
 
+// refKinds is the set of kind values valid in memory after parsing. Legacy
+// alias kinds (grounds, evidence) are absent — UnmarshalYAML resolves them to
+// their canonical kind before this set is consulted.
 var refKinds = map[RefKind]bool{
-	RefKindGrounds:   true,
-	RefKindBuildsOn:  true,
-	RefKindRefines:   true,
-	RefKindAddresses: true,
-	RefKindSurfaces:  true,
-	RefKindEvidence:  true,
-	RefKindDependsOn: true,
-	RefKindRelated:   true,
-	RefKindUnknown:   true,
+	RefKindGroundedIn: true,
+	RefKindBuildsOn:   true,
+	RefKindRefines:    true,
+	RefKindAddresses:  true,
+	RefKindSurfaces:   true,
+	RefKindDependsOn:  true,
+	RefKindRequiredBy: true,
+	RefKindRelated:    true,
+	RefKindUnknown:    true,
+}
+
+// refKindAliases maps a legacy on-disk kind value to its canonical replacement,
+// applied at parse time. grounds was renamed to grounded-in; evidence was
+// merged into grounded-in (empirical hardness is read from the target's kind,
+// not encoded as a separate ref kind). The alias keys are not capturable, so
+// new captures using them are rejected; only entries already on disk carry them.
+var refKindAliases = map[RefKind]RefKind{
+	RefKindGrounds:  RefKindGroundedIn,
+	RefKindEvidence: RefKindGroundedIn,
 }
 
 // IsValidRefKind reports whether k is one of the closed-set kind values,
@@ -56,13 +81,13 @@ func IsCapturableRefKind(k RefKind) bool {
 // Used to render the closed set in error messages and documentation.
 func RefKindValues() []RefKind {
 	return []RefKind{
-		RefKindGrounds,
+		RefKindGroundedIn,
 		RefKindBuildsOn,
 		RefKindRefines,
 		RefKindAddresses,
 		RefKindSurfaces,
-		RefKindEvidence,
 		RefKindDependsOn,
+		RefKindRequiredBy,
 		RefKindRelated,
 	}
 }
@@ -106,6 +131,9 @@ func (r *Ref) UnmarshalYAML(node *yaml.Node) error {
 			return fmt.Errorf("ref object %q: missing required `kind`", raw.ID)
 		}
 		k := RefKind(raw.Kind)
+		if canon, ok := refKindAliases[k]; ok {
+			k = canon // legacy grounds/evidence → grounded-in; nothing above the parser sees the old value
+		}
 		if !IsValidRefKind(k) {
 			return fmt.Errorf("ref object %q: invalid kind %q (expected one of: %s)", raw.ID, raw.Kind, refKindList())
 		}

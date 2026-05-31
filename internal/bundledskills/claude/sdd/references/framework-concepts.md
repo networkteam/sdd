@@ -106,22 +106,9 @@ Three fields with distinct semantics:
 
 **Open signal** = not superseded, not closed. **Active decision** = not superseded, not closed.
 
-### Ref kinds
+Every ref on a new entry carries a kind from the closed vocabulary below. Pre-flight rejects missing or invalid kinds at high severity; an LLM advisory check flags mismatches between kind/desc and the entry body. The vocabulary is defined once in [ref-kinds.md](ref-kinds.md) and reused verbatim by the pre-flight rubric:
 
-Every ref on a new entry must carry a kind from this closed vocabulary. Pre-flight rejects missing or invalid kinds at high severity; an LLM advisory check flags mismatches between kind/desc and the entry body.
-
-| Kind | When to use |
-|---|---|
-| `grounds` | Anchors to standing structure — a contract, aspiration, or active standing directive that the entry leans on |
-| `builds-on` | Extends prior lineage — the target is **closed**, or the new entry is the next step in time *after* it rather than refining in place |
-| `refines` | Sharpens, narrows, or clarifies an **active** target's commitments **in place** — the augmenting-directive pattern. Target stays active; lifecycle is split (the refining entry closes alongside the target via the target's done signal) |
-| `addresses` | Responds to a gap, question, or insight signal — the entry's purpose is to act on it |
-| `surfaces` | Created or discovered the referenced gap during this work — used when capture surfaces both the signal and the decision in one pass |
-| `evidence` | Empirical observation supporting the claim — a fact or done signal whose data the entry cites |
-| `depends-on` | Functional prerequisite — the referenced entry must land before this one is meaningful |
-| `related` | Parallel sibling, no other axis fits — neighborly context that doesn't ground, build on, address, or depend |
-
-**`refines` vs `builds-on`.** Both name a forward relationship to a prior entry; the test is *is the target still active, and does the new entry sharpen its commitments in place, or does it continue the chain in time?* Active + in-place refinement → `refines`. Closed (or next-step continuation) → `builds-on`. The augmenting-directive pattern always uses `refines`.
+<!-- sdd:include references/ref-kinds.md -->
 
 ## Retirement primitives
 

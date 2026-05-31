@@ -208,7 +208,7 @@ func TestParseAttachFlags_MultipleAttachments(t *testing.T) {
 
 func TestParseRefFlags_ObjectForm(t *testing.T) {
 	specs := []string{
-		`{"id":"20260101-000000-s-cpt-aaa","kind":"grounds"}`,
+		`{"id":"20260101-000000-s-cpt-aaa","kind":"grounded-in"}`,
 		`{"id":"20260102-000000-s-cpt-bbb","kind":"addresses","desc":"resolves the gap"}`,
 	}
 	got, err := parseRefFlags(specs)
@@ -218,13 +218,25 @@ func TestParseRefFlags_ObjectForm(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2", len(got))
 	}
-	want0 := model.Ref{ID: "20260101-000000-s-cpt-aaa", Kind: model.RefKindGrounds}
+	want0 := model.Ref{ID: "20260101-000000-s-cpt-aaa", Kind: model.RefKindGroundedIn}
 	if got[0] != want0 {
 		t.Errorf("got[0] = %+v, want %+v", got[0], want0)
 	}
 	want1 := model.Ref{ID: "20260102-000000-s-cpt-bbb", Kind: model.RefKindAddresses, Desc: "resolves the gap"}
 	if got[1] != want1 {
 		t.Errorf("got[1] = %+v, want %+v", got[1], want1)
+	}
+}
+
+func TestParseRefFlags_LegacyKindRejected(t *testing.T) {
+	// AC 1: grounds and evidence are not capturable — the read-layer alias maps
+	// them on disk, but a new capture must use grounded-in. Reject with the
+	// closed-set guidance.
+	for _, kind := range []string{"grounds", "evidence"} {
+		spec := `{"id":"20260101-000000-s-cpt-aaa","kind":"` + kind + `"}`
+		if _, err := parseRefFlags([]string{spec}); err == nil {
+			t.Errorf("parseRefFlags(kind=%q): want rejection (legacy kind not capturable)", kind)
+		}
 	}
 }
 

@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
+	"github.com/networkteam/sdd/internal/bundledskills"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -175,6 +177,11 @@ type preflightContext struct {
 	ActiveAspirations  string
 	OpenSignals        string
 	ConfiguredLanguage string
+	// RefKindVocabulary is the canonical ref-kind definitions, read from the
+	// bundled skill reference (references/ref-kinds.md) — the same single source
+	// the skill ships. The ref-meta consistency rubric renders it instead of
+	// restating the kinds, so the vocabulary is defined once.
+	RefKindVocabulary string
 }
 
 // selectCheckType determines the pre-flight check type from entry properties and graph context.
@@ -249,14 +256,20 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 	pctx := &preflightContext{
 		ProposedEntry:      FormatEntryForPrompt(entry),
 		ConfiguredLanguage: configuredLanguage,
+		RefKindVocabulary:  refKindVocabulary(),
 	}
 
-	// Referenced entries
+	// Referenced entries. Each carries its derived status (active / closed /
+	// superseded) so the ref-meta check can distinguish grounded-in (basis),
+	// builds-on (closed or next-step), and refines (active, in-place) — those
+	// three split on the target's status, which the entry text alone can't
+	// reveal. Status is appended here (pre-flight only) rather than in the
+	// shared FormatEntryForPrompt, so summary-prompt hashes stay stable.
 	if len(entry.Refs) > 0 {
 		var parts []string
 		for _, ref := range entry.Refs {
 			if e, ok := graph.ByID[ref.ID]; ok {
-				parts = append(parts, FormatEntryForPrompt(e))
+				parts = append(parts, formatReferencedEntry(graph, e))
 			}
 		}
 		if len(parts) > 0 {
@@ -330,6 +343,59 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 	}
 
 	return pctx
+}
+
+// formatReferencedEntry renders a ref target for the pre-flight prompt: the
+// standard entry rendering plus a `Derived status:` line. The status lets the
+// ref-meta consistency check tell grounded-in / builds-on / refines apart —
+// kinds that split on whether the target is a basis, a closed prior step, or an
+// active commitment refined in place. This is pre-flight only; the summary
+// prompt uses FormatEntryForPrompt unchanged, so summary hashes don't drift.
+func formatReferencedEntry(graph *model.Graph, e *model.Entry) string {
+	return FormatEntryForPrompt(e) + "\nDerived status: " + derivedStatusForPrompt(graph.DerivedStatus(e))
+}
+
+// derivedStatusForPrompt renders a Status as plain prose for the validator
+// prompt (not the `{status: ...}` display notation, which is a view concern).
+func derivedStatusForPrompt(s model.Status) string {
+	switch s.Kind {
+	case model.StatusActive:
+		return "active"
+	case model.StatusOpen:
+		return "open"
+	case model.StatusClosedBy:
+		return "closed by " + s.By
+	case model.StatusSupersededBy:
+		return "superseded by " + s.By
+	case model.StatusCascadeClosedBy:
+		return "role retired (bound actor chain closed by " + s.By + ")"
+	case model.StatusCascadeOrphan:
+		return "orphan role (no matching actor chain)"
+	case model.StatusNone:
+		return "terminal (done signal — no lifecycle status)"
+	default:
+		return string(s.Kind)
+	}
+}
+
+var (
+	refKindVocabOnce sync.Once
+	refKindVocabText string
+)
+
+// refKindVocabulary returns the canonical ref-kind vocabulary from the bundled
+// skill reference (references/ref-kinds.md), cached after first read. This is
+// the single source the skill also ships, so the rubric never restates the
+// kinds. The fragment is embedded in the binary, so a read failure is not
+// expected; on error the rubric renders without the injected definitions
+// (degraded, non-fatal) rather than blocking capture.
+func refKindVocabulary() string {
+	refKindVocabOnce.Do(func() {
+		if data, err := bundledskills.ReadReference("sdd", "references/ref-kinds.md"); err == nil {
+			refKindVocabText = strings.TrimSpace(string(data))
+		}
+	})
+	return refKindVocabText
 }
 
 // renderPreflightPrompt renders the pre-flight prompt for the given check type

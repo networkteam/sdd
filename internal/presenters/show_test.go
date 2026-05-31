@@ -170,7 +170,7 @@ func TestRenderShow_DownstreamCarriesRefKind(t *testing.T) {
 		Content: "Source decision",
 		Refs: []model.Ref{{
 			ID:   primary.ID,
-			Kind: model.RefKindGrounds,
+			Kind: model.RefKindGroundedIn,
 			Desc: "anchors to the standing observation",
 		}},
 		Time: primary.Time,
@@ -178,7 +178,7 @@ func TestRenderShow_DownstreamCarriesRefKind(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{primary, source})
 	out := renderShow(t, g, []string{primary.ID}, withDownstream())
 
-	if !contains(out, "refd-by (grounds) 20260410-100100-d-tac-src") {
+	if !contains(out, "refd-by (grounded-in) 20260410-100100-d-tac-src") {
 		t.Errorf("downstream missing kind annotation in:\n%s", out)
 	}
 	if !contains(out, "desc: anchors to the standing observation") {

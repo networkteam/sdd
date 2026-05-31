@@ -188,3 +188,100 @@ func TestRenderSkillFile_RoundTripsThroughParse(t *testing.T) {
 		t.Errorf("StoredHash: got %q, want deadbeef", sf.StoredHash)
 	}
 }
+
+func findSkillEntry(t *testing.T, entries []SkillBundleEntry, relPath string) SkillBundleEntry {
+	t.Helper()
+	for _, e := range entries {
+		if e.RelPath == relPath {
+			return e
+		}
+	}
+	t.Fatalf("entry %q not found", relPath)
+	return SkillBundleEntry{}
+}
+
+func TestResolveSkillIncludes_ReplacesMarkerWithBody(t *testing.T) {
+	entries := []SkillBundleEntry{
+		{Skill: "sdd", RelPath: "references/frag.md", Content: []byte("VOCAB LINE ONE\nVOCAB LINE TWO\n")},
+		{Skill: "sdd", RelPath: "references/host.md", Content: []byte("before\n<!-- sdd:include references/frag.md -->\nafter\n")},
+	}
+	out, err := ResolveSkillIncludes(entries)
+	if err != nil {
+		t.Fatalf("ResolveSkillIncludes: %v", err)
+	}
+	host := findSkillEntry(t, out, "references/host.md")
+	if bytes.Contains(host.Content, []byte("sdd:include")) {
+		t.Errorf("marker not resolved:\n%s", host.Content)
+	}
+	for _, want := range []string{"before", "VOCAB LINE ONE", "VOCAB LINE TWO", "after"} {
+		if !bytes.Contains(host.Content, []byte(want)) {
+			t.Errorf("resolved content missing %q:\n%s", want, host.Content)
+		}
+	}
+}
+
+func TestResolveSkillIncludes_MissingTargetErrors(t *testing.T) {
+	entries := []SkillBundleEntry{
+		{Skill: "sdd", RelPath: "host.md", Content: []byte("<!-- sdd:include references/nope.md -->\n")},
+	}
+	if _, err := ResolveSkillIncludes(entries); err == nil {
+		t.Fatal("want error for missing include target, got nil")
+	}
+}
+
+func TestResolveSkillIncludes_NoMarkerUnchanged(t *testing.T) {
+	entries := []SkillBundleEntry{
+		{Skill: "sdd", RelPath: "plain.md", Content: []byte("no markers here\n")},
+	}
+	out, err := ResolveSkillIncludes(entries)
+	if err != nil {
+		t.Fatalf("ResolveSkillIncludes: %v", err)
+	}
+	if !bytes.Equal(out[0].Content, entries[0].Content) {
+		t.Error("content changed though there was no marker")
+	}
+}
+
+func TestResolveSkillIncludes_StripsIncludedFrontmatter(t *testing.T) {
+	entries := []SkillBundleEntry{
+		{Skill: "sdd", RelPath: "references/frag.md", Content: []byte("---\nstamp: x\n---\nFRAGMENT BODY\n")},
+		{Skill: "sdd", RelPath: "host.md", Content: []byte("<!-- sdd:include references/frag.md -->\n")},
+	}
+	out, err := ResolveSkillIncludes(entries)
+	if err != nil {
+		t.Fatalf("ResolveSkillIncludes: %v", err)
+	}
+	host := findSkillEntry(t, out, "host.md")
+	if bytes.Contains(host.Content, []byte("stamp: x")) {
+		t.Errorf("included frontmatter should be stripped:\n%s", host.Content)
+	}
+	if !bytes.Contains(host.Content, []byte("FRAGMENT BODY")) {
+		t.Errorf("included body missing:\n%s", host.Content)
+	}
+}
+
+// TestResolveSkillIncludes_ResolvedContentDriftStable proves the install writer
+// and drift detection agree on the *resolved* content: a resolved entry written
+// with stamps and parsed back classifies as Current against that same resolved
+// entry. This is the property that keeps included skills out of false "modified"
+// state — both paths consume Load's resolved output.
+func TestResolveSkillIncludes_ResolvedContentDriftStable(t *testing.T) {
+	entries := []SkillBundleEntry{
+		{Skill: "sdd", RelPath: "references/frag.md", Content: []byte("FRAGMENT\n")},
+		{Skill: "sdd", RelPath: "host.md", Content: []byte("---\nname: host\n---\nbefore\n<!-- sdd:include references/frag.md -->\nafter\n")},
+	}
+	out, err := ResolveSkillIncludes(entries)
+	if err != nil {
+		t.Fatalf("ResolveSkillIncludes: %v", err)
+	}
+	host := findSkillEntry(t, out, "host.md")
+	hash := ComputeSkillHash(host.Content)
+	rendered, err := RenderSkillFile(host, "v1", hash)
+	if err != nil {
+		t.Fatalf("RenderSkillFile: %v", err)
+	}
+	installed := ParseSkillFile("/tmp/host.md", rendered)
+	if got := ComputeSkillStatus(host, installed); got != SkillStatusCurrent {
+		t.Errorf("resolved entry should classify Current, got %s", got)
+	}
+}

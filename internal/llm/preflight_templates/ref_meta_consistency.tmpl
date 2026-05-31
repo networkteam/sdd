@@ -1,28 +1,30 @@
 {{ define "ref_meta_consistency" }}
 ## Reference metadata consistency (apply when the entry has refs)
 
-Each ref carries a `kind` (from the closed vocabulary: grounds, builds-on, refines, addresses, surfaces, evidence, depends-on, related) and an optional `desc` naming why the reference exists. Both must read consistently with how the entry body frames the reference. Skip the desc-side check when no ref carries a `desc`; the kind-side check applies whenever there are refs.
+A ref carries a `kind` — why the pointer exists, chosen from what the entry **body** asserts — and an optional `desc` naming that relationship. Both must read consistently with the body. The canonical ref-kind vocabulary (the single source the skill also ships) follows; judge the chosen kind and desc against it.
 
-**Distinguishing `refines` from `builds-on`.** Both name a forward relationship. Use `refines` when the target is active and the body sharpens, narrows, or clarifies its commitments in place (the augmenting-directive pattern — target stays active, lifecycle is split). Use `builds-on` when the target is closed (next decision in the chain) or when the new entry stands alongside in a forward "next step" sense rather than refining in place. A `builds-on` ref on an active target whose body frames the relationship as "narrowing AC X" or "applying the plan's commitment to scope Y" is a wrong-kind finding; `refines` is the correct kind there.
+{{ .RefKindVocabulary }}
+
+**Use each referenced entry's `Derived status:` line** to separate the three status-sensitive kinds: `grounded-in` (the target is a basis the source rests on — any status), `builds-on` (the target is **closed** or a finished prior step), `refines` (the target is **active** and the body sharpens its commitments in place — the augmenting pattern). A `builds-on` whose target is active and whose body frames the relationship as "narrowing AC X" or "applying the plan's commitment to scope Y" is the wrong kind — `refines` is correct. A `refines` on a target that is already closed is wrong — `builds-on` is correct.
 
 Two axes of mismatch:
 
-- **Desc-vs-body** — what the desc claims about the relationship vs. what the body actually does with the reference.
-- **Kind-vs-body** — whether the chosen kind value names the body's framing correctly, or whether another kind in the closed set would name it better.
+- **Kind-vs-body** — whether the chosen kind names the body's framing correctly, or another kind in the vocabulary (read against the target's status where relevant) would name it better.
+- **Desc-vs-body** — what the desc claims about the relationship vs. what the body actually does with the reference. Skip this axis when no ref carries a `desc`.
 
 ## Calibration
 
-- `high` — Direct contradiction between ref metadata and body framing. Pre-flight blocks because a misleading desc or wrong kind degrades graph readability for every future reader. Two flavors:
-  - *Desc contradiction*: the body affirmatively refutes the relationship the desc claims. Example: ref `(kind: grounds, desc: "extends the predecessor contract")` on a contract; body says "this directive retires the predecessor contract." Both can't be true.
-  - *Wrong kind*: the chosen kind misrepresents the body's framing; another kind in the closed set names it correctly. Examples: ref `(kind: grounds)` on a gap signal whose body says "addresses the temporal-blur gap" — `addresses` is correct (gap signals aren't standing structure). Ref `(kind: evidence)` on a plan whose body says "depends on the per-ref kind taxonomy landing first" — `depends-on` is correct (functional prerequisite, not citation). Ref `(kind: builds-on)` on a contract the entry leans on without extending — `grounds` is correct (anchors to standing structure).
+- `high` — Direct contradiction between ref metadata and body framing: a misleading kind or desc degrades graph readability for every future reader. Two flavors:
+  - *Wrong kind*: the chosen kind misrepresents the body and another kind clearly names it. Examples: `grounded-in` on a gap whose body says "addresses the gap" → `addresses` (a gap is not a basis). `grounded-in` on a plan the body says it "depends on landing first" → `depends-on` (a prerequisite, not a citation). `builds-on` on an **active** target the body sharpens in place → `refines` (check the target's `Derived status:`). `refines` on a **closed** target → `builds-on`.
+  - *Desc contradiction*: the body affirmatively refutes the relationship the desc claims (e.g. `desc: "extends the predecessor contract"` while the body says "this directive retires that contract").
 
-  Cite the ref ID and the contradicting body excerpt so the author can resolve unambiguously.
+  Cite the ref ID and the contradicting body excerpt so the author can resolve it unambiguously.
 
-- `medium` — Significant divergence without affirmative refutation. The desc or kind is defensible but a future reader would reasonably misread the relationship from the metadata alone. Examples: desc "anchors to dialogue-first principle" while the body builds the case through a different principle without naming dialogue-first; kind `related` on a ref the body uses as a functional prerequisite (`depends-on` would be sharper but `related` isn't *wrong*).
+- `medium` — A genuinely misleading divergence without flat contradiction: a future reader would reasonably read the wrong relationship from the metadata alone (e.g. a `desc` naming a different basis than the body argues from). Reserve this for real misreads — not for "a sharper kind also exists."
 
-- `low` — Mild divergence the reader can reconcile from context. Examples: desc names a sub-claim ("extends the type-system kind taxonomy") while the body uses a broader frame ("builds on the d-cpt-ydf framework") — same axis, different focal length. Wording-level variation with equivalent meaning. Kind that fits but a slightly different kind from the closed set would also fit.
+- `low` — Defensible but sharper: the chosen kind fits and is not wrong, yet a different kind would name the body more precisely (e.g. `related` on a ref the body uses as a functional prerequisite — `depends-on` would be sharper but `related` is not wrong). Also mild desc focal-length differences. Per the selection-and-calibration directive (d-prc-2is), these are `low`, not `medium` — body-keyed selection means a defensible choice is not an error. The augmenting pattern (a directive that `refines` an active plan it sharpens in place) is correct, not a finding.
 
-- No finding — Desc is consistent with the body's framing **and** kind matches how the body uses the reference. Also no finding when no ref carries a `desc` and every kind reads correctly against the body.
+- No finding — the kind and desc read correctly against the body (and the target's status), or no ref carries a `desc` and every kind reads correctly.
 
-The metadata serves readers; the body is the source of truth. When desc and body disagree, the body wins — flag the desc so the author can repair it. When kind and body disagree, the kind value is the structural commitment that downstream consumers (heat ranking, render expansion) key on; getting it right matters more than getting the prose-level desc right.
+The body is the source of truth; the kind is the structural commitment downstream consumers (heat ranking, render expansion) key on, so getting the kind right matters more than the prose-level desc. `related` is the floor — surface a sharper kind only as `low` unless a floor use is flatly wrong.
 {{ end }}

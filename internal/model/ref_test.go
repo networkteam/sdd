@@ -48,7 +48,7 @@ func TestRefUnmarshal_ObjectForm(t *testing.T) {
 
 func TestRefUnmarshal_ObjectForm_NoDesc(t *testing.T) {
 	const doc = `- id: 20260101-000000-s-cpt-aaa
-  kind: grounds
+  kind: grounded-in
 `
 	var refs []Ref
 	if err := yaml.Unmarshal([]byte(doc), &refs); err != nil {
@@ -57,8 +57,26 @@ func TestRefUnmarshal_ObjectForm_NoDesc(t *testing.T) {
 	if refs[0].Desc != "" {
 		t.Errorf("Desc = %q, want empty when omitted", refs[0].Desc)
 	}
-	if refs[0].Kind != RefKindGrounds {
-		t.Errorf("Kind = %q, want grounds", refs[0].Kind)
+	if refs[0].Kind != RefKindGroundedIn {
+		t.Errorf("Kind = %q, want grounded-in", refs[0].Kind)
+	}
+}
+
+func TestRefUnmarshal_LegacyAliasResolved(t *testing.T) {
+	// Legacy on-disk grounds/evidence resolve to grounded-in at parse time, so
+	// nothing above the parser sees the old value. History is never rewritten —
+	// the alias lives only in the read path.
+	for _, kind := range []string{"grounds", "evidence"} {
+		t.Run(kind, func(t *testing.T) {
+			doc := "- id: 20260101-000000-s-cpt-aaa\n  kind: " + kind + "\n"
+			var refs []Ref
+			if err := yaml.Unmarshal([]byte(doc), &refs); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if refs[0].Kind != RefKindGroundedIn {
+				t.Errorf("legacy kind %q resolved to %q, want grounded-in", kind, refs[0].Kind)
+			}
+		})
 	}
 }
 
@@ -76,7 +94,7 @@ func TestRefUnmarshal_MissingKind_Rejected(t *testing.T) {
 }
 
 func TestRefUnmarshal_MissingID_Rejected(t *testing.T) {
-	const doc = `- kind: grounds
+	const doc = `- kind: grounded-in
 `
 	var refs []Ref
 	err := yaml.Unmarshal([]byte(doc), &refs)
@@ -131,12 +149,13 @@ func TestRefUnmarshal_ClosedSetCoverage(t *testing.T) {
 		kind string
 		want RefKind
 	}{
-		{"grounds", RefKindGrounds},
+		{"grounded-in", RefKindGroundedIn},
 		{"builds-on", RefKindBuildsOn},
+		{"refines", RefKindRefines},
 		{"addresses", RefKindAddresses},
 		{"surfaces", RefKindSurfaces},
-		{"evidence", RefKindEvidence},
 		{"depends-on", RefKindDependsOn},
+		{"required-by", RefKindRequiredBy},
 		{"related", RefKindRelated},
 		{"unknown", RefKindUnknown}, // object-form unknown allowed at parse time for legacy round-trip
 	}
@@ -181,7 +200,7 @@ func TestRefMarshal_ObjectFormWithOrder(t *testing.T) {
 }
 
 func TestRefMarshal_OmitsDescWhenEmpty(t *testing.T) {
-	r := Ref{ID: "20260101-000000-s-cpt-aaa", Kind: RefKindGrounds}
+	r := Ref{ID: "20260101-000000-s-cpt-aaa", Kind: RefKindGroundedIn}
 	out, err := yaml.Marshal([]Ref{r})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -211,11 +230,19 @@ func TestRefMarshal_LegacyUnknownStillEmitsObjectForm(t *testing.T) {
 
 func TestIsValidRefKind(t *testing.T) {
 	for _, k := range []RefKind{
-		RefKindGrounds, RefKindBuildsOn, RefKindAddresses, RefKindSurfaces,
-		RefKindEvidence, RefKindDependsOn, RefKindRelated, RefKindUnknown,
+		RefKindGroundedIn, RefKindBuildsOn, RefKindRefines, RefKindAddresses,
+		RefKindSurfaces, RefKindDependsOn, RefKindRequiredBy, RefKindRelated,
+		RefKindUnknown,
 	} {
 		if !IsValidRefKind(k) {
 			t.Errorf("%q should be valid", k)
+		}
+	}
+	// Legacy alias kinds resolve to their canonical form at parse time, so the
+	// raw values are not themselves valid in memory.
+	for _, k := range []RefKind{RefKindGrounds, RefKindEvidence} {
+		if IsValidRefKind(k) {
+			t.Errorf("legacy alias %q should not be valid in memory (resolves to grounded-in at parse)", k)
 		}
 	}
 	if IsValidRefKind(RefKind("bogus")) {
@@ -225,8 +252,8 @@ func TestIsValidRefKind(t *testing.T) {
 
 func TestIsCapturableRefKind(t *testing.T) {
 	for _, k := range []RefKind{
-		RefKindGrounds, RefKindBuildsOn, RefKindAddresses, RefKindSurfaces,
-		RefKindEvidence, RefKindDependsOn, RefKindRelated,
+		RefKindGroundedIn, RefKindBuildsOn, RefKindRefines, RefKindAddresses,
+		RefKindSurfaces, RefKindDependsOn, RefKindRequiredBy, RefKindRelated,
 	} {
 		if !IsCapturableRefKind(k) {
 			t.Errorf("%q should be capturable", k)
@@ -235,6 +262,13 @@ func TestIsCapturableRefKind(t *testing.T) {
 	if IsCapturableRefKind(RefKindUnknown) {
 		t.Error("unknown should not be capturable at new-entry time")
 	}
+	// Legacy alias kinds are rejected for new captures (AC 1) — only their
+	// canonical replacement grounded-in is capturable.
+	for _, k := range []RefKind{RefKindGrounds, RefKindEvidence} {
+		if IsCapturableRefKind(k) {
+			t.Errorf("legacy alias %q must not be capturable for new entries", k)
+		}
+	}
 	if IsCapturableRefKind(RefKind("bogus")) {
 		t.Error("bogus should not be capturable")
 	}
@@ -242,7 +276,7 @@ func TestIsCapturableRefKind(t *testing.T) {
 
 func TestRefIDs(t *testing.T) {
 	refs := []Ref{
-		{ID: "a", Kind: RefKindGrounds},
+		{ID: "a", Kind: RefKindGroundedIn},
 		{ID: "b", Kind: RefKindAddresses},
 	}
 	got := RefIDs(refs)
