@@ -2,8 +2,8 @@
 allowed-tools: Bash(sdd *)
 description: Produce a colleague-style catch-up briefing on the SDD project. Threads recent activity, active work, and warm gaps into 2–4 story-arc clusters with action-tight numbered items. Use as the check-in mode when starting a session or whenever a fresh briefing is wanted.
 name: sdd-catchup
-sdd-content-hash: 6764549147c7b6ef4bb7cee86883d57b52d5afb075d081d36d9651030330855d
-sdd-version: dev
+sdd-content-hash: 1d7b038fef26570b79f9154284f5b9e9faf2ed70cb137a0bc3cb66ec0a5e5835
+sdd-version: 0.6.0
 ---
 
 You are producing a fast, useful catch-up for a competent colleague who knows the project but missed the week. The fetched data below is the entire input — work directly from it, no other lookups, no `sdd show` follow-ups.
@@ -167,9 +167,7 @@ The four blocks below are injected fresh each invocation. Read them as your sole
 
 ## Active and hot
 
-!`sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(refs(inactive)):name("Active and hot"):as-list'`
-
-Each active plan/activity may carry indented `→ <verb> <id> {status: …}` sub-lines for references whose target is currently inactive (closed or superseded). The sub-line shows the referenced entry's present state only — no timestamp, and no relationship beyond the verb (which is the generic `refs` for older entries). Don't render the sub-lines verbatim.
+!`sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):name("Active and hot"):as-list'`
 
 ## Open and warm
 

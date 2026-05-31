@@ -1,6 +1,6 @@
 ---
-sdd-content-hash: 8f238d5b816e7a96054a68c93eed6b6849f84232519b8ce4f4f574b6d1d3054c
-sdd-version: dev
+sdd-content-hash: 74f1c44316237d92ea335db62da38f3366493261e9b760f678045def63cb2329
+sdd-version: 0.6.0
 ---
 # SDD CLI Reference
 
@@ -73,19 +73,8 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `name(<string>)` | Final section header — overrides any prefix and any rank-based auto-derive. Last call wins; `name("")` clears any prior name |
 | `name-prefix(<string>)` | Prefix the auto-derive composer extends with the rank suffix. Macros bake this so `top(N)` reads "Top by heat (exp-14d)" by default and "Top by in-degree" after `:rank(in-degree)` — the prefix stays, the suffix tracks rank |
 | `expand(involvement)` | Per row, explode involvement triples into focus-block sub-rows (focus-block only) |
-| `expand(refs)` | Per row, render each entry's outgoing refs as indented sub-lines (as-list only). Optional nested `expand(refs(inactive))` narrows to refs whose target is currently inactive. Composes with filters, `rank`, and `n` |
 | `group(by(<field>))` | Bucket entries by field; produces grouped shape (consume with `as-grouped`) |
 | `stalled(<value>)` | Threshold below which a focus target with assigned actors is "stalled" (default 1.0) |
-
-**`expand(refs)` sub-line shape.** Each ref renders as `→ <verb> <full-id> {status: …}` with an optional `: "<desc>"` clause when the ref carries a description. The verb is the per-ref kind (`grounds`, `builds-on`, `refines`, `addresses`, `surfaces`, `evidence`, `depends-on`, `related`); legacy bare-string refs (kind `unknown`) render with the generic verb `refs`. Status surfaces the referenced entry's *current* derived state, so stale summary prose can't mislead a reader into treating a closed dependency as still open. Done-signal targets carry no status segment (they are terminal). Three shapes:
-
-```
-→ refs 20260506-151345-d-tac-uww {status: closed-by 20260507-133746-s-tac-z2o}     # legacy bare-string ref
-→ grounds 20260413-142536-d-cpt-ah1 {status: active}                                # object-form, no desc
-→ depends-on 20260423-143213-d-tac-hsu {status: closed-by 20260423-144715-s-tac-2y0}: "wraps the sync infra"  # object-form with desc
-```
-
-`expand(refs(inactive))` keeps only the sub-lines whose target is currently inactive — the exact inverse of the `active` filter: closed, superseded, or a role whose bound actor chain is retired. It is a current-state filter, not a changelog: it reports what each referent's state is now, not whether it changed since being referenced (a ref to an already-closed predecessor shows the same as one that closed afterward).
 
 **Section header resolution:** the executor picks the header in this order:
 1. Explicit `name(...)` → final, no auto-append.
@@ -175,11 +164,6 @@ sdd view --layout='top(10):rank(heat(exp-7d)):name("Hot last week"),top(10):rank
 
 sdd view --layout='top(20):not(kind(contract,aspiration))'
 # Top 20 by heat, excluding standing entries that anchor by structure
-
-sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(refs(inactive)):as-list'
-# Top-8 active plans/activities by recent heat, each showing only the refs
-# whose target is now inactive (closed, superseded, or a retired role) — the
-# lean catch-up view that flags dependencies no longer live
 ```
 
 ## `sdd show` output format
