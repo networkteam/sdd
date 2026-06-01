@@ -768,7 +768,7 @@ func TestPreflightEval_RefMeta_BuildsOnClosedTarget_NoFinding(t *testing.T) {
 	done := &model.Entry{
 		ID: "20260510-100000-s-tac-don", Type: model.TypeSignal, Kind: model.KindDone,
 		Closes: []string{oldPlan.ID}, Content: "Shipped per-ref kinds across the graph.",
-		Time:   time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC),
+		Time: time.Date(2026, 5, 10, 10, 0, 0, 0, time.UTC),
 	}
 	graph := model.NewGraph([]*model.Entry{oldPlan, done})
 	proposed := planWithACs("20260531-170000-d-tac-new",

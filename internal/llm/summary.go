@@ -65,7 +65,7 @@ type summaryContext struct {
 // is introduced when templates are refactored (see the plan decision).
 func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error) {
 	sctx := &summaryContext{
-		EntryContent: FormatEntryForPrompt(entry),
+		EntryContent: formatEntryForSummaryPrompt(entry),
 	}
 
 	// Collect direct refs, closes, and supersedes entries.
@@ -94,7 +94,7 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 				triple += " " + e.TypeLabel()
 				parts = append(parts, fmt.Sprintf("[%s] %s (ID: %s)\nSummary: %s", relation, triple, e.ID, e.Summary))
 			} else {
-				parts = append(parts, fmt.Sprintf("[%s] %s", relation, FormatEntryForPrompt(e)))
+				parts = append(parts, fmt.Sprintf("[%s] %s", relation, formatEntryForSummaryPrompt(e)))
 			}
 		}
 	}
@@ -142,7 +142,27 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 // Mixed entries (some refs legacy, some object) get the multi-line form —
 // the presence of any object-form ref signals an entry authored under the
 // new contract; rendering uniformly preserves clarity.
+//
+// This renders canonical (parse-resolved) ref kinds — the form pre-flight and
+// all user-facing prompt contexts need. The summary-generation prompt instead
+// calls formatEntryForSummaryPrompt, which renders each ref's on-disk kind so
+// the grounds/evidence → grounded-in rename never enters the summary hash
+// (s-tac-koz).
 func FormatEntryForPrompt(e *model.Entry) string {
+	return formatEntryForPrompt(e, false)
+}
+
+// formatEntryForSummaryPrompt renders an entry for the summary-generation
+// prompt using each ref's on-disk kind (pre-alias-resolution). A legacy
+// grounds/evidence ref renders as it was stored, so the alias never changes
+// the summary prompt and the entry's stored hash stays valid without a
+// re-summarize (s-tac-koz). Pre-flight must NOT use this — it judges ref-meta
+// against the canonical vocabulary.
+func formatEntryForSummaryPrompt(e *model.Entry) string {
+	return formatEntryForPrompt(e, true)
+}
+
+func formatEntryForPrompt(e *model.Entry, onDiskRefKinds bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ID: %s\n", e.ID)
 	fmt.Fprintf(&b, "Type: %s\n", e.Type)
@@ -156,7 +176,11 @@ func FormatEntryForPrompt(e *model.Entry) string {
 		} else {
 			b.WriteString("Refs:\n")
 			for _, r := range e.Refs {
-				fmt.Fprintf(&b, "  - %s (kind: %s)", r.ID, r.Kind)
+				kind := r.Kind
+				if onDiskRefKinds {
+					kind = r.OnDiskKind()
+				}
+				fmt.Fprintf(&b, "  - %s (kind: %s)", r.ID, kind)
 				if r.Desc != "" {
 					fmt.Fprintf(&b, ": %s", r.Desc)
 				}

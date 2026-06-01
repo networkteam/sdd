@@ -65,7 +65,8 @@ func TestRefUnmarshal_ObjectForm_NoDesc(t *testing.T) {
 func TestRefUnmarshal_LegacyAliasResolved(t *testing.T) {
 	// Legacy on-disk grounds/evidence resolve to grounded-in at parse time, so
 	// nothing above the parser sees the old value. History is never rewritten —
-	// the alias lives only in the read path.
+	// the alias lives only in the read path. OnDiskKind still reports the raw
+	// stored value so the summary prompt can render it verbatim (s-tac-koz).
 	for _, kind := range []string{"grounds", "evidence"} {
 		t.Run(kind, func(t *testing.T) {
 			doc := "- id: 20260101-000000-s-cpt-aaa\n  kind: " + kind + "\n"
@@ -76,7 +77,33 @@ func TestRefUnmarshal_LegacyAliasResolved(t *testing.T) {
 			if refs[0].Kind != RefKindGroundedIn {
 				t.Errorf("legacy kind %q resolved to %q, want grounded-in", kind, refs[0].Kind)
 			}
+			if got := refs[0].OnDiskKind(); got != RefKind(kind) {
+				t.Errorf("OnDiskKind() = %q, want raw on-disk %q", got, kind)
+			}
 		})
+	}
+}
+
+func TestRef_OnDiskKind_FallsBackToKind(t *testing.T) {
+	// Non-alias parsed refs and in-memory-constructed refs leave onDiskKind
+	// empty, so OnDiskKind falls back to Kind. This keeps a parsed non-alias ref
+	// byte-equal (==) to its constructed-literal form.
+	const doc = "- id: 20260101-000000-s-cpt-aaa\n  kind: addresses\n"
+	var refs []Ref
+	if err := yaml.Unmarshal([]byte(doc), &refs); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := refs[0].OnDiskKind(); got != RefKindAddresses {
+		t.Errorf("parsed non-alias OnDiskKind() = %q, want addresses", got)
+	}
+	want := Ref{ID: "20260101-000000-s-cpt-aaa", Kind: RefKindAddresses}
+	if refs[0] != want {
+		t.Errorf("parsed non-alias ref %+v must stay == to its literal form %+v", refs[0], want)
+	}
+
+	inMem := Ref{ID: "x", Kind: RefKindRelated}
+	if got := inMem.OnDiskKind(); got != RefKindRelated {
+		t.Errorf("in-memory OnDiskKind() = %q, want related", got)
 	}
 }
 

@@ -370,6 +370,68 @@ func Test_FormatEntryForPrompt_LegacyEntrySummaryHashStable(t *testing.T) {
 	}
 }
 
+// Test_formatEntryForSummaryPrompt_LegacyAliasRefKind pins the s-tac-koz fix:
+// the summary prompt renders a legacy grounds/evidence ref with its on-disk
+// kind (so the rename never enters the summary hash and the stored hash stays
+// valid), while pre-flight renders the canonical grounded-in (so the ref-meta
+// check still judges against the live vocabulary). Building via ParseEntry is
+// load-bearing — the alias is only resolved through UnmarshalYAML, which is
+// what sets the on-disk kind.
+func Test_formatEntryForSummaryPrompt_LegacyAliasRefKind(t *testing.T) {
+	for _, onDisk := range []string{"grounds", "evidence"} {
+		t.Run(onDisk, func(t *testing.T) {
+			src := "---\n" +
+				"type: decision\n" +
+				"layer: tactical\n" +
+				"kind: directive\n" +
+				"refs:\n" +
+				"  - id: 20260410-110000-s-cpt-aaa\n" +
+				"    kind: " + onDisk + "\n" +
+				"---\n" +
+				"Body."
+			e, err := model.ParseEntry("20260410-120000-d-tac-xyz.md", src)
+			if err != nil {
+				t.Fatalf("ParseEntry: %v", err)
+			}
+
+			summaryRender := formatEntryForSummaryPrompt(e)
+			if !strings.Contains(summaryRender, "(kind: "+onDisk+")") {
+				t.Errorf("summary prompt must render on-disk kind %q for hash stability, got:\n%s", onDisk, summaryRender)
+			}
+			if strings.Contains(summaryRender, "grounded-in") {
+				t.Errorf("summary prompt must NOT render canonical grounded-in for a legacy %s ref, got:\n%s", onDisk, summaryRender)
+			}
+
+			preflightRender := FormatEntryForPrompt(e)
+			if !strings.Contains(preflightRender, "(kind: grounded-in)") {
+				t.Errorf("pre-flight prompt must render canonical grounded-in, got:\n%s", preflightRender)
+			}
+		})
+	}
+}
+
+// Test_formatEntryForSummaryPrompt_NonAliasMatchesCanonical confirms the two
+// render paths diverge ONLY for legacy aliases — a capturable kind renders
+// identically in both.
+func Test_formatEntryForSummaryPrompt_NonAliasMatchesCanonical(t *testing.T) {
+	src := "---\n" +
+		"type: decision\n" +
+		"layer: tactical\n" +
+		"kind: directive\n" +
+		"refs:\n" +
+		"  - id: 20260410-110000-s-cpt-aaa\n" +
+		"    kind: addresses\n" +
+		"---\n" +
+		"Body."
+	e, err := model.ParseEntry("20260410-120000-d-tac-xyz.md", src)
+	if err != nil {
+		t.Fatalf("ParseEntry: %v", err)
+	}
+	if formatEntryForSummaryPrompt(e) != FormatEntryForPrompt(e) {
+		t.Errorf("non-alias refs must render identically in summary and pre-flight paths")
+	}
+}
+
 func Test_assembleContext_BasicSignal(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("observed something"))
 	graph := model.NewGraph([]*model.Entry{sig})

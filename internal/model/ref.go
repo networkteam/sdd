@@ -100,6 +100,28 @@ type Ref struct {
 	ID   string
 	Kind RefKind
 	Desc string
+
+	// onDiskKind preserves the ref's kind exactly as stored on disk when it
+	// differs from the canonical Kind — i.e. only for a legacy alias
+	// (grounds/evidence) that UnmarshalYAML resolved to grounded-in. For all
+	// non-alias refs (and in-memory-constructed refs) it stays empty so a
+	// parsed ref remains byte-equal (==) to its constructed-literal form.
+	// Summary-prompt rendering reads it via OnDiskKind so the rename never
+	// enters the summary hash and legacy files stay byte-stable without a
+	// re-summarize (s-tac-koz). Pre-flight and user-facing rendering use Kind.
+	onDiskKind RefKind
+}
+
+// OnDiskKind returns the ref kind as stored on disk, before legacy alias
+// resolution (grounds/evidence → grounded-in). It falls back to Kind for every
+// ref that was not alias-resolved, including in-memory-constructed refs. Used
+// only by summary-prompt rendering to keep summary hashes stable across the
+// rename (s-tac-koz); pre-flight and all user-facing rendering use Kind.
+func (r Ref) OnDiskKind() RefKind {
+	if r.onDiskKind != "" {
+		return r.onDiskKind
+	}
+	return r.Kind
 }
 
 // UnmarshalYAML accepts either a scalar string (legacy form; Kind defaults
@@ -130,7 +152,8 @@ func (r *Ref) UnmarshalYAML(node *yaml.Node) error {
 		if raw.Kind == "" {
 			return fmt.Errorf("ref object %q: missing required `kind`", raw.ID)
 		}
-		k := RefKind(raw.Kind)
+		rawKind := RefKind(raw.Kind)
+		k := rawKind
 		if canon, ok := refKindAliases[k]; ok {
 			k = canon // legacy grounds/evidence → grounded-in; nothing above the parser sees the old value
 		}
@@ -140,6 +163,13 @@ func (r *Ref) UnmarshalYAML(node *yaml.Node) error {
 		r.ID = raw.ID
 		r.Kind = k
 		r.Desc = raw.Desc
+		if rawKind != k {
+			// An alias was resolved (grounds/evidence → grounded-in). Keep the
+			// on-disk value so the summary prompt renders it verbatim and the
+			// stored hash stays valid (s-tac-koz). Left empty otherwise so
+			// parsed non-alias refs stay == to constructed literals.
+			r.onDiskKind = rawKind
+		}
 		return nil
 	default:
 		return fmt.Errorf("ref: expected string or mapping, got node kind %d", node.Kind)
