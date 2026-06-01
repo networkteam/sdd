@@ -39,14 +39,23 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 		return nil, fmt.Errorf("gollm: model not configured for provider %q", cfg.Provider)
 	}
 
+	// Resolve the retry policy (provider-aware backoff lives in the gollm
+	// fork). We previously forced SetMaxRetries(0) because gollm's stock
+	// retry logged every attempt at WARN and flooded batch summarize; the
+	// fork classifies transient vs permanent errors, honors server-provided
+	// Retry-After, and logs attempts at Debug — so retries are now safe to
+	// enable. gollm counts retries *after* the first attempt, hence -1.
+	maxAttempts, baseDelay, maxDelay, err := cfg.Retry.Resolved()
+	if err != nil {
+		return nil, fmt.Errorf("gollm: %w", err)
+	}
+
 	opts := []upstream.ConfigOption{
 		upstream.SetProvider(cfg.Provider),
 		upstream.SetModel(cfg.Model),
-		// Gollm defaults to 3 internal retries. For a batch summarize over
-		// hundreds of entries, a single cancelled context triggers 3
-		// retry WARNs per worker and floods the log. We prefer one shot per
-		// call and let the SDD caller decide higher-level retry policy.
-		upstream.SetMaxRetries(0),
+		upstream.SetMaxRetries(maxAttempts - 1),
+		upstream.SetRetryDelay(baseDelay),
+		upstream.SetMaxRetryDelay(maxDelay),
 		// Gollm's default MaxTokens (256) truncates longer summaries and
 		// pre-flight JSON responses mid-sentence. 4096 covers summaries
 		// (~150 tokens), pre-flight findings arrays, and has headroom for

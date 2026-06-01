@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/networkteam/slogutils v0.4.0
+	github.com/philippgille/chromem-go v0.7.0
 	github.com/teilomillet/gollm v0.1.11
 	github.com/urfave/cli/v3 v3.8.0
 	gitlab.com/golang-commonmark/markdown v0.0.0-20211110145824-bf3e522c626a
@@ -21,7 +22,7 @@ require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/buger/jsonparser v1.1.1 // indirect
+	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/caarlos0/env/v11 v11.3.1 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
@@ -50,7 +51,6 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
-	github.com/philippgille/chromem-go v0.7.0 // indirect
 	github.com/pkoukk/tiktoken-go v0.1.8 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -66,3 +66,11 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 )
+
+// Point gollm at the networkteam fork, which adds provider-aware retry with
+// backoff (d-tac-4v1). The fork keeps the github.com/teilomillet/gollm module
+// path, so this resolves cleanly. goreleaser and the curl installer build from
+// source and honor replace; only `go install pkg@version` (which sdd does not
+// use) would break. Remove this directive once the change lands upstream and
+// bump the require above to the released teilomillet/gollm version.
+replace github.com/teilomillet/gollm => github.com/networkteam/gollm v0.0.0-20260601200655-9389047b181f

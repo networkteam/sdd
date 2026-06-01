@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 )
 
 func TestMergeConfig_EmptyOverlayPreservesBase(t *testing.T) {
@@ -102,6 +103,62 @@ func TestMergeConfig_SyncOverlay(t *testing.T) {
 	got = MergeConfig(base, &Config{})
 	if got.Sync.Cooldown != "5m" {
 		t.Errorf("empty overlay should preserve base Sync.Cooldown = %q", got.Sync.Cooldown)
+	}
+}
+
+func TestRetryConfig_Resolved(t *testing.T) {
+	// Empty config yields the baked defaults.
+	maxAttempts, baseD, maxD, err := RetryConfig{}.Resolved()
+	if err != nil {
+		t.Fatalf("default resolve errored: %v", err)
+	}
+	if maxAttempts != DefaultRetryMaxAttempts {
+		t.Errorf("MaxAttempts = %d, want %d", maxAttempts, DefaultRetryMaxAttempts)
+	}
+	if baseD != 2*time.Second || maxD != 60*time.Second {
+		t.Errorf("default delays = (%v, %v), want (2s, 60s)", baseD, maxD)
+	}
+
+	// Explicit values are honored.
+	maxAttempts, baseD, maxD, err = RetryConfig{MaxAttempts: 3, BaseDelay: "500ms", MaxDelay: "10s"}.Resolved()
+	if err != nil {
+		t.Fatalf("explicit resolve errored: %v", err)
+	}
+	if maxAttempts != 3 || baseD != 500*time.Millisecond || maxD != 10*time.Second {
+		t.Errorf("explicit resolve = (%d, %v, %v), want (3, 500ms, 10s)", maxAttempts, baseD, maxD)
+	}
+
+	// A non-positive MaxAttempts falls back to the default.
+	if got, _, _, _ := (RetryConfig{MaxAttempts: -1}).Resolved(); got != DefaultRetryMaxAttempts {
+		t.Errorf("negative MaxAttempts = %d, want default %d", got, DefaultRetryMaxAttempts)
+	}
+
+	// Invalid durations surface an error rather than degrading silently.
+	if _, _, _, err := (RetryConfig{BaseDelay: "soon"}).Resolved(); err == nil {
+		t.Error("invalid base_delay should error")
+	}
+	if _, _, _, err := (RetryConfig{MaxDelay: "later"}).Resolved(); err == nil {
+		t.Error("invalid max_delay should error")
+	}
+}
+
+func TestMergeConfig_RetryOverlay(t *testing.T) {
+	base := &Config{LLM: LLMConfig{Retry: RetryConfig{MaxAttempts: 5, BaseDelay: "2s", MaxDelay: "60s"}}}
+
+	// Overlay overrides only the fields it sets.
+	overlay := &Config{LLM: LLMConfig{Retry: RetryConfig{MaxAttempts: 3}}}
+	got := MergeConfig(base, overlay)
+	if got.LLM.Retry.MaxAttempts != 3 {
+		t.Errorf("MaxAttempts = %d, want 3 (overridden)", got.LLM.Retry.MaxAttempts)
+	}
+	if got.LLM.Retry.BaseDelay != "2s" || got.LLM.Retry.MaxDelay != "60s" {
+		t.Errorf("unset overlay fields should inherit base, got %+v", got.LLM.Retry)
+	}
+
+	// Empty overlay preserves base.
+	got = MergeConfig(base, &Config{})
+	if got.LLM.Retry.MaxAttempts != 5 || got.LLM.Retry.BaseDelay != "2s" {
+		t.Errorf("empty overlay should preserve base retry, got %+v", got.LLM.Retry)
 	}
 }
 

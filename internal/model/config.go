@@ -27,6 +27,18 @@ const (
 	// LLM calls (e.g. sdd summarize --all).
 	DefaultLLMConcurrency = 4
 
+	// DefaultRetryMaxAttempts is the total number of LLM call attempts
+	// (1 = no retry) when the gollm runner hits a transient failure. Five
+	// attempts ride out a connection blip or a short 429 without making an
+	// interactive sdd new hang indefinitely.
+	DefaultRetryMaxAttempts = 5
+
+	// DefaultRetryBaseDelay is the exponential-backoff floor between retries.
+	DefaultRetryBaseDelay = "2s"
+
+	// DefaultRetryMaxDelay caps backoff growth between retries.
+	DefaultRetryMaxDelay = "60s"
+
 	// DefaultSyncCooldown bounds how often background sync runs git fetch
 	// when last-fetch exceeds this duration. Applied when Config.Sync.Cooldown
 	// is empty or unparseable.
@@ -166,6 +178,56 @@ type LLMConfig struct {
 	// 100) to effectively disable the cap on higher tiers. The claude-cli
 	// and ollama providers ignore this field.
 	RateLimitRPS float64 `yaml:"rate_limit_rps,omitempty"`
+	// Retry tunes the provider-aware retry policy applied by the gollm
+	// runner (transient-error classification, server-provided backoff,
+	// exponential backoff with jitter). Ignored by the claude-cli provider,
+	// whose own CLI handles retries.
+	Retry RetryConfig `yaml:"retry,omitempty"`
+}
+
+// RetryConfig tunes retry/backoff behavior for the gollm-backed runner. Each
+// zero-valued field falls back to the corresponding DefaultRetry* constant via
+// Resolved, so an absent retry block yields the baked defaults.
+type RetryConfig struct {
+	// MaxAttempts is the total number of attempts per call (1 = no retry).
+	// Zero means DefaultRetryMaxAttempts.
+	MaxAttempts int `yaml:"max_attempts,omitempty"`
+	// BaseDelay is the exponential-backoff floor as a Go duration string
+	// (e.g. "2s"). Empty means DefaultRetryBaseDelay.
+	BaseDelay string `yaml:"base_delay,omitempty"`
+	// MaxDelay caps backoff growth as a Go duration string (e.g. "60s").
+	// Empty means DefaultRetryMaxDelay.
+	MaxDelay string `yaml:"max_delay,omitempty"`
+}
+
+// Resolved applies the baked defaults to any zero-valued field and parses the
+// duration strings. An invalid duration returns an error so misconfiguration
+// surfaces when the runner is constructed rather than silently degrading.
+func (rc RetryConfig) Resolved() (maxAttempts int, baseDelay, maxDelay time.Duration, err error) {
+	maxAttempts = rc.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultRetryMaxAttempts
+	}
+
+	baseStr := rc.BaseDelay
+	if baseStr == "" {
+		baseStr = DefaultRetryBaseDelay
+	}
+	baseDelay, err = time.ParseDuration(baseStr)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("parsing retry base_delay %q: %w", baseStr, err)
+	}
+
+	maxStr := rc.MaxDelay
+	if maxStr == "" {
+		maxStr = DefaultRetryMaxDelay
+	}
+	maxDelay, err = time.ParseDuration(maxStr)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("parsing retry max_delay %q: %w", maxStr, err)
+	}
+
+	return maxAttempts, baseDelay, maxDelay, nil
 }
 
 // ParseConfig unmarshals YAML bytes into a Config struct. Empty input is
@@ -281,6 +343,7 @@ func mergeLLMConfig(base, overlay LLMConfig) LLMConfig {
 	if overlay.RateLimitRPS != 0 {
 		out.RateLimitRPS = overlay.RateLimitRPS
 	}
+	out.Retry = mergeRetryConfig(base.Retry, overlay.Retry)
 	if len(overlay.APIKeys) > 0 {
 		if out.APIKeys == nil {
 			out.APIKeys = make(map[string]string, len(overlay.APIKeys))
@@ -295,6 +358,20 @@ func mergeLLMConfig(base, overlay LLMConfig) LLMConfig {
 		for k, v := range overlay.APIKeys {
 			out.APIKeys[k] = v
 		}
+	}
+	return out
+}
+
+func mergeRetryConfig(base, overlay RetryConfig) RetryConfig {
+	out := base
+	if overlay.MaxAttempts != 0 {
+		out.MaxAttempts = overlay.MaxAttempts
+	}
+	if overlay.BaseDelay != "" {
+		out.BaseDelay = overlay.BaseDelay
+	}
+	if overlay.MaxDelay != "" {
+		out.MaxDelay = overlay.MaxDelay
 	}
 	return out
 }
