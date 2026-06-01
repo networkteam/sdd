@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Shared body for the rebuild-on-git-event hooks.
+# Rebuilds the local sdd dev binary. Cache-cheap when nothing changed (Go build cache).
+exec devbox run build

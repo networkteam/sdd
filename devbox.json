@@ -2,8 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
   "packages": ["go@1.26", "golangci-lint@2.11"],
   "shell": {
-    "init_hook": ["echo 'Welcome to devbox!' > /dev/null"],
+    "init_hook": ["git config core.hooksPath .githooks 2>/dev/null || true"],
     "scripts": {
+      "build": "go build -o bin/sdd ./cmd/sdd",
       "gen-installer": "binst gen -o install.sh"
     }
   },

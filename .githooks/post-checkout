@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# $3 = 1 on branch checkout, 0 on file checkout — only rebuild on branch switches.
+[ "$3" = "1" ] || exit 0
+exec "$(dirname "$0")/_build"

@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fires after a rebase (e.g. `git pull --rebase`, our default sync path). Keeps bin/sdd fresh.
+exec "$(dirname "$0")/_build"

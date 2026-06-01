@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Fires after a merge pull (incl. fast-forward). Keeps bin/sdd fresh.
+exec "$(dirname "$0")/_build"

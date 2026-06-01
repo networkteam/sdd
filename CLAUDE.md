@@ -11,15 +11,16 @@ SDD is a CLI-driven framework for building and traversing decision graphs throug
 The project uses Devbox + direnv for the toolchain (Go 1.26, GNU sed, etc.). In a fresh clone:
 
 ```bash
-direnv allow                  # loads devbox environment
-go build -o bin/sdd ./cmd/sdd # build fresh local sdd dev version
+direnv allow                  # loads devbox env; wires the git hooks (core.hooksPath)
+devbox run build              # build fresh local sdd dev version
 sdd init --scope project      # refresh .claude/skills from the embedded bundle
 ```
 
-The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally, never commit, added to PATH via devbox.json, so call it via `sdd`). `sdd init` is idempotent: on a fresh checkout it creates `.sdd/meta.json` and installs skills; on subsequent runs it refreshes whatever drifted.
+The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devbox run build`, never commit, added to PATH via devbox.json, so call it via `sdd`). Git hooks under `.githooks/` (wired via `core.hooksPath` on `direnv allow`) auto-rebuild it after every pull, rebase, and branch switch — but you still rebuild manually after editing source. `sdd init` is idempotent: on a fresh checkout it creates `.sdd/meta.json` and installs skills; on subsequent runs it refreshes whatever drifted.
 
 ## Commands
 
+- `devbox run build` — build the local `bin/sdd` dev binary (git hooks also run this after pull/rebase/checkout)
 - `go vet ./...` — compilation + correctness check (never use `go build` just to verify compilation — it produces no output on success)
 - `go test ./...` — run all tests
 - `go fmt ./...` — format code
@@ -96,7 +97,7 @@ sdd/
 Skills are **source-of-truth in `internal/bundledskills/claude/`** and compiled into the binary via `//go:embed`. The copy under `.claude/skills/` is the _installed_ output for this repo — it is what Claude Code loads during a session.
 
 - **Never edit `.claude/skills/` directly.** Changes made there will be overwritten (or flagged as "modified") the next time `sdd init` runs.
-- Edit in `internal/bundledskills/claude/<skill>/` → rebuild (`go build -o bin/sdd ./cmd/sdd`) → reinstall (`sdd init --scope project`). The installed copy picks up the new bundle and refreshes `.claude/skills/` with fresh `sdd-version` + `sdd-content-hash` stamps.
+- Edit in `internal/bundledskills/claude/<skill>/` → rebuild (`devbox run build`) → reinstall (`sdd init --scope project`). The installed copy picks up the new bundle and refreshes `.claude/skills/` with fresh `sdd-version` + `sdd-content-hash` stamps.
 - Commits should include both locations when a skill changes: the source under `internal/bundledskills/claude/` and the re-stamped output under `.claude/skills/`.
 
 ## Git rules
