@@ -8,11 +8,11 @@ SDD records your project's reasoning as an immutable decision graph — signals 
 
 ## Why SDD
 
-**Without SDD:** insights and decisions from each agent session get lost or hard to find once the session ends.
+**Without SDD:** the reasoning from each agent session — what you noticed, what you decided, and why — is lost once the session ends.
 
-**Most other systems:** scatter state across separate static artifacts — docs, plans, roadmaps, trackers, tickets — that duplicate across layers, drift, and resist new insight.
+**Most other systems** either record everything automatically — a searchable pile of what was said, not a decision you can trust — or scatter state across static artifacts (docs, plans, roadmaps, tickets) that duplicate across layers and drift.
 
-**With SDD:** an append-only graph where new insight becomes a new entry. State is _derived from the graph_, never maintained in parallel. Tracked in Git, so humans and agents work against the same view — each session runs independently, and signals and decisions are captured by the work itself.
+**With SDD:** every entry is a confirmed record of what you decided and why — reasoning, not a recording. New insight becomes a new entry — deliberately captured, labeled, and connected to the reasoning already there, so every capture makes the graph **richer, not just bigger**. State is _derived from the graph_, never maintained in parallel, and tracked in Git so humans and agents work against the same view.
 
 ## How you use it
 
