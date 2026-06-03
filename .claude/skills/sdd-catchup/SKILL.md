@@ -2,11 +2,11 @@
 allowed-tools: Bash(sdd *)
 description: Produce a colleague-style catch-up briefing on the SDD project. Threads recent activity, active work, and warm gaps into 2–4 story-arc clusters with action-tight numbered items. Use as the check-in mode when starting a session or whenever a fresh briefing is wanted.
 name: sdd-catchup
-sdd-content-hash: 6764549147c7b6ef4bb7cee86883d57b52d5afb075d081d36d9651030330855d
+sdd-content-hash: a8c2d6583be8ea91a92f830251722e20eec47b9fc4704150e54b39a583760eea
 sdd-version: dev
 ---
 
-You are producing a fast, useful catch-up for a competent colleague who knows the project but missed the week. The fetched data below is the entire input — work directly from it, no other lookups, no `sdd show` follow-ups.
+You are producing a fast, useful catch-up for a competent colleague who knows the project but missed the week. **For composing this briefing only**, the fetched data below is your entire input — work directly from it, with no other lookups and no `sdd show` follow-ups. This scoping covers the briefing itself and nothing after it (see the handback note at the end).
 
 Goal: a colleague-style briefing that surfaces what wants the user's next action. Cluster by project thread (current relevance, not kind or layer). Compress the input — don't echo CLI output verbatim.
 
@@ -159,19 +159,13 @@ For focus: render a single italic summary line at the top, in plain language: "C
 
 # Fetched data
 
-The four blocks below are injected fresh each invocation. Read them as your sole input.
-
-## Recent done
+The four blocks below are injected fresh each invocation. Read them as your sole input **for composing this briefing** — don't run extra lookups to assemble it.
 
 !`sdd view --layout='kind(done):rank(by(date)):n(10):name("Recent done"):as-list'`
-
-## Active and hot
 
 !`sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(refs(inactive)):name("Active and hot"):as-list'`
 
 Each active plan/activity may carry indented `→ <verb> <id> {status: …}` sub-lines for references whose target is currently inactive (closed or superseded). The sub-line shows the referenced entry's present state only — no timestamp, and no relationship beyond the verb (which is the generic `refs` for older entries). Don't render the sub-lines verbatim.
-
-## Open and warm
 
 !`sdd view --layout='kind(gap,question,insight):active:rank(heat(exp-14d)):n(15):name("Open and warm"):as-list'`
 
@@ -237,3 +231,9 @@ Say *drill A* or *survey* for the full picture.
 - Restate aspirations or focus entries as content — they're framing.
 - Echo banned words from entry text — paraphrase.
 - Echo internal references (slice numbers, AC numbers, version labels, fixture names) — describe the work in plain words.
+
+# After the briefing — hand back to /sdd
+
+The "sole input, no lookups" rule above applies **only to composing this briefing**. It does not govern what comes next.
+
+Once the briefing renders, control returns to `/sdd` and normal grounding resumes. In the dialogue that follows, don't treat these summaries as verified facts: before asserting any connection, status, date, or what an entry "already covers," read the entries first. `sdd show` takes several full IDs at once and renders them back to back (`sdd show <id1> <id2> …`), and `sdd search` widens to what you didn't already name. A summary is a pointer, not the entry.
