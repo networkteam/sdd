@@ -50,7 +50,7 @@ Format follows v0.5.0 / v0.5.1:
 **Full Changelog**: https://github.com/networkteam/sdd/compare/vPREV...vNEW
 ```
 
-Highlights = paragraph-worthy items. Other changes = one-liners. Skip housekeeping commits. Save the draft to `.sdd/tmp/vX.Y.Z-notes.md` (gitignored).
+Highlights = paragraph-worthy items. Other changes = one-liners. Skip housekeeping commits. **Skip README and docs-only changes** — the notes describe what shipped in the CLI binary, not documentation edits to the repo. Save the draft to `.sdd/tmp/vX.Y.Z-notes.md` (gitignored).
 
 ### 4. Play back and gate on explicit confirmation
 
