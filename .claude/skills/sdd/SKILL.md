@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: f2785be3a2ae09623cb851299620e4c52acc4f2c05353e208c5aebacecf7dc77
+sdd-content-hash: 61ea1523b68b6c8d4142df4e7f620833c8a801f3e018205c15df29527b86883b
 sdd-version: dev
 ---
 
@@ -43,11 +43,16 @@ Before you start the catch-up, say in one short line what you're about to do —
 
 ## How you behave
 
-### Ground claims before you make them
+### Ground before you claim — widen, then inspect
 
-Being a useful SDD partner means being properly informed *first*. Catch-up summaries, recalled IDs, and entry titles are pointers — not verified facts. Before you assert a connection, a status, a date, or what an entry "already covers," read it: `sdd show <id1> <id2> …` takes several full IDs at once and renders their chains back to back, and `sdd search` turns up what you didn't already name. If you state a graph relationship you didn't just read, you're guessing — and to the user a confident guess is indistinguishable from a verified claim.
+Catch-up summaries, recalled IDs, and entry titles are pointers, not facts. Before you assert what the graph holds — a connection, a status, a date, what an entry "already covers," or whether something is new — run two moves, in order:
 
-This holds in **dialogue**, not only when drafting an entry. The moment you make a claim about the graph — in synthesis, in a catch-up follow-up, in a recommendation — is the moment it needed grounding. When you can't ground a claim, say so and check, rather than asserting and waiting to be corrected. This is the dialogue-side companion to "Surface candidates with `sdd search`" below, which covers capture-time discovery.
+- **Widen.** For any new input or topic, search the graph from several *different angles* — not one query, but a few phrasings that come at the idea differently, plus any known term or ID — so you find the entries you didn't think to name. This comes first and is not optional. Reading only the entries a catch-up already named confirms what you spotted; it does not discover what you missed.
+- **Inspect.** Pull the promising candidates' full detail in one shot — bundle their IDs into a single load — and read the chains before drawing a conclusion.
+
+The tools for both moves are documented once: [search](references/search.md) for how to search and which mode, [cli-reference](references/cli-reference.md) for loading entries and the full-ID rule. Use those rather than re-deriving commands from memory.
+
+This holds in **dialogue**, not only when drafting an entry — synthesis, a catch-up follow-up, a recommendation all count. If you state a graph relationship you haven't just widened and inspected for, you're guessing, and to the user a confident guess is indistinguishable from a verified claim. When you can't ground a claim, say so and check rather than asserting and waiting to be corrected.
 
 ### Keep dialogue focused
 
@@ -133,9 +138,9 @@ Then propose at least one topic in the play-back. Reuse an existing label when o
 
 After `sdd new` succeeds, the output prints the LLM-generated summary alongside the entry path. Read it: does it stay true to the body's meaning, or has it introduced an actor not in the body, shifted commitment framing, or auto-corrected an identifier that was intentional? Summaries are what `sdd status`, `sdd list`, and catch-up render — drift here is what readers consume. If the summary has drifted, offer the user a corrected version and run `sdd summarize <full-id> --text "<better summary>"` (or pipe via stdin with `--text -`) to replace it. The fix is cheap at capture time; once others read the bad version, it lives on in their context.
 
-### Surface candidates with `sdd search`
+### Widen before capture, too
 
-When dialogue references a concept, identifier, or area of the graph, `sdd search` produces ranked candidates fast. Use it before drafting a new entry (to check what already exists), during explore briefings (to widen the related set), and when grooming candidates that look superseded-in-practice (to find the newer entry). Search returns seeds; agent judgment via dialogue picks the right one — search never substitutes for reading the candidate's full chain via `sdd show`. See [search reference](references/search.md) for mode selection and citation reading.
+The Widen → Inspect moves aren't only for dialogue claims. Before drafting a new entry, widen first to check whether you'd be re-stating something the graph already holds — refs are cheaper than supersedes, and finding the existing entry up front lets you ref it. The same move surfaces the newer entry when grooming something that looks superseded-in-practice, and widens the related set during explore briefings. Search returns seeds; dialogue picks the right one, and it never replaces inspecting the full chain.
 
 ### Always suggest next steps
 

@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: f6e2987152c33d5a4a07ba6291664e70df83f5088db97336aa1cd74a62d2d768
+sdd-content-hash: 5780ee5708395c2d116cfba06ace80c6af9e37bc990720c7d2fb9da1a9886174
 sdd-version: dev
 ---
 # Engage Playbook
@@ -12,10 +12,10 @@ Four steps, in order. Don't skip any of them, and don't reorder.
 
 1. **Anchor** — establish the entry the session is about.
    - Entry ID given: use it.
-   - Topic phrase given (no anchor): `sdd search --query "<phrase>"` to surface candidates, then dialogue toward picking the centre. See [search reference](search.md) for mode selection.
+   - Topic phrase given (no anchor): widen (the **Widen** move) to surface candidates, then dialogue toward picking the centre. See [search](search.md) for mode selection.
    - Action verb only ("let's keep going", "let's evaluate"): if the recent dialogue or `sdd wip list` resolves to a clear entry, use it; otherwise ask which entry.
 
-2. **Read chain** — `sdd show <full-id> --downstream`. This single call surfaces upstream rationale, augment-plan amendments, partial done signals against ACs, supersession, and downstream activity. Use full IDs always (per the outer skill's CLI rule). For closed commitments where evaluation is in scope, also fetch the closing done signal at full detail (`sdd show --max-depth 0 <done-id>`).
+2. **Read chain (Inspect)** — load the anchor with its chain in one call (`sdd show <full-id> --downstream`; see [cli-reference](cli-reference.md)). This surfaces upstream rationale, augment-plan amendments, partial done signals against ACs, supersession, and downstream activity. Use full IDs always (per the outer skill's CLI rule). For closed commitments where evaluation is in scope, also load the closing done signal at full detail.
 
 3. **Brief** — synthesize what the entry is about, current status, what's around it. **The brief shape varies by entry kind and user intent** (see "Brief shapes" below). Don't default to a single template — pick the shape that matches what the user is engaging on and what they're trying to do.
 
@@ -87,7 +87,7 @@ When the anchor is a signal (gap, question, insight, fact) and the intent is to 
 > **What this is about** — one paragraph synthesizing the chain, including the originating context and any refining signals.
 > **Status** — open / closed-by / superseded-by, plus a one-line read of where the signal sits in active threads.
 > **What's happened since** — downstream entries (decisions addressing it, refining signals, related captures), if any.
-> **What's around it** — semantically-related entries surfaced via `sdd search --query` or via `/sdd-explore` if the spread is wide.
+> **What's around it** — semantically-related entries surfaced by widening (the **Widen** move) or via `/sdd-explore` if the spread is wide.
 > **Orienting question** — close with: "what does this need?"
 
 The narrative is short — three to five sentences total in most cases. Don't pad. The orienting question hands intent back to the user.

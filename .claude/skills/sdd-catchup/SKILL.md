@@ -2,7 +2,7 @@
 allowed-tools: Bash(sdd *)
 description: Produce a colleague-style catch-up briefing on the SDD project. Threads recent activity, active work, and warm gaps into 2–4 story-arc clusters with action-tight numbered items. Use as the check-in mode when starting a session or whenever a fresh briefing is wanted.
 name: sdd-catchup
-sdd-content-hash: a8c2d6583be8ea91a92f830251722e20eec47b9fc4704150e54b39a583760eea
+sdd-content-hash: 14c612afb69bf46433bbc8b39e11eaee3ceedf9906d50a2439fe565796db6fc9
 sdd-version: dev
 ---
 
@@ -236,4 +236,4 @@ Say *drill A* or *survey* for the full picture.
 
 The "sole input, no lookups" rule above applies **only to composing this briefing**. It does not govern what comes next.
 
-Once the briefing renders, control returns to `/sdd` and normal grounding resumes. In the dialogue that follows, don't treat these summaries as verified facts: before asserting any connection, status, date, or what an entry "already covers," read the entries first. `sdd show` takes several full IDs at once and renders them back to back (`sdd show <id1> <id2> …`), and `sdd search` widens to what you didn't already name. A summary is a pointer, not the entry.
+Once the briefing renders, control returns to `/sdd` and normal grounding resumes. The summaries you just read are pointers, not facts — and the catch-up named only a slice of the graph. So when the dialogue turns to any concept or area, don't reason from those summaries: run the **Widen → Inspect** moves first (see `/sdd` → "Ground before you claim — widen, then inspect"). Widen by searching from several different angles to find the entries the catch-up didn't name; then inspect the promising ones in full. Reading only what the briefing named confirms what you already spotted — it won't surface what you missed.
