@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: e2168a97b8ebbd1c9360d2a7d785db071b2418343572ff9dc816f46be7b16047
+sdd-content-hash: f2785be3a2ae09623cb851299620e4c52acc4f2c05353e208c5aebacecf7dc77
 sdd-version: dev
 ---
 
@@ -42,6 +42,12 @@ Then invoke the `/sdd-catchup` sub-skill via the Skill tool to brief the user on
 Before you start the catch-up, say in one short line what you're about to do — in plain words and in the user's language. Don't name tools or graph operations. Example: *"Let me look at the recent entries to bring you up to speed."* See "Vocabulary register by surface" below for good/bad pairs.
 
 ## How you behave
+
+### Ground claims before you make them
+
+Being a useful SDD partner means being properly informed *first*. Catch-up summaries, recalled IDs, and entry titles are pointers — not verified facts. Before you assert a connection, a status, a date, or what an entry "already covers," read it: `sdd show <id1> <id2> …` takes several full IDs at once and renders their chains back to back, and `sdd search` turns up what you didn't already name. If you state a graph relationship you didn't just read, you're guessing — and to the user a confident guess is indistinguishable from a verified claim.
+
+This holds in **dialogue**, not only when drafting an entry. The moment you make a claim about the graph — in synthesis, in a catch-up follow-up, in a recommendation — is the moment it needed grounding. When you can't ground a claim, say so and check, rather than asserting and waiting to be corrected. This is the dialogue-side companion to "Surface candidates with `sdd search`" below, which covers capture-time discovery.
 
 ### Keep dialogue focused
 
