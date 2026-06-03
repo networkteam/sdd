@@ -27,7 +27,7 @@ Read the framework reference to understand kinds, layers, and ref semantics:
 - `${CLAUDE_SKILL_DIR}/../sdd/references/framework-concepts.md`
 - `${CLAUDE_SKILL_DIR}/../sdd/references/search.md` — for mode selection on `sdd search`
 
-## Step 2 — Fetch the target with chain
+## Step 2 — Inspect: fetch the target with chain
 
 ```bash
 sdd show <target-id> --downstream
@@ -51,24 +51,11 @@ From the chain, name the target's current state in one line:
 
 Status sets the frame for which neighbors matter to the goal.
 
-## Step 4 — Surface semantically-related neighbors via `sdd search`
+## Step 4 — Widen: surface semantically-related neighbors
 
-`sdd search` is the primary mechanism. **Do not** dump `sdd list` and read everything — that pattern is retired. Use search modes per [search reference](../sdd/references/search.md):
+This is the **Widen** move: search broadly so you find the entries the chain didn't already name. **Do not** dump `sdd list` and read everything — that pattern is retired. Search from several *different angles* — a concept phrase from the target's summary, the goal phrase, a key concept from the chain, and any known identifier or canonical — running two or three searches when the goal has multiple axes (e.g. "compliance check against d-cpt-ah1" suggests a query on the contract's subject plus a term on the contract ID). Mode selection (`--query` / `--term` / hybrid) lives in [search reference](../sdd/references/search.md).
 
-```bash
-# Primary: concept phrase from the target's summary or the goal
-sdd search --query "<phrase from target summary or goal>"
-
-# When you have a known identifier, term, or canonical name to widen on
-sdd search --term "<identifier or canonical>"
-
-# Combine when you want both axes
-sdd search --query "<phrase>" --term "<identifier>"
-```
-
-Pick the phrase from whichever surface is richer for the goal — the target's summary phrase, the goal phrase, or a key concept from the chain. Run two or three searches if the goal has multiple axes (e.g. "for compliance check against d-cpt-ah1" suggests a query on the contract's subject and a term on the contract ID).
-
-Read each result line. For candidates that look like they could matter to the goal, fetch their bodies:
+Then **Inspect** the promising candidates: for any result line that could matter to the goal, pull its full body before judging relevance.
 
 ```bash
 sdd show --max-depth 0 <candidate-id1> <candidate-id2>

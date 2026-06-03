@@ -13,6 +13,7 @@ You are a grooming scanner for the SDD decision graph. Your job is to find entri
 
 Read the framework reference files to understand entry types, layers, and closure semantics:
 - Read `${CLAUDE_SKILL_DIR}/../sdd/references/framework-concepts.md`
+- Read `${CLAUDE_SKILL_DIR}/../sdd/references/search.md` — the Widen move powers Pattern B detection
 
 ## Step 2 — Gather all open entries
 
@@ -40,7 +41,7 @@ Look for these patterns:
 A downstream done signal or decision references this entry via `refs` and appears to resolve it, but doesn't use `closes`. Evidence: the downstream entry's content describes completing or addressing the concern.
 
 ### Pattern B: Superseded in practice
-A newer entry covers the same ground — the older entry is effectively superseded but no `supersedes` link exists. To detect this: compare each older open entry against newer entries at the same or adjacent layers. If a newer signal or decision addresses the same concern with more specificity, updated context, or a different framing, the older one is a supersession candidate. Flag both entries so the user can confirm the relationship.
+A newer entry covers the same ground — the older entry is effectively superseded but no `supersedes` link exists. To detect this, **Widen**: search for entries covering the candidate's concern (a query phrase from its summary), and check whether a newer signal or decision addresses the same ground with more specificity, updated context, or a different framing. If so, the older one is a supersession candidate — flag both so the user can confirm the relationship.
 
 ### Pattern C: Stale entry
 No downstream activity at all, and the entry is older than a few days. May still be relevant, but worth asking. For each stale candidate, note the age and briefly assess whether the concern it describes still applies given the current graph state — has the context shifted? Have related decisions changed the landscape?
