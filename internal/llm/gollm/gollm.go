@@ -24,6 +24,7 @@ import (
 type Runner struct {
 	client   upstream.LLM
 	provider string
+	model    string
 	useCache bool
 }
 
@@ -112,6 +113,7 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 	return &Runner{
 		client:   client,
 		provider: cfg.Provider,
+		model:    cfg.Model,
 		useCache: useCache,
 	}, nil
 }
@@ -132,7 +134,7 @@ func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, erro
 
 	prompt := upstream.NewPrompt(req.UserPrompt, opts...)
 
-	text, err := r.client.Generate(ctx, prompt)
+	resp, err := r.client.GenerateWithUsage(ctx, prompt)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("gollm %s: timed out", r.provider)
@@ -140,10 +142,43 @@ func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, erro
 		return nil, fmt.Errorf("gollm %s: %w", r.provider, err)
 	}
 
-	// gollm's Generate returns text only; Meta stays nil — token/cost
-	// metrics are not surfaced through this path. logCallResult handles
-	// nil Meta gracefully.
-	return &llm.RunResult{Text: text}, nil
+	// The fork surfaces per-call usage (tokens + prompt-cache read/creation)
+	// via GenerateWithUsage; map it into the agent-neutral LLMMetadata so the
+	// gollm path stops returning nil Meta. Cost is not reported by the
+	// provider APIs (it was a claude-cli extra), so it is left zero.
+	return &llm.RunResult{Text: resp.Content, Meta: metaFromUsage(resp.Usage, r.model, r.provider)}, nil
+}
+
+// metaFromUsage maps a gollm Response.Usage into the agent-neutral
+// llm.LLMMetadata. It prefers the Anthropic-style input/output counts and falls
+// back to the OpenAI-style prompt/completion counts. Returns nil when the
+// provider reported no usage (so logging and the stats sink skip the call).
+func metaFromUsage(u *upstream.Usage, model, provider string) *llm.LLMMetadata {
+	if u == nil {
+		return nil
+	}
+	in := u.InputTokens
+	if in == 0 {
+		in = u.PromptTokens
+	}
+	out := u.OutputTokens
+	if out == 0 {
+		out = u.CompletionTokens
+	}
+	mu := llm.ModelUsage{
+		InputTokens:       in,
+		OutputTokens:      out,
+		CacheReadTokens:   u.CacheReadInputTokens,
+		CacheCreateTokens: u.CacheCreationInputTokens,
+	}
+	return &llm.LLMMetadata{
+		Provider:          provider,
+		InputTokens:       in,
+		OutputTokens:      out,
+		CacheReadTokens:   u.CacheReadInputTokens,
+		CacheCreateTokens: u.CacheCreationInputTokens,
+		Models:            map[string]llm.ModelUsage{model: mu},
+	}
 }
 
 // needsAPIKey reports whether the provider requires an API key configured
