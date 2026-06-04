@@ -44,6 +44,7 @@ func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, erro
 	}
 
 	meta := &llm.LLMMetadata{
+		Provider:          "claude-cli",
 		TotalCostUSD:      resp.TotalCostUSD,
 		InputTokens:       resp.Usage.InputTokens,
 		OutputTokens:      resp.Usage.OutputTokens,

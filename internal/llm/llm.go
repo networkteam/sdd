@@ -64,6 +64,9 @@ type RunResult struct {
 
 // LLMMetadata holds agent-neutral per-call metrics from the LLM provider.
 type LLMMetadata struct {
+	// Provider is the configured LLM provider that served the call
+	// (e.g. "anthropic", "ollama", "openai", "claude-cli").
+	Provider          string
 	TotalCostUSD      float64
 	InputTokens       int
 	OutputTokens      int

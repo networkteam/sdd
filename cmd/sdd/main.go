@@ -20,6 +20,7 @@ import (
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llm/factory"
+	"github.com/networkteam/sdd/internal/llmstats"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
@@ -237,6 +238,16 @@ func main() {
 			}))
 			slog.SetDefault(logger)
 			ctx = slogutils.WithLogger(ctx, logger)
+
+			// Attach a stats sink so LLM calls (pre-flight, summarize) record
+			// token + prompt-cache metrics to .sdd/stats/llm.jsonl. Best-effort:
+			// if .sdd/ isn't discoverable or the sink can't be created, LLM
+			// calls simply record nothing.
+			if sddDir, err := resolveSDDDir(); err == nil {
+				if sink, err := llmstats.NewFileSink(filepath.Join(sddDir, "stats")); err == nil {
+					ctx = llm.WithStatsSink(ctx, sink)
+				}
+			}
 
 			// Background sync check runs on every command except `sdd init`
 			// (bootstrap may precede remote configuration — sync would emit

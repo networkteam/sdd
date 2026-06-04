@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	upstream "github.com/teilomillet/gollm"
+
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -70,5 +72,36 @@ func TestNewRunner_BadTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "parsing timeout") {
 		t.Errorf("error should mention timeout parsing, got %v", err)
+	}
+}
+
+func TestMetaFromUsage(t *testing.T) {
+	if metaFromUsage(nil, "m", "anthropic") != nil {
+		t.Error("nil usage should yield nil meta")
+	}
+
+	// Anthropic-style fields, including the prompt-cache read breakdown.
+	m := metaFromUsage(&upstream.Usage{
+		InputTokens:          6341,
+		OutputTokens:         8,
+		CacheReadInputTokens: 6163,
+	}, "claude-sonnet-4-6", "anthropic")
+	if m == nil {
+		t.Fatal("expected non-nil meta")
+	}
+	if m.InputTokens != 6341 || m.OutputTokens != 8 || m.CacheReadTokens != 6163 {
+		t.Errorf("anthropic mapping wrong: %+v", m)
+	}
+	if m.Provider != "anthropic" {
+		t.Errorf("provider not propagated: %+v", m)
+	}
+	if mu, ok := m.Models["claude-sonnet-4-6"]; !ok || mu.CacheReadTokens != 6163 {
+		t.Errorf("per-model usage wrong: %+v", m.Models)
+	}
+
+	// OpenAI-style counts fall back to input/output.
+	m2 := metaFromUsage(&upstream.Usage{PromptTokens: 100, CompletionTokens: 20}, "gpt", "openai")
+	if m2.InputTokens != 100 || m2.OutputTokens != 20 {
+		t.Errorf("openai fallback wrong: %+v", m2)
 	}
 }
