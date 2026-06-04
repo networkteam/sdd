@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 215fc77b5b6d547a8cfb9d434b9aa31af63e38634f3bf3d987c58bdaa9dda754
+sdd-content-hash: b888ef1376c45551c4f9d901e80ee13774ba4e6aae695ebad9a95e8bc2d6ebb0
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -123,7 +123,7 @@ A ref is a contextual pointer with **no status effect** — closure is `closes`/
 | `grounded-in` | founded on / reasons from | the target is a basis the source rests on — a contract, aspiration, standing directive, a **fact** taken as premise or cited as empirical proof, an **insight** reasoned from, or a prior decision conformed to | you realize/operationalize it → `addresses`; you extend a closed line → `builds-on` |
 | `builds-on` | continues / extends | the target is **closed** and you extend it, or you are the next step after a finished chain | the target is active and sharpened in place → `refines`; you realize its commitment → `addresses` |
 | `refines` | sharpens (in place) | the target is **active** and you narrow/clarify its commitments without replacing it (the augmenting pattern; the refining entry closes alongside the target) | the target is closed → `builds-on`; you realize it → `addresses` |
-| `addresses` | acts on / realizes | responding to a gap/question/insight, **or** realizing a decision's commitment — operationalizing a directive, supplying a plan's AC or an activity's work (incl. partial, without closing) | you only reason from it → `grounded-in`; the target depends on you → `required-by` |
+| `addresses` | acts on / realizes | responding to a gap/question/insight, **or** realizing a decision's commitment — operationalizing a directive, supplying a plan's AC or an activity's work (incl. partial, without closing) | you only reason from it → `grounded-in`; the target depends on you → `required-by`; the target is a terminal `done` (a completed fact, not an open concern) → `builds-on`/`grounded-in` |
 | `surfaces` | created / discovered (forward) | doing the source's work created or discovered the target; capture the surfaced entry first, then the source that refs it | generic neighborly context → `related` |
 | `depends-on` | needs first (prerequisite) | your work is gated on the target landing or holding first | the target is a basis you reason from → `grounded-in` |
 | `required-by` | is the prerequisite of (forward) | this entry is what a later plan/activity/focus was waiting on, recorded from the prerequisite's side | you do/supply the target's work rather than gate it → `addresses` |
@@ -134,6 +134,8 @@ A ref is a contextual pointer with **no status effect** — closure is `closes`/
 **`refines` vs `builds-on`** turns on the target's status: active + sharpened in place → `refines`; closed or a forward next-step → `builds-on`.
 
 **`related` is the floor, never a default** — it is the most over-reached kind. For a decision target, split: the source *realizes* it → `addresses`; the source is *context it accounts for* → `related`.
+
+**A terminal `done` is not "addressed."** A `done` records completed work — it is not a gap, question, insight, or commitment, so the relationship `addresses` names does not hold for it. When a later entry takes up a follow-up a done flagged, the kind is `builds-on` (the next step after that finished chain) or, when the entry reasons *from* the done as empirical evidence, `grounded-in` — never `addresses`. Choosing between `builds-on` and `grounded-in` here is a defensible-choice question, not an error.
 
 **Growth.** Add an inverse kind only when the other direction has no existing home (`depends-on`'s forward partner was homeless → `required-by`; `surfaces`'s reverse already lands on `grounded-in`/`addresses` → no inverse). Every added kind is one more judgment call at capture and one more rubric boundary — weigh that against a real query need before adding more.
 
