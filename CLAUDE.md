@@ -92,6 +92,7 @@ sdd/
 - Layers: strategic (`stg`), conceptual (`cpt`), tactical (`tac`), operational (`ops`), process (`prc`)
 - Full ID format: `{YYYYMMDD}-{HHmmss}-{type}-{layer}-{suffix}` — full ID used in code/CLI invocations, path derived from it
 - WIP markers live at `.sdd/graph/wip/`
+- **Finding entries: use `sdd search`, not grep.** To locate graph entries (including when delegating to subagents), use `sdd search` (vector or hybrid retrieval) — it matches semantically across summaries and bodies. Reserve `grep`/`ripgrep` for **source code**; `sdd search` only indexes graph entries, not Go source.
 
 ## Skill source of truth
 
@@ -106,6 +107,7 @@ Skills are **source-of-truth in `internal/bundledskills/claude/`** and compiled 
 
 - **Never commit compiled binaries.** `bin/sdd` is in `.gitignore` and must stay there. Rebuild locally.
 - **Never use `git add -A` or `git add .`.** Stage individual files by path (`git add path/to/file`). Wide-net staging sweeps in unrelated work from concurrent sessions or active WIP markers and binds it to the wrong commit narrative — the contamination is invisible until the commit lands and is hard to untangle without rewriting history.
+- **Trust `sdd`'s auto-commit.** `sdd new`, `sdd summarize`, and `sdd init` make their own `sdd: …` commit. If the command exits without error, the entry and its commit are done — do not re-run `git status` / `git log` to confirm. The only thing worth reading back is the generated summary (for fidelity), not the commit.
 
 ## Auto-memory
 
