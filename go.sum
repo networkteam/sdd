@@ -74,8 +74,8 @@ github.com/muesli/cancelreader v0.2.2 h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELU
 github.com/muesli/cancelreader v0.2.2/go.mod h1:3XuTXfFS2VjM+HTLZY9Ak0l6eUKfijIfMUZ4EgX0QYo=
 github.com/muesli/termenv v0.16.0 h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=
 github.com/muesli/termenv v0.16.0/go.mod h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=
-github.com/networkteam/gollm v0.0.0-20260602193251-4119d4d327ec h1:0i52jttwBMzNdPe42lNmUvmCBuGc0dmGc7+zm4j3y/0=
-github.com/networkteam/gollm v0.0.0-20260602193251-4119d4d327ec/go.mod h1:ba4KWPPrYoc7PbPkcjTD6uMi2s5yXVWVsE5uzP+mvCg=
+github.com/networkteam/gollm v0.0.0-20260604171358-7aec6bb435d4 h1:nqOZ8/3OGoPhhLa8Vg/xHgJDwblEcFGaz00sWBca5oM=
+github.com/networkteam/gollm v0.0.0-20260604171358-7aec6bb435d4/go.mod h1:ba4KWPPrYoc7PbPkcjTD6uMi2s5yXVWVsE5uzP+mvCg=
 github.com/networkteam/slogutils v0.4.0 h1:tf6Gf//H/a3EUmNszWEw8fhQkscrDdKt7HEdb2wBUhM=
 github.com/networkteam/slogutils v0.4.0/go.mod h1:j6siLHGfAkUpfhNUXw43EUdZv/HBaGd/RW7ToPwiJZo=
 github.com/philippgille/chromem-go v0.7.0 h1:4jfvfyKymjKNfGxBUhHUcj1kp7B17NL/I1P+vGh1RvY=

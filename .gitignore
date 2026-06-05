@@ -4,3 +4,6 @@
 .sdd/tmp/
 .sdd/config.local.yaml
 .sdd/index/
+.sdd/stats/
+go.work
+go.work.sum
