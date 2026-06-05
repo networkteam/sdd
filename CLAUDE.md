@@ -23,6 +23,7 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 - `devbox run build` — build the local `bin/sdd` dev binary (git hooks also run this after pull/rebase/checkout)
 - `go vet ./...` — compilation + correctness check (never use `go build` just to verify compilation — it produces no output on success)
 - `go test ./...` — run all tests
+- `go test -tags=eval -run TestPreflightEval ./internal/llm/...` — pre-flight prompt calibration eval (live `claude` CLI, slow + paid; model via `SDD_EVAL_MODEL`, default `sonnet`). Capture full output to a file and grep the file — `… -v 2>&1 | tee /tmp/eval.log` — never filter the live stream, or a failure shows no findings and forces a costly re-run.
 - `go fmt ./...` — format code
 - `golangci-lint run ./...` — lint (must be clean; CI enforces)
 - `sdd status` — smoke-test the binary against the graph at `.sdd/graph/`
@@ -99,6 +100,7 @@ Skills are **source-of-truth in `internal/bundledskills/claude/`** and compiled 
 - **Never edit `.claude/skills/` directly.** Changes made there will be overwritten (or flagged as "modified") the next time `sdd init` runs.
 - Edit in `internal/bundledskills/claude/<skill>/` → rebuild (`devbox run build`) → reinstall (`sdd init --scope project`). The installed copy picks up the new bundle and refreshes `.claude/skills/` with fresh `sdd-version` + `sdd-content-hash` stamps.
 - Commits should include both locations when a skill changes: the source under `internal/bundledskills/claude/` and the re-stamped output under `.claude/skills/`.
+- **`sdd init` auto-commits the installed refresh.** Running `sdd init` (e.g. `--scope project`) commits the regenerated `.claude/skills/` files on its own as `sdd: refresh installed skills and metadata`. So after a reinstall the installed copy already shows clean in `git status` (it's committed), and your bundled-source edit stays as the separate change you commit yourself — the two halves land in two commits, not one. This is expected; don't go hunting for "missing" installed-file changes or try to fold the auto-commit back in.
 
 ## Git rules
 
@@ -109,4 +111,4 @@ Skills are **source-of-truth in `internal/bundledskills/claude/`** and compiled 
 
 **Do not write auto-memory in this project.** This repo dogfoods SDD — we use SDD to develop SDD. Auto-memory creates a parallel record that shortcuts what the graph and skill dialogue are supposed to handle, and it contaminates the evaluation of whether SDD itself is guiding the work well. If memory quietly carries the context that SDD should be surfacing through signals, decisions, and skill guidance, we lose the signal about where the framework is falling short.
 
-Scope: feedback about stylistic tics or other things genuinely unrelated to SDD behavior (how Claude communicates in general) may still go to memory. Anything about SDD concepts, CLI behavior, graph conventions, skill design, or project working preferences belongs in the graph or in this CLAUDE.md — not auto-memory.
+**No exceptions, and no separate memory store.** When you would reach for auto-memory — a working preference, a recurring habit, a cross-session note — update this CLAUDE.md instead (or capture it in the graph when it is SDD substance). This holds even for things that feel "general" or unrelated to SDD: if it surfaced while working here, it lands here, not in a parallel memory file. Do not carve out a "this one's just a communication tic" exception — that loophole defeats the purpose. CLAUDE.md and the graph are the only durable records.
