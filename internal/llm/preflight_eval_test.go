@@ -1,67 +1,92 @@
 //go:build eval
 
 // This file contains evaluation tests for pre-flight prompt template accuracy.
-// Run manually when tuning templates (costs real claude API calls):
+// Run manually when tuning templates (costs real LLM calls):
 //
-//	go test -tags=eval -run TestPreflightEval ./sdd/llm/... -v
+//	go test -tags=eval -run TestPreflightEval ./internal/llm/... -v
+//
+// The suite is an EXTERNAL test package (llm_test) so it drives the real
+// pre-flight pipeline through the exported llm.Preflight orchestrator with a
+// production-built Runner — no bespoke runner, and the eval exercises the same
+// path production does. Provider/model are selectable via SDD_EVAL_PROVIDER /
+// SDD_EVAL_MODEL (default: the claude-cli provider on Sonnet — the model class
+// the ref-meta non-determinism was reported on, s-prc-uh3, and the transport
+// that needs no API key because it rides the logged-in claude CLI). Set
+// SDD_EVAL_PROVIDER=anthropic (+ a key) for the faster direct-API path.
 //
 // Expectations match the severity-scored output format: HasBlocking() == true
 // means at least one `high` finding was reported (the blocking threshold).
 
-package llm
+package llm_test
 
 import (
 	"context"
 	"fmt"
-	"os/exec"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llm/factory"
 	"github.com/networkteam/sdd/internal/model"
 )
 
-// liveRunner implements Runner using the real claude CLI.
-type liveRunner struct {
-	model string
+// capturingRunner wraps a real llm.Runner and records the last raw response.
+// llm.Preflight returns only the parsed result, so the wrapper preserves the
+// raw model output for failure logging while the eval still runs the real
+// orchestrator end to end.
+type capturingRunner struct {
+	inner    llm.Runner
+	lastText string
 }
 
-func (r *liveRunner) Run(ctx context.Context, req Request) (*RunResult, error) {
-	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", r.model)
-	cmd.Stdin = strings.NewReader(req.Combined())
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("claude -p: %w", err)
+func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, error) {
+	res, err := r.inner.Run(ctx, req)
+	if res != nil {
+		r.lastText = res.Text
 	}
-	return &RunResult{Text: string(out)}, nil
+	return res, err
 }
 
-// runEval runs pre-flight against the proposed entry and returns the parsed
-// result plus raw output for logging on failure.
-func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*PreflightResult, string) {
+// evalRunner builds the production Runner the eval validates against, wrapped to
+// capture raw output. Provider/model come from SDD_EVAL_PROVIDER / SDD_EVAL_MODEL
+// (defaults: claude-cli + sonnet — keyless CLI transport on the reported model).
+func evalRunner(t *testing.T) *capturingRunner {
 	t.Helper()
-	ct := selectCheckType(proposed, graph)
-	// English default — the language-drift rubric only fires for non-empty locales.
-	pctx := assembleContext(proposed, graph, ct, "")
-	req, err := renderPreflightPrompt(ct, pctx)
+	runner, err := factory.New(model.LLMConfig{
+		Provider: getenvOr("SDD_EVAL_PROVIDER", "claude-cli"),
+		Model:    getenvOr("SDD_EVAL_MODEL", "sonnet"),
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("building eval runner: %v", err)
 	}
+	return &capturingRunner{inner: runner}
+}
+
+func getenvOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+// runEval runs the real pre-flight pipeline (llm.Preflight) against the proposed
+// entry and returns the parsed result plus the raw model output for logging on
+// failure.
+func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llm.PreflightResult, string) {
+	t.Helper()
+	runner := evalRunner(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	runner := &liveRunner{model: "claude-haiku-4-5-20251001"}
-	runResult, err := runner.Run(ctx, req)
+	// English default — the language-drift rubric only fires for non-empty locales.
+	result, err := llm.Preflight(ctx, runner, proposed, graph, "")
 	if err != nil {
-		t.Fatalf("Runner error: %v", err)
+		t.Fatalf("Preflight error (raw output: %q): %v", runner.lastText, err)
 	}
-
-	result, err := parsePreflightResult(runResult.Text)
-	if err != nil {
-		t.Fatalf("Parse error (raw output: %q): %v", runResult.Text, err)
-	}
-	return result, runResult.Text
+	return result, runner.lastText
 }
 
 // planWithACs returns a plan decision whose description embeds an AC section.
@@ -431,7 +456,7 @@ func TestPreflightEval_AugmentingDirective_GenuineSupersessionFlagged(t *testing
 // caught a replacement-shaped directive that should belong in a supersedes
 // operation rather than an augmentation. Used by the augmenting-directive
 // negative case to allow medium-or-high severity calibration.
-func mentionsSupersession(findings []Finding) bool {
+func mentionsSupersession(findings []llm.Finding) bool {
 	for _, f := range findings {
 		blob := strings.ToLower(f.Category + " " + f.Observation)
 		if strings.Contains(blob, "supersede") ||
@@ -489,17 +514,18 @@ func TestPreflightEval_AugmentingDirective_TopicFilterReconstruction(t *testing.
 	}
 }
 
-// mentionsRefMeta reports whether any finding's category or observation
-// mentions ref / kind / desc concerns — used by the ref-metadata consistency
-// tests to detect that the partial fired without binding to a specific
-// category string the template doesn't pin down.
-func mentionsRefMeta(findings []Finding) bool {
+// mentionsRefMeta reports whether any finding is a ref-metadata consistency
+// finding, keyed on the finding Category. The ref_meta_consistency rubric emits
+// ref-kind-* / ref-meta-* / desc-* categories; matching the category rather
+// than scanning the observation prose avoids false positives when an unrelated
+// finding's prose happens to mention "ref" or "kind" — e.g. a low ac-specificity
+// note about "each ref by a per-kind weight" is not a ref-meta finding.
+func mentionsRefMeta(findings []llm.Finding) bool {
 	for _, f := range findings {
-		blob := strings.ToLower(f.Category + " " + f.Observation)
-		if strings.Contains(blob, "desc") ||
-			strings.Contains(blob, "kind") ||
-			strings.Contains(blob, "ref ") ||
-			strings.Contains(blob, "reference") {
+		cat := strings.ToLower(f.Category)
+		if strings.Contains(cat, "ref-kind") ||
+			strings.Contains(cat, "ref-meta") ||
+			strings.HasPrefix(cat, "desc-") {
 			return true
 		}
 	}
@@ -508,7 +534,7 @@ func mentionsRefMeta(findings []Finding) bool {
 
 // hasFindingAtSeverity reports whether any finding matches the predicate at
 // the given severity.
-func hasFindingAtSeverity(findings []Finding, sev Severity, predicate func(Finding) bool) bool {
+func hasFindingAtSeverity(findings []llm.Finding, sev llm.Severity, predicate func(llm.Finding) bool) bool {
 	for _, f := range findings {
 		if f.Severity != sev {
 			continue
@@ -582,7 +608,7 @@ func TestPreflightEval_RefMeta_DescContradicts_High(t *testing.T) {
 
 	result, raw := runEval(t, graph, proposed)
 	// Direct contradiction (desc "extends" vs body "retires") should be high.
-	if !hasFindingAtSeverity(result.Findings, SeverityHigh, mentionsRefMetaPredicate) {
+	if !hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
 		t.Errorf("Expected a high finding mentioning the contradicting desc, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Correctly flagged desc contradiction as high. Findings: %+v", result.Findings)
@@ -624,7 +650,7 @@ func TestPreflightEval_RefMeta_WrongKind_High(t *testing.T) {
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	if !hasFindingAtSeverity(result.Findings, SeverityHigh, mentionsRefMetaPredicate) {
+	if !hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
 		t.Errorf("Expected a high finding mentioning the wrong kind (grounds on a gap signal), got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Correctly flagged wrong kind as high. Findings: %+v", result.Findings)
@@ -671,7 +697,7 @@ func TestPreflightEval_RefMeta_TopicalDrift_NotHigh(t *testing.T) {
 	result, raw := runEval(t, graph, proposed)
 	// A correct kind with mild desc drift sits below the contradiction
 	// threshold — the validator must not block on metadata here.
-	if hasFindingAtSeverity(result.Findings, SeverityHigh, mentionsRefMetaPredicate) {
+	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
 		t.Errorf("Expected no high ref-metadata finding for topical desc drift with a correct kind, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Topical-drift case did not produce a high ref-metadata finding. Findings: %+v", result.Findings)
@@ -680,8 +706,8 @@ func TestPreflightEval_RefMeta_TopicalDrift_NotHigh(t *testing.T) {
 
 // mentionsRefMetaPredicate is the predicate form of mentionsRefMeta for use
 // with hasFindingAtSeverity.
-func mentionsRefMetaPredicate(f Finding) bool {
-	return mentionsRefMeta([]Finding{f})
+func mentionsRefMetaPredicate(f llm.Finding) bool {
+	return mentionsRefMeta([]llm.Finding{f})
 }
 
 // The scenarios below pin the principle-based ref-kind calibration. Correct or
@@ -753,7 +779,7 @@ func TestPreflightEval_RefMeta_BuildsOnActiveSharpened_High(t *testing.T) {
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	if !hasFindingAtSeverity(result.Findings, SeverityHigh, mentionsRefMetaPredicate) {
+	if !hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
 		t.Errorf("Expected a high finding — builds-on on an active target sharpened in place should be refines. Got: %+v\nRaw:\n%s", result.Findings, raw)
 	}
 }
@@ -803,5 +829,45 @@ func TestPreflightEval_RefMeta_RelatedFloor_NoFinding(t *testing.T) {
 	result, raw := runEval(t, graph, proposed)
 	if mentionsRefMeta(result.Findings) {
 		t.Errorf("Expected NO ref-meta finding — related is the correct floor for a genuine sibling. Got: %+v\nRaw:\n%s", result.Findings, raw)
+	}
+}
+
+// Terminal-`done` tie-break (d-prc-v0h / d-prc-uh3): the target is a terminal
+// `done` whose body flagged a follow-up, and the source is the next step taking
+// that follow-up up. `builds-on` (next step after a finished chain) is
+// applicable, so the ceiling is `low` — the advisory must NOT block at `high`.
+// This pins the oscillation case where identical input drew contradictory high
+// verdicts that each recommended `addresses` — the one kind a terminal done
+// (a completed fact, not a gap/commitment) forbids.
+func TestPreflightEval_RefMeta_BuildsOnTerminalDoneFollowup_NotHigh(t *testing.T) {
+	done := &model.Entry{
+		ID:      "20260604-090000-s-ops-rec",
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
+		Content: "Restored the cluster after the outage and brought all services back online. One follow-up remains: remote out-of-band management of the affected node is still broken and is tracked separately.",
+		Time:    time.Date(2026, 6, 4, 9, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{done})
+
+	proposed := &model.Entry{
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindDirective,
+		Refs: []model.Ref{
+			// Terminal done target; the source is the next step after that
+			// finished chain. builds-on is applicable, so this must not block
+			// at high — and addresses (what the oscillating validator kept
+			// recommending) is inapplicable to a completed fact.
+			{ID: done.ID, Kind: model.RefKindBuildsOn, Desc: "next step after the recovery, which flagged remote management as still broken"},
+		},
+		Content: "Restore remote out-of-band management of the affected node — the follow-up the outage recovery (s-ops-rec) flagged as still broken. This is the next step after that finished recovery work.",
+		Time:    time.Date(2026, 6, 4, 14, 0, 0, 0, time.UTC),
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+		t.Errorf("Expected no high ref-meta finding — builds-on on a terminal done (taking up a flagged follow-up) is applicable; the ceiling is low. Got: %+v\nRaw:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly did not block builds-on on a terminal done. Findings: %+v", result.Findings)
 	}
 }
