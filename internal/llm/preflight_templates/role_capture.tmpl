@@ -1,6 +1,4 @@
-{{ define "role_capture_system" -}}
-You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
-
+{{ define "role_capture_user" -}}
 ## Task
 
 A `kind: role` decision is being captured — a participation pattern binding an actor to a specific contribution shape. Mechanical frontmatter checks (actor canonical matches an active chain's head, refs includes the head actor entry ID) run separately; focus this rubric on **contribution-shape prose quality**.
@@ -21,15 +19,7 @@ Roles record *what a participant does*, orthogonal to strategic or conceptual co
 - No finding — Contribution shape is clear, actor linkage is named, scope is per-actor rather than universal.
 
 Trust the mechanical layer for structural validation: actor canonical mismatch, missing head ref, orphan cascade, and layer mismatches are handled by frontmatter validation, pre-flight mechanical checks, and lint. Do not re-flag those here.
-{{ template "unrelated_refs" . -}}
-{{ template "contracts" . -}}
-{{ template "entry_quality" . -}}
-{{ template "ref_meta_consistency" . -}}
-{{ template "language" . -}}
-{{ template "verdict" . -}}
-{{- end }}
 
-{{ define "role_capture_user" -}}
 ## Proposed role decision
 
 {{ .ProposedEntry }}

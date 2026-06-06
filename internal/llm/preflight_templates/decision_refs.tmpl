@@ -1,6 +1,4 @@
-{{ define "decision_refs_system" -}}
-You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
-
+{{ define "decision_refs_user" -}}
 ## Task
 
 A decision is being created with references but not closing any entries. Verify that the decision is well-grounded, complete, and — for directive-kind decisions — that it reads as a bounded commitment rather than a perpetual pull (which would be an aspiration).
@@ -23,7 +21,7 @@ Genuine supersession is still distinct from augmentation: a directive that *repl
 
 ## Checks
 
-1. **Ref completeness**: Does this entry logically build upon or advance existing entries without referencing them? If the entry wouldn't make sense without the context of another entry, or moves that line of thought further, it should ref that entry. Refs represent logical dependency ("builds on"), not topical association. (Graph-mechanics meta-patterns named in prose are not refs — see "Augmenting directives" above.)
+1. **Ref completeness**: Read the body against the referenced entries provided below. Every entry the body reasons from, responds to, contrasts with, or advances should appear as a ref — if a sentence depends on another entry's context to make sense, that entry should be referenced. Judge this from the body itself and the referenced entries below; do not hunt the wider graph for entries that might be related — skill-side widening before capture covers that. Refs represent logical dependency ("builds on"), not topical association. (Graph-mechanics meta-patterns named in prose are not refs — see "Augmenting directives" above.)
 2. **Grounding**: The decision content should be grounded in the referenced entries — not introducing commitments from nowhere.
 3. **No scope smuggling**: The decision should not contain undiscussed commitments beyond what the referenced entries support. (Refining the scope of a ref'd active plan via the augmenting-directive pattern is not scope smuggling — see "Augmenting directives" above.)
 4. **Acceptance criteria presence** (applies only when the proposed entry is `Kind: plan`): Plan decisions must include an `## Acceptance criteria` section in the description with `- [ ]` checklist items. Missing AC section on a plan decision is a `high` finding. If the proposed kind is not `plan`, skip this check.
@@ -31,12 +29,12 @@ Genuine supersession is still distinct from augmentation: a directive that *repl
 
 ## Calibration
 
-A decision must ref the signals or decisions that directly motivated it or that it directly answers. Not every tangentially-related entry needs a ref.
+Judge ref completeness from the body and the referenced entries below — not from a graph-wide search. A decision must ref the entries its body reasons from, responds to, or advances. Not every tangentially-related entry needs a ref.
 
-- `high` — Decision answers the specific question raised by an unreferenced signal (e.g. decision prescribes an answer to a distribution question raised in an unreferenced signal that even listed options the decision implicitly rejects). Or: proposed entry is a plan decision with no `## Acceptance criteria` section in its description.
-- `medium` — A related signal plausibly informs the decision but isn't answered directly; could be intentional scope narrowing.
+- `high` — Proposed entry is a plan decision with no `## Acceptance criteria` section in its description.
+- `medium` — The body names a specific entry (by ID or unmistakable description) it depends on, but that entry is absent from the refs; or the reasoning clearly leans on context no referenced entry supplies, suggesting a motivating entry is missing. Could be intentional scope narrowing.
 - `low` — Style suggestion (dense summary could be split across sentences).
-- No finding — Strategic decisions synthesize direction without every principle being pre-established in a signal; demanding pre-grounding prevents strategic thinking. Presence-of-field checks (missing Kind, missing Confidence) belong to CLI/lint, not LLM judgment.
+- No finding — The referenced entries adequately ground the body. Strategic decisions synthesize direction without every principle being pre-established in a signal; demanding pre-grounding prevents strategic thinking. Presence-of-field checks (missing Kind, missing Confidence) belong to CLI/lint, not LLM judgment.
 
 ### Directive-reads-aspiration-shaped calibration (stg / cpt directives only)
 
@@ -45,20 +43,7 @@ A directive at strategic or conceptual layer with perpetual framing and no "done
 - `medium` — Strategic or conceptual directive with perpetual framing and no bounded completion criterion. Narrative uses phrases like "ongoing pull toward X", "we orient around Y", "always favoring Z", with no "done when" or "closed by" horizon. Example: `kind: directive` at `stg` with content "We commit to prioritizing user trust over short-term growth as an enduring stance." — reads as an aspiration.
 - `low` — Directive at any layer where the commitment could read as a perpetual pull rather than a bounded choice; narrative is ambiguous. Example: directive at `cpt` "Favor simplicity in API design" — could be bounded (applied to current design work) or perpetual (a standing orientation); a sentence naming the horizon would clarify.
 - No finding — Directive with a clear bounded choice, even if high-level. Examples: "We will pursue direct-to-consumer distribution over wholesale" (bounded despite strategic); "Use Postgres for the new service" (concrete commitment). Bounded directives have a "done when" shape: a specific change lands, a path is taken, or the commitment is fulfilled by action.
-{{ template "unrelated_refs" . -}}
-{{ if .OpenSignals }}
-## Open signals in the graph (check for missing refs)
 
-{{ .OpenSignals }}
-{{ end -}}
-{{ template "contracts" . -}}
-{{ template "entry_quality" . -}}
-{{ template "ref_meta_consistency" . -}}
-{{ template "language" . -}}
-{{ template "verdict" . -}}
-{{- end }}
-
-{{ define "decision_refs_user" -}}
 ## Proposed decision
 
 {{ .ProposedEntry }}

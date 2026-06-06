@@ -1,6 +1,4 @@
-{{ define "closing_decision_system" -}}
-You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
-
+{{ define "closing_decision_user" -}}
 ## Task
 
 A decision is being created that claims to close one or more entries. Most commonly this is a decision closing signals (the standard pattern: directive/activity/plan/contract addressing a gap). A `kind: directive` decision may also close stable-kind entries (`fact` / `insight` / `contract` / `aspiration`) as a retirement. Verify that the decision genuinely addresses each closed entry, and that retirement cases carry rationale.
@@ -29,16 +27,7 @@ Stable-kind entries (`fact`, `insight`, `contract`, `aspiration`) have nothing i
 - `medium` — Reasoning restates what was closed without naming what changed. Example: "Retiring the immutability contract. It said documents don't change." (recaps the contract but never explains what shifted to make retirement appropriate).
 - `low` — Reasoning present but thin; a sentence would sharpen. Example: "New evidence made this outdated." — directionally correct, but the specific evidence or shift isn't named.
 - No finding — Narrative cites a specific reason: new evidence with specifics, a scope change with what's changed, an explicit handoff to a new entry ("superseded effectively by the aspiration `d-cpt-xyz`"), a concrete context shift, or a reclassification ("reclassifying this directive as a contract"). The reason's *correctness* is not evaluated; *presence* is.
-{{ template "unrelated_refs" . -}}
-{{ template "unusual_close" . -}}
-{{ template "contracts" . -}}
-{{ template "entry_quality" . -}}
-{{ template "ref_meta_consistency" . -}}
-{{ template "language" . -}}
-{{ template "verdict" . -}}
-{{- end }}
 
-{{ define "closing_decision_user" -}}
 ## Proposed decision
 
 {{ .ProposedEntry }}

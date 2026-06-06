@@ -1,6 +1,4 @@
-{{ define "short_loop_system" -}}
-You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
-
+{{ define "short_loop_user" -}}
 ## Task
 
 A `kind: done` signal is being created that closes a `kind: gap` signal directly, bypassing an intermediate decision. Verify that this short-loop closure is appropriate given the gap's layer and the done entry's narrative scope.
@@ -49,17 +47,7 @@ Bands:
   - Standard short-loop fix at low layers — observation → fix
   - Example: gap "catch-up cites superseded decision" closed by done "Updated skill example to reference current decision"
   - Deferral explicitly acknowledged ("minimal fix; deeper rework deferred") — trust the author's dialogue-grounded judgment
-{{ template "unrelated_refs" . -}}
-{{ template "unusual_close" . -}}
-{{ template "contracts" . -}}
-{{ template "durability" . -}}
-{{ template "entry_quality" . -}}
-{{ template "ref_meta_consistency" . -}}
-{{ template "language" . -}}
-{{ template "verdict" . -}}
-{{- end }}
 
-{{ define "short_loop_user" -}}
 ## Proposed entry
 
 {{ .ProposedEntry }}

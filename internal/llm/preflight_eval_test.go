@@ -168,6 +168,12 @@ func TestPreflightEval_ClosingAction_DeviationWithReasoning(t *testing.T) {
 	// Action omits items but supplies brief reasoning for each. Per the
 	// clarified calibration: reasoning presence (not quality) is what
 	// matters — expected: no high finding.
+	//
+	// The done signal carries an attachment so the durability check (now in the
+	// universal system preamble per d-tac-fah) passes — a real completion records
+	// its artifact. This isolates the AC-reasoning behavior the case targets;
+	// without it, durability correctly fires high on the missing artifact and
+	// masks what we're testing.
 	plan := planWithACs("20260410-120000-d-tac-pln",
 		"Implementation plan with four items.",
 		"Create database schema for user accounts",
@@ -178,11 +184,12 @@ func TestPreflightEval_ClosingAction_DeviationWithReasoning(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{plan})
 
 	proposed := &model.Entry{
-		Type:    model.TypeSignal,
-		Kind:    model.KindDone,
-		Layer:   model.LayerTactical,
-		Closes:  []string{plan.ID},
-		Content: "Implemented item 1 (database schema with users table and bcrypt passwords) and item 3 (full CRUD endpoints at /users). Deviation: authentication middleware (item 2) deferred — dialogued that we'd adopt an existing Passport.js library in a follow-up rather than build from scratch. Deviation: integration tests (item 4) deferred to a follow-up action — agreed during implementation that the schema/endpoint work needed smoke testing first, with the full suite as a separate closure.",
+		Type:        model.TypeSignal,
+		Kind:        model.KindDone,
+		Layer:       model.LayerTactical,
+		Closes:      []string{plan.ID},
+		Attachments: []string{"2026/04/10-130000-s-tac-def/implementation.md"},
+		Content:     "Implemented item 1 (database schema with users table and bcrypt passwords) and item 3 (full CRUD endpoints at /users); details in the attached implementation notes. Deviation: authentication middleware (item 2) deferred — dialogued that we'd adopt an existing Passport.js library in a follow-up rather than build from scratch. Deviation: integration tests (item 4) deferred to a follow-up action — agreed during implementation that the schema/endpoint work needed smoke testing first, with the full suite as a separate closure.",
 	}
 
 	result, raw := runEval(t, graph, proposed)
@@ -400,7 +407,7 @@ func TestPreflightEval_AugmentingDirective_CleanRefinement(t *testing.T) {
 		Type:    model.TypeDecision,
 		Layer:   model.LayerTactical,
 		Kind:    model.KindDirective,
-		Refs:    []model.Ref{{ID: plan.ID, Kind: model.RefKindBuildsOn}},
+		Refs:    []model.Ref{{ID: plan.ID, Kind: model.RefKindRefines}},
 		Content: "The 200ms p95 latency target in d-tac-pln applies to query corpora up to 50k documents — beyond that we accept up to 350ms in the first iteration. The plan's AC stands for the bulk of expected production traffic; this directive sharpens the boundary so the closing done signal can address both regimes explicitly. Plan stays active; this directive is closed by the plan's done signal alongside the plan.",
 		Time:    time.Date(2026, 4, 15, 14, 0, 0, 0, time.UTC),
 	}
@@ -499,8 +506,8 @@ func TestPreflightEval_AugmentingDirective_TopicFilterReconstruction(t *testing.
 		Layer: model.LayerTactical,
 		Kind:  model.KindDirective,
 		Refs: []model.Ref{
-			{ID: plan1.ID, Kind: model.RefKindBuildsOn},
-			{ID: plan2.ID, Kind: model.RefKindBuildsOn},
+			{ID: plan1.ID, Kind: model.RefKindRefines},
+			{ID: plan2.ID, Kind: model.RefKindRefines},
 		},
 		Content: "Plan 1 (d-tac-gvn) ships the `topic(L)` filter primitive in shared internal packages as part of its `sdd list --topic` AC. Plan 2 (d-tac-uww) consumes the existing primitive rather than re-implementing it. This resolves an ambiguity in Plan 1's AC text — which described the primitive as living in Plan 2's shared internals — by clarifying ownership in Plan 1's favor, since Plan 1 is the first plan to need the primitive. Plan 1 stays active; this directive is scoped to Plan 1's AC contract and is closed by Plan 1's done signal alongside the plan.",
 		Time:    time.Date(2026, 5, 6, 15, 47, 59, 0, time.UTC),

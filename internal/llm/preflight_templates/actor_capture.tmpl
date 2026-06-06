@@ -1,6 +1,4 @@
-{{ define "actor_capture_system" -}}
-You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
-
+{{ define "actor_capture_user" -}}
 ## Task
 
 A `kind: actor` signal is being captured — a first-class participant identity entry. Mechanical frontmatter checks (canonical presence, canonical write-once invariant) run separately; focus this rubric on **prose quality**.
@@ -27,14 +25,7 @@ Some actors represent a *family* or *collective* rather than a specific individu
 - No finding — Prose grounds the identity, names the canonical, and keeps this-graph role scope out.
 
 Do not introduce finding categories beyond those calibrated above. External organizational roles, career background, and identity scope (family vs session, collective vs individual) are identity content — not findings. Trust the mechanical layer for structural validation: missing canonical, cross-chain canonical reuse, and layer mismatches are handled by frontmatter validation and the lint invariant check. Do not re-flag those here.
-{{ template "contracts" . -}}
-{{ template "entry_quality" . -}}
-{{ template "ref_meta_consistency" . -}}
-{{ template "language" . -}}
-{{ template "verdict" . -}}
-{{- end }}
 
-{{ define "actor_capture_user" -}}
 ## Proposed actor signal
 
 {{ .ProposedEntry }}

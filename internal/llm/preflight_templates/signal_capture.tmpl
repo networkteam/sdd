@@ -1,6 +1,4 @@
-{{ define "signal_capture_system" -}}
-You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
-
+{{ define "signal_capture_user" -}}
 ## Task
 
 A signal (observation/fact) is being captured. Perform a classification check.
@@ -21,15 +19,7 @@ Signals are dialogue material. Focus on clear cases.
 - No finding — "Should either X or Y" offering alternatives, "should treat X as a valid outcome" proposing direction, or confidence the author deliberately set. These are dialogue material.
 
 Trust the structural layer for type discipline: kinds on signals (gap/fact/question/insight/done) are structural metadata and may evolve; prose-level type policing belongs to the kind system, not pre-flight.
-{{ template "unrelated_refs" . -}}
-{{ template "contracts" . -}}
-{{ template "entry_quality" . -}}
-{{ template "ref_meta_consistency" . -}}
-{{ template "language" . -}}
-{{ template "verdict" . -}}
-{{- end }}
 
-{{ define "signal_capture_user" -}}
 ## Proposed signal
 
 {{ .ProposedEntry }}

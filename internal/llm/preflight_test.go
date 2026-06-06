@@ -600,48 +600,6 @@ func Test_assembleContext_WithSupersedes(t *testing.T) {
 	}
 }
 
-func Test_assembleContext_OpenSignalsForDecisionRefs(t *testing.T) {
-	sig1 := entry("20260410-120000-s-cpt-aaa", withKind(model.KindGap), withContent("open signal one"))
-	sig2 := entry("20260410-120100-s-tac-bbb", withKind(model.KindGap), withContent("open signal two"))
-	graph := model.NewGraph([]*model.Entry{sig1, sig2})
-
-	proposed := &model.Entry{
-		Type:    model.TypeDecision,
-		Layer:   model.LayerConceptual,
-		Refs:    refsOf(sig1.ID),
-		Content: "new decision",
-	}
-
-	pctx := assembleContext(proposed, graph, checkDecisionRefs, "")
-
-	if pctx.OpenSignals == "" {
-		t.Error("OpenSignals should be populated for decision-refs check")
-	}
-	if !strings.Contains(pctx.OpenSignals, "open signal one") {
-		t.Error("OpenSignals should contain first signal")
-	}
-	if !strings.Contains(pctx.OpenSignals, "open signal two") {
-		t.Error("OpenSignals should contain second signal")
-	}
-}
-
-func Test_assembleContext_OpenSignalsNotIncludedForOtherChecks(t *testing.T) {
-	sig := entry("20260410-120000-s-cpt-aaa", withContent("open signal"))
-	graph := model.NewGraph([]*model.Entry{sig})
-
-	proposed := &model.Entry{
-		Type:    model.TypeSignal,
-		Layer:   model.LayerConceptual,
-		Content: "new signal",
-	}
-
-	pctx := assembleContext(proposed, graph, checkSignalCapture, "")
-
-	if pctx.OpenSignals != "" {
-		t.Error("OpenSignals should be empty for non-decision-refs checks")
-	}
-}
-
 func Test_assembleContext_ClosedPlanDescriptionFlowsThrough(t *testing.T) {
 	// Plans carry their AC section inline in the description; a done signal
 	// closing a plan flows that description through ClosedEntries via
@@ -675,7 +633,6 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 		ClosedEntries:     "ID: closed\nType: signal\n\nClosed content",
 		SupersededEntries: "ID: old\nType: decision\n\nOld content",
 		ActiveContracts:   "ID: contract\nType: decision\n\nContract content",
-		OpenSignals:       "ID: open\nType: signal\n\nOpen signal",
 	}
 
 	for ct, tmplName := range checkTypeTemplates {
@@ -874,6 +831,78 @@ func Test_renderPreflightPrompt_DissolutionNamesContextPresence(t *testing.T) {
 	}
 	if !strings.Contains(result.Combined(), "dialogue-captured context") {
 		t.Errorf("dissolution template should name dialogue-captured context as the test")
+	}
+}
+
+func Test_renderPreflightPrompt_UniversalSystemIsByteStable(t *testing.T) {
+	// The universal system preamble must be byte-identical across substantive
+	// check types and across repeated assembly of the same graph. That
+	// byte-stability is precisely what lets Anthropic's prompt cache hit on
+	// sequential captures within a session (d-tac-fah). Contracts live in the
+	// preamble, so this also guards the deterministic contract sort in
+	// assembleContext — a non-deterministic order would silently kill cache reuse
+	// even when the contract set never changed.
+	contractA := entry("20260101-120000-d-prc-aaa", withKind(model.KindContract), withContent("Contract A body"))
+	contractB := entry("20260102-120000-d-prc-bbb", withKind(model.KindContract), withContent("Contract B body"))
+	// Insert in non-sorted order to prove assembleContext sorts deterministically.
+	graph := model.NewGraph([]*model.Entry{contractB, contractA})
+
+	decision := &model.Entry{Type: model.TypeDecision, Layer: model.LayerTactical, Content: "a decision with refs"}
+	signal := &model.Entry{Type: model.TypeSignal, Layer: model.LayerTactical, Content: "a signal"}
+
+	reqDecision, err := renderPreflightPrompt(checkDecisionRefs, assembleContext(decision, graph, checkDecisionRefs, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqSignal, err := renderPreflightPrompt(checkSignalCapture, assembleContext(signal, graph, checkSignalCapture, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if reqDecision.SystemPrompt != reqSignal.SystemPrompt {
+		t.Errorf("universal system prompt differs across check types — prompt cache will miss.\n--- decision_refs system ---\n%s\n--- signal_capture system ---\n%s", reqDecision.SystemPrompt, reqSignal.SystemPrompt)
+	}
+
+	// Re-assemble the same graph (contracts re-sorted from scratch) and confirm
+	// the system prompt is still byte-identical.
+	reqDecision2, err := renderPreflightPrompt(checkDecisionRefs, assembleContext(decision, graph, checkDecisionRefs, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reqDecision.SystemPrompt != reqDecision2.SystemPrompt {
+		t.Error("universal system prompt not stable across repeated assembly of the same graph — contract sort is non-deterministic")
+	}
+
+	// Sanity: the contracts must actually appear, or the byte-stability assertion
+	// above is vacuous.
+	if !strings.Contains(reqDecision.SystemPrompt, "Contract A body") || !strings.Contains(reqDecision.SystemPrompt, "Contract B body") {
+		t.Error("expected active contracts to appear in the universal system preamble")
+	}
+}
+
+func Test_renderPreflightPrompt_StructuralChecksKeepLightSystem(t *testing.T) {
+	// annotation and focus deliberately stay off the universal preamble (d-tac-fah,
+	// option b): they are rare and their bespoke rubrics would over-flag under the
+	// heavy universal partials (e.g. unrelated_refs flagging an annotation's
+	// membership refs). Their system block must NOT carry the heavy partials.
+	pctx := &preflightContext{ProposedEntry: "ID: test\nType: signal\n\nproposed"}
+
+	for _, ct := range []checkType{checkAnnotationCapture, checkFocusCapture} {
+		t.Run(ct.String(), func(t *testing.T) {
+			req, err := renderPreflightPrompt(ct, pctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, heavy := range []string{"Artifact durability", "Unrelated references check", "Unusual close-pattern check", "Reference metadata consistency"} {
+				if strings.Contains(req.SystemPrompt, heavy) {
+					t.Errorf("%s system block should stay light but contains %q", ct, heavy)
+				}
+			}
+			// It must still carry the verdict format, which every check needs.
+			if !strings.Contains(req.SystemPrompt, `"findings"`) {
+				t.Errorf("%s system block should still carry the verdict output format", ct)
+			}
+		})
 	}
 }
 

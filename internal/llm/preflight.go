@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"text/template"
@@ -175,7 +176,6 @@ type preflightContext struct {
 	SupersededEntries  string
 	ActiveContracts    string
 	ActiveAspirations  string
-	OpenSignals        string
 	ConfiguredLanguage string
 	// RefKindVocabulary is the canonical ref-kind definitions, read from the
 	// bundled skill reference (references/ref-kinds.md) — the same single source
@@ -307,9 +307,15 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 		}
 	}
 
-	// Active contracts (always included)
+	// Active contracts (always included). Sorted by full ID so the rendered
+	// block is byte-identical across captures whenever the contract set is
+	// unchanged. Contracts live in the cached universal system preamble (d-tac-fah),
+	// so a non-deterministic order would silently break prompt-cache reuse even
+	// when nothing about the contract set changed — this sort is the byte-stability
+	// invariant, not a cosmetic ordering.
 	contracts := graph.Contracts()
 	if len(contracts) > 0 {
+		sort.Slice(contracts, func(i, j int) bool { return contracts[i].ID < contracts[j].ID })
 		var parts []string
 		for _, c := range contracts {
 			parts = append(parts, FormatEntryForPrompt(c))
@@ -327,18 +333,6 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 				parts = append(parts, FormatEntryForPrompt(a))
 			}
 			pctx.ActiveAspirations = strings.Join(parts, "\n\n---\n\n")
-		}
-	}
-
-	// Open signals (for decision-refs check)
-	if ct == checkDecisionRefs {
-		signals := graph.OpenSignals()
-		if len(signals) > 0 {
-			var parts []string
-			for _, s := range signals {
-				parts = append(parts, FormatEntryForPrompt(s))
-			}
-			pctx.OpenSignals = strings.Join(parts, "\n\n---\n\n")
 		}
 	}
 
@@ -399,12 +393,17 @@ func refKindVocabulary() string {
 }
 
 // renderPreflightPrompt renders the pre-flight prompt for the given check type
-// and context as a two-part Request. The _system block carries the stable
-// instructions, calibration, and graph-scoped context (contracts, open signals);
-// the _user block carries the proposed entry and its direct refs/closes.
-// Splitting the prompt this way lets providers that support prompt caching
-// (Anthropic) treat the system portion as a cacheable prefix. All templates
-// are parsed together so partials (contracts, verdict, etc.) are available.
+// and context as a two-part Request. The system block is a byte-stable,
+// type-independent universal preamble (validator role, universal partials,
+// ref-kind vocabulary, active contracts, output format) shared by every
+// substantive check, so sequential captures within a session reuse Anthropic's
+// prompt cache (d-tac-fah). The per-type task, rubric, and calibration — plus the
+// proposed entry and its related entries — live in the _user block. The two
+// structural checks (annotation, focus) keep a lighter bespoke system block:
+// they are rare, carry intentionally light rubrics, and forcing the heavy
+// universal partials on them risks false positives (e.g. unrelated_refs flagging
+// an annotation's membership refs). All templates are parsed together so partials
+// are available.
 func renderPreflightPrompt(ct checkType, pctx *preflightContext) (Request, error) {
 	base, ok := checkTypeTemplates[ct]
 	if !ok {
@@ -416,9 +415,16 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (Request, error
 		return Request{}, fmt.Errorf("parsing templates: %w", err)
 	}
 
+	// Substantive checks share the universal preamble; the structural checks
+	// keep their own light system block.
+	systemTmpl := "universal_system"
+	if ct == checkAnnotationCapture || ct == checkFocusCapture {
+		systemTmpl = base + "_system"
+	}
+
 	var sysB, userB strings.Builder
-	if err := tmpl.ExecuteTemplate(&sysB, base+"_system", pctx); err != nil {
-		return Request{}, fmt.Errorf("executing template %s_system: %w", base, err)
+	if err := tmpl.ExecuteTemplate(&sysB, systemTmpl, pctx); err != nil {
+		return Request{}, fmt.Errorf("executing template %s: %w", systemTmpl, err)
 	}
 	if err := tmpl.ExecuteTemplate(&userB, base+"_user", pctx); err != nil {
 		return Request{}, fmt.Errorf("executing template %s_user: %w", base, err)

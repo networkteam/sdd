@@ -1,6 +1,4 @@
-{{ define "supersedes_system" -}}
-You are a pre-flight validator for the SDD (Signal-Dialogue-Decision) decision graph. Report structural findings; a separate tooling layer decides what to block on.
-
+{{ define "supersedes_user" -}}
 ## Task
 
 An entry is being created that supersedes (replaces) an existing entry. Verify that the new entry fully covers the ground of what it replaces.
@@ -19,14 +17,7 @@ Supersede is structural — kind transitions, scope retention, information prese
 - `medium` — Scope narrowing is inferable from comparison but not explicitly noted.
 - `low` — Supersede explanation is brief; a sentence naming what changed would help future readers.
 - No finding — Contract→directive retirement or directive→plan scope expansion explained in the text. Kind transitions that the entry text argues for with reasoning.
-{{ template "contracts" . -}}
-{{ template "entry_quality" . -}}
-{{ template "ref_meta_consistency" . -}}
-{{ template "language" . -}}
-{{ template "verdict" . -}}
-{{- end }}
 
-{{ define "supersedes_user" -}}
 ## Proposed entry
 
 {{ .ProposedEntry }}
