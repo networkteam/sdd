@@ -22,11 +22,13 @@ import (
 
 // claudeSkillsFS holds the embedded Claude skill tree.
 //
-// The `all:` prefix ensures files starting with '.' or '_' (e.g. a future
-// .gitignore inside a skill's references/ dir) are still embedded; without it
-// //go:embed silently skips them.
+// Plain `//go:embed claude` recurses the whole tree but excludes files whose
+// names start with '.' or '_' (Go's default). That keeps OS junk like a
+// `.DS_Store` out of the embedded FS, so it can't be installed by `sdd init`
+// and abort the init commit on a gitignored path. To ship a skill's own
+// dotfile (e.g. a `.gitignore`), add an explicit pattern naming that file.
 //
-//go:embed all:claude
+//go:embed claude
 var claudeSkillsFS embed.FS
 
 // Load returns the embedded skill bundle for the given agent target, with
