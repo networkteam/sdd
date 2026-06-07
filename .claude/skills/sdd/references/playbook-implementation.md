@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 7513c10befd25f642a5026d7d96ab902cf22b2037ac0911d63cd422435f85a5e
+sdd-content-hash: 438e4e53d059169604def91983a338b5182633562a444818bdb0d2f008fdb4b7
 sdd-version: dev
 ---
 # Transition to implementation
@@ -28,7 +28,7 @@ Two moves, every time you implement an entry. Not judgment calls — an empty ma
 ```
 sdd wip start <entry-id> --exclusive --participant <name> "<description>"
 ```
-Add `--branch` for branch mode; in worktree mode the marker is created inside the worktree (below).
+Add `--branch` for branch mode; in worktree mode create the marker on the base first, then enter the worktree (below).
 
 ## Implement, then close
 
@@ -53,7 +53,7 @@ Isolated directory; the harness moves the session, git does the plumbing, `sdd w
 
 **Prerequisites** (once per repo): a `.worktreeinclude` listing gitignored state to carry (`.sdd/config.local.yaml`, `.sdd/index/`), `.claude/worktrees/` in `.gitignore`, and `worktree.baseRef: "head"` in `.claude/settings.json`.
 
-**Start:** `EnterWorktree(name: "<entry-suffix>")` — the harness creates it under `.claude/worktrees/`, switches the session in, and `.worktreeinclude` carries state across — then `sdd wip start <entry-id> --exclusive --participant <name> "<description>"`.
+**Start:** create the marker on the base first, so it is visible there — `sdd wip start <entry-id> --exclusive --participant <name> "<description>"` — then `EnterWorktree(name: "<entry-suffix>")`. The harness creates the worktree under `.claude/worktrees/` and switches the session in; branching from the base (`baseRef: head`) carries the marker along, and `.worktreeinclude` brings the gitignored local state (config + index).
 
 **Work** inside the worktree — commit and capture the closing done signal here, on the branch. You don't need the user's approval step by step; the next time you involve them is the merge confirmation below, unless you hit a design choice no decision covers (stop rule above).
 
