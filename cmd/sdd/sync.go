@@ -5,15 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
+	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/slogutils"
+	"github.com/urfave/cli/v3"
 )
 
 // syncCheckTimeout caps the full sync check (fetch + log range + merge-tree).
@@ -99,6 +103,61 @@ func (gitSyncerImpl) MergeTreePredict(ctx context.Context, ourRef, theirRef stri
 	return model.ParseMergeTreeConflicts(string(out)), nil
 }
 
+// syncCmd exposes graph synchronization. Today it carries a single mode,
+// --pull, which performs a merge-only pull so background sync never rewrites
+// the shared graph's history; the bare command prints guidance.
+func syncCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "sync",
+		Usage: "Synchronize the shared graph with the upstream branch",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "pull",
+				Usage: "Pull upstream changes with a merge (never a rebase); refuses on a dirty working tree",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if !cmd.Bool("pull") {
+				return errors.New("sync: specify --pull to merge upstream changes into the shared graph")
+			}
+			handler := handlers.New(handlers.Options{Puller: gitPuller{}})
+			return handler.SyncPull(ctx, &command.SyncPullCmd{
+				OnPulled: func(output string) {
+					if output != "" {
+						fmt.Fprintln(os.Stdout, output)
+					}
+				},
+			})
+		},
+	}
+}
+
+// gitPuller is the production handlers.Puller: shells out to git for the
+// working-tree cleanliness check and the merge-only pull.
+type gitPuller struct{}
+
+func (gitPuller) IsClean(ctx context.Context) (bool, error) {
+	out, err := exec.CommandContext(ctx, "git", "status", "--porcelain").Output()
+	if err != nil {
+		return false, fmt.Errorf("git status --porcelain: %w", err)
+	}
+	return strings.TrimSpace(string(out)) == "", nil
+}
+
+func (gitPuller) MergePull(ctx context.Context) (string, error) {
+	// --no-rebase forces a merge pull regardless of the user's pull.rebase
+	// config, so background sync never rewrites the shared graph's history.
+	out, err := exec.CommandContext(ctx, "git", "pull", "--no-rebase").CombinedOutput()
+	msg := strings.TrimSpace(string(out))
+	if err != nil {
+		if msg == "" {
+			return "", fmt.Errorf("git pull --no-rebase: %w", err)
+		}
+		return "", fmt.Errorf("git pull --no-rebase: %s", msg)
+	}
+	return msg, nil
+}
+
 // runSyncCheck performs the background sync check and emits slog lines.
 // Swallows all errors — sync check failure must never fail a user command.
 // Bounded by syncCheckTimeout so network pathologies cannot stall the CLI.
@@ -145,9 +204,9 @@ func emitSyncStatus(logger *slog.Logger, s model.SyncStatus) {
 	case model.SyncStateFastForward:
 		logger.Info(fmt.Sprintf("sync: fast-forward available, %d commits behind", s.RemoteAhead))
 	case model.SyncStateCleanRebase:
-		logger.Info(fmt.Sprintf("sync: rebase is clean, %d remote / %d local", s.RemoteAhead, s.LocalAhead))
+		logger.Info(fmt.Sprintf("sync: merge is clean, %d remote / %d local", s.RemoteAhead, s.LocalAhead))
 	case model.SyncStateConflictPredicted:
-		logger.Warn(fmt.Sprintf("sync: rebase would conflict in %s, %d remote / %d local",
+		logger.Warn(fmt.Sprintf("sync: merge would conflict in %s, %d remote / %d local",
 			strings.Join(s.ConflictPaths, ", "), s.RemoteAhead, s.LocalAhead))
 	case model.SyncStateLocalAhead:
 		logger.Info(fmt.Sprintf("sync: local ahead by %d, consider push", s.LocalAhead))
