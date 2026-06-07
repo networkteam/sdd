@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 438e4e53d059169604def91983a338b5182633562a444818bdb0d2f008fdb4b7
+sdd-content-hash: 5ac4d44df9e835f8967d0da6014774640dc8be72c04108b87732a303147254ae
 sdd-version: dev
 ---
 # Transition to implementation
@@ -61,6 +61,6 @@ Isolated directory; the harness moves the session, git does the plumbing, `sdd w
 1. `ExitWorktree(action: "keep")` — back to base. Use `keep`, never `remove`: teardown is below, and `ExitWorktree` only removes worktrees it created itself.
 2. `git pull --no-rebase` (merge, never rebase — a rebase rewrites base history and orphans the branch), then `git merge <branch>`. A real merge, not a squash.
 3. `sdd wip done <marker-id>`.
-4. `git worktree remove <path>` (path via `git worktree list`), then `git branch -d <branch>`.
+4. `git worktree remove --force <path>` (path via `git worktree list`; `--force` because the `.worktreeinclude`'d gitignored state leaves the worktree non-clean), then `git branch -d <branch>`.
 
 `EnterWorktree(name:)` creates a new worktree; `path:` re-enters one. Conclude in a single pass — a mid-conclude background rebase could rewrite base history.
