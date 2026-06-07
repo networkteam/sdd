@@ -112,7 +112,7 @@ Both alignments and divergences must be surfaced — a divergence-only list read
 
 ### Other shapes (recognize, adapt)
 
-- **Done signal + evaluate intent**: split brief — what landed (from the done body and what it closes) plus the lens choices available (outer behavioral: E2E, user feedback; inner structural: code, architecture, conceptual review). Both perspectives must be reasoned about together so neither is dropped.
+- **Done signal + evaluate intent**: split brief — what landed (from the done body and what it closes) plus the inner and outer lenses (see [evaluation.md](evaluation.md)), reasoned about together so neither is dropped.
 - **Aspiration + alignment-check intent**: alignment scoring — how a candidate decision pulls toward (or away from) the aspiration's direction.
 - **Question + answer intent**: hypothesis brief — what's known (from refs + adjacent facts), what's still unknown, what would resolve the question.
 

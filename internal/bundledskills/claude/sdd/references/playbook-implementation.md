@@ -1,80 +1,62 @@
 # Transition to implementation
 
-When the conversation reaches "let's build this":
+When the conversation reaches "let's build this".
 
-1. Check: are there enough decisions to scope the work? **Prefer reducing scope over building into the unknown** — if a portion of the work depends on a decision not yet made, narrow the scope to what's decided rather than improvising the missing piece.
-2. If gaps exist, surface them: "Before building, we should decide X"
-3. **Decision-before-done-signal checkpoint**: if the upcoming work requires making a choice between alternatives — not just executing a known path — stop and capture the decision first. A done signal that closes a gap directly should describe *what was done*, not *why this approach*. Approach-shaped closures smuggle decisions past the graph; pre-flight will flag them and strictly block at higher layers (strategic / conceptual).
-4. Assess whether a plan decision is needed. The test: **will the closing done signal have enough to validate against without a plan?** If the decision is specific enough on its own (small fix, single change, obvious path from signal to completion), skip the plan. If the decision describes a direction but implementation requires decomposition (multiple requirements, design choices, multi-step scope), capture a plan decision first — the pre-flight validates every plan item at closing time, which is where the rigor pays off.
-5. If scope is clear, capture any needed operational sub-decisions
-6. Create an exclusive WIP marker for the entry being implemented (`sdd wip start <entry-id> --exclusive --participant <name> <description>`)
-7. **Before starting implementation**, run `sdd show <entry-id> --downstream` to surface any augmenting directives that ref the entry. Treat their commitments as extensions of the original acceptance contract — every AC the original entry carries plus every commitment in a downstream augmenting directive is part of what the closing done signal must address. This is required for plan decisions and recommended for any non-trivial decision; the augmentation pattern (per `d-prc-9ti`) lets refinements accumulate without supersession, so the implicit AC chain is the real spec. See the Augment Plan Playbook below.
-8. **If implementing a plan decision**, read its `## Acceptance criteria` section alongside the downstream commitments and use the union as your work checklist. Each AC and each downstream commitment is a contract item: the closing done signal must either confirm it done with specific evidence or explain the deviation with dialogue reasoning.
-9. Implementation happens in the same session — the meta-process stays active
-10. If you hit a design choice not covered by existing decisions: **stop implementation**, capture a done signal recording what was done so far with the WIP marker still active, and capture a signal for the missing decision. Don't make the choice yourself. If the choice is a narrow refinement of the existing plan rather than a missing decision, capture it as an augmenting directive instead (see the Augment Plan Playbook).
-11. After implementation, commit the code changes first, then capture the done signal addressing each original AC and each augmenting directive's commitment. Close the original entry and any augmenting directives in the same done signal via `--closes <entry-id>,<dir1-id>,...`. Then remove the WIP marker (`sdd wip done <marker-id>`).
-12. Prompt for evaluation signals
+## Scope check first
 
-## Branching for isolated work
+1. Enough decisions to scope the work? **Prefer reducing scope over building into the unknown** — narrow to what's decided rather than improvising a missing piece. If gaps remain, surface them: "Before building, we should decide X."
+2. **Choosing between alternatives, not just executing a known path?** Capture the decision first — a done signal closing a gap describes *what was done*, not *why this approach*. Pre-flight blocks approach-shaped closures, strictly at higher layers.
+3. **Needs decomposition (multiple requirements, design choices)?** Capture a plan decision first. Specific enough on its own → skip the plan.
+4. Scope clear but multi-step? Capture any needed operational sub-decisions before building.
 
-**When to suggest branching:**
-- The work is exploratory or uncertain — the direction might be discarded
-- Multi-participant project — other participants are active on main, and in-progress entries would create noise
-- The scope is large enough that intermediate entries would clutter main if the direction changes
-- There's an active WIP marker from another participant on a related entry — branching avoids collision
+## Before any code: mode + marker
 
-**Don't branch for:** small confident changes, capturing signals/decisions from dialogue, solo work with no collaboration pressure.
+Two moves, every time you implement an entry. Not judgment calls — an empty marker list or recent commits straight to `main` are not permission to skip them.
 
-**Starting a branch:**
+**Ask the user how to run it.** You can't infer this — whether they want a parallel session is theirs to say. Recommend one for the scope, then let them pick:
+
+- **in place** on `main` — contained changes
+- **branch** — isolation, same directory
+- **worktree** — isolation + separate dir; you run autonomously, the user confirms the merge
+- **quick** — the user judges it too small to track; the only mode without a marker
+
+**Create the WIP marker** — mandatory for every mode except *quick*:
 ```
-sdd wip start <entry-id> --branch --exclusive --participant <name> "<description>"
+sdd wip start <entry-id> --exclusive --participant <name> "<description>"
 ```
-The CLI creates a git branch (`sdd/<suffix>-<slug>`) and checks out to it. The WIP marker is committed on main before the checkout for coordination visibility. Same session, same directory.
+Add `--branch` for branch mode; in worktree mode the marker is created inside the worktree (below).
 
-**Working on a branch:**
-- Normal SDD loop — entries, code changes, all on the branch
-- `git merge main` regularly to stay synchronized with other participants' graph changes and WIP markers
-- Entries on the branch are invisible to main until merge — that's the isolation property
+## Implement, then close
 
-**Ending a branch — assess and recommend one of two moves:**
+Implementation stays in this session — the meta-process stays active.
 
-### "Conclude and keep"
-Recommend when: the reasoning chain has value for future traversal (even if the conclusion is "this direction is wrong"), code changes are worth keeping, or multiple entries connect to the broader graph.
+1. **First** run `sdd show <entry-id> --downstream` — augmenting directives that ref the entry extend the acceptance contract (the implicit AC chain is the real spec). Required for plans, recommended for any non-trivial decision.
+2. For a plan, work the union of its `## Acceptance criteria` and those downstream commitments as the checklist — each confirmed with evidence or its deviation explained.
+3. Hit a design choice no decision covers? **Stop**, capture a done signal for progress so far (marker still active), and capture a signal for the missing decision — don't decide yourself. A narrow refinement instead → an augmenting directive (see Augment Plan Playbook).
+4. Commit code first, then the done signal addressing every AC and augmenting commitment, closing them via `--closes <entry-id>,<dir-id>,...`. Then `sdd wip done <marker-id>`.
+5. Prompt for evaluation signals — apply the lenses (see [evaluation.md](evaluation.md)).
 
-1. Commit all work, `git merge main`, resolve conflicts on the branch
-2. Walk the entry chain — close/supersede intermediate entries that shouldn't be open after merge
-3. Selectively revert unwanted non-graph changes via new commits
-4. `git checkout main` then `git merge <branch>`
-5. Capture closing done signal + forward-looking signal on main
-6. `sdd wip done <marker-id>` — removes marker, deletes branch
+## Branch mode
 
-### "Discard"
-Recommend when: the exploration was shallow, nothing emerged beyond "tried it, didn't work," and the key takeaway fits in a single signal on main.
+The CLI creates `sdd/<suffix>-<slug>` and checks out; the marker is committed on `main` first for visibility. `git merge main` regularly. Branch entries are invisible to `main` until merge — that is the isolation.
 
-1. `git checkout main`
-2. Capture summary signal on main (key learning if any)
-3. `sdd wip done <marker-id> --force` — removes marker, force-deletes branch
+- **Conclude and keep** (chain or code worth keeping): commit, `git merge main`, resolve on the branch, close/supersede intermediates, present the landing evaluation (see [evaluation.md](evaluation.md)), `git checkout main` then `git merge <branch>`, closing done signal + any forward-looking signal on `main`, `sdd wip done <marker-id>`.
+- **Discard** (nothing emerged): `git checkout main`, a summary signal if any, `sdd wip done <marker-id> --force`.
 
-## Worktree mode (optional)
+## Worktree mode
 
-Worktrees isolate concurrent work in a separate directory so edits in one session never touch another. The sdd CLI owns none of this: the agent harness moves the session, git does the branch plumbing, and `sdd wip` only tracks the marker. Two gates bound the flow — the user confirms once to start and once to merge; everything between runs without check-ins.
+Isolated directory; the harness moves the session, git does the plumbing, `sdd wip` tracks the marker. The CLI owns none of it.
 
-**When to suggest a worktree:** the work is more than a short-loop change — multi-file, multi-commit, or worth keeping the base branch free to use meanwhile. Don't suggest one for small confident changes or pure capture.
+**Prerequisites** (once per repo): a `.worktreeinclude` listing gitignored state to carry (`.sdd/config.local.yaml`, `.sdd/index/`), `.claude/worktrees/` in `.gitignore`, and `worktree.baseRef: "head"` in `.claude/settings.json`.
 
-**Repo prerequisites** (set once per repo): a `.worktreeinclude` at the repo root listing the gitignored local state to carry into each worktree — for an sdd repo that is `.sdd/config.local.yaml` and `.sdd/index/`, so search works without re-embedding — plus `.claude/worktrees/` in `.gitignore` and `worktree.baseRef: "head"` in `.claude/settings.json` so worktrees branch from local state.
+**Start:** `EnterWorktree(name: "<entry-suffix>")` — the harness creates it under `.claude/worktrees/`, switches the session in, and `.worktreeinclude` carries state across — then `sdd wip start <entry-id> --exclusive --participant <name> "<description>"`.
 
-**Start — Gate 1, user confirms:**
-1. `EnterWorktree(name: "<entry-suffix>")` — the harness creates the worktree under `.claude/worktrees/`, switches the session into it, and `.worktreeinclude` carries local state across (so `sdd search` works with no re-embed).
-2. `sdd wip start <entry-id> --exclusive --participant <name> "<description>"` — records the marker on the new branch.
+**Work** inside the worktree — commit and capture the closing done signal here, on the branch. You don't need the user's approval step by step; the next time you involve them is the merge confirmation below, unless you hit a design choice no decision covers (stop rule above).
 
-**Work:** the normal SDD loop inside the worktree — entries, code, commits. Capture the closing done signal here, on the branch. No check-ins until the work is ready.
+**Conclude** — present the landing evaluation first (see [evaluation.md](evaluation.md)); the user confirms the merge on that basis, and you stay in the worktree until they do. Then:
+1. `ExitWorktree(action: "keep")` — back to base. Use `keep`, never `remove`: teardown is below, and `ExitWorktree` only removes worktrees it created itself.
+2. `git pull --no-rebase` (merge, never rebase — a rebase rewrites base history and orphans the branch), then `git merge <branch>`. A real merge, not a squash.
+3. `sdd wip done <marker-id>`.
+4. `git worktree remove <path>` (path via `git worktree list`), then `git branch -d <branch>`.
 
-**Conclude — Gate 2, user confirms the merge:** stay in the worktree until the user confirms. Then:
-1. `ExitWorktree(action: "keep")` — returns the session to the base directory. Use `keep`, never `remove`: teardown is the steps below, and `ExitWorktree` only removes worktrees it created itself.
-2. `git pull --no-rebase` to bring the base current by merge (never rebase — a rebase rewrites base history and can orphan the branch), then `git merge <branch>` into the base. Use a real merge, not a squash, so the branch tip stays an ancestor.
-3. `sdd wip done <marker-id>` — removes the marker.
-4. `git worktree remove <path>` (re-derive `<path>` via `git worktree list`), then `git branch -d <branch>` — safe to delete now that it is merged.
-
-**Notes:**
-- `EnterWorktree(name: …)` always creates a new worktree; pass `path:` instead to re-enter an existing one.
-- Conclude in a single pass: background sync runs on a cooldown, and a mid-conclude rebase could rewrite base history.
+`EnterWorktree(name:)` creates a new worktree; `path:` re-enters one. Conclude in a single pass — a mid-conclude background rebase could rewrite base history.

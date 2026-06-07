@@ -15,7 +15,7 @@ A session can move fluidly between these modes:
 
 **Capture**: Something happened — a user observation, market signal, idea, implementation finding. Always dialogue before recording: play back what you'd capture, ask if it's right, adjust. Never silently create entries.
 
-**Evaluate**: A commitment was completed (captured as a `kind: done` signal). Collect further signals: did it meet the target? What gaps remain? Consider multiple perspectives (technical, product, brand). Each evaluation is: decision (what to evaluate against) → done signal (who reviewed) → signals (findings).
+**Evaluate**: A commitment was completed (captured as a `kind: done` signal). Collect further signals: did it meet the target? What gaps remain? Apply both evaluation lenses (see [evaluation.md](evaluation.md)). Each evaluation is: decision (what to evaluate against) → done signal (who reviewed) → signals (findings).
 
 **Reflect/Dialogue**: Open exploration around a signal, decision, or open question. The goal is to synthesize insights, shape understanding, and move toward decisions. Like a thinking partner, not a task executor.
 
