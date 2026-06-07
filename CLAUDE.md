@@ -18,6 +18,10 @@ sdd init --scope project      # refresh .claude/skills from the embedded bundle
 
 The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devbox run build`, never commit, added to PATH via devbox.json, so call it via `sdd`). Git hooks under `.githooks/` (wired via `core.hooksPath` on `direnv allow`) auto-rebuild it after every pull, rebase, and branch switch — but you still rebuild manually after editing source. `sdd init` is idempotent: on a fresh checkout it creates `.sdd/meta.json` and installs skills; on subsequent runs it refreshes whatever drifted.
 
+## Worktrees
+
+Always run `direnv allow <path>` on a new worktree under `.claude/worktrees/` (safe — it's this repo's own `.envrc`) so a shell opened there loads the devbox env.
+
 ## Commands
 
 - `devbox run build` — build the local `bin/sdd` dev binary (git hooks also run this after pull/rebase/checkout)
@@ -54,6 +58,8 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 - **Push logic down**: Finders and handlers are orchestration — they wire dependencies and delegate. Graph traversal, tree building, filtering, and any pure computation belongs in `internal/model/`. Always question whether code in a finder/handler could live in a lower package.
 
 - **Single path**: I/O functions (file loading, etc.) should delegate to in-memory constructors. Don't duplicate indexing or initialization logic between production and test code paths.
+
+- **Comments explain the current why, not history**: Don't narrate how the code used to be ("previously…", "with the old X…", "changed from Y"). Git carries history. A comment should justify the current code where the why isn't self-evident — and nothing more.
 
 - **Logging**: Use `log/slog`; retrieve the logger via `slogutils.FromContext(ctx)` (from `github.com/networkteam/slogutils`). Handler entry points take `ctx` and pull the logger from it — do not pass loggers as separate arguments, and do not use `fmt.Fprintf(h.stderr, ...)` for operational messages. Stderr writes are reserved for user-facing CLI output that isn't logging (prompts, structured CLI results).
 
