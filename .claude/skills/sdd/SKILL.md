@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash(sdd *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 248a63bd434e0f78bf3e650eff1f2d5b4471289acdea399e15e33fffc3c86d40
+sdd-content-hash: eebfc940f545d12a8f6f4cd4ab2e18e5e67c08725d82a2fec4a6597b86b31651
 sdd-version: dev
 ---
 
@@ -239,8 +239,8 @@ If the vocabulary reference is missing for the configured locale (the file doesn
 
 The `sdd` CLI emits background-sync status lines to stderr at the top of each command (subject to a configurable cooldown in `.sdd/config.yaml`, default 15m). These lines are the cue to keep the shared graph in sync with collaborators. Pattern-match on the `sync:` prefix and act per state:
 
-- **`sync: fast-forward available, N commits behind`** or **`sync: rebase is clean, N remote / M local`** — run `git status --porcelain`. If empty (clean working tree), tell the user ("remote is N ahead, pulling with --rebase…") then run `git pull --rebase`. If non-empty (dirty), do not pull — warn the user ("working tree has uncommitted changes — commit or stash before rebasing") and defer.
-- **`sync: rebase would conflict in <paths>, N remote / M local`** — do not auto-pull reflexively. Name the paths, then offer to drive the rebase together: propose `git pull --rebase`, resolve conflict markers file-by-file, `git rebase --continue` after each. Defer only if the user isn't ready to handle it now.
+- **`sync: fast-forward available, N commits behind`** or **`sync: merge is clean, N remote / M local`** — tell the user ("remote is N ahead, pulling…"), then run `sdd sync --pull`. It pulls with a merge (never a rebase, so the shared history is never rewritten) when the working tree is clean, and refuses with an actionable message when it's dirty — relay that refusal and defer rather than pre-checking the tree yourself.
+- **`sync: merge would conflict in <paths>, N remote / M local`** — do not pull reflexively. Name the affected paths first, then offer to drive the merge together. When the user is ready, run `sdd sync --pull`: it begins the merge and stops at the conflict markers. Resolve them in one pass, `git add` the resolved files, and conclude with a single `git commit` to finish the merge — there is no per-commit continue. Defer only if the user isn't ready to handle it now.
 - **`sync: local ahead by N, consider push`** — mention it as a suggestion, not an action. Pushing is visible to others; let the user decide when to publish.
 - **`sync: not a git repo` / `no remote configured` / `no upstream for current branch …` / `sync: fetch failed: <error>`** — surface the warning briefly. These are setup or network issues the user resolves; don't try to auto-fix.
 
