@@ -281,6 +281,7 @@ func main() {
 			summarizeCmd(),
 			indexCmd(),
 			searchCmd(),
+			syncCmd(),
 		},
 		DefaultCommand: "status",
 	}

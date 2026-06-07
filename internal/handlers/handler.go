@@ -50,6 +50,18 @@ type Mover interface {
 	Move(src, dst string) error
 }
 
+// Puller is the git surface for `sdd sync --pull`: a merge-only pull that
+// never rewrites the shared graph's history. Injected so tests can fake the
+// working-tree state and the pull without shelling out to git.
+type Puller interface {
+	// IsClean reports whether the working tree has no uncommitted changes
+	// (a `git status --porcelain` with empty output).
+	IsClean(ctx context.Context) (bool, error)
+	// MergePull runs a merge-only pull (`git pull --no-rebase`) and returns
+	// git's combined output. A non-nil error means the pull failed.
+	MergePull(ctx context.Context) (string, error)
+}
+
 // Handler holds injected dependencies shared across command methods.
 // Each public method corresponds to one command and lives in its own file
 // (handler_new_entry.go, etc.).
@@ -61,6 +73,7 @@ type Handler struct {
 	committer Committer
 	brancher  Brancher
 	mover     Mover
+	puller    Puller
 	stderr    io.Writer
 	now       func() time.Time
 }
@@ -74,6 +87,7 @@ type Options struct {
 	Committer Committer
 	Brancher  Brancher
 	Mover     Mover
+	Puller    Puller
 	Stderr    io.Writer
 	Now       func() time.Time
 }
@@ -88,6 +102,7 @@ func New(opts Options) *Handler {
 		committer: opts.Committer,
 		brancher:  opts.Brancher,
 		mover:     opts.Mover,
+		puller:    opts.Puller,
 		stderr:    opts.Stderr,
 		now:       opts.Now,
 	}
