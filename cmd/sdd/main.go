@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
@@ -1125,7 +1125,7 @@ func newGraphDirPromptModel(defaultValue string) graphDirPromptModel {
 	ti := textinput.New()
 	ti.Placeholder = defaultValue
 	ti.Focus()
-	ti.Width = 60
+	ti.SetWidth(60)
 	return graphDirPromptModel{textInput: ti}
 }
 
@@ -1135,12 +1135,12 @@ func (m graphDirPromptModel) Init() tea.Cmd {
 
 func (m graphDirPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEnter:
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "enter":
 			m.done = true
 			return m, tea.Quit
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case "ctrl+c", "esc":
 			return m, tea.Quit
 		}
 	}
@@ -1149,9 +1149,9 @@ func (m graphDirPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m graphDirPromptModel) View() string {
-	return fmt.Sprintf("Graph directory (relative to repo root) [%s]: %s",
-		m.textInput.Placeholder, m.textInput.View())
+func (m graphDirPromptModel) View() tea.View {
+	return tea.NewView(fmt.Sprintf("Graph directory (relative to repo root) [%s]: %s",
+		m.textInput.Placeholder, m.textInput.View()))
 }
 
 // promptGraphDir runs an interactive prompt for the graph directory.
@@ -1183,19 +1183,19 @@ func newParticipantPromptModel(defaultValue string) participantPromptModel {
 	ti := textinput.New()
 	ti.Placeholder = defaultValue
 	ti.Focus()
-	ti.Width = 60
+	ti.SetWidth(60)
 	return participantPromptModel{textInput: ti}
 }
 
 func (m participantPromptModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m participantPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.Type {
-		case tea.KeyEnter:
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "enter":
 			m.done = true
 			return m, tea.Quit
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case "ctrl+c", "esc":
 			return m, tea.Quit
 		}
 	}
@@ -1204,9 +1204,9 @@ func (m participantPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m participantPromptModel) View() string {
-	return fmt.Sprintf("Participant name [%s]: %s",
-		m.textInput.Placeholder, m.textInput.View())
+func (m participantPromptModel) View() tea.View {
+	return tea.NewView(fmt.Sprintf("Participant name [%s]: %s",
+		m.textInput.Placeholder, m.textInput.View()))
 }
 
 // promptParticipant runs an interactive prompt for the local participant name.
@@ -1238,19 +1238,19 @@ func newLanguagePromptModel(defaultValue string) languagePromptModel {
 	ti := textinput.New()
 	ti.Placeholder = defaultValue
 	ti.Focus()
-	ti.Width = 20
+	ti.SetWidth(20)
 	return languagePromptModel{textInput: ti}
 }
 
 func (m languagePromptModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m languagePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.Type {
-		case tea.KeyEnter:
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "enter":
 			m.done = true
 			return m, tea.Quit
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case "ctrl+c", "esc":
 			return m, tea.Quit
 		}
 	}
@@ -1259,9 +1259,9 @@ func (m languagePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m languagePromptModel) View() string {
-	return fmt.Sprintf("Graph language [%s]: %s",
-		m.textInput.Placeholder, m.textInput.View())
+func (m languagePromptModel) View() tea.View {
+	return tea.NewView(fmt.Sprintf("Graph language [%s]: %s",
+		m.textInput.Placeholder, m.textInput.View()))
 }
 
 // promptLanguage runs an interactive prompt for the graph authoring language.
@@ -1313,38 +1313,27 @@ func newScopePromptModel() scopePromptModel {
 func (m scopePromptModel) Init() tea.Cmd { return nil }
 
 func (m scopePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.Type {
-		case tea.KeyEnter:
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "enter":
 			m.done = true
 			return m, tea.Quit
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case "ctrl+c", "esc":
 			return m, tea.Quit
-		case tea.KeyUp:
+		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
 			}
-		case tea.KeyDown:
+		case "down", "j":
 			if m.cursor < len(m.options)-1 {
 				m.cursor++
-			}
-		case tea.KeyRunes:
-			switch string(key.Runes) {
-			case "k":
-				if m.cursor > 0 {
-					m.cursor--
-				}
-			case "j":
-				if m.cursor < len(m.options)-1 {
-					m.cursor++
-				}
 			}
 		}
 	}
 	return m, nil
 }
 
-func (m scopePromptModel) View() string {
+func (m scopePromptModel) View() tea.View {
 	var b strings.Builder
 	b.WriteString("Where should skills be installed? (↑/↓ to navigate, enter to confirm)\n")
 	for i, opt := range m.options {
@@ -1354,7 +1343,7 @@ func (m scopePromptModel) View() string {
 		}
 		fmt.Fprintf(&b, "%s%s — %s\n", marker, opt.label, opt.hint)
 	}
-	return b.String()
+	return tea.NewView(b.String())
 }
 
 // promptScope runs the interactive scope selector. Returns the chosen scope
@@ -1453,7 +1442,7 @@ func newConfirmPromptModel(prompt string) confirmPromptModel {
 	ti := textinput.New()
 	ti.Placeholder = "N"
 	ti.CharLimit = 1
-	ti.Width = 3
+	ti.SetWidth(3)
 	ti.Focus()
 	return confirmPromptModel{textInput: ti, prompt: prompt}
 }
@@ -1463,12 +1452,12 @@ func (m confirmPromptModel) Init() tea.Cmd {
 }
 
 func (m confirmPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.Type {
-		case tea.KeyEnter:
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "enter":
 			m.done = true
 			return m, tea.Quit
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case "ctrl+c", "esc":
 			return m, tea.Quit
 		}
 	}
@@ -1477,8 +1466,8 @@ func (m confirmPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m confirmPromptModel) View() string {
-	return fmt.Sprintf("%s [y/N]: %s", m.prompt, m.textInput.View())
+func (m confirmPromptModel) View() tea.View {
+	return tea.NewView(fmt.Sprintf("%s [y/N]: %s", m.prompt, m.textInput.View()))
 }
 
 // promptOverwriteModified asks the user whether to overwrite a user-edited
