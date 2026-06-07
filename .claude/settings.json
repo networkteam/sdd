@@ -12,5 +12,8 @@
       "Skill(sdd-groom)",
       "Skill(sdd)"
     ]
+  },
+  "worktree": {
+    "baseRef": "head"
   }
 }

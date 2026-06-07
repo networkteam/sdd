@@ -57,17 +57,24 @@ Recommend when: the exploration was shallow, nothing emerged beyond "tried it, d
 
 ## Worktree mode (optional)
 
-For multiple concurrent branches on the same machine. When the user asks for worktree isolation, the agent sets it up:
+Worktrees isolate concurrent work in a separate directory so edits in one session never touch another. The sdd CLI owns none of this: the agent harness moves the session, git does the branch plumbing, and `sdd wip` only tracks the marker. Two gates bound the flow — the user confirms once to start and once to merge; everything between runs without check-ins.
 
-1. After `sdd wip start --branch`, switch back so the branch is free for the worktree:
-   ```bash
-   git checkout main
-   ```
-2. Create the worktree (sibling directory, named after the branch with slashes replaced by hyphens):
-   ```bash
-   git worktree add ../<branch-name-as-dir> <branch-name>
-   ```
-3. Check CLAUDE.md for setup instructions (build steps, dependency installs) and run them inside the worktree directory
-4. Tell the user: "The worktree is ready at `<path>`. Start a new agent session there to continue working on this branch." Close the current session's work on this topic — the new session picks up from the WIP marker and plan.
+**When to suggest a worktree:** the work is more than a short-loop change — multi-file, multi-commit, or worth keeping the base branch free to use meanwhile. Don't suggest one for small confident changes or pure capture.
 
-A single worktree can be reused for different branches over time. Clean up with `git worktree remove ../<path>` when no longer needed.
+**Repo prerequisites** (set once per repo): a `.worktreeinclude` at the repo root listing the gitignored local state to carry into each worktree — for an sdd repo that is `.sdd/config.local.yaml` and `.sdd/index/`, so search works without re-embedding — plus `.claude/worktrees/` in `.gitignore` and `worktree.baseRef: "head"` in `.claude/settings.json` so worktrees branch from local state.
+
+**Start — Gate 1, user confirms:**
+1. `EnterWorktree(name: "<entry-suffix>")` — the harness creates the worktree under `.claude/worktrees/`, switches the session into it, and `.worktreeinclude` carries local state across (so `sdd search` works with no re-embed).
+2. `sdd wip start <entry-id> --exclusive --participant <name> "<description>"` — records the marker on the new branch.
+
+**Work:** the normal SDD loop inside the worktree — entries, code, commits. Capture the closing done signal here, on the branch. No check-ins until the work is ready.
+
+**Conclude — Gate 2, user confirms the merge:** stay in the worktree until the user confirms. Then:
+1. `ExitWorktree(action: "keep")` — returns the session to the base directory. Use `keep`, never `remove`: teardown is the steps below, and `ExitWorktree` only removes worktrees it created itself.
+2. `git pull --no-rebase` to bring the base current by merge (never rebase — a rebase rewrites base history and can orphan the branch), then `git merge <branch>` into the base. Use a real merge, not a squash, so the branch tip stays an ancestor.
+3. `sdd wip done <marker-id>` — removes the marker.
+4. `git worktree remove <path>` (re-derive `<path>` via `git worktree list`), then `git branch -d <branch>` — safe to delete now that it is merged.
+
+**Notes:**
+- `EnterWorktree(name: …)` always creates a new worktree; pass `path:` instead to re-enter an existing one.
+- Conclude in a single pass: background sync runs on a cooldown, and a mid-conclude rebase could rewrite base history.

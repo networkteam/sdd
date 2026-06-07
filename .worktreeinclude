@@ -1,0 +1,13 @@
+# Carried into every Claude Code worktree. Only gitignored files are copied.
+
+# Run sdd immediately without waiting for a rebuild
+bin/sdd
+
+# Participant identity — captures need it
+.sdd/config.local.yaml
+
+# Search index — avoid re-embedding (large but instant to copy)
+.sdd/index/
+
+# Devbox env cache — may speed shell startup; regenerates if stale
+.devbox/

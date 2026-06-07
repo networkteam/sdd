@@ -1,6 +1,7 @@
 /tmp
 /bin
 /dist
+.claude/worktrees/
 .sdd/tmp/
 .sdd/config.local.yaml
 .sdd/index/
