@@ -61,6 +61,9 @@ type openaiEmbedResponse struct {
 	Data []struct {
 		Embedding []float32 `json:"embedding"`
 	} `json:"data"`
+	Usage struct {
+		PromptTokens int `json:"prompt_tokens"`
+	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -71,19 +74,20 @@ type openaiEmbedResponse struct {
 // EmbedDocuments applies the configured document template before
 // dispatching to the shared transport.
 func (e *openaiEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
-	return e.embed(ctx, applyTemplate(e.documentTemplate, texts))
+	return e.embed(ctx, "embed-documents", applyTemplate(e.documentTemplate, texts))
 }
 
 // EmbedQueries applies the configured query template before dispatching
 // to the shared transport.
 func (e *openaiEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
-	return e.embed(ctx, applyTemplate(e.queryTemplate, texts))
+	return e.embed(ctx, "embed-queries", applyTemplate(e.queryTemplate, texts))
 }
 
 // embed splits the (already-templated) input slice into capped sub-batches,
 // sends each as a single /v1/embeddings call, and concatenates results
-// in input order.
-func (e *openaiEmbedder) embed(ctx context.Context, texts []string) ([][]float32, error) {
+// in input order. op labels the recorded stat (embed-documents vs
+// embed-queries).
+func (e *openaiEmbedder) embed(ctx context.Context, op string, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
@@ -93,7 +97,7 @@ func (e *openaiEmbedder) embed(ctx context.Context, texts []string) ([][]float32
 		if end > len(texts) {
 			end = len(texts)
 		}
-		batch, err := e.embedBatch(ctx, texts[start:end])
+		batch, err := e.embedBatch(ctx, op, texts[start:end])
 		if err != nil {
 			return nil, fmt.Errorf("openai batch [%d:%d]: %w", start, end, err)
 		}
@@ -102,7 +106,7 @@ func (e *openaiEmbedder) embed(ctx context.Context, texts []string) ([][]float32
 	return out, nil
 }
 
-func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+func (e *openaiEmbedder) embedBatch(ctx context.Context, op string, texts []string) ([][]float32, error) {
 	body := openaiEmbedRequest{
 		Input:          texts,
 		Model:          e.model,
@@ -120,6 +124,7 @@ func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+e.apiKey)
 
+	start := time.Now()
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("openai embed request: %w", err)
@@ -142,6 +147,20 @@ func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) ([][]fl
 	if len(decoded.Data) != len(texts) {
 		return nil, fmt.Errorf("openai returned %d embeddings for %d inputs", len(decoded.Data), len(texts))
 	}
+
+	// One stat per HTTP call. Self-hosted OpenAI-compatible servers (omlx,
+	// vLLM, LM Studio) report prompt_tokens in usage just as OpenAI does;
+	// when a server omits it, tokens.in is 0 but items + duration still
+	// give the throughput comparison.
+	llm.RecordEmbedCall(ctx, llm.CallStat{
+		Op:          op,
+		Provider:    "openai",
+		Model:       e.model,
+		Items:       len(texts),
+		InputTokens: decoded.Usage.PromptTokens,
+		DurationMS:  time.Since(start).Milliseconds(),
+	})
+
 	out := make([][]float32, len(decoded.Data))
 	for i, d := range decoded.Data {
 		out[i] = d.Embedding

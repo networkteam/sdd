@@ -53,25 +53,30 @@ type ollamaEmbedRequest struct {
 
 type ollamaEmbedResponse struct {
 	Embeddings [][]float32 `json:"embeddings"`
-	Error      string      `json:"error,omitempty"`
+	// PromptEvalCount is the token count Ollama reports for the batch on
+	// /api/embed. Absent on older daemons — zero then, which the stat
+	// records as tokens.in 0 (items + duration still capture throughput).
+	PromptEvalCount int    `json:"prompt_eval_count"`
+	Error           string `json:"error,omitempty"`
 }
 
 // EmbedDocuments applies the configured document template before
 // dispatching to the shared transport.
 func (e *ollamaEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
-	return e.embed(ctx, applyTemplate(e.documentTemplate, texts))
+	return e.embed(ctx, "embed-documents", applyTemplate(e.documentTemplate, texts))
 }
 
 // EmbedQueries applies the configured query template before dispatching
 // to the shared transport.
 func (e *ollamaEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
-	return e.embed(ctx, applyTemplate(e.queryTemplate, texts))
+	return e.embed(ctx, "embed-queries", applyTemplate(e.queryTemplate, texts))
 }
 
 // embed splits a (already-templated) input slice into capped sub-batches,
 // sends each as a single /api/embed request, and concatenates the
-// results in input order.
-func (e *ollamaEmbedder) embed(ctx context.Context, texts []string) ([][]float32, error) {
+// results in input order. op labels the recorded stat (embed-documents vs
+// embed-queries).
+func (e *ollamaEmbedder) embed(ctx context.Context, op string, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
@@ -81,7 +86,7 @@ func (e *ollamaEmbedder) embed(ctx context.Context, texts []string) ([][]float32
 		if end > len(texts) {
 			end = len(texts)
 		}
-		batch, err := e.embedBatch(ctx, texts[start:end])
+		batch, err := e.embedBatch(ctx, op, texts[start:end])
 		if err != nil {
 			return nil, fmt.Errorf("ollama batch [%d:%d]: %w", start, end, err)
 		}
@@ -93,7 +98,7 @@ func (e *ollamaEmbedder) embed(ctx context.Context, texts []string) ([][]float32
 	return out, nil
 }
 
-func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) (vec [][]float32, err error) {
+func (e *ollamaEmbedder) embedBatch(ctx context.Context, op string, texts []string) (vec [][]float32, err error) {
 	body := ollamaEmbedRequest{Model: e.model, Input: texts}
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -105,6 +110,7 @@ func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) (vec []
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	start := time.Now()
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ollama embed request: %w", err)
@@ -128,6 +134,17 @@ func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) (vec []
 		return nil, fmt.Errorf("ollama returned %d embeddings for %d inputs (model %q)",
 			len(decoded.Embeddings), len(texts), e.model)
 	}
+
+	// One stat per HTTP call, mirroring the openai path.
+	llm.RecordEmbedCall(ctx, llm.CallStat{
+		Op:          op,
+		Provider:    "ollama",
+		Model:       e.model,
+		Items:       len(texts),
+		InputTokens: decoded.PromptEvalCount,
+		DurationMS:  time.Since(start).Milliseconds(),
+	})
+
 	return decoded.Embeddings, nil
 }
 

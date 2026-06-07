@@ -8,10 +8,25 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 )
+
+// fakeSink captures the CallStats an embedder records, for the
+// stat-recording assertions below.
+type fakeSink struct {
+	mu    sync.Mutex
+	calls []llm.CallStat
+}
+
+func (s *fakeSink) RecordCall(c llm.CallStat) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, c)
+}
 
 func TestNew_NoProvider(t *testing.T) {
 	t.Parallel()
@@ -96,6 +111,104 @@ func TestOpenAIEmbedder_Embed(t *testing.T) {
 	}
 	if emb.Fingerprint() != "openai/text-embedding-3-small/256" {
 		t.Errorf("Fingerprint(): got %q", emb.Fingerprint())
+	}
+}
+
+func TestOpenAIEmbedder_RecordsStat(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"embedding": []float32{0.1, 0.2}},
+				{"embedding": []float32{0.3, 0.4}},
+			},
+			"usage": map[string]any{"prompt_tokens": 42},
+		})
+	}))
+	defer srv.Close()
+
+	emb, err := New(model.EmbeddingConfig{
+		Provider:     "openai",
+		Model:        "text-embedding-3-small",
+		Endpoint:     srv.URL,
+		APIKeys:      map[string]string{"openai": "test-key"},
+		RateLimitRPS: 1000,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sink := &fakeSink{}
+	ctx := llm.WithStatsSink(context.Background(), sink)
+	if _, err := emb.EmbedDocuments(ctx, []string{"hello", "world"}); err != nil {
+		t.Fatalf("EmbedDocuments: %v", err)
+	}
+
+	if len(sink.calls) != 1 {
+		t.Fatalf("recorded %d calls, want 1", len(sink.calls))
+	}
+	got := sink.calls[0]
+	if got.Op != "embed-documents" {
+		t.Errorf("op: got %q, want embed-documents", got.Op)
+	}
+	if got.Provider != "openai" {
+		t.Errorf("provider: got %q, want openai", got.Provider)
+	}
+	if got.Model != "text-embedding-3-small" {
+		t.Errorf("model: got %q", got.Model)
+	}
+	if got.Items != 2 {
+		t.Errorf("items: got %d, want 2", got.Items)
+	}
+	if got.InputTokens != 42 {
+		t.Errorf("input tokens: got %d, want 42 (from usage.prompt_tokens)", got.InputTokens)
+	}
+}
+
+func TestOllamaEmbedder_RecordsStat(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"embeddings":        [][]float32{{0.1, 0.2}},
+			"prompt_eval_count": 17,
+		})
+	}))
+	defer srv.Close()
+
+	emb, err := New(model.EmbeddingConfig{
+		Provider:       "ollama",
+		Model:          "qwen3-embedding:8b",
+		OllamaEndpoint: srv.URL,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	sink := &fakeSink{}
+	ctx := llm.WithStatsSink(context.Background(), sink)
+	if _, err := emb.EmbedQueries(ctx, []string{"only one query"}); err != nil {
+		t.Fatalf("EmbedQueries: %v", err)
+	}
+
+	if len(sink.calls) != 1 {
+		t.Fatalf("recorded %d calls, want 1", len(sink.calls))
+	}
+	got := sink.calls[0]
+	if got.Op != "embed-queries" {
+		t.Errorf("op: got %q, want embed-queries", got.Op)
+	}
+	if got.Provider != "ollama" {
+		t.Errorf("provider: got %q, want ollama", got.Provider)
+	}
+	if got.Items != 1 {
+		t.Errorf("items: got %d, want 1", got.Items)
+	}
+	if got.InputTokens != 17 {
+		t.Errorf("input tokens: got %d, want 17 (from prompt_eval_count)", got.InputTokens)
 	}
 }
 

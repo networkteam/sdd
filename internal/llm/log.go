@@ -72,6 +72,30 @@ func recordCallStat(ctx context.Context, meta *LLMMetadata, op string, elapsed t
 	})
 }
 
+// RecordEmbedCall logs one embedding batch at debug level and hands its
+// metrics to the StatsSink on ctx (if any). It mirrors logCallResult for the
+// embedding path, which carries no LLMMetadata: embeddings report input
+// tokens and an item count, never output tokens or a cache breakdown. The
+// caller supplies a fully-populated CallStat (op, provider, model, items,
+// input tokens, duration). Best-effort — a nil sink is a no-op and a sink
+// error never reaches the caller.
+func RecordEmbedCall(ctx context.Context, stat CallStat) {
+	logger := slogutils.FromContext(ctx)
+	logger.Debug("llm call", slog.Group("llm",
+		slog.String("op", stat.Op),
+		slog.Duration("duration", time.Duration(stat.DurationMS)*time.Millisecond),
+		slog.String("provider", stat.Provider),
+		slog.Group(stat.Model,
+			slog.Int("tokens.in", stat.InputTokens),
+			slog.Int("items", stat.Items),
+		),
+	))
+
+	if sink := statsSinkFromContext(ctx); sink != nil {
+		sink.RecordCall(stat)
+	}
+}
+
 // primaryModel returns a representative model name from the per-model usage map
 // (one entry on the gollm path), or "" when none is recorded.
 func primaryModel(meta *LLMMetadata) string {

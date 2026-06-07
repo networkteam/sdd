@@ -39,6 +39,7 @@ type record struct {
 	Op                string `json:"op"`
 	Provider          string `json:"provider,omitempty"`
 	Model             string `json:"model,omitempty"`
+	Items             int    `json:"items,omitempty"`
 	InputTokens       int    `json:"input_tokens"`
 	OutputTokens      int    `json:"output_tokens"`
 	CacheReadTokens   int    `json:"cache_read_tokens"`
@@ -54,6 +55,7 @@ func (s *FileSink) RecordCall(stat llm.CallStat) {
 		Op:                stat.Op,
 		Provider:          stat.Provider,
 		Model:             stat.Model,
+		Items:             stat.Items,
 		InputTokens:       stat.InputTokens,
 		OutputTokens:      stat.OutputTokens,
 		CacheReadTokens:   stat.CacheReadTokens,

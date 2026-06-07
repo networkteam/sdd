@@ -8,9 +8,13 @@ import "context"
 // tokens and the prompt-cache breakdown but not a dollar cost, and we do not
 // maintain a pricing table (see d-tac-zis).
 type CallStat struct {
-	Op                string
-	Provider          string
-	Model             string
+	Op       string
+	Provider string
+	Model    string
+	// Items is the number of inputs in this call. The embedding path sets it
+	// (one batch = N texts) so throughput (items or tokens per second) is
+	// derivable from DurationMS; chat calls are single-prompt and leave it 0.
+	Items             int
 	InputTokens       int
 	OutputTokens      int
 	CacheReadTokens   int
