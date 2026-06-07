@@ -24,7 +24,7 @@ Two moves, every time you implement an entry. Not judgment calls — an empty ma
 ```
 sdd wip start <entry-id> --exclusive --participant <name> "<description>"
 ```
-Add `--branch` for branch mode; in worktree mode the marker is created inside the worktree (below).
+Add `--branch` for branch mode; in worktree mode create the marker on the base first, then enter the worktree (below).
 
 ## Implement, then close
 
@@ -49,7 +49,7 @@ Isolated directory; the harness moves the session, git does the plumbing, `sdd w
 
 **Prerequisites** (once per repo): a `.worktreeinclude` listing gitignored state to carry (`.sdd/config.local.yaml`, `.sdd/index/`), `.claude/worktrees/` in `.gitignore`, and `worktree.baseRef: "head"` in `.claude/settings.json`.
 
-**Start:** `EnterWorktree(name: "<entry-suffix>")` — the harness creates it under `.claude/worktrees/`, switches the session in, and `.worktreeinclude` carries state across — then `sdd wip start <entry-id> --exclusive --participant <name> "<description>"`.
+**Start:** create the marker on the base first, so it is visible there — `sdd wip start <entry-id> --exclusive --participant <name> "<description>"` — then `EnterWorktree(name: "<entry-suffix>")`. The harness creates the worktree under `.claude/worktrees/` and switches the session in; branching from the base (`baseRef: head`) carries the marker along, and `.worktreeinclude` brings the gitignored local state (config + index).
 
 **Work** inside the worktree — commit and capture the closing done signal here, on the branch. You don't need the user's approval step by step; the next time you involve them is the merge confirmation below, unless you hit a design choice no decision covers (stop rule above).
 
@@ -57,6 +57,6 @@ Isolated directory; the harness moves the session, git does the plumbing, `sdd w
 1. `ExitWorktree(action: "keep")` — back to base. Use `keep`, never `remove`: teardown is below, and `ExitWorktree` only removes worktrees it created itself.
 2. `git pull --no-rebase` (merge, never rebase — a rebase rewrites base history and orphans the branch), then `git merge <branch>`. A real merge, not a squash.
 3. `sdd wip done <marker-id>`.
-4. `git worktree remove <path>` (path via `git worktree list`), then `git branch -d <branch>`.
+4. `git worktree remove --force <path>` (path via `git worktree list`; `--force` because the `.worktreeinclude`'d gitignored state leaves the worktree non-clean), then `git branch -d <branch>`.
 
 `EnterWorktree(name:)` creates a new worktree; `path:` re-enters one. Conclude in a single pass — a mid-conclude background rebase could rewrite base history.
