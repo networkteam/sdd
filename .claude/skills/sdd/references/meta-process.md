@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 1a990491951362c23fc261e554633d0d20c2cdb2b6b5760af68c4da1411e3965
+sdd-content-hash: 2407cbcae8ba299c8e3aa64d5cf1f59ed1418e88ce2a1b8ca36642cc9c0ea37c
 sdd-version: dev
 ---
 # SDD Meta Process
@@ -19,7 +19,7 @@ A session can move fluidly between these modes:
 
 **Capture**: Something happened — a user observation, market signal, idea, implementation finding. Always dialogue before recording: play back what you'd capture, ask if it's right, adjust. Never silently create entries.
 
-**Evaluate**: A commitment was completed (captured as a `kind: done` signal). Collect further signals: did it meet the target? What gaps remain? Consider multiple perspectives (technical, product, brand). Each evaluation is: decision (what to evaluate against) → done signal (who reviewed) → signals (findings).
+**Evaluate**: A commitment was completed (captured as a `kind: done` signal). Collect further signals: did it meet the target? What gaps remain? Apply both evaluation lenses (see [evaluation.md](evaluation.md)). Each evaluation is: decision (what to evaluate against) → done signal (who reviewed) → signals (findings).
 
 **Reflect/Dialogue**: Open exploration around a signal, decision, or open question. The goal is to synthesize insights, shape understanding, and move toward decisions. Like a thinking partner, not a task executor.
 
