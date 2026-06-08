@@ -1,18 +1,15 @@
-# 20260410-100000-s-stg-aaa
-
-ID:     20260410-100000-s-stg-aaa
-Type:   signal
-Layer:  strategic
-Kind:   gap
-Time:   2026-04-10 10:00:00
-
-Derived:
-  Status: closed-by 20260410-100200-a-tac-ccc
+---
+id: 20260410-100000-s-stg-aaa
+type: signal
+layer: strategic
+kind: gap
+status: closed-by 20260410-100200-a-tac-ccc
+time: "2026-04-10 10:00:00"
+---
 
 Target signal
 
-## downstream:
-  - refd-by (related) 20260410-100100-d-cpt-bbb directive {status: active}: "Decision referencing target"
-  - closed-by 20260410-100200-a-tac-ccc: "Action closing target"
-
+## downstream
+- related 20260410-100100-d-cpt-bbb (directive, active) — Decision referencing target
+- closed-by 20260410-100200-a-tac-ccc — Action closing target
 

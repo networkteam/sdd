@@ -433,6 +433,10 @@ func showCmd() *cli.Command {
 				Name:  "downstream",
 				Usage: "Include downstream entries (refd-by, closed-by, superseded-by)",
 			},
+			&cli.BoolFlag{
+				Name:  "with-summary",
+				Usage: "Include the primary's stored summary in the envelope (for drift review)",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ids := cmd.Args().Slice()
@@ -458,7 +462,9 @@ func showCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			presenters.RenderShow(os.Stdout, result)
+			presenters.RenderShow(os.Stdout, result, presenters.ShowOptions{
+				WithSummary: cmd.Bool("with-summary"),
+			})
 			return nil
 		},
 	}

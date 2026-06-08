@@ -1,18 +1,17 @@
-# 20260410-100100-d-tac-bbb
-
-ID:     20260410-100100-d-tac-bbb
-Type:   decision
-Layer:  tactical
-Refs:
-  - 20260410-100000-s-stg-aaa (related)
-Time:   2026-04-10 10:01:00
-
-Derived:
-  Status: active
+---
+id: 20260410-100100-d-tac-bbb
+type: decision
+layer: tactical
+kind: directive
+refs:
+    - id: 20260410-100000-s-stg-aaa
+      kind: related
+status: active
+time: "2026-04-10 10:01:00"
+---
 
 Primary
 
-## upstream:
-  - refs (related) 20260410-100000-s-stg-aaa gap {status: open}: "First sentence of content."
-
+## upstream
+- related 20260410-100000-s-stg-aaa (gap, open) — First sentence of content.
 

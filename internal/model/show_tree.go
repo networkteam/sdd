@@ -28,10 +28,16 @@ type TruncatedRef struct {
 }
 
 // ShowTree holds the upstream and downstream chains for a single primary entry.
+// Primary-derived attributes (status, supersede trail, effective topics) are
+// computed during the build so presenters consume precomputed values and stay
+// pure — no graph traversal at render time.
 type ShowTree struct {
-	Primary    *Entry
-	Upstream   []ShowTreeItem
-	Downstream []ShowTreeItem
+	Primary              *Entry
+	PrimaryStatus        Status
+	PrimarySupersedePath []string
+	PrimaryTopics        []TopicPath
+	Upstream             []ShowTreeItem
+	Downstream           []ShowTreeItem
 }
 
 // BuildShowTree constructs the upstream and optionally downstream traversal
@@ -68,10 +74,14 @@ func (g *Graph) BuildShowTree(id string, maxDepth int, includeDownstream bool, r
 	markRendered(downstream, rendered)
 	rendered[id] = true
 
+	status, supersedePath := g.itemStatus(e)
 	return &ShowTree{
-		Primary:    e,
-		Upstream:   upstream,
-		Downstream: downstream,
+		Primary:              e,
+		PrimaryStatus:        status,
+		PrimarySupersedePath: supersedePath,
+		PrimaryTopics:        g.EffectiveTopics(e),
+		Upstream:             upstream,
+		Downstream:           downstream,
 	}
 }
 

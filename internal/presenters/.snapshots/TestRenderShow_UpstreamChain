@@ -1,19 +1,18 @@
-# 20260410-100200-d-tac-ccc
-
-ID:     20260410-100200-d-tac-ccc
-Type:   decision
-Layer:  tactical
-Refs:
-  - 20260410-100100-s-cpt-bbb (related)
-Time:   2026-04-10 10:02:00
-
-Derived:
-  Status: active
+---
+id: 20260410-100200-d-tac-ccc
+type: decision
+layer: tactical
+kind: directive
+refs:
+    - id: 20260410-100100-s-cpt-bbb
+      kind: related
+status: active
+time: "2026-04-10 10:02:00"
+---
 
 Decision based on observations
 
-## upstream:
-  - refs (related) 20260410-100100-s-cpt-bbb gap {status: open}: "Middle observation building on root"
-    - refs (related) 20260410-100000-s-stg-aaa gap {status: open}: "Root signal about the foundation"
-
+## upstream
+- related 20260410-100100-s-cpt-bbb (gap, open) — Middle observation building on root
+  - related 20260410-100000-s-stg-aaa (gap, open) — Root signal about the foundation
 

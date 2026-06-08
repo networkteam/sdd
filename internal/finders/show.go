@@ -36,9 +36,12 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 		tree := q.Graph.BuildShowTree(id, maxDepth, q.Downstream, rendered, primaries)
 
 		groups = append(groups, query.ShowGroup{
-			Primary:    tree.Primary,
-			Upstream:   tree.Upstream,
-			Downstream: tree.Downstream,
+			Primary:              tree.Primary,
+			PrimaryStatus:        tree.PrimaryStatus,
+			PrimarySupersedePath: tree.PrimarySupersedePath,
+			PrimaryTopics:        tree.PrimaryTopics,
+			Upstream:             tree.Upstream,
+			Downstream:           tree.Downstream,
 		})
 	}
 

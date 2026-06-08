@@ -133,10 +133,32 @@ func FormatStatus(s model.Status) string {
 // where a reader is traversing a reference, surface the intermediate hops;
 // flat surfaces keep the head-only form.
 func FormatStatusTrail(s model.Status, supersedePath []string) string {
-	if s.Kind == model.StatusSupersededBy && len(supersedePath) > 1 {
-		return "{status: superseded-by " + strings.Join(supersedePath[1:], " → ") + "}"
+	v := formatStatusTrailValue(s, supersedePath)
+	if v == "" {
+		return ""
 	}
-	return FormatStatus(s)
+	return "{status: " + v + "}"
+}
+
+// formatStatusTrailValue is the brace-less status value shared by the
+// curly-brace flat surfaces (via FormatStatusTrail) and the bracket-less
+// contexts — the show envelope's `status:` field and the show tree's
+// `(<kind>, <status>)` slot. StatusNone (done signals) yields the empty
+// string so callers omit the segment. A superseded target with a multi-hop
+// trail expands to `superseded-by <hop1> → … → <head>` (the path's first
+// element is the origin and is dropped); other compound states render
+// `<kind> <head-id>`.
+func formatStatusTrailValue(s model.Status, supersedePath []string) string {
+	if s.Kind == model.StatusNone {
+		return ""
+	}
+	if s.Kind == model.StatusSupersededBy && len(supersedePath) > 1 {
+		return "superseded-by " + strings.Join(supersedePath[1:], " → ")
+	}
+	if s.By != "" {
+		return string(s.Kind) + " " + s.By
+	}
+	return string(s.Kind)
 }
 
 // LayerOrder returns the display order for layers (strategic → process).

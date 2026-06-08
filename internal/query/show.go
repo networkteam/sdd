@@ -16,11 +16,16 @@ type ShowQuery struct {
 const DefaultMaxDepth = 4
 
 // ShowGroup is one primary's full tree: the primary entry, its upstream chain,
-// and its downstream chain. Multiple groups are joined with separators.
+// and its downstream chain. Primary-derived attributes (status, supersede
+// trail, effective topics) are carried alongside so presenters render without
+// touching the graph. Multiple groups are joined with separators.
 type ShowGroup struct {
-	Primary    *model.Entry
-	Upstream   []model.ShowTreeItem
-	Downstream []model.ShowTreeItem
+	Primary              *model.Entry
+	PrimaryStatus        model.Status
+	PrimarySupersedePath []string
+	PrimaryTopics        []model.TopicPath
+	Upstream             []model.ShowTreeItem
+	Downstream           []model.ShowTreeItem
 }
 
 // ShowResult is the structured output for a ShowQuery — one group per primary.
