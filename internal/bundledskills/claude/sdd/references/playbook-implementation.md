@@ -33,7 +33,7 @@ Implementation stays in this session — the meta-process stays active.
 1. **First** run `sdd show <entry-id> --downstream` — augmenting directives that ref the entry extend the acceptance contract (the implicit AC chain is the real spec). Required for plans, recommended for any non-trivial decision.
 2. For a plan, work the union of its `## Acceptance criteria` and those downstream commitments as the checklist — each confirmed with evidence or its deviation explained.
 3. Hit a design choice no decision covers? **Stop**, capture a done signal for progress so far (marker still active), and capture a signal for the missing decision — don't decide yourself. A narrow refinement instead → an augmenting directive (see Augment Plan Playbook).
-4. Commit code first, then the done signal addressing every AC and augmenting commitment, closing them via `--closes <entry-id>,<dir-id>,...`. Then `sdd wip done <marker-id>`.
+4. Commit code first, then the done signal addressing every AC and augmenting commitment, closing them via `--closes <entry-id>,<dir-id>,...`. **Cite the commit hash(es) in the done signal** so the artifact pointer is explicit — "code committed" without a hash leaves a reader (and pre-flight's artifact-durability check) unable to find what landed. Then `sdd wip done <marker-id>`.
 5. Prompt for evaluation signals — apply the lenses (see [evaluation.md](evaluation.md)).
 
 ## Branch mode
