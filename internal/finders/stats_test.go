@@ -1,0 +1,56 @@
+package finders_test
+
+import (
+	"testing"
+
+	"github.com/networkteam/sdd/internal/finders"
+	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llmstats"
+	"github.com/networkteam/sdd/internal/query"
+)
+
+func TestStatsEmptySink(t *testing.T) {
+	f := finders.New(finders.Options{})
+	res, err := f.Stats(query.StatsQuery{StatsDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if !res.SinkEmpty {
+		t.Fatalf("expected SinkEmpty for an absent sink")
+	}
+	if res.Report.Totals.Calls != 0 {
+		t.Fatalf("expected zero totals, got %+v", res.Report.Totals)
+	}
+}
+
+func TestStatsReadsAndFilters(t *testing.T) {
+	dir := t.TempDir()
+	sink, err := llmstats.NewFileSink(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink.RecordCall(llm.CallStat{Op: "preflight", Provider: "anthropic", Model: "m", InputTokens: 100, DurationMS: 100})
+	sink.RecordCall(llm.CallStat{Op: "embed-documents", Provider: "ollama", Model: "q", Items: 4, InputTokens: 40, DurationMS: 200})
+
+	f := finders.New(finders.Options{})
+
+	all, err := f.Stats(query.StatsQuery{StatsDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.SinkEmpty || all.Report.Totals.Calls != 2 {
+		t.Fatalf("expected 2 calls, non-empty sink, got empty=%v calls=%d", all.SinkEmpty, all.Report.Totals.Calls)
+	}
+
+	ollama, err := f.Stats(query.StatsQuery{StatsDir: dir, Provider: "ollama"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ollama.Report.Totals.Calls != 1 {
+		t.Fatalf("provider filter: want 1 call, got %d", ollama.Report.Totals.Calls)
+	}
+	// Sink had records, so even a filter that excludes some is not SinkEmpty.
+	if ollama.SinkEmpty {
+		t.Fatalf("filtered result over a non-empty sink must not be SinkEmpty")
+	}
+}

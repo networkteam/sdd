@@ -282,6 +282,7 @@ func main() {
 			indexCmd(),
 			searchCmd(),
 			syncCmd(),
+			statsCmd(),
 		},
 		DefaultCommand: "status",
 	}
@@ -318,6 +319,76 @@ func infoCmd() *cli.Command {
 				return err
 			}
 			presenters.RenderInfo(os.Stdout, result)
+			return nil
+		},
+	}
+}
+
+func statsCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "stats",
+		Usage: "Show LLM/embedding usage analytics from the local stats sink",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "since",
+				Usage: "Date range: all-time (default), a duration (7d, 30d, 2w, 1m), or YYYY-MM-DD",
+			},
+			&cli.StringFlag{
+				Name:  "op",
+				Usage: "Filter by operation (preflight, summarize, embed-documents, embed-queries)",
+			},
+			&cli.StringFlag{
+				Name:  "provider",
+				Usage: "Filter by provider (e.g. anthropic, ollama, openai)",
+			},
+			&cli.StringFlag{
+				Name:  "model",
+				Usage: "Filter by model name",
+			},
+			&cli.StringFlag{
+				Name:  "format",
+				Usage: "Output format: auto (default — styled table on a TTY, JSON otherwise) or json",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			sddDir, err := resolveSDDDir()
+			if err != nil {
+				return err
+			}
+
+			now := time.Now()
+			var since *time.Time
+			if spec := strings.TrimSpace(cmd.String("since")); spec != "" && spec != "all-time" && spec != "all" {
+				cutoff, err := model.ResolveSinceSpec(spec, now)
+				if err != nil {
+					return err
+				}
+				since = &cutoff
+			}
+
+			f, err := newReadFinder()
+			if err != nil {
+				return err
+			}
+			result, err := f.Stats(query.StatsQuery{
+				StatsDir: filepath.Join(sddDir, "stats"),
+				Since:    since,
+				Until:    now,
+				Op:       cmd.String("op"),
+				Provider: cmd.String("provider"),
+				Model:    cmd.String("model"),
+			})
+			if err != nil {
+				return err
+			}
+
+			// Non-TTY consumers (and an explicit --format json) get clean
+			// structured stdout; interactive terminals get the styled table
+			// (per d-cpt-mvb / d-cpt-5f4).
+			if cmd.String("format") == "json" || !isTerminal(os.Stdout) {
+				return presenters.RenderStatsJSON(os.Stdout, result)
+			}
+			presenters.RenderStatsTable(os.Stdout, result)
 			return nil
 		},
 	}

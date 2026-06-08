@@ -32,25 +32,11 @@ func NewFileSink(dir string) (*FileSink, error) {
 	return &FileSink{path: filepath.Join(dir, "llm.jsonl"), now: time.Now}, nil
 }
 
-// record is the on-disk JSONL shape. Cost is intentionally absent — the active
-// provider path reports tokens and the cache breakdown but no dollar cost.
-type record struct {
-	Timestamp         string `json:"ts"`
-	Op                string `json:"op"`
-	Provider          string `json:"provider,omitempty"`
-	Model             string `json:"model,omitempty"`
-	Items             int    `json:"items,omitempty"`
-	InputTokens       int    `json:"input_tokens"`
-	OutputTokens      int    `json:"output_tokens"`
-	CacheReadTokens   int    `json:"cache_read_tokens"`
-	CacheCreateTokens int    `json:"cache_create_tokens"`
-	DurationMS        int64  `json:"duration_ms"`
-}
-
 // RecordCall appends one JSON line for the call. Errors are swallowed: stats
-// collection is best-effort and must never break a capture or summarize.
+// collection is best-effort and must never break a capture or summarize. The
+// on-disk shape is Record, shared with the reader (reader.go).
 func (s *FileSink) RecordCall(stat llm.CallStat) {
-	line, err := json.Marshal(record{
+	line, err := json.Marshal(Record{
 		Timestamp:         s.now().UTC().Format(time.RFC3339),
 		Op:                stat.Op,
 		Provider:          stat.Provider,

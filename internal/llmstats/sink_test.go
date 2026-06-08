@@ -41,10 +41,10 @@ func TestFileSinkRecordCall(t *testing.T) {
 	}
 	defer f.Close()
 
-	var recs []record
+	var recs []Record
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		var r record
+		var r Record
 		if err := json.Unmarshal(sc.Bytes(), &r); err != nil {
 			t.Fatalf("unmarshal line %q: %v", sc.Text(), err)
 		}
