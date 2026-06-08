@@ -17,6 +17,10 @@ type ShowOptions struct {
 	// Off by default — the body renders right after the envelope, and the
 	// summary is only needed for human drift-review.
 	WithSummary bool
+	// Width is the target wrap width for the styled renderer's glamour body
+	// (terminal columns). Zero falls back to a sensible default. Ignored by
+	// the plain renderer, which never reflows the body.
+	Width int
 }
 
 // RenderShow writes the plain-markdown show output for a ShowResult. Each group

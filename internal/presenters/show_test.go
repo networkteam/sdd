@@ -269,6 +269,37 @@ func TestRenderShow_SummaryShownWithFlag(t *testing.T) {
 	}
 }
 
+func TestRenderShowStyled_ColorDisabled(t *testing.T) {
+	// Writing to a non-TTY buffer downsamples to Ascii through the colorprofile
+	// writer, so the styled output arrives color-free — we assert on its plain
+	// structure (envelope, glamour-rendered body, styled tree node).
+	root := entry("20260410-100000-s-stg-aaa", withSummary("Root signal about the foundation"))
+	primary := entry("20260410-100100-d-tac-ccc",
+		withContent("Decision body paragraph rendered through glamour."),
+		withRefs("20260410-100000-s-stg-aaa"))
+	g := model.NewGraph([]*model.Entry{root, primary})
+
+	f := finders.New(finders.Options{})
+	result, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{primary.ID}, MaxDepth: query.DefaultMaxDepth})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	presenters.RenderShowStyled(&buf, result, presenters.ShowOptions{Width: 80})
+	out := buf.String()
+
+	for _, want := range []string{
+		"id: 20260410-100100-d-tac-ccc",                    // envelope
+		"Decision body paragraph rendered through glamour", // glamour body (color-free)
+		"related 20260410-100000-s-stg-aaa",                // styled tree node, color stripped
+		"## upstream",
+	} {
+		if !contains(out, want) {
+			t.Errorf("styled (color-disabled) output missing %q in:\n%s", want, out)
+		}
+	}
+}
+
 // contains and indexOf are tiny local helpers to keep the assertions readable
 // without importing strings just for two calls.
 func contains(s, sub string) bool { return indexOf(s, sub) >= 0 }

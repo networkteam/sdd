@@ -437,6 +437,10 @@ func showCmd() *cli.Command {
 				Name:  "with-summary",
 				Usage: "Include the primary's stored summary in the envelope (for drift review)",
 			},
+			&cli.StringFlag{
+				Name:  "format",
+				Usage: "Output format: auto (default — styled on a TTY, plain markdown otherwise) or text",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ids := cmd.Args().Slice()
@@ -462,9 +466,19 @@ func showCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			presenters.RenderShow(os.Stdout, result, presenters.ShowOptions{
-				WithSummary: cmd.Bool("with-summary"),
-			})
+			opts := presenters.ShowOptions{WithSummary: cmd.Bool("with-summary")}
+
+			// Renderer selection: an explicit --format text, NO_COLOR, or a
+			// non-terminal stdout all take the plain markdown renderer; an
+			// interactive terminal gets the styled view (d-cpt-5f4 / d-cpt-mvb).
+			if cmd.String("format") == "text" || os.Getenv("NO_COLOR") != "" || !isTerminal(os.Stdout) {
+				presenters.RenderShow(os.Stdout, result, opts)
+				return nil
+			}
+			if w, _, err := term.GetSize(os.Stdout.Fd()); err == nil {
+				opts.Width = w
+			}
+			presenters.RenderShowStyled(os.Stdout, result, opts)
 			return nil
 		},
 	}
