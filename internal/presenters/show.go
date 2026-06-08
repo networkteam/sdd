@@ -60,7 +60,12 @@ func renderSummaryItem(w io.Writer, graph *model.Graph, item model.ShowTreeItem,
 		sb.WriteString(" ")
 		sb.WriteString(string(k))
 	}
-	if s := FormatStatus(graph.DerivedStatus(item.Entry)); s != "" {
+	status := graph.DerivedStatus(item.Entry)
+	var supersedePath []string
+	if status.Kind == model.StatusSupersededBy {
+		supersedePath = graph.ResolveRef(item.Entry.ID).Path()
+	}
+	if s := FormatStatusTrail(status, supersedePath); s != "" {
 		sb.WriteString(" ")
 		sb.WriteString(s)
 	}

@@ -547,6 +547,34 @@ func (g *Graph) validate() {
 	validateRoleOrphans(g)
 	validateParticipantCoverage(g)
 	validateAliasAmbiguity(g)
+	validateSupersedeForks(g)
+}
+
+// validateSupersedeForks flags an entry superseded by more than one entry — a
+// fork in its supersession chain. Supersession is meant to be linear (each
+// entry has at most one successor); a fork makes "walk to the live head"
+// (ResolveRef) ambiguous, so the resolver follows the first superseder and
+// relies on this lint to surface the anomaly. A fork should not occur under
+// normal capture — it signals direct file edits, a validator bypass, or
+// corruption. The warning attaches to the forked entry, listing its
+// superseders in sorted order for deterministic output.
+func validateSupersedeForks(g *Graph) {
+	for id, supers := range g.SupersededBy {
+		if len(supers) < 2 {
+			continue
+		}
+		e, ok := g.ByID[id]
+		if !ok {
+			continue
+		}
+		sorted := append([]string(nil), supers...)
+		sort.Strings(sorted)
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "supersedes",
+			Value:   id,
+			Message: fmt.Sprintf("entry is superseded by %d entries (%s) — supersession must be linear; a fork makes head resolution ambiguous", len(sorted), strings.Join(sorted, ", ")),
+		})
+	}
 }
 
 // validateActorInvariant enforces the write-once-across-chains invariant

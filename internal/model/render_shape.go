@@ -46,11 +46,17 @@ type FlatList struct {
 // and Desc is the optional per-ref rationale. A ref whose target is missing
 // from the graph (dangling — lint surfaces it elsewhere) carries a zero
 // Status, which renders without a status segment.
+//
+// SupersedePath is populated only when the target is superseded: the ordered
+// supersession trail from the target (origin) to its live head (ResolveRef
+// Path). The presenter renders the hops through to the head so a reader can
+// connect a stale intermediate ID met elsewhere; it stays nil otherwise.
 type RefExpansion struct {
-	Kind   RefKind
-	ID     string
-	Status Status
-	Desc   string
+	Kind          RefKind
+	ID            string
+	Status        Status
+	Desc          string
+	SupersedePath []string
 }
 
 // Shape implements SectionData.
