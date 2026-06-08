@@ -343,6 +343,48 @@ func TestRenderView_AsListExpandRefs_DoneTargetOmitsStatus(t *testing.T) {
 	}
 }
 
+func TestRenderView_AsListExpandRefs_SupersededPath(t *testing.T) {
+	// A ref pointing at a multiply-superseded target renders the supersede
+	// trail through to the live head. The origin (the sub-line's own id) is
+	// dropped; the rendered hops are the superseders ending at the head, so a
+	// reader who meets an intermediate id elsewhere can connect it.
+	parent := entry("20260101-100000-d-tac-par",
+		withKind(model.KindPlan),
+		withParticipants("Christopher"),
+		withSummary("Parent plan"))
+	g := model.NewGraph([]*model.Entry{parent})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-list",
+			Data: model.FlatList{
+				Entries: []*model.Entry{parent},
+				RefExpansions: [][]model.RefExpansion{{
+					{
+						Kind:   model.RefKindGroundedIn,
+						ID:     "20260101-090000-d-cpt-old",
+						Status: model.Status{Kind: model.StatusSupersededBy, By: "20260101-092000-d-cpt-new"},
+						SupersedePath: []string{
+							"20260101-090000-d-cpt-old",
+							"20260101-091000-d-cpt-mid",
+							"20260101-092000-d-cpt-new",
+						},
+					},
+				}},
+			},
+		}},
+	}
+
+	got := renderView(result)
+	want := "" +
+		"  20260101-100000-d-tac-par tactical plan decision (Christopher) {status: active} Parent plan\n" +
+		"    → grounded-in 20260101-090000-d-cpt-old {status: superseded-by 20260101-091000-d-cpt-mid → 20260101-092000-d-cpt-new}\n"
+	if got != want {
+		t.Errorf("superseded-path render mismatch:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
 func TestRenderView_AsListExpandRefs_ComposesWithScore(t *testing.T) {
 	// Ranked + expanded: the entry line keeps its {score: ...} segment and
 	// the ref sub-lines render beneath it.

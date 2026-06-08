@@ -500,6 +500,36 @@ func Test_assembleContext_RefsCarryDerivedStatus(t *testing.T) {
 	}
 }
 
+// Test_assembleContext_SupersededRefSurfacesLiveHead verifies s-tac-5p5 at the
+// pre-flight layer: when a ref points at a superseded entry, the literal target
+// is kept (its superseded status is what the ref-meta check reasons against) and
+// the live head's content is surfaced alongside, labeled, so the validator can
+// reason about the current entity rather than a retired intermediate.
+func Test_assembleContext_SupersededRefSurfacesLiveHead(t *testing.T) {
+	old := entry("20260410-100000-d-cpt-old", withContent("old contract text"))
+	head := entry("20260410-110000-d-cpt-new", withContent("live head text"), withSupersedes(old.ID))
+	graph := model.NewGraph([]*model.Entry{old, head})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Refs:    refsOf(old.ID),
+		Content: "new decision grounded in the old contract",
+	}
+
+	pctx := assembleContext(proposed, graph, checkDecisionRefs, "")
+
+	if !strings.Contains(pctx.ReferencedEntries, "old contract text") {
+		t.Errorf("should keep the literal (superseded) target's content\n%s", pctx.ReferencedEntries)
+	}
+	if !strings.Contains(pctx.ReferencedEntries, "(live head of "+old.ID+")") {
+		t.Errorf("should label the resolved live head\n%s", pctx.ReferencedEntries)
+	}
+	if !strings.Contains(pctx.ReferencedEntries, "live head text") {
+		t.Errorf("should surface the live head's content\n%s", pctx.ReferencedEntries)
+	}
+}
+
 func Test_derivedStatusForPrompt(t *testing.T) {
 	cases := []struct {
 		status model.Status

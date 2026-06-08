@@ -1,6 +1,7 @@
 package finders
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -80,11 +81,11 @@ func TestView_ExpandRefs_AllRefsWithStatusAndKind(t *testing.T) {
 	want := []model.RefExpansion{
 		{Kind: model.RefKindGroundedIn, ID: "20260101-090000-d-cpt-act", Status: model.Status{Kind: model.StatusActive}},
 		{Kind: model.RefKindDependsOn, ID: "20260101-090100-d-cpt-clo", Status: model.Status{Kind: model.StatusClosedBy, By: "20260101-091000-s-cpt-cls"}, Desc: "blocked on this"},
-		{Kind: model.RefKindBuildsOn, ID: "20260101-090200-d-cpt-sup", Status: model.Status{Kind: model.StatusSupersededBy, By: "20260101-092000-d-cpt-spr"}},
+		{Kind: model.RefKindBuildsOn, ID: "20260101-090200-d-cpt-sup", Status: model.Status{Kind: model.StatusSupersededBy, By: "20260101-092000-d-cpt-spr"}, SupersedePath: []string{"20260101-090200-d-cpt-sup", "20260101-092000-d-cpt-spr"}},
 		{Kind: model.RefKindUnknown, ID: "20260101-090300-d-cpt-leg", Status: model.Status{Kind: model.StatusActive}},
 	}
 	for i, w := range want {
-		if rows[i] != w {
+		if !reflect.DeepEqual(rows[i], w) {
 			t.Errorf("row %d:\n  got:  %+v\n  want: %+v", i, rows[i], w)
 		}
 	}

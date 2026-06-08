@@ -123,6 +123,22 @@ func FormatStatus(s model.Status) string {
 	return "{status: " + string(s.Kind) + "}"
 }
 
+// FormatStatusTrail renders the status segment for a ref sub-line, expanding a
+// superseded target into its full supersede trail through to the live head:
+// `{status: superseded-by <hop1> → … → <head>}`. supersedePath is the resolved
+// origin→head path (model.ResolveRef(...).Path()); its first element is the
+// origin (the sub-line's own entry) and is dropped, so the rendered hops are
+// the superseders ending at the head. When the target is not superseded
+// (path length ≤ 1) this is identical to FormatStatus — only ref sub-lines,
+// where a reader is traversing a reference, surface the intermediate hops;
+// flat surfaces keep the head-only form.
+func FormatStatusTrail(s model.Status, supersedePath []string) string {
+	if s.Kind == model.StatusSupersededBy && len(supersedePath) > 1 {
+		return "{status: superseded-by " + strings.Join(supersedePath[1:], " → ") + "}"
+	}
+	return FormatStatus(s)
+}
+
 // LayerOrder returns the display order for layers (strategic → process).
 func LayerOrder() []model.Layer {
 	return []model.Layer{

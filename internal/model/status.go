@@ -15,7 +15,7 @@ const (
 
 // Status is the computed lifecycle status for an entry. By is populated only
 // for compound states (ClosedBy, SupersededBy) and holds the full entry ID of
-// the first closer/superseder.
+// the live head closer/superseder (see DerivedStatus).
 type Status struct {
 	Kind StatusKind
 	By   string
@@ -23,9 +23,14 @@ type Status struct {
 
 // DerivedStatus returns the computed lifecycle status for an entry, derived
 // from graph relationships. Superseded is checked before closed so a
-// superseded-then-closed entry (rare) surfaces as superseded. When multiple
-// entries close or supersede the target, the first one (by graph insertion
-// order) is reported.
+// superseded-then-closed entry (rare) surfaces as superseded. When an entry
+// has multiple closers/superseders, or its closer/superseder is itself
+// superseded, the By is resolved to the live head of that chain (via
+// ResolveRef) — never a stale intermediate. This keeps the reported closer
+// active: a superseded closer resolves forward to the active entry that
+// replaced it, so an entry re-closed under done-supersession reports the live
+// done rather than the retired one. Open/closed membership is unaffected
+// (closedSet/supersededSet) — only the reported attribution.
 //
 // Role decisions additionally derive status via the actor-chain cascade
 // (see ActorChain / RoleStatus in actor.go). A role whose bound actor chain
@@ -34,10 +39,10 @@ type Status struct {
 // StatusCascadeOrphan — an abnormal state flagged by lint.
 func (g *Graph) DerivedStatus(e *Entry) Status {
 	if ids := g.SupersededBy[e.ID]; len(ids) > 0 {
-		return Status{Kind: StatusSupersededBy, By: ids[0]}
+		return Status{Kind: StatusSupersededBy, By: g.ResolveRef(ids[0]).Head()}
 	}
 	if ids := g.ClosedBy[e.ID]; len(ids) > 0 {
-		return Status{Kind: StatusClosedBy, By: ids[0]}
+		return Status{Kind: StatusClosedBy, By: g.ResolveRef(ids[0]).Head()}
 	}
 	switch e.Type {
 	case TypeSignal:
@@ -59,14 +64,14 @@ func (g *Graph) DerivedStatus(e *Entry) Status {
 
 // deriveRoleStatus applies the role cascade: if the actor chain bound via
 // Actor is unresolved, return cascade-orphan; if its head is closed, return
-// cascade-closed-by that closer; otherwise active.
+// cascade-closed-by that closer (resolved to its live head); otherwise active.
 func (g *Graph) deriveRoleStatus(role *Entry) Status {
 	chain := g.ChainForCanonical(role.Actor)
 	if chain == nil || chain.Head == nil {
 		return Status{Kind: StatusCascadeOrphan}
 	}
 	if ids := g.ClosedBy[chain.Head.ID]; len(ids) > 0 {
-		return Status{Kind: StatusCascadeClosedBy, By: ids[0]}
+		return Status{Kind: StatusCascadeClosedBy, By: g.ResolveRef(ids[0]).Head()}
 	}
 	return Status{Kind: StatusActive}
 }

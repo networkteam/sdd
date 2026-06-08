@@ -265,11 +265,27 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 	// three split on the target's status, which the entry text alone can't
 	// reveal. Status is appended here (pre-flight only) rather than in the
 	// shared FormatEntryForPrompt, so summary-prompt hashes stay stable.
+	//
+	// When a ref points at a superseded entry, the literal target is kept as
+	// the referenced entry — its superseded status is what the ref-meta check
+	// reasons against, so swapping in the active head would flip builds-on /
+	// refines judgments. The live head's content is appended alongside (labeled)
+	// so the validator can still reason about the current entity rather than
+	// being stranded at a retired intermediate. A stale ref is expected under
+	// concurrent supersession (the head an author reffed may already be replaced
+	// by the time the entry lands), so this is context, not a finding.
 	if len(entry.Refs) > 0 {
 		var parts []string
 		for _, ref := range entry.Refs {
-			if e, ok := graph.ByID[ref.ID]; ok {
-				parts = append(parts, formatReferencedEntry(graph, e))
+			e, ok := graph.ByID[ref.ID]
+			if !ok {
+				continue
+			}
+			parts = append(parts, formatReferencedEntry(graph, e))
+			if rr := graph.ResolveRef(ref.ID); rr.IsStale() {
+				if head, ok := graph.ByID[rr.Head()]; ok {
+					parts = append(parts, "(live head of "+ref.ID+")\n"+formatReferencedEntry(graph, head))
+				}
 			}
 		}
 		if len(parts) > 0 {

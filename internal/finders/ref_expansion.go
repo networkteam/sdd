@@ -31,11 +31,18 @@ func expandRefs(g *model.Graph, entries []*model.Entry, inactiveOnly bool) [][]m
 			if inactiveOnly && !isInactiveStatus(status.Kind) {
 				continue
 			}
+			// For a superseded target, carry the trail to the live head so
+			// the presenter can render the supersede path; nil otherwise.
+			var supersedePath []string
+			if status.Kind == model.StatusSupersededBy {
+				supersedePath = g.ResolveRef(ref.ID).Path()
+			}
 			rows = append(rows, model.RefExpansion{
-				Kind:   ref.Kind,
-				ID:     ref.ID,
-				Status: status,
-				Desc:   ref.Desc,
+				Kind:          ref.Kind,
+				ID:            ref.ID,
+				Status:        status,
+				Desc:          ref.Desc,
+				SupersedePath: supersedePath,
 			})
 		}
 		out[i] = rows
