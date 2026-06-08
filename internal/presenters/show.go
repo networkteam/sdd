@@ -30,7 +30,7 @@ func renderShowGroup(w io.Writer, graph *model.Graph, g query.ShowGroup) {
 	if len(g.Upstream) > 0 {
 		fmt.Fprintln(w, "## upstream:")
 		for _, item := range g.Upstream {
-			renderSummaryItem(w, graph, item, g.Primary.ID)
+			renderSummaryItem(w, item, g.Primary.ID)
 		}
 		fmt.Fprintln(w)
 	}
@@ -38,7 +38,7 @@ func renderShowGroup(w io.Writer, graph *model.Graph, g query.ShowGroup) {
 	if len(g.Downstream) > 0 {
 		fmt.Fprintln(w, "## downstream:")
 		for _, item := range g.Downstream {
-			renderSummaryItem(w, graph, item, g.Primary.ID)
+			renderSummaryItem(w, item, g.Primary.ID)
 		}
 		fmt.Fprintln(w)
 	}
@@ -50,7 +50,7 @@ func renderShowGroup(w io.Writer, graph *model.Graph, g query.ShowGroup) {
 // or "refd-by" and the edge carries kind metadata; closes/supersedes (and
 // their inverses) never carry kind. When a desc is present it renders as
 // an indented sub-line beneath the summary.
-func renderSummaryItem(w io.Writer, graph *model.Graph, item model.ShowTreeItem, primaryID string) {
+func renderSummaryItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 	indent := strings.Repeat("  ", item.Depth)
 	relations := formatRelations(item.Relations, item.RefKind)
 
@@ -60,12 +60,7 @@ func renderSummaryItem(w io.Writer, graph *model.Graph, item model.ShowTreeItem,
 		sb.WriteString(" ")
 		sb.WriteString(string(k))
 	}
-	status := graph.DerivedStatus(item.Entry)
-	var supersedePath []string
-	if status.Kind == model.StatusSupersededBy {
-		supersedePath = graph.ResolveRef(item.Entry.ID).Path()
-	}
-	if s := FormatStatusTrail(status, supersedePath); s != "" {
+	if s := FormatStatusTrail(item.Status, item.SupersedePath); s != "" {
 		sb.WriteString(" ")
 		sb.WriteString(s)
 	}
