@@ -117,18 +117,53 @@ func TestDerivedStatus_SkipsSupersededCloser(t *testing.T) {
 // TestValidateSupersedeForks covers s-tac-5p5's lint half (AC5): an entry
 // superseded by more than one entry is a fork anomaly, flagged with both
 // superseders named.
+// TestValidateSupersedeForks: a live fork — two active successors of the same
+// entry — warns, naming both active heads (per d-cpt-rgx).
 func TestValidateSupersedeForks(t *testing.T) {
 	x := mkDec("20260101-100000-d-tac-xxx")
-	y := mkDec("20260101-110000-d-tac-yyy", x.ID)
-	z := mkDec("20260101-120000-d-tac-zzz", x.ID) // also supersedes x — fork
+	y := mkDec("20260101-110000-d-tac-yyy", x.ID) // active head
+	z := mkDec("20260101-120000-d-tac-zzz", x.ID) // active head — live fork
 	g := model.NewGraph([]*model.Entry{x, y, z})
 	_ = g
 
-	if !entryHasWarning(x, "superseded by 2 entries") {
-		t.Fatalf("expected fork warning on %s, got %+v", x.ID, x.Warnings)
+	if !entryHasWarning(x, "2 active supersede heads") {
+		t.Fatalf("expected live-fork warning on %s, got %+v", x.ID, x.Warnings)
 	}
 	if !entryHasWarning(x, y.ID) || !entryHasWarning(x, z.ID) {
-		t.Errorf("fork warning should name both superseders %s and %s, got %+v", y.ID, z.ID, x.Warnings)
+		t.Errorf("fork warning should name both active heads %s and %s, got %+v", y.ID, z.ID, x.Warnings)
+	}
+}
+
+// TestValidateSupersedeForks_SettledForkNoWarning: a fork whose branches have
+// all closed has no live head-resolution ambiguity, so it stays quiet — the
+// benign historical case d-cpt-rgx exempts.
+func TestValidateSupersedeForks_SettledForkNoWarning(t *testing.T) {
+	x := mkDec("20260101-100000-d-tac-xxx")
+	y := mkDec("20260101-110000-d-tac-yyy", x.ID)
+	z := mkDec("20260101-120000-d-tac-zzz", x.ID)
+	doneY := &model.Entry{ID: "20260101-130000-s-tac-dyy", Type: model.TypeSignal, Layer: model.LayerTactical, Kind: model.KindDone, Closes: []string{y.ID}}
+	doneZ := &model.Entry{ID: "20260101-140000-s-tac-dzz", Type: model.TypeSignal, Layer: model.LayerTactical, Kind: model.KindDone, Closes: []string{z.ID}}
+	g := model.NewGraph([]*model.Entry{x, y, z, doneY, doneZ})
+	_ = g
+
+	if entryHasWarning(x, "active supersede heads") {
+		t.Errorf("settled fork (both branch heads closed) should not warn: %+v", x.Warnings)
+	}
+}
+
+// TestValidateSupersedeForks_ConvergedDiamondNoWarning: a fork whose branches
+// reconverge to a single head (the converge-forward resolution from d-cpt-rgx)
+// has one live head, so it stays quiet.
+func TestValidateSupersedeForks_ConvergedDiamondNoWarning(t *testing.T) {
+	x := mkDec("20260101-100000-d-tac-xxx")
+	y := mkDec("20260101-110000-d-tac-yyy", x.ID)
+	z := mkDec("20260101-120000-d-tac-zzz", x.ID)
+	w := mkDec("20260101-130000-d-tac-www", y.ID, z.ID) // supersedes both branches
+	g := model.NewGraph([]*model.Entry{x, y, z, w})
+	_ = g
+
+	if entryHasWarning(x, "active supersede heads") {
+		t.Errorf("converged diamond (single live head) should not warn: %+v", x.Warnings)
 	}
 }
 
@@ -138,7 +173,7 @@ func TestValidateSupersedeForks_LinearChainNoWarning(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{a, b})
 	_ = g
 
-	if entryHasWarning(a, "superseded by") {
+	if entryHasWarning(a, "active supersede heads") {
 		t.Errorf("linear chain should not raise a fork warning: %+v", a.Warnings)
 	}
 }

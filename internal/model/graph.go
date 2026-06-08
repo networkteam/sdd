@@ -550,29 +550,46 @@ func (g *Graph) validate() {
 	validateSupersedeForks(g)
 }
 
-// validateSupersedeForks flags an entry superseded by more than one entry — a
-// fork in its supersession chain. Supersession is meant to be linear (each
-// entry has at most one successor); a fork makes "walk to the live head"
-// (ResolveRef) ambiguous, so the resolver follows the first superseder and
-// relies on this lint to surface the anomaly. A fork should not occur under
-// normal capture — it signals direct file edits, a validator bypass, or
-// corruption. The warning attaches to the forked entry, listing its
-// superseders in sorted order for deterministic output.
+// validateSupersedeForks flags a live fork — an entry whose supersession
+// closure has more than one currently-active head, leaving head resolution
+// genuinely ambiguous (ResolveRef would have to choose between competing live
+// successors). Per d-cpt-rgx, only live forks warn: a fork whose branches have
+// all closed or reconverged to a single head is settled and stays quiet.
+// Supersession is meant to be linear, but a historical fork that resolved
+// itself is benign and, under immutability, cannot be edited away — so warning
+// on branch count alone would be permanent noise. Each immediate superseder is
+// resolved to its branch head; distinct heads that are not closed are the live
+// successors. The warning attaches to the forked entry, listing those heads in
+// sorted order for deterministic output.
 func validateSupersedeForks(g *Graph) {
+	closed := g.closedSet()
 	for id, supers := range g.SupersededBy {
 		if len(supers) < 2 {
 			continue
+		}
+		liveHeads := make(map[string]bool)
+		for _, s := range supers {
+			head := g.ResolveRef(s).Head()
+			if !closed[head] {
+				liveHeads[head] = true
+			}
+		}
+		if len(liveHeads) < 2 {
+			continue // settled: branches closed or reconverged to one head
 		}
 		e, ok := g.ByID[id]
 		if !ok {
 			continue
 		}
-		sorted := append([]string(nil), supers...)
-		sort.Strings(sorted)
+		heads := make([]string, 0, len(liveHeads))
+		for h := range liveHeads {
+			heads = append(heads, h)
+		}
+		sort.Strings(heads)
 		e.Warnings = append(e.Warnings, Warning{
 			Field:   "supersedes",
 			Value:   id,
-			Message: fmt.Sprintf("entry is superseded by %d entries (%s) — supersession must be linear; a fork makes head resolution ambiguous", len(sorted), strings.Join(sorted, ", ")),
+			Message: fmt.Sprintf("entry has %d active supersede heads (%s) — a live fork; head resolution is ambiguous until the branches converge or close", len(heads), strings.Join(heads, ", ")),
 		})
 	}
 }
