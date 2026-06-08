@@ -10,9 +10,12 @@ status: active
 time: "2026-04-10 10:01:00"
 ---
 
+# body
+
 First primary
 
-## upstream
+# upstream
+
 - related 20260410-100000-s-stg-aaa (gap, open) — Shared ref
 
 ---
@@ -27,8 +30,11 @@ status: active
 time: "2026-04-10 10:02:00"
 ---
 
+# body
+
 Second primary
 
-## upstream
+# upstream
+
 - related 20260410-100000-s-stg-aaa (gap, open) — (see above)
 

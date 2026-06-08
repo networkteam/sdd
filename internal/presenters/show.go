@@ -43,11 +43,16 @@ func RenderShow(w io.Writer, result *query.ShowResult, opts ShowOptions) {
 func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 	writeEnvelope(w, g, opts)
 	fmt.Fprintln(w)
+	// Top-level `# body` heading so the body's own `##` sections nest beneath
+	// it rather than colliding with the neighborhood section headings.
+	fmt.Fprintln(w, "# body")
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, g.Primary.Content)
 
 	if len(g.Upstream) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "## upstream")
+		fmt.Fprintln(w, "# upstream")
+		fmt.Fprintln(w)
 		for _, item := range g.Upstream {
 			renderTreeItem(w, item, g.Primary.ID)
 		}
@@ -55,7 +60,8 @@ func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 
 	if len(g.Downstream) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "## downstream")
+		fmt.Fprintln(w, "# downstream")
+		fmt.Fprintln(w)
 		for _, item := range g.Downstream {
 			renderTreeItem(w, item, g.Primary.ID)
 		}

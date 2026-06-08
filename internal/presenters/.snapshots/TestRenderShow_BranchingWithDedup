@@ -12,9 +12,12 @@ status: active
 time: "2026-04-10 10:03:00"
 ---
 
+# body
+
 Primary with two branches
 
-## upstream
+# upstream
+
 - related 20260410-100100-s-cpt-bbb (gap, open) — Branch B
   - related 20260410-100000-s-stg-ddd (gap, open) — Shared deep ref
 - related 20260410-100200-s-cpt-ccc (gap, open) — Branch C

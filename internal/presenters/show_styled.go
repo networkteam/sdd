@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/glamour/v2"
+	glamourstyles "charm.land/glamour/v2/styles"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
@@ -18,12 +19,12 @@ import (
 // path; a plain io.Writer (test buffer, pipe) is downsampled to Ascii and gets
 // clean text. The concrete palette is a starting point, not a frozen spec.
 var (
-	showHeaderStyle = lipgloss.NewStyle().Bold(true)
-	envKeyStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))   // YAML keys (cyan)
-	envPunctStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240")) // fences, list markers, colons
-	showGuideStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240")) // indent guides
-	showVerbStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))   // relation kind
-	showDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245")) // secondary: (kind, status), desc, truncation
+	showHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // section headings (bright white)
+	envKeyStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))             // YAML keys (cyan)
+	envPunctStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // fences, list markers, colons
+	showGuideStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // indent guides
+	showVerbStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))             // relation kind
+	showDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))           // secondary: (kind, status), desc, truncation
 )
 
 // defaultBodyWidth is the glamour wrap width used when no terminal width is
@@ -58,19 +59,23 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 	fmt.Fprintln(w, styleEnvelopeYAML(env.String()))
 	fmt.Fprintln(w)
 
-	// Body: glamour-rendered markdown (raw fallback on any render error).
+	// Body under a top-level heading so the body's own `##` sections nest
+	// beneath it; glamour-rendered (raw fallback on any render error).
+	fmt.Fprintln(w, showHeaderStyle.Render("# body"))
 	fmt.Fprint(w, renderStyledBody(g.Primary.Content, opts.Width))
 
 	if len(g.Upstream) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, showHeaderStyle.Render("## upstream"))
+		fmt.Fprintln(w, showHeaderStyle.Render("# upstream"))
+		fmt.Fprintln(w)
 		for _, item := range g.Upstream {
 			renderTreeItemStyled(w, item, g.Primary.ID)
 		}
 	}
 	if len(g.Downstream) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, showHeaderStyle.Render("## downstream"))
+		fmt.Fprintln(w, showHeaderStyle.Render("# downstream"))
+		fmt.Fprintln(w)
 		for _, item := range g.Downstream {
 			renderTreeItemStyled(w, item, g.Primary.ID)
 		}
@@ -121,15 +126,19 @@ func isYAMLKey(s string) bool {
 }
 
 // renderStyledBody renders the entry body markdown through glamour at the given
-// wrap width. The style is "dark" by default, overridable via GLAMOUR_STYLE.
+// wrap width, using the dark style with its document margin zeroed so the body
+// aligns flush-left with the envelope and tree (the stock margin insets it).
 // Any renderer-construction or render error falls back to the raw body so the
 // command never fails on a body it can't pretty-print.
 func renderStyledBody(content string, width int) string {
 	if width <= 0 {
 		width = defaultBodyWidth
 	}
+	style := glamourstyles.DarkStyleConfig
+	var noMargin uint
+	style.Document.Margin = &noMargin
 	r, err := glamour.NewTermRenderer(
-		glamour.WithStandardStyle(glamourStyleName()),
+		glamour.WithStyles(style),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {
@@ -140,16 +149,6 @@ func renderStyledBody(content string, width int) string {
 		return content + "\n"
 	}
 	return out
-}
-
-// glamourStyleName resolves the glamour style: GLAMOUR_STYLE when set, else
-// "dark". An unknown name makes NewTermRenderer fail and renderStyledBody falls
-// back to the raw body.
-func glamourStyleName() string {
-	if s := strings.TrimSpace(os.Getenv("GLAMOUR_STYLE")); s != "" {
-		return s
-	}
-	return "dark"
 }
 
 // renderTreeItemStyled is the styled analog of renderTreeItem: dim indent

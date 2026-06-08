@@ -7,9 +7,12 @@ status: closed-by 20260410-100200-a-tac-ccc
 time: "2026-04-10 10:00:00"
 ---
 
+# body
+
 Target signal
 
-## downstream
+# downstream
+
 - related 20260410-100100-d-cpt-bbb (directive, active) — Decision referencing target
 - closed-by 20260410-100200-a-tac-ccc — Action closing target
 

@@ -292,7 +292,7 @@ func TestRenderShowStyled_ColorDisabled(t *testing.T) {
 		"id: 20260410-100100-d-tac-ccc",                    // envelope
 		"Decision body paragraph rendered through glamour", // glamour body (color-free)
 		"related 20260410-100000-s-stg-aaa",                // styled tree node, color stripped
-		"## upstream",
+		"# upstream",
 	} {
 		if !contains(out, want) {
 			t.Errorf("styled (color-disabled) output missing %q in:\n%s", want, out)
