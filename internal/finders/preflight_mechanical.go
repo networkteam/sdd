@@ -28,6 +28,10 @@ import (
 //     new entry must carry a kind from the closed set, rejecting the legacy
 //     `unknown` sentinel which is reserved for read-side bare-string round-
 //     trip and not authorable.
+//   - supersede-non-head (d-cpt-rgx): a new entry's supersedes must target the
+//     live head of a chain, not an entry that already has an active successor
+//     (which would create a fork). Settled branches — the existing successor
+//     has closed — are exempt.
 //
 // Severity is strictly binary: SeverityHigh or absent. Mechanical checks
 // never emit medium or low; partial coverage is never "kind-of an actor".
@@ -39,6 +43,7 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph) []query.Finding
 
 	findings = append(findings, participantCoverageFindings(entry, graph)...)
 	findings = append(findings, refKindFindings(entry)...)
+	findings = append(findings, supersedeForkFindings(entry, graph)...)
 
 	if entry.IsActor() {
 		findings = append(findings, actorWriteOnceFindings(entry, graph)...)
@@ -73,6 +78,36 @@ func refKindFindings(entry *model.Entry) []query.Finding {
 				Observation: fmt.Sprintf("refs[%d] (%s): kind %q is not allowed for new entries (expected one of: %s)", i, r.ID, r.Kind, capturableRefKindList()),
 			})
 		}
+	}
+	return findings
+}
+
+// supersedeForkFindings enforces capture-time fork prevention (d-cpt-rgx): a
+// new entry must supersede the live head of a chain, not an entry that already
+// has an active successor. Superseding a non-head leaves two active successors
+// competing for head resolution — a fork. Mechanical and binary: high when a
+// supersedes target resolves to a different, still-active head; the author
+// should supersede that head instead. A target whose existing successor has
+// since closed is a settled branch, not a fork, so reviving it is allowed.
+func supersedeForkFindings(entry *model.Entry, graph *model.Graph) []query.Finding {
+	var findings []query.Finding
+	for _, sid := range entry.Supersedes {
+		if _, ok := graph.ByID[sid]; !ok {
+			continue // dangling supersedes is reported by ref resolution
+		}
+		head := graph.ResolveRef(sid).Head()
+		if head == sid {
+			continue // sid is already a live head — linear supersession
+		}
+		headEntry := graph.ByID[head]
+		if headEntry == nil || isInactiveStatus(graph.DerivedStatus(headEntry).Kind) {
+			continue // existing branch settled (head closed) — not a live fork
+		}
+		findings = append(findings, query.Finding{
+			Severity:    query.SeverityHigh,
+			Category:    "supersede-non-head",
+			Observation: fmt.Sprintf("supersedes %s, which is already superseded by the active entry %s — supersede %s (the live head) instead to keep the chain linear and avoid a fork", sid, head, head),
+		})
 	}
 	return findings
 }

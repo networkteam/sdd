@@ -518,3 +518,70 @@ func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
 		t.Error("Prompt should include the closed decision content")
 	}
 }
+
+func TestMechanical_SupersedeNonHead_Blocks(t *testing.T) {
+	// target is already superseded by an active successor; superseding target
+	// again would create a fork — the author should supersede the live head.
+	target := &model.Entry{ID: "20260101-100000-d-tac-tgt", Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective}
+	succ := &model.Entry{ID: "20260101-110000-d-tac-suc", Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective, Supersedes: []string{target.ID}}
+	graph := model.NewGraph([]*model.Entry{target, succ})
+
+	proposed := &model.Entry{
+		Type:       model.TypeDecision,
+		Layer:      model.LayerTactical,
+		Kind:       model.KindDirective,
+		Supersedes: []string{target.ID},
+		Content:    "second successor — would fork the chain",
+	}
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "supersede-non-head" && f.Severity == query.SeverityHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected supersede-non-head high finding, got %+v", got)
+	}
+}
+
+func TestMechanical_SupersedeLiveHead_Allowed(t *testing.T) {
+	// target is a live head (nothing supersedes it) — superseding it is linear.
+	target := &model.Entry{ID: "20260101-100000-d-tac-tgt", Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective}
+	graph := model.NewGraph([]*model.Entry{target})
+
+	proposed := &model.Entry{
+		Type:       model.TypeDecision,
+		Layer:      model.LayerTactical,
+		Kind:       model.KindDirective,
+		Supersedes: []string{target.ID},
+		Content:    "linear successor",
+	}
+	for _, f := range mechanicalPreflight(proposed, graph) {
+		if f.Category == "supersede-non-head" {
+			t.Errorf("superseding a live head should not fork, got %+v", f)
+		}
+	}
+}
+
+func TestMechanical_SupersedeSettledBranch_Allowed(t *testing.T) {
+	// target's only successor has since closed — the branch is settled, so
+	// reviving it as the sole active successor is not a fork.
+	target := &model.Entry{ID: "20260101-100000-d-tac-tgt", Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective}
+	succ := &model.Entry{ID: "20260101-110000-d-tac-suc", Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective, Supersedes: []string{target.ID}}
+	closer := &model.Entry{ID: "20260101-120000-s-tac-cls", Type: model.TypeSignal, Layer: model.LayerTactical, Kind: model.KindDone, Closes: []string{succ.ID}}
+	graph := model.NewGraph([]*model.Entry{target, succ, closer})
+
+	proposed := &model.Entry{
+		Type:       model.TypeDecision,
+		Layer:      model.LayerTactical,
+		Kind:       model.KindDirective,
+		Supersedes: []string{target.ID},
+		Content:    "reviving a settled chain — single active successor, not a fork",
+	}
+	for _, f := range mechanicalPreflight(proposed, graph) {
+		if f.Category == "supersede-non-head" {
+			t.Errorf("superseding a target whose successor is closed should not fork, got %+v", f)
+		}
+	}
+}
