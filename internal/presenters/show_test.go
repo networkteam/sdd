@@ -15,7 +15,7 @@ import (
 // renderShow exercises the finder + presenter together.
 func renderShow(t *testing.T, g *model.Graph, ids []string, opts ...showOpt) string {
 	t.Helper()
-	cfg := showConfig{q: query.ShowQuery{Graph: g, IDs: ids, MaxDepth: query.DefaultMaxDepth}}
+	cfg := showConfig{q: query.ShowQuery{Graph: g, IDs: ids, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth}}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -38,12 +38,8 @@ type showConfig struct {
 
 type showOpt func(*showConfig)
 
-func withMaxDepth(d int) showOpt {
-	return func(c *showConfig) { c.q.MaxDepth = d }
-}
-
-func withDownstream() showOpt {
-	return func(c *showConfig) { c.q.Downstream = true }
+func withUpDepth(d int) showOpt {
+	return func(c *showConfig) { c.q.UpDepth = d }
 }
 
 func renderWithSummary() showOpt {
@@ -75,7 +71,7 @@ func TestRenderShow_DownstreamWithRelations(t *testing.T) {
 		withCloses("20260410-100000-s-stg-aaa"))
 
 	g := model.NewGraph([]*model.Entry{target, refBy, closedBy})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{target.ID}, withDownstream()))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{target.ID}))
 }
 
 func TestRenderShow_MultiPrimaryDedup(t *testing.T) {
@@ -120,7 +116,7 @@ func TestRenderShow_MaxDepthTruncation(t *testing.T) {
 		withRefs("20260410-100200-s-tac-ccc"))
 
 	g := model.NewGraph([]*model.Entry{e0, e1, e2, primary})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}, withMaxDepth(2)))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}, withUpDepth(2)))
 }
 
 func TestRenderShow_FallbackFirstSentence(t *testing.T) {
@@ -182,10 +178,10 @@ func TestRenderShow_DownstreamCarriesRefKind(t *testing.T) {
 		Time: primary.Time,
 	}
 	g := model.NewGraph([]*model.Entry{primary, source})
-	out := renderShow(t, g, []string{primary.ID}, withDownstream())
+	out := renderShow(t, g, []string{primary.ID})
 
 	// Downstream tree: a refd-by edge carrying a kind renders the kind as the
-	// verb (the `## downstream` header carries the incoming direction).
+	// verb (the `# downstream` header carries the incoming direction).
 	if !contains(out, "- grounded-in 20260410-100100-d-tac-src (directive, active)") {
 		t.Errorf("downstream missing kind-verb node in:\n%s", out)
 	}
@@ -280,7 +276,7 @@ func TestRenderShowStyled_ColorDisabled(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{root, primary})
 
 	f := finders.New(finders.Options{})
-	result, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{primary.ID}, MaxDepth: query.DefaultMaxDepth})
+	result, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{primary.ID}, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth})
 	if err != nil {
 		t.Fatal(err)
 	}

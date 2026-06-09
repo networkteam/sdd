@@ -8,7 +8,7 @@ func TestBuildShowTree_NoRefs(t *testing.T) {
 	e := entry("20260410-100000-s-tac-aaa")
 	g := NewGraph([]*Entry{e})
 
-	tree := g.BuildShowTree(e.ID, 4, false, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(e.ID, 4, 0, make(map[string]bool), make(map[string]bool))
 
 	if tree.Primary.ID != e.ID {
 		t.Errorf("Primary = %q, want %q", tree.Primary.ID, e.ID)
@@ -27,7 +27,7 @@ func TestBuildShowTree_UpstreamChain(t *testing.T) {
 	c := entry("20260410-100200-d-tac-ccc", withRefs("20260410-100100-s-cpt-bbb"))
 
 	g := NewGraph([]*Entry{a, b, c})
-	tree := g.BuildShowTree(c.ID, 4, false, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(c.ID, 4, 0, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Upstream) != 2 {
 		t.Fatalf("Upstream = %d items, want 2", len(tree.Upstream))
@@ -61,7 +61,7 @@ func TestBuildShowTree_MaxDepthTruncation(t *testing.T) {
 	primary := entry("20260410-100300-d-tac-ddd", withRefs("20260410-100200-s-tac-ccc"))
 
 	g := NewGraph([]*Entry{root, a, b, primary})
-	tree := g.BuildShowTree(primary.ID, 2, false, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(primary.ID, 2, 0, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Upstream) != 2 {
 		t.Fatalf("Upstream = %d items, want 2 (b + a)", len(tree.Upstream))
@@ -80,7 +80,7 @@ func TestBuildShowTree_MaxDepth1(t *testing.T) {
 	c := entry("20260410-100200-d-tac-ccc", withRefs("20260410-100100-s-cpt-bbb"))
 
 	g := NewGraph([]*Entry{a, b, c})
-	tree := g.BuildShowTree(c.ID, 1, false, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(c.ID, 1, 0, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Upstream) != 1 {
 		t.Fatalf("Upstream = %d items, want 1", len(tree.Upstream))
@@ -97,7 +97,7 @@ func TestBuildShowTree_CombinedRelations(t *testing.T) {
 		withCloses("20260410-100000-s-tac-aaa"))
 
 	g := NewGraph([]*Entry{a, b})
-	tree := g.BuildShowTree(b.ID, 4, false, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(b.ID, 4, 0, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Upstream) != 1 {
 		t.Fatalf("Upstream = %d items, want 1", len(tree.Upstream))
@@ -113,7 +113,7 @@ func TestBuildShowTree_BranchingDedup(t *testing.T) {
 		withRefs("20260410-100100-s-cpt-bbb", "20260410-100200-s-cpt-ccc"))
 
 	g := NewGraph([]*Entry{shared, b, c, primary})
-	tree := g.BuildShowTree(primary.ID, 4, false, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(primary.ID, 4, 0, make(map[string]bool), make(map[string]bool))
 
 	// Expected: b(1), shared(2), c(1), shared(2-see above).
 	if len(tree.Upstream) != 4 {
@@ -144,8 +144,8 @@ func TestBuildShowTree_CrossGroupDedup(t *testing.T) {
 	rendered := make(map[string]bool)
 	primaries := map[string]bool{first.ID: true, second.ID: true}
 
-	tree1 := g.BuildShowTree(first.ID, 4, false, rendered, primaries)
-	tree2 := g.BuildShowTree(second.ID, 4, false, rendered, primaries)
+	tree1 := g.BuildShowTree(first.ID, 4, 0, rendered, primaries)
+	tree2 := g.BuildShowTree(second.ID, 4, 0, rendered, primaries)
 
 	if len(tree1.Upstream) != 1 {
 		t.Fatalf("tree1.Upstream = %d, want 1", len(tree1.Upstream))
@@ -169,7 +169,7 @@ func TestBuildShowTree_ShownBelowForFuturePrimary(t *testing.T) {
 	g := NewGraph([]*Entry{a, b})
 	primaries := map[string]bool{b.ID: true, a.ID: true}
 
-	tree := g.BuildShowTree(b.ID, 4, false, make(map[string]bool), primaries)
+	tree := g.BuildShowTree(b.ID, 4, 0, make(map[string]bool), primaries)
 
 	if len(tree.Upstream) != 1 {
 		t.Fatalf("Upstream = %d, want 1", len(tree.Upstream))
@@ -187,7 +187,7 @@ func TestBuildShowTree_Downstream(t *testing.T) {
 		withRefs("20260410-100100-d-cpt-bbb"))
 
 	g := NewGraph([]*Entry{target, child, grandchild})
-	tree := g.BuildShowTree(target.ID, 4, true, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(target.ID, 4, 4, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Downstream) < 2 {
 		t.Fatalf("Downstream = %d items, want >= 2", len(tree.Downstream))
@@ -209,16 +209,16 @@ func TestBuildShowTree_Downstream(t *testing.T) {
 	}
 }
 
-func TestBuildShowTree_DownstreamNotIncludedByDefault(t *testing.T) {
+func TestBuildShowTree_NoDownstreamWhenDepthZero(t *testing.T) {
 	target := entry("20260410-100000-s-stg-aaa")
 	child := entry("20260410-100100-d-cpt-bbb", withSummary("Child"),
 		withRefs("20260410-100000-s-stg-aaa"))
 
 	g := NewGraph([]*Entry{target, child})
-	tree := g.BuildShowTree(target.ID, 4, false, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(target.ID, 4, 0, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Downstream) != 0 {
-		t.Errorf("Downstream = %d, want 0 (downstream not requested)", len(tree.Downstream))
+		t.Errorf("Downstream = %d, want 0 (downDepth 0)", len(tree.Downstream))
 	}
 }
 
@@ -230,7 +230,7 @@ func TestBuildShowTree_DownstreamMaxDepth(t *testing.T) {
 		withRefs("20260410-100100-d-cpt-bbb"))
 
 	g := NewGraph([]*Entry{target, child, grandchild})
-	tree := g.BuildShowTree(target.ID, 1, true, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(target.ID, 1, 1, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Downstream) != 1 {
 		t.Fatalf("Downstream = %d, want 1", len(tree.Downstream))
@@ -250,7 +250,7 @@ func TestBuildShowTree_DownstreamRelationTypes(t *testing.T) {
 		withSupersedes("20260410-100000-s-tac-aaa"))
 
 	g := NewGraph([]*Entry{target, refBy, closedBy, supersededBy})
-	tree := g.BuildShowTree(target.ID, 4, true, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(target.ID, 4, 4, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Downstream) != 3 {
 		t.Fatalf("Downstream = %d, want 3", len(tree.Downstream))
@@ -276,7 +276,7 @@ func TestBuildShowTree_CombinedDownstreamRelations(t *testing.T) {
 		withCloses("20260410-100000-s-tac-aaa"))
 
 	g := NewGraph([]*Entry{target, both})
-	tree := g.BuildShowTree(target.ID, 4, true, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(target.ID, 4, 4, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Downstream) != 1 {
 		t.Fatalf("Downstream = %d, want 1", len(tree.Downstream))
@@ -292,7 +292,7 @@ func TestBuildShowTree_AllSummaryOnly(t *testing.T) {
 		withRefs("20260410-100200-d-tac-ccc"))
 
 	g := NewGraph([]*Entry{a, b, c, downstream})
-	tree := g.BuildShowTree(c.ID, 4, true, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(c.ID, 4, 4, make(map[string]bool), make(map[string]bool))
 
 	for i, item := range tree.Upstream {
 		if !item.SummaryOnly {
@@ -311,7 +311,7 @@ func TestBuildShowTree_CyclePrevention(t *testing.T) {
 	b := entry("20260410-100100-s-cpt-bbb", withSummary("B"), withRefs("20260410-100000-s-stg-aaa"))
 
 	g := NewGraph([]*Entry{a, b})
-	tree := g.BuildShowTree(a.ID, 10, false, make(map[string]bool), make(map[string]bool))
+	tree := g.BuildShowTree(a.ID, 10, 0, make(map[string]bool), make(map[string]bool))
 
 	if len(tree.Upstream) != 2 {
 		t.Fatalf("Upstream = %d, want 2", len(tree.Upstream))

@@ -25,9 +25,10 @@ type ShowOptions struct {
 
 // RenderShow writes the plain-markdown show output for a ShowResult. Each group
 // renders as a YAML frontmatter envelope + raw markdown body for the primary,
-// followed by compact markdown trees for the upstream and (when requested)
-// downstream neighborhoods. Groups are separated by a blank line — each is a
-// self-contained frontmatter+body markdown document.
+// followed by compact markdown trees for the upstream and downstream
+// neighborhoods (each present to the depth the query set; an empty direction is
+// omitted). Groups are separated by a blank line — each is a self-contained
+// frontmatter+body markdown document.
 //
 // This is the agent / pipe / `--format text` renderer; the styled terminal
 // renderer shares the same data model (see the styled renderer / slice 3).
@@ -128,7 +129,7 @@ func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 // encodes depth (depth 1 sits flush-left); the line shape is
 // `- <verb> <full-id> (<kind>, <status>) — <first-sentence>`. An `↳` why
 // sub-line follows when the ref carries a desc, and unexpanded children at the
-// max-depth boundary render as an indented child-level truncation line — never
+// depth boundary render as an indented child-level truncation line — never
 // inline on this node.
 func renderTreeItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 	bulletIndent := strings.Repeat("  ", item.Depth-1)

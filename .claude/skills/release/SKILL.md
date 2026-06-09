@@ -18,10 +18,10 @@ git log $(git describe --tags --abbrev=0)..HEAD --oneline
 The git log is the authoritative scope of the release. Commit subjects in this project often carry a graph entry ID like `(d-tac-e1s)` or `(s-tac-2b0)` — collect all relevant IDs from the log, then pull them in one batch call:
 
 ```bash
-sdd show <id1> <id2> <id3> --max-depth 0
+sdd show <id1> <id2> <id3> --up 0 --down 0
 ```
 
-Full bodies plus immediate closes/refs context, no deep chain traversal — the right level for highlight prose. You see what plan closed what without walking the whole upstream history. Skip housekeeping commits (`sdd: refresh installed skills`, `sdd: signal/decision/wip` graph entries, pure refactors with no user-visible effect).
+Full bodies plus the envelope's immediate closes/refs context, no chain traversal — the right level for highlight prose. You see what plan closed what without walking the whole upstream history. Skip housekeeping commits (`sdd: refresh installed skills`, `sdd: signal/decision/wip` graph entries, pure refactors with no user-visible effect).
 
 ### 2. Propose the version bump
 

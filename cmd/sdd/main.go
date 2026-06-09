@@ -425,13 +425,14 @@ func showCmd() *cli.Command {
 		ArgsUsage: "<id> [id2 id3 ...]",
 		Flags: []cli.Flag{
 			&cli.IntFlag{
-				Name:  "max-depth",
-				Value: query.DefaultMaxDepth,
-				Usage: "Maximum depth for upstream/downstream expansion (0 = primary only)",
+				Name:  "up",
+				Value: query.DefaultUpDepth,
+				Usage: "Upstream (grounding) expansion depth; 0 = no upstream",
 			},
-			&cli.BoolFlag{
-				Name:  "downstream",
-				Usage: "Include downstream entries (refd-by, closed-by, superseded-by)",
+			&cli.IntFlag{
+				Name:  "down",
+				Value: query.DefaultDownDepth,
+				Usage: "Downstream (consumers) expansion depth; 0 = no downstream",
 			},
 			&cli.BoolFlag{
 				Name:  "with-summary",
@@ -458,10 +459,10 @@ func showCmd() *cli.Command {
 				return err
 			}
 			result, err := f.Show(query.ShowQuery{
-				Graph:      g,
-				IDs:        ids,
-				MaxDepth:   int(cmd.Int("max-depth")),
-				Downstream: cmd.Bool("downstream"),
+				Graph:     g,
+				IDs:       ids,
+				UpDepth:   int(cmd.Int("up")),
+				DownDepth: int(cmd.Int("down")),
 			})
 			if err != nil {
 				return err

@@ -3,17 +3,24 @@ package query
 import "github.com/networkteam/sdd/internal/model"
 
 // ShowQuery captures intent to render a set of entries with their reference
-// chains. Upstream is always included; downstream requires opt-in.
+// chains. Upstream and downstream each expand to their own depth; a depth of 0
+// skips that direction (downstream off, or upstream off, or both → primary
+// only).
 type ShowQuery struct {
-	Graph      *model.Graph
-	IDs        []string
-	MaxDepth   int  // depth limit for upstream/downstream expansion; 0 = no expansion
-	Downstream bool // include downstream entries (refd-by, closed-by, superseded-by)
+	Graph     *model.Graph
+	IDs       []string
+	UpDepth   int // upstream expansion depth (grounding chain); 0 = no upstream
+	DownDepth int // downstream expansion depth (consumers); 0 = no downstream
 }
 
-// DefaultMaxDepth is the default upstream/downstream expansion depth,
-// applied by the CLI when no --max-depth flag is given.
-const DefaultMaxDepth = 4
+// Default expansion depths applied by the CLI when the flags are omitted.
+// Upstream goes deeper to capture an entry's grounding; downstream stays
+// shallow because consumers fan out far faster (a hub contract has dozens of
+// immediate referrers).
+const (
+	DefaultUpDepth   = 2
+	DefaultDownDepth = 1
+)
 
 // ShowGroup is one primary's full tree: the primary entry, its upstream chain,
 // and its downstream chain. Primary-derived attributes (status, supersede

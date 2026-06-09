@@ -13,12 +13,12 @@ type ShowTreeItem struct {
 	ShownAbove    bool           // already rendered earlier — "(see above)" marker
 	ShownBelow    bool           // future primary — "(see below)" marker
 	SummaryOnly   bool           // true for depth > 0
-	Truncated     []TruncatedRef // children hidden at max-depth boundary
+	Truncated     []TruncatedRef // children hidden at depth boundary
 	Status        Status         // derived lifecycle status, computed at build so renderers stay pure
 	SupersedePath []string       // resolved origin→head trail when superseded; nil otherwise
 }
 
-// TruncatedRef describes a child entry hidden at the max-depth boundary.
+// TruncatedRef describes a child entry hidden at the depth boundary.
 type TruncatedRef struct {
 	ID        string
 	Relations []string
@@ -40,11 +40,12 @@ type ShowTree struct {
 	Downstream           []ShowTreeItem
 }
 
-// BuildShowTree constructs the upstream and optionally downstream traversal
-// trees for a primary entry, respecting max depth, cross-group dedup
-// (rendered), and future-primary dedup (primaries). Both directions use
-// per-direction visited sets. The rendered map is updated with newly-shown entries.
-func (g *Graph) BuildShowTree(id string, maxDepth int, includeDownstream bool, rendered, primaries map[string]bool) *ShowTree {
+// BuildShowTree constructs the upstream and downstream traversal trees for a
+// primary entry, each to its own depth, respecting cross-group dedup (rendered)
+// and future-primary dedup (primaries). A depth of 0 skips that direction
+// entirely. Both directions use per-direction visited sets. The rendered map is
+// updated with newly-shown entries.
+func (g *Graph) BuildShowTree(id string, upDepth, downDepth int, rendered, primaries map[string]bool) *ShowTree {
 	e := g.ByID[id]
 	if e == nil {
 		return nil
@@ -52,20 +53,19 @@ func (g *Graph) BuildShowTree(id string, maxDepth int, includeDownstream bool, r
 
 	// Upstream: expand primary's children (refs/closes/supersedes) directly.
 	// The primary itself is rendered separately by the presenter.
-	upVisited := make(map[string]bool)
-	upVisited[id] = true // mark primary visited to prevent cycles back to it
 	var upstream []ShowTreeItem
-	for _, child := range upstreamChildren(e) {
-		upstream = append(upstream, g.buildUpstream(child.id, 1, child.relations, child.refKind, child.refDesc, maxDepth, upVisited, rendered, primaries)...)
+	if upDepth > 0 {
+		upVisited := map[string]bool{id: true} // mark primary visited to prevent cycles back to it
+		for _, child := range upstreamChildren(e) {
+			upstream = append(upstream, g.buildUpstream(child.id, 1, child.relations, child.refKind, child.refDesc, upDepth, upVisited, rendered, primaries)...)
+		}
 	}
 
-	// Downstream: only when requested.
 	var downstream []ShowTreeItem
-	if includeDownstream {
-		downVisited := make(map[string]bool)
-		downVisited[id] = true
+	if downDepth > 0 {
+		downVisited := map[string]bool{id: true}
 		for _, child := range g.downstreamChildren(id) {
-			downstream = append(downstream, g.buildDownstream(child.id, 1, child.relations, child.refKind, child.refDesc, maxDepth, downVisited, rendered, primaries)...)
+			downstream = append(downstream, g.buildDownstream(child.id, 1, child.relations, child.refKind, child.refDesc, downDepth, downVisited, rendered, primaries)...)
 		}
 	}
 
