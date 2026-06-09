@@ -15,23 +15,6 @@ import (
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// Show styling. Each color encodes one concept; prominence comes from white vs
-// the glamour body grey vs faint. Colors render only through the colorprofile
-// writer on the TTY path; a plain io.Writer (test buffer, pipe) is downsampled
-// to Ascii and gets clean text. The palette tracks glamour's dark style — body
-// text 252, faint 240 — so the chrome and the rendered body read as one piece.
-var (
-	clrHeading  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // section headings (bright white)
-	clrIdentity = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))            // identity values: type, layer
-	clrID       = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))           // every rendered id outside the body (gold)
-	clrKey      = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))             // YAML keys (cyan)
-	clrRefKind  = lipgloss.NewStyle().Foreground(lipgloss.Color("141"))           // ref kinds: frontmatter ref values + tree verbs (purple)
-	clrBody     = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))           // glamour body grey: secondary values, summary, desc
-	clrQual     = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true) // kind + status words (tree qualifier and envelope) — most prominent
-	clrFaint    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // punctuation, guides, truncation
-	clrInactive = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))           // whole node when closed/superseded (recedes)
-)
-
 // defaultBodyWidth is the glamour wrap width used when no terminal width is
 // available.
 const defaultBodyWidth = 80

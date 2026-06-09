@@ -18,16 +18,6 @@ import (
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// Stats styling. Colors render only on the TTY path (RenderStatsTable); the
-// agent path is plain JSON. The concrete look — colors, spacing, borders — is
-// the starting point for live design review per the plan's UX-design AC, not a
-// frozen spec.
-var (
-	statsHeaderStyle  = lipgloss.NewStyle().Bold(true)
-	statsDimStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	statsColHeadStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-)
-
 // RenderStatsTable writes the styled, human-facing usage report: a header and
 // source line, an overall totals block, then per-model and per-op tables. Used
 // on the interactive TTY path. The empty cases (no sink yet, or nothing in the
@@ -39,8 +29,8 @@ var (
 // test buffer, a pipe) gets clean text and a real TTY keeps color (d-cpt-mvb).
 func RenderStatsTable(dst io.Writer, r *query.StatsResult) {
 	w := colorprofile.NewWriter(dst, os.Environ())
-	fmt.Fprintln(w, " "+statsHeaderStyle.Render("sdd stats")+statsDimStyle.Render(" — "+rangeLabel(r.Since)))
-	fmt.Fprintln(w, " "+statsDimStyle.Render(fmt.Sprintf("source: %s · %d calls", r.Source, r.Report.Totals.Calls)))
+	fmt.Fprintln(w, " "+clrHeading.Render("sdd stats")+clrBody.Render(" — "+rangeLabel(r.Since)))
+	fmt.Fprintln(w, " "+clrBody.Render(fmt.Sprintf("source: %s · %d calls", r.Source, r.Report.Totals.Calls)))
 	fmt.Fprintln(w)
 
 	if r.SinkEmpty {
@@ -60,7 +50,8 @@ func RenderStatsTable(dst io.Writer, r *query.StatsResult) {
 }
 
 func renderTotals(w io.Writer, t model.StatMetrics) {
-	fmt.Fprintln(w, " "+statsHeaderStyle.Render("Totals"))
+	fmt.Fprintln(w, " "+clrHeading.Render("Totals"))
+	fmt.Fprintln(w)
 	fmt.Fprintf(w, "   tokens in   %-8s  cache read   %-8s  calls  %s\n",
 		humanCount(t.InputTokens), humanCount(t.CacheReadTokens), strconv.Itoa(t.Calls))
 	fmt.Fprintf(w, "   tokens out  %-8s  cache write  %-8s  time   %s\n",
@@ -68,7 +59,8 @@ func renderTotals(w io.Writer, t model.StatMetrics) {
 }
 
 func renderModelTable(w io.Writer, rows []model.ModelRollup) {
-	fmt.Fprintln(w, " "+statsHeaderStyle.Render("By model"))
+	fmt.Fprintln(w, " "+clrHeading.Render("By model"))
+	fmt.Fprintln(w)
 	data := make([][]string, 0, len(rows))
 	for _, m := range rows {
 		data = append(data, []string{
@@ -85,7 +77,8 @@ func renderModelTable(w io.Writer, rows []model.ModelRollup) {
 }
 
 func renderOpTable(w io.Writer, rows []model.OpRollup) {
-	fmt.Fprintln(w, " "+statsHeaderStyle.Render("By operation"))
+	fmt.Fprintln(w, " "+clrHeading.Render("By operation"))
+	fmt.Fprintln(w)
 	data := make([][]string, 0, len(rows))
 	for _, o := range rows {
 		itemsCell, itemsPerSec := "—", "—"
@@ -116,13 +109,13 @@ func statsTable(headers []string, rows [][]string, leftCols int) string {
 		BorderTop(false).BorderBottom(false).BorderLeft(false).
 		BorderRight(false).BorderColumn(false).BorderRow(false).
 		BorderHeader(true).
-		BorderStyle(statsDimStyle).
+		BorderStyle(clrFaint).
 		Headers(headers...).
 		Rows(rows...).
 		StyleFunc(func(row, col int) lipgloss.Style {
 			s := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
 			if row == table.HeaderRow {
-				s = s.Inherit(statsColHeadStyle)
+				s = s.Inherit(clrKey)
 			}
 			if col >= leftCols {
 				s = s.Align(lipgloss.Right)
