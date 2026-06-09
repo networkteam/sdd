@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: b17e940c0abdd37abcaa9a186ff5226e1064bef35820e75de79f5e9e924626db
+sdd-content-hash: 04dcb9ba096f5213546ea3ce6b765a4c81ab03f404b217c44eba23a290962bec
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -9,10 +9,9 @@ sdd-version: dev
 - `sdd info` — session framing only: `Local participant: ...`, `Language: ...` (when configured), `Search: ...`. Stable surface for skill `!`sdd ...`` injections that need the agent to see who's local and which retrieval modes are available without the rest of `sdd status`.
 - `sdd status` — overview grouped by decision kind (Aspirations, Contracts, Plans, Activities, Directives), plus Gaps and Questions, Recent Insights, and Recent Done Signals (uses summaries). Header lines match `sdd info` byte-for-byte.
 - `sdd view --layout=<spec>` — composable pipeline of primitives (source, filter, transform, aggregate, rank, page, render) with named macros as sugar. Mechanical catch-up at scale; bare `sdd view` prints help with vocabulary tables. See "`sdd view` pipeline" below.
-- `sdd show <id>` — full entry with upstream summary chain (depth-limited)
+- `sdd show <id>` — full entry plus its upstream (grounding) and downstream (consumers) chains. Both shown by default: upstream depth 2, downstream depth 1.
 - `sdd show <id> [<id2> ...]` — multiple IDs in one call render their entries back to back (handy for comparing a cluster, e.g. the entries a new one will ref)
-- `sdd show <id> --downstream` — include downstream entries (refd-by, closed-by, superseded-by)
-- `sdd show <id> --max-depth N` — set upstream/downstream expansion depth (default 4, 0 = primary only)
+- `sdd show <id> --up N --down N` — set the upstream and downstream expansion depths independently. Defaults: `--up 2 --down 1` (downstream fans out faster, so it stays shallower). `0` turns a direction off; `--up 0 --down 0` is the primary entry alone. Increase (e.g. `--up 4 --down 3`) to see more of an entry's surroundings on demand.
 - `sdd list [--type d|s|a] [--layer stg|cpt|tac|ops|prc] [--kind <kind>] [--topic <label>]` — filtered listing. `--kind` accepts any signal kind (gap, fact, question, insight, done, actor, annotation) or decision kind (directive, activity, plan, contract, aspiration, role, focus); the two sets are disjoint. `--topic` filters to entries whose effective topic set (inline `topics:` ∪ topics declared by annotations whose refs include the entry) has any label with the given path as a component-wise, case-insensitive prefix. Uses summaries.
 - `sdd new <type> <layer> [flags] <description>` — create entries (output prints the new entry ID, file path, and the LLM-generated summary so the agent can verify fidelity)
 - `sdd summarize [<id> | --all]` — regenerate entry summaries
@@ -199,14 +198,13 @@ sdd view --layout='id("20260520-003237-s-cpt-ghy","20260506-191632-d-cpt-ni0"):a
 
 ## `sdd show` output format
 
-- **Depth 0** (target entry): metadata block, then a `Summary:` section (omitted when no summary is stored), then the full body
-- **Depth 1+** (upstream/downstream): summary lines with relation labels, kind, and entry ID
-- **Dedup**: each entry shown at shallowest occurrence; later encounters show `(see above)`
-- **Truncation**: at max-depth boundary, hidden entries listed as `[truncated: refs <id>, ...]`
+- **Primary entry**: a YAML frontmatter envelope (id, type, kind, layer, confidence, participants, refs, closes, supersedes, attachments, derived status/topics, time) followed by the raw markdown body. The stored summary is omitted by default — pass `--with-summary` to include it for drift review.
+- **Neighborhood**: `# upstream` and `# downstream` sections, each a compact markdown tree. One bullet per node — `<ref-kind> <full-id> (<entry-kind>, <status>) — <first-sentence>` — with indentation encoding depth and an `↳` sub-line carrying the ref's "why" (its `desc`) when present.
+- **Dedup**: each entry shown at shallowest occurrence; later encounters show `(see above)`.
+- **Truncation**: at the depth boundary, a node's unexpanded children render as an indented child-level line `+N more refs truncated (depth N): <ids>`.
+- **Rendering**: a styled, colored view on an interactive terminal (the body rendered through glamour); plain markdown for non-TTY consumers, `--format text`, or `NO_COLOR`. Both share one data model — only presentation differs. The styled palette is defined by the CLI color-scheme directive.
 
-Summary line format: `{indent}- {relations} {full-id} ({kind}): "{summary}"`
-
-The depth-0 `Summary:` section renders the same text shown in `sdd list` and `sdd status` — surfacing it inline gives readers a quick orientation when looking up an ID and makes summary-body drift visible during normal review.
+Depth is controlled per direction by `--up` / `--down` (see the `sdd show` entry above).
 
 ## `sdd new` flags
 

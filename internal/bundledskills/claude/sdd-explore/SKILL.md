@@ -30,13 +30,13 @@ Read the framework reference to understand kinds, layers, and ref semantics:
 ## Step 2 — Inspect: fetch the target with chain
 
 ```bash
-sdd show <target-id> --downstream
+sdd show <target-id> --up 3 --down 2
 ```
 
-Returns target at full detail plus upstream/downstream summary lines with relation labels and kind. If a specific upstream or downstream entry is load-bearing for the goal (a key decision in the chain, a closing done signal under evaluation), fetch its full body separately:
+Returns target at full detail plus upstream/downstream summary lines with relation labels and kind. Explore deliberately widens past the `sdd show` defaults (`--up 2 --down 1`) to pull more of the surrounding chain into view. If a specific upstream or downstream entry is load-bearing for the goal (a key decision in the chain, a closing done signal under evaluation), fetch its full body separately:
 
 ```bash
-sdd show --max-depth 0 <id1> <id2>
+sdd show <id1> <id2> --up 0 --down 0
 ```
 
 ## Step 3 — Determine status
@@ -58,7 +58,7 @@ This is the **Widen** move: search broadly so you find the entries the chain did
 Then **Inspect** the promising candidates: for any result line that could matter to the goal, pull its full body before judging relevance.
 
 ```bash
-sdd show --max-depth 0 <candidate-id1> <candidate-id2>
+sdd show <candidate-id1> <candidate-id2> --up 0 --down 0
 ```
 
 ## Step 5 — Compress toward the goal

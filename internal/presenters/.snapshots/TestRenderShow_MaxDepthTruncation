@@ -1,20 +1,22 @@
-# 20260410-100300-d-tac-ddd
+---
+id: 20260410-100300-d-tac-ddd
+type: decision
+kind: directive
+layer: tactical
+refs:
+    - id: 20260410-100200-s-tac-ccc
+      kind: related
+status: active
+time: "2026-04-10 10:03:00"
+---
 
-ID:     20260410-100300-d-tac-ddd
-Type:   decision
-Layer:  tactical
-Refs:
-  - 20260410-100200-s-tac-ccc (related)
-Time:   2026-04-10 10:03:00
-
-Derived:
-  Status: active
+# body
 
 Primary
 
-## upstream:
-  - refs (related) 20260410-100200-s-tac-ccc gap {status: open}: "Level 2"
-    - refs (related) 20260410-100100-s-cpt-bbb gap {status: open}: "Level 1"
-      [truncated: refs (related) 20260410-100000-s-stg-aaa gap]
+# upstream
 
+- related 20260410-100200-s-tac-ccc (gap, open) — Level 2
+  - related 20260410-100100-s-cpt-bbb (gap, open) — Level 1
+    +1 more refs truncated (depth 2): 20260410-100000-s-stg-aaa
 

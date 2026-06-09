@@ -5,132 +5,236 @@ import (
 	"io"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// RenderShow writes the show output for a ShowResult. Each group renders:
-// the primary entry at full detail, then an upstream section (summary lines),
-// then a downstream section (summary lines). Groups are separated by "---".
-func RenderShow(w io.Writer, result *query.ShowResult) {
+// ShowOptions controls optional segments of the show rendering.
+type ShowOptions struct {
+	// WithSummary includes the primary's stored summary in the envelope.
+	// Off by default — the body renders right after the envelope, and the
+	// summary is only needed for human drift-review.
+	WithSummary bool
+	// Width is the target wrap width for the styled renderer's glamour body
+	// (terminal columns). Zero falls back to a sensible default. Ignored by
+	// the plain renderer, which never reflows the body.
+	Width int
+}
+
+// RenderShow writes the plain-markdown show output for a ShowResult. Each group
+// renders as a YAML frontmatter envelope + raw markdown body for the primary,
+// followed by compact markdown trees for the upstream and downstream
+// neighborhoods (each present to the depth the query set; an empty direction is
+// omitted). Groups are separated by a blank line — each is a self-contained
+// frontmatter+body markdown document.
+//
+// This is the agent / pipe / `--format text` renderer; the styled terminal
+// renderer shares the same data model (see the styled renderer / slice 3).
+func RenderShow(w io.Writer, result *query.ShowResult, opts ShowOptions) {
 	for i, g := range result.Groups {
 		if i > 0 {
-			fmt.Fprintln(w, "---")
 			fmt.Fprintln(w)
 		}
-		renderShowGroup(w, result.Graph, g)
+		renderShowGroup(w, g, opts)
 	}
 }
 
-func renderShowGroup(w io.Writer, graph *model.Graph, g query.ShowGroup) {
-	// Primary entry: full content.
-	fmt.Fprintf(w, "# %s\n\n", g.Primary.ID)
-	WriteEntryFull(w, g.Primary, graph)
+func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
+	writeEnvelope(w, g, opts)
+	fmt.Fprintln(w)
+	// Top-level `# body` heading so the body's own `##` sections nest beneath
+	// it rather than colliding with the neighborhood section headings.
+	fmt.Fprintln(w, "# body")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, g.Primary.Content)
 
 	if len(g.Upstream) > 0 {
-		fmt.Fprintln(w, "## upstream:")
-		for _, item := range g.Upstream {
-			renderSummaryItem(w, graph, item, g.Primary.ID)
-		}
 		fmt.Fprintln(w)
+		fmt.Fprintln(w, "# upstream")
+		fmt.Fprintln(w)
+		for _, item := range g.Upstream {
+			renderTreeItem(w, item, g.Primary.ID)
+		}
 	}
 
 	if len(g.Downstream) > 0 {
-		fmt.Fprintln(w, "## downstream:")
-		for _, item := range g.Downstream {
-			renderSummaryItem(w, graph, item, g.Primary.ID)
-		}
 		fmt.Fprintln(w)
+		fmt.Fprintln(w, "# downstream")
+		fmt.Fprintln(w)
+		for _, item := range g.Downstream {
+			renderTreeItem(w, item, g.Primary.ID)
+		}
 	}
 }
 
-// renderSummaryItem renders a single summary line at the appropriate indent.
-// Format: `<indent>- <relations>(<refKind>)? <id> <kind>? {status: S}?: "<summary>"`
-// Per-ref kind decorates the relation when one of the relations is "refs"
-// or "refd-by" and the edge carries kind metadata; closes/supersedes (and
-// their inverses) never carry kind. When a desc is present it renders as
-// an indented sub-line beneath the summary.
-func renderSummaryItem(w io.Writer, graph *model.Graph, item model.ShowTreeItem, primaryID string) {
-	indent := strings.Repeat("  ", item.Depth)
-	relations := formatRelations(item.Relations, item.RefKind)
+// showEnvelope is the YAML frontmatter envelope for the primary entry. It
+// mirrors the on-disk frontmatter (reusing model.Ref's object-form marshaling)
+// and adds the filename-derived id, the entry time, discovered attachments,
+// and the derived status and effective topics. Field order here is the YAML
+// output order. Summary renders last (and only with --with-summary) so the
+// long opt-in text never pushes the scannable fields down.
+type showEnvelope struct {
+	ID           string      `yaml:"id"`
+	Type         string      `yaml:"type"`
+	Kind         string      `yaml:"kind,omitempty"`
+	Layer        string      `yaml:"layer"`
+	Confidence   string      `yaml:"confidence,omitempty"`
+	Participants []string    `yaml:"participants,omitempty"`
+	Canonical    string      `yaml:"canonical,omitempty"`
+	Aliases      []string    `yaml:"aliases,omitempty"`
+	Actor        string      `yaml:"actor,omitempty"`
+	Topics       []string    `yaml:"topics,omitempty"`
+	Refs         []model.Ref `yaml:"refs,omitempty"`
+	Closes       []string    `yaml:"closes,omitempty"`
+	Supersedes   []string    `yaml:"supersedes,omitempty"`
+	Attachments  []string    `yaml:"attachments,omitempty"`
+	Status       string      `yaml:"status,omitempty"`
+	Time         string      `yaml:"time"`
+	Summary      string      `yaml:"summary,omitempty"`
+}
 
-	var sb strings.Builder
-	sb.WriteString(item.Entry.ID)
-	if k := kindForDisplay(item.Entry); k != "" {
-		sb.WriteString(" ")
-		sb.WriteString(string(k))
+func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
+	e := g.Primary
+	env := showEnvelope{
+		ID:           e.ID,
+		Type:         e.TypeLabel(),
+		Layer:        e.LayerLabel(),
+		Kind:         string(e.Kind),
+		Confidence:   e.Confidence,
+		Participants: e.Participants,
+		Canonical:    e.Canonical,
+		Aliases:      e.Aliases,
+		Actor:        e.Actor,
+		Topics:       topicLabels(g.PrimaryTopics),
+		Refs:         e.Refs,
+		Closes:       e.Closes,
+		Supersedes:   e.Supersedes,
+		Attachments:  e.Attachments,
+		Status:       formatStatusTrailValue(g.PrimaryStatus, g.PrimarySupersedePath),
+		Time:         e.Time.Format("2006-01-02 15:04:05"),
 	}
-	status := graph.DerivedStatus(item.Entry)
-	var supersedePath []string
-	if status.Kind == model.StatusSupersededBy {
-		supersedePath = graph.ResolveRef(item.Entry.ID).Path()
+	if opts.WithSummary {
+		env.Summary = e.Summary
 	}
-	if s := FormatStatusTrail(status, supersedePath); s != "" {
-		sb.WriteString(" ")
-		sb.WriteString(s)
-	}
-	idPart := sb.String()
 
-	switch {
-	case item.ShownAbove:
-		if item.Entry.ID == primaryID {
-			fmt.Fprintf(w, "%s- %s %s: (this entry)\n", indent, relations, idPart)
-		} else {
-			fmt.Fprintf(w, "%s- %s %s: (see above)\n", indent, relations, idPart)
-		}
-	case item.ShownBelow:
-		fmt.Fprintf(w, "%s- %s %s: (see below)\n", indent, relations, idPart)
-	default:
-		summary := item.Entry.Summary
-		if summary == "" {
-			summary = firstSentence(item.Entry.Content)
-		}
-		fmt.Fprintf(w, "%s- %s %s: %q\n", indent, relations, idPart, summary)
+	data, _ := yaml.Marshal(&env)
+	fmt.Fprint(w, "---\n")
+	fmt.Fprint(w, string(data))
+	fmt.Fprint(w, "---\n")
+}
+
+// renderTreeItem renders one neighborhood node as a markdown bullet. Indent
+// encodes depth (depth 1 sits flush-left); the line shape is
+// `- <verb> <full-id> (<kind>, <status>) — <first-sentence>`. An `↳` why
+// sub-line follows when the ref carries a desc, and unexpanded children at the
+// depth boundary render as an indented child-level truncation line — never
+// inline on this node.
+func renderTreeItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
+	bulletIndent := strings.Repeat("  ", item.Depth-1)
+	subIndent := strings.Repeat("  ", item.Depth)
+
+	var line strings.Builder
+	line.WriteString(bulletIndent)
+	line.WriteString("- ")
+	line.WriteString(treeVerb(item))
+	line.WriteString(" ")
+	line.WriteString(item.Entry.ID)
+	if qual := treeQualifier(item); qual != "" {
+		line.WriteString(" ")
+		line.WriteString(qual)
 	}
+	if sentence := treeSentence(item, primaryID); sentence != "" {
+		line.WriteString(" — ")
+		line.WriteString(sentence)
+	}
+	fmt.Fprintln(w, line.String())
 
 	if item.RefDesc != "" {
-		descIndent := strings.Repeat("  ", item.Depth+1)
-		fmt.Fprintf(w, "%sdesc: %s\n", descIndent, item.RefDesc)
+		fmt.Fprintf(w, "%s↳ %s\n", subIndent, item.RefDesc)
 	}
 
 	if len(item.Truncated) > 0 {
-		childIndent := strings.Repeat("  ", item.Depth+1)
-		parts := make([]string, len(item.Truncated))
+		ids := make([]string, len(item.Truncated))
 		for i, tr := range item.Truncated {
-			rels := formatRelations(tr.Relations, tr.RefKind)
-			k := ""
-			if tr.Kind != "" {
-				k = " " + string(tr.Kind)
-			}
-			parts[i] = rels + " " + tr.ID + k
+			ids[i] = tr.ID
 		}
-		fmt.Fprintf(w, "%s[truncated: %s]\n", childIndent, strings.Join(parts, ", "))
+		fmt.Fprintf(w, "%s+%d more refs truncated (depth %d): %s\n",
+			subIndent, len(item.Truncated), item.Depth, strings.Join(ids, ", "))
 	}
 }
 
-// formatRelations builds the comma-joined relation label and decorates
-// the "refs" or "refd-by" entry with its per-ref kind in parens when set.
-// Other relations are left unannotated — closes/supersedes (and inverses)
-// carry uniform meaning and never accept per-edge metadata.
-func formatRelations(relations []string, refKind model.RefKind) string {
-	if refKind == "" {
-		return strings.Join(relations, ",")
+// treeQualifier is the parenthesized `(<kind>, <status>)` slot for a tree
+// node. Empty parts collapse so a node with no derived status renders
+// `(<kind>)` and a legacy entry with neither renders no parens at all —
+// never a bare `()` or a leading-comma `(, …)`.
+func treeQualifier(item model.ShowTreeItem) string {
+	kind := entryKindLabel(item.Entry)
+	status := formatStatusTrailValue(item.Status, item.SupersedePath)
+	switch {
+	case kind != "" && status != "":
+		return "(" + kind + ", " + status + ")"
+	case kind != "":
+		return "(" + kind + ")"
+	case status != "":
+		return "(" + status + ")"
+	default:
+		return ""
 	}
-	out := make([]string, len(relations))
-	for i, r := range relations {
-		if r == "refs" || r == "refd-by" {
-			out[i] = r + " (" + string(refKind) + ")"
+}
+
+// treeSentence is the trailing micro-summary for a node. Dedup markers take the
+// slot when the node was already shown (or is a later primary); otherwise it's
+// the entry's first sentence — from the stored summary when present, else the
+// body — derived at render time without touching the stored summary.
+func treeSentence(item model.ShowTreeItem, primaryID string) string {
+	switch {
+	case item.ShownAbove && item.Entry.ID == primaryID:
+		return "(this entry)"
+	case item.ShownAbove:
+		return "(see above)"
+	case item.ShownBelow:
+		return "(see below)"
+	}
+	src := item.Entry.Summary
+	if src == "" {
+		src = item.Entry.Content
+	}
+	return firstSentence(src)
+}
+
+// treeVerb is the leading relation word for a tree node. A refs/refd-by edge
+// carrying a kind renders as that kind (grounded-in, addresses, …) — the
+// meaningful relationship; legacy refs without a kind stay "refs"/"refd-by".
+// closes/supersedes (and their downstream inverses) render verbatim — they
+// carry uniform meaning and never accept per-edge kinds. Combined relations
+// join with a comma.
+func treeVerb(item model.ShowTreeItem) string {
+	parts := make([]string, len(item.Relations))
+	for i, r := range item.Relations {
+		if (r == "refs" || r == "refd-by") && item.RefKind != "" && item.RefKind != model.RefKindUnknown {
+			parts[i] = string(item.RefKind)
 		} else {
-			out[i] = r
+			parts[i] = r
 		}
 	}
-	return strings.Join(out, ",")
+	return strings.Join(parts, ",")
+}
+
+// entryKindLabel is the `<kind>` shown in a tree node's `(<kind>, <status>)`
+// slot: the display kind when set (directive for kindless decisions), falling
+// back to the type label for kindless signals.
+func entryKindLabel(e *model.Entry) string {
+	if k := kindForDisplay(e); k != "" {
+		return string(k)
+	}
+	return e.TypeLabel()
 }
 
 // kindForDisplay returns the kind to render for an entry. Decisions fall back
 // to "directive" when Kind is empty (legacy default); other types show kind
-// only when explicitly set. Presenter expansion for the full kind vocabulary
-// lands in a later session.
+// only when explicitly set.
 func kindForDisplay(e *model.Entry) model.Kind {
 	if e.Kind != "" {
 		return e.Kind
@@ -141,132 +245,33 @@ func kindForDisplay(e *model.Entry) model.Kind {
 	return ""
 }
 
-// writeRefsBlock renders the metadata-block refs section. Single-kind no-desc
-// runs collapse to the legacy single-line "Refs: id1, id2" shape; once any ref
-// carries a kind or desc, each ref renders on its own line so readers can
-// scan kind and desc per reference.
-func writeRefsBlock(w io.Writer, refs []model.Ref) {
-	allLegacy := true
-	for _, r := range refs {
-		if r.Kind != "" && r.Kind != model.RefKindUnknown {
-			allLegacy = false
-			break
-		}
-		if r.Desc != "" {
-			allLegacy = false
-			break
-		}
+// topicLabels renders an effective topic set as plain label strings for the
+// envelope's `topics:` field.
+func topicLabels(paths []model.TopicPath) []string {
+	if len(paths) == 0 {
+		return nil
 	}
-	if allLegacy {
-		fmt.Fprintf(w, "Refs:   %s\n", strings.Join(model.RefIDs(refs), ", "))
-		return
+	labels := make([]string, len(paths))
+	for i, p := range paths {
+		labels[i] = p.String()
 	}
-	fmt.Fprintln(w, "Refs:")
-	for _, r := range refs {
-		kind := string(r.Kind)
-		if kind == "" {
-			kind = "(unset)"
-		}
-		fmt.Fprintf(w, "  - %s (%s)\n", r.ID, kind)
-		if r.Desc != "" {
-			fmt.Fprintf(w, "    desc: %s\n", r.Desc)
-		}
-	}
+	return labels
 }
 
-// firstSentence extracts the first sentence from content as a fallback summary.
-func firstSentence(content string) string {
-	content = strings.TrimSpace(content)
-	if content == "" {
+// firstSentence returns the leading sentence of s — text up to the first
+// sentence-ending ". " or the first line break, whichever comes first. Used
+// for the compact depth-level micro-summary in the show tree; stored summaries
+// are never modified.
+func firstSentence(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
 		return ""
 	}
-	if idx := strings.IndexByte(content, '\n'); idx >= 0 {
-		content = content[:idx]
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[:i])
 	}
-	if len(content) > 120 {
-		content = content[:117] + "..."
+	if i := strings.Index(s, ". "); i >= 0 {
+		return s[:i+1]
 	}
-	return content
-}
-
-// WriteEntryFull writes the full metadata and content of an entry. Stored
-// frontmatter fields render first, then a "Derived:" section lists attributes
-// computed from graph relationships (d-tac-3yi). The curly-brace inline
-// notation (`{status: ...}`) is reserved for flat contexts like status, list,
-// and summary chains — the labeled block here keeps the stored/derived split
-// explicit without redundant wrapping.
-func WriteEntryFull(w io.Writer, e *model.Entry, graph *model.Graph) {
-	fmt.Fprintf(w, "ID:     %s\n", e.ID)
-	fmt.Fprintf(w, "Type:   %s\n", e.TypeLabel())
-	fmt.Fprintf(w, "Layer:  %s\n", e.LayerLabel())
-	if e.Kind != "" && e.Kind != model.KindDirective {
-		fmt.Fprintf(w, "Kind:   %s\n", e.Kind)
-	}
-	if e.Confidence != "" {
-		fmt.Fprintf(w, "Conf:   %s\n", e.Confidence)
-	}
-	if len(e.Participants) > 0 {
-		fmt.Fprintf(w, "Who:    %s\n", strings.Join(e.Participants, ", "))
-	}
-	if len(e.Refs) > 0 {
-		writeRefsBlock(w, e.Refs)
-	}
-	if len(e.Closes) > 0 {
-		fmt.Fprintf(w, "Closes: %s\n", strings.Join(e.Closes, ", "))
-	}
-	if len(e.Supersedes) > 0 {
-		fmt.Fprintf(w, "Supersedes: %s\n", strings.Join(e.Supersedes, ", "))
-	}
-	for _, a := range e.Attachments {
-		fmt.Fprintf(w, "Attachment: %s\n", a)
-	}
-	if len(e.Warnings) > 0 {
-		for _, warn := range e.Warnings {
-			fmt.Fprintf(w, "⚠ %s\n", warn.Message)
-		}
-	}
-	fmt.Fprintf(w, "Time:   %s\n", e.Time.Format("2006-01-02 15:04:05"))
-	writeDerivedSection(w, e, graph)
-	if e.Summary != "" {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Summary:")
-		fmt.Fprintln(w, e.Summary)
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, e.Content)
-	fmt.Fprintln(w)
-}
-
-// writeDerivedSection writes a "Derived:" block with graph-computed attributes,
-// omitted entirely when the entry has no derived state (e.g. actions). Status
-// always renders when present; Topics renders when the entry has a non-empty
-// effective topic set (inline ∪ annotation memberships).
-func writeDerivedSection(w io.Writer, e *model.Entry, graph *model.Graph) {
-	status := graph.DerivedStatus(e)
-	topics := graph.EffectiveTopics(e)
-	if status.Kind == model.StatusNone && len(topics) == 0 {
-		return
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Derived:")
-	if status.Kind != model.StatusNone {
-		fmt.Fprintf(w, "  Status: %s\n", formatStatusValue(status))
-	}
-	if len(topics) > 0 {
-		labels := make([]string, 0, len(topics))
-		for _, t := range topics {
-			labels = append(labels, t.String())
-		}
-		fmt.Fprintf(w, "  Topics: %s\n", strings.Join(labels, ", "))
-	}
-}
-
-// formatStatusValue renders a Status as a plain value (no curly braces) for
-// use inside the labeled "Derived:" block. Compound states use a space
-// separator: "closed-by <id>", "superseded-by <id>".
-func formatStatusValue(s model.Status) string {
-	if s.By != "" {
-		return string(s.Kind) + " " + s.By
-	}
-	return string(s.Kind)
+	return s
 }

@@ -14,8 +14,6 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 		return nil, fmt.Errorf("graph is required")
 	}
 
-	maxDepth := q.MaxDepth
-
 	resolved, err := q.Graph.ResolveIDs(q.IDs)
 	if err != nil {
 		return nil, err
@@ -33,12 +31,15 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 			return nil, fmt.Errorf("entry not found: %s", id)
 		}
 
-		tree := q.Graph.BuildShowTree(id, maxDepth, q.Downstream, rendered, primaries)
+		tree := q.Graph.BuildShowTree(id, q.UpDepth, q.DownDepth, rendered, primaries)
 
 		groups = append(groups, query.ShowGroup{
-			Primary:    tree.Primary,
-			Upstream:   tree.Upstream,
-			Downstream: tree.Downstream,
+			Primary:              tree.Primary,
+			PrimaryStatus:        tree.PrimaryStatus,
+			PrimarySupersedePath: tree.PrimarySupersedePath,
+			PrimaryTopics:        tree.PrimaryTopics,
+			Upstream:             tree.Upstream,
+			Downstream:           tree.Downstream,
 		})
 	}
 

@@ -1,22 +1,25 @@
-# 20260410-100300-d-tac-aaa
+---
+id: 20260410-100300-d-tac-aaa
+type: decision
+kind: directive
+layer: tactical
+refs:
+    - id: 20260410-100100-s-cpt-bbb
+      kind: related
+    - id: 20260410-100200-s-cpt-ccc
+      kind: related
+status: active
+time: "2026-04-10 10:03:00"
+---
 
-ID:     20260410-100300-d-tac-aaa
-Type:   decision
-Layer:  tactical
-Refs:
-  - 20260410-100100-s-cpt-bbb (related)
-  - 20260410-100200-s-cpt-ccc (related)
-Time:   2026-04-10 10:03:00
-
-Derived:
-  Status: active
+# body
 
 Primary with two branches
 
-## upstream:
-  - refs (related) 20260410-100100-s-cpt-bbb gap {status: open}: "Branch B"
-    - refs (related) 20260410-100000-s-stg-ddd gap {status: open}: "Shared deep ref"
-  - refs (related) 20260410-100200-s-cpt-ccc gap {status: open}: "Branch C"
-    - refs (related) 20260410-100000-s-stg-ddd gap {status: open}: (see above)
+# upstream
 
+- related 20260410-100100-s-cpt-bbb (gap, open) — Branch B
+  - related 20260410-100000-s-stg-ddd (gap, open) — Shared deep ref
+- related 20260410-100200-s-cpt-ccc (gap, open) — Branch C
+  - related 20260410-100000-s-stg-ddd (gap, open) — (see above)
 

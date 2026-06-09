@@ -25,14 +25,14 @@ This shows the current graph grouped by section (Aspirations, Contracts, Plans, 
 
 ## Step 3 — Check each entry for downstream activity
 
-For each candidate entry, fetch it with its upstream and downstream context:
+For each candidate entry, fetch it with its upstream and downstream context (`sdd show` includes both by default; widen downstream with `--down 2` if a resolver might sit a hop deeper):
 ```bash
-sdd show --downstream <id>
+sdd show <id>
 ```
 
-This returns the entry at full detail, upstream entries as summaries, and downstream entries as summaries. If you need full details of a specific downstream entry to assess whether it resolves the target, fetch it:
+This returns the entry at full detail, upstream entries as summaries, and downstream entries as summaries. If you need full details of a specific downstream entry to assess whether it resolves the target, fetch just that entry:
 ```bash
-sdd show --max-depth 0 <downstream-id>
+sdd show <downstream-id> --up 0 --down 0
 ```
 
 Look for these patterns:

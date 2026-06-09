@@ -5,18 +5,20 @@ import "sort"
 // ShowTreeItem represents an entry at a specific depth in a show tree.
 // Depth 0 is the primary entry. Depth 1+ entries are summary-only.
 type ShowTreeItem struct {
-	Entry       *Entry
-	Depth       int
-	Relations   []string       // e.g. ["refs"], ["refs", "closes"], ["refd-by"]
-	RefKind     RefKind        // kind of the refs edge linking parent to this entry (empty when no refs relation or no kind metadata)
-	RefDesc     string         // desc of the refs edge (when present)
-	ShownAbove  bool           // already rendered earlier — "(see above)" marker
-	ShownBelow  bool           // future primary — "(see below)" marker
-	SummaryOnly bool           // true for depth > 0
-	Truncated   []TruncatedRef // children hidden at max-depth boundary
+	Entry         *Entry
+	Depth         int
+	Relations     []string       // e.g. ["refs"], ["refs", "closes"], ["refd-by"]
+	RefKind       RefKind        // kind of the refs edge linking parent to this entry (empty when no refs relation or no kind metadata)
+	RefDesc       string         // desc of the refs edge (when present)
+	ShownAbove    bool           // already rendered earlier — "(see above)" marker
+	ShownBelow    bool           // future primary — "(see below)" marker
+	SummaryOnly   bool           // true for depth > 0
+	Truncated     []TruncatedRef // children hidden at depth boundary
+	Status        Status         // derived lifecycle status, computed at build so renderers stay pure
+	SupersedePath []string       // resolved origin→head trail when superseded; nil otherwise
 }
 
-// TruncatedRef describes a child entry hidden at the max-depth boundary.
+// TruncatedRef describes a child entry hidden at the depth boundary.
 type TruncatedRef struct {
 	ID        string
 	Relations []string
@@ -26,17 +28,24 @@ type TruncatedRef struct {
 }
 
 // ShowTree holds the upstream and downstream chains for a single primary entry.
+// Primary-derived attributes (status, supersede trail, effective topics) are
+// computed during the build so presenters consume precomputed values and stay
+// pure — no graph traversal at render time.
 type ShowTree struct {
-	Primary    *Entry
-	Upstream   []ShowTreeItem
-	Downstream []ShowTreeItem
+	Primary              *Entry
+	PrimaryStatus        Status
+	PrimarySupersedePath []string
+	PrimaryTopics        []TopicPath
+	Upstream             []ShowTreeItem
+	Downstream           []ShowTreeItem
 }
 
-// BuildShowTree constructs the upstream and optionally downstream traversal
-// trees for a primary entry, respecting max depth, cross-group dedup
-// (rendered), and future-primary dedup (primaries). Both directions use
-// per-direction visited sets. The rendered map is updated with newly-shown entries.
-func (g *Graph) BuildShowTree(id string, maxDepth int, includeDownstream bool, rendered, primaries map[string]bool) *ShowTree {
+// BuildShowTree constructs the upstream and downstream traversal trees for a
+// primary entry, each to its own depth, respecting cross-group dedup (rendered)
+// and future-primary dedup (primaries). A depth of 0 skips that direction
+// entirely. Both directions use per-direction visited sets. The rendered map is
+// updated with newly-shown entries.
+func (g *Graph) BuildShowTree(id string, upDepth, downDepth int, rendered, primaries map[string]bool) *ShowTree {
 	e := g.ByID[id]
 	if e == nil {
 		return nil
@@ -44,20 +53,19 @@ func (g *Graph) BuildShowTree(id string, maxDepth int, includeDownstream bool, r
 
 	// Upstream: expand primary's children (refs/closes/supersedes) directly.
 	// The primary itself is rendered separately by the presenter.
-	upVisited := make(map[string]bool)
-	upVisited[id] = true // mark primary visited to prevent cycles back to it
 	var upstream []ShowTreeItem
-	for _, child := range upstreamChildren(e) {
-		upstream = append(upstream, g.buildUpstream(child.id, 1, child.relations, child.refKind, child.refDesc, maxDepth, upVisited, rendered, primaries)...)
+	if upDepth > 0 {
+		upVisited := map[string]bool{id: true} // mark primary visited to prevent cycles back to it
+		for _, child := range upstreamChildren(e) {
+			upstream = append(upstream, g.buildUpstream(child.id, 1, child.relations, child.refKind, child.refDesc, upDepth, upVisited, rendered, primaries)...)
+		}
 	}
 
-	// Downstream: only when requested.
 	var downstream []ShowTreeItem
-	if includeDownstream {
-		downVisited := make(map[string]bool)
-		downVisited[id] = true
+	if downDepth > 0 {
+		downVisited := map[string]bool{id: true}
 		for _, child := range g.downstreamChildren(id) {
-			downstream = append(downstream, g.buildDownstream(child.id, 1, child.relations, child.refKind, child.refDesc, maxDepth, downVisited, rendered, primaries)...)
+			downstream = append(downstream, g.buildDownstream(child.id, 1, child.relations, child.refKind, child.refDesc, downDepth, downVisited, rendered, primaries)...)
 		}
 	}
 
@@ -66,10 +74,14 @@ func (g *Graph) BuildShowTree(id string, maxDepth int, includeDownstream bool, r
 	markRendered(downstream, rendered)
 	rendered[id] = true
 
+	status, supersedePath := g.itemStatus(e)
 	return &ShowTree{
-		Primary:    e,
-		Upstream:   upstream,
-		Downstream: downstream,
+		Primary:              e,
+		PrimaryStatus:        status,
+		PrimarySupersedePath: supersedePath,
+		PrimaryTopics:        g.EffectiveTopics(e),
+		Upstream:             upstream,
+		Downstream:           downstream,
 	}
 }
 
@@ -196,6 +208,18 @@ func refMetaFrom(source *Entry, targetID string) (RefKind, string) {
 	return "", ""
 }
 
+// itemStatus derives a tree node's lifecycle status and, when superseded, the
+// resolved origin→head trail used for trail rendering. Computed during tree
+// building so presenters consume precomputed values rather than deriving status
+// themselves (keeps the renderers pure — no graph traversal at render time).
+func (g *Graph) itemStatus(e *Entry) (Status, []string) {
+	status := g.DerivedStatus(e)
+	if status.Kind == StatusSupersededBy {
+		return status, g.ResolveRef(e.ID).Path()
+	}
+	return status, nil
+}
+
 // buildUpstream walks the upstream reference chain in DFS pre-order with
 // depth limit and summary-only rendering at depth > 0.
 func (g *Graph) buildUpstream(id string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
@@ -212,6 +236,7 @@ func (g *Graph) buildUpstream(id string, depth int, relations []string, refKind 
 		RefDesc:     refDesc,
 		SummaryOnly: depth > 0,
 	}
+	item.Status, item.SupersedePath = g.itemStatus(e)
 
 	if rendered[id] {
 		item.ShownAbove = true
@@ -255,6 +280,7 @@ func (g *Graph) buildDownstream(id string, depth int, relations []string, refKin
 		RefDesc:     refDesc,
 		SummaryOnly: true,
 	}
+	item.Status, item.SupersedePath = g.itemStatus(e)
 
 	if rendered[id] {
 		item.ShownAbove = true

@@ -1,37 +1,40 @@
-# 20260410-100100-d-cpt-bbb
+---
+id: 20260410-100100-d-cpt-bbb
+type: decision
+kind: directive
+layer: conceptual
+refs:
+    - id: 20260410-100000-s-stg-aaa
+      kind: related
+status: active
+time: "2026-04-10 10:01:00"
+---
 
-ID:     20260410-100100-d-cpt-bbb
-Type:   decision
-Layer:  conceptual
-Refs:
-  - 20260410-100000-s-stg-aaa (related)
-Time:   2026-04-10 10:01:00
-
-Derived:
-  Status: active
+# body
 
 First primary
 
-## upstream:
-  - refs (related) 20260410-100000-s-stg-aaa gap {status: open}: "Shared ref"
+# upstream
+
+- related 20260410-100000-s-stg-aaa (gap, open) — Shared ref
 
 ---
+id: 20260410-100200-d-cpt-ccc
+type: decision
+kind: directive
+layer: conceptual
+refs:
+    - id: 20260410-100000-s-stg-aaa
+      kind: related
+status: active
+time: "2026-04-10 10:02:00"
+---
 
-# 20260410-100200-d-cpt-ccc
-
-ID:     20260410-100200-d-cpt-ccc
-Type:   decision
-Layer:  conceptual
-Refs:
-  - 20260410-100000-s-stg-aaa (related)
-Time:   2026-04-10 10:02:00
-
-Derived:
-  Status: active
+# body
 
 Second primary
 
-## upstream:
-  - refs (related) 20260410-100000-s-stg-aaa gap {status: open}: (see above)
+# upstream
 
+- related 20260410-100000-s-stg-aaa (gap, open) — (see above)
 

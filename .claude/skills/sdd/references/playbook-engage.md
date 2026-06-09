@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 9b12e9cb4ef29c2cff6a5a9106d8f2681bcebc0c3e5642285bc7f47a8a68a40c
+sdd-content-hash: 295b104ea53e2ab8aa66e8c4107244a53eda94f105e79a2b8eb7cadeebf6020d
 sdd-version: dev
 ---
 # Engage Playbook
@@ -15,7 +15,7 @@ Four steps, in order. Don't skip any of them, and don't reorder.
    - Topic phrase given (no anchor): widen (the **Widen** move) to surface candidates, then dialogue toward picking the centre. See [search](search.md) for mode selection.
    - Action verb only ("let's keep going", "let's evaluate"): if the recent dialogue or `sdd wip list` resolves to a clear entry, use it; otherwise ask which entry.
 
-2. **Read chain (Inspect)** — load the anchor with its chain in one call (`sdd show <full-id> --downstream`; see [cli-reference](cli-reference.md)). This surfaces upstream rationale, augment-plan amendments, partial done signals against ACs, supersession, and downstream activity. Use full IDs always (per the outer skill's CLI rule). For closed commitments where evaluation is in scope, also load the closing done signal at full detail.
+2. **Read chain (Inspect)** — load the anchor with its chain in one call (`sdd show <full-id> --up 3 --down 2`; see [cli-reference](cli-reference.md)). Engage widens past the `sdd show` defaults (`--up 2 --down 1`) to pull more of the entry's surroundings into view. This surfaces upstream rationale, augment-plan amendments, partial done signals against ACs, supersession, and downstream activity. Use full IDs always (per the outer skill's CLI rule). For closed commitments where evaluation is in scope, also load the closing done signal at full detail.
 
 3. **Brief** — synthesize what the entry is about, current status, what's around it. **The brief shape varies by entry kind and user intent** (see "Brief shapes" below). Don't default to a single template — pick the shape that matches what the user is engaging on and what they're trying to do.
 

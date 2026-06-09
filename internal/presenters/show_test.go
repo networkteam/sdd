@@ -15,28 +15,35 @@ import (
 // renderShow exercises the finder + presenter together.
 func renderShow(t *testing.T, g *model.Graph, ids []string, opts ...showOpt) string {
 	t.Helper()
-	q := query.ShowQuery{Graph: g, IDs: ids, MaxDepth: query.DefaultMaxDepth}
+	cfg := showConfig{q: query.ShowQuery{Graph: g, IDs: ids, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth}}
 	for _, o := range opts {
-		o(&q)
+		o(&cfg)
 	}
 	f := finders.New(finders.Options{})
-	result, err := f.Show(q)
+	result, err := f.Show(cfg.q)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	presenters.RenderShow(&buf, result)
+	presenters.RenderShow(&buf, result, cfg.render)
 	return buf.String()
 }
 
-type showOpt func(*query.ShowQuery)
-
-func withMaxDepth(d int) showOpt {
-	return func(q *query.ShowQuery) { q.MaxDepth = d }
+// showConfig threads both query options (graph traversal) and render options
+// (presentation) through the renderShow helper.
+type showConfig struct {
+	q      query.ShowQuery
+	render presenters.ShowOptions
 }
 
-func withDownstream() showOpt {
-	return func(q *query.ShowQuery) { q.Downstream = true }
+type showOpt func(*showConfig)
+
+func withUpDepth(d int) showOpt {
+	return func(c *showConfig) { c.q.UpDepth = d }
+}
+
+func renderWithSummary() showOpt {
+	return func(c *showConfig) { c.render.WithSummary = true }
 }
 
 func TestRenderShow_SingleEntryNoRefs(t *testing.T) {
@@ -64,7 +71,7 @@ func TestRenderShow_DownstreamWithRelations(t *testing.T) {
 		withCloses("20260410-100000-s-stg-aaa"))
 
 	g := model.NewGraph([]*model.Entry{target, refBy, closedBy})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{target.ID}, withDownstream()))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{target.ID}))
 }
 
 func TestRenderShow_MultiPrimaryDedup(t *testing.T) {
@@ -109,7 +116,7 @@ func TestRenderShow_MaxDepthTruncation(t *testing.T) {
 		withRefs("20260410-100200-s-tac-ccc"))
 
 	g := model.NewGraph([]*model.Entry{e0, e1, e2, primary})
-	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}, withMaxDepth(2)))
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}, withUpDepth(2)))
 }
 
 func TestRenderShow_FallbackFirstSentence(t *testing.T) {
@@ -120,7 +127,7 @@ func TestRenderShow_FallbackFirstSentence(t *testing.T) {
 	cupaloy.SnapshotT(t, renderShow(t, g, []string{b.ID}))
 }
 
-func TestRenderShow_RefKindAndDescOnMetadataAndSummary(t *testing.T) {
+func TestRenderShow_RefKindAndDesc(t *testing.T) {
 	target := entry("20260410-100000-s-stg-aaa", withContent("Target observation"))
 	primary := &model.Entry{
 		ID:      "20260410-100100-d-tac-bbb",
@@ -137,27 +144,22 @@ func TestRenderShow_RefKindAndDescOnMetadataAndSummary(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{target, primary})
 	out := renderShow(t, g, []string{primary.ID})
 
-	// Metadata block: refs section with per-ref kind and desc inline.
-	wantMeta := []string{
-		"Refs:",
-		"- 20260410-100000-s-stg-aaa (addresses)",
+	// Envelope: refs render in object form with id, kind, and desc.
+	wantEnvelope := []string{
+		"refs:",
+		"id: 20260410-100000-s-stg-aaa",
+		"kind: addresses",
 		"desc: resolves the target observation",
 	}
-	for _, w := range wantMeta {
+	for _, w := range wantEnvelope {
 		if !contains(out, w) {
-			t.Errorf("metadata missing %q in:\n%s", w, out)
+			t.Errorf("envelope missing %q in:\n%s", w, out)
 		}
 	}
 
-	// Upstream summary: relation decorated with kind, desc rendered beneath.
-	wantSummary := []string{
-		"refs (addresses) 20260410-100000-s-stg-aaa",
-		"desc: resolves the target observation",
-	}
-	for _, w := range wantSummary {
-		if !contains(out, w) {
-			t.Errorf("summary missing %q in:\n%s", w, out)
-		}
+	// Upstream tree: the kind is the verb, desc on an indented sub-line.
+	if !contains(out, "- addresses 20260410-100000-s-stg-aaa (gap, open)") {
+		t.Errorf("tree missing kind-verb node in:\n%s", out)
 	}
 }
 
@@ -176,20 +178,22 @@ func TestRenderShow_DownstreamCarriesRefKind(t *testing.T) {
 		Time: primary.Time,
 	}
 	g := model.NewGraph([]*model.Entry{primary, source})
-	out := renderShow(t, g, []string{primary.ID}, withDownstream())
+	out := renderShow(t, g, []string{primary.ID})
 
-	if !contains(out, "refd-by (grounded-in) 20260410-100100-d-tac-src") {
-		t.Errorf("downstream missing kind annotation in:\n%s", out)
+	// Downstream tree: a refd-by edge carrying a kind renders the kind as the
+	// verb (the `# downstream` header carries the incoming direction).
+	if !contains(out, "- grounded-in 20260410-100100-d-tac-src (directive, active)") {
+		t.Errorf("downstream missing kind-verb node in:\n%s", out)
 	}
-	if !contains(out, "desc: anchors to the standing observation") {
-		t.Errorf("downstream missing desc sub-line in:\n%s", out)
+	if !contains(out, "↳ anchors to the standing observation") {
+		t.Errorf("downstream missing why sub-line in:\n%s", out)
 	}
 }
 
-func TestRenderShow_LegacyRefsRenderAsSingleLine(t *testing.T) {
+func TestRenderShow_LegacyRefs(t *testing.T) {
 	// Entries on disk with bare-string refs parse as kind: unknown. The
-	// renderer collapses to the single-line legacy shape for those rather
-	// than expanding to the multi-line metadata block.
+	// envelope marshals them in object form (kind: unknown); the tree renders
+	// the generic "refs" verb since there's no meaningful kind to surface.
 	target := entry("20260410-100000-s-stg-aaa", withContent("Target"))
 	primary := &model.Entry{
 		ID:      "20260410-100100-d-tac-bbb",
@@ -201,8 +205,11 @@ func TestRenderShow_LegacyRefsRenderAsSingleLine(t *testing.T) {
 	}
 	g := model.NewGraph([]*model.Entry{target, primary})
 	out := renderShow(t, g, []string{primary.ID})
-	if !contains(out, "Refs:   20260410-100000-s-stg-aaa") {
-		t.Errorf("legacy refs should render as single line, got:\n%s", out)
+	if !contains(out, "kind: unknown") {
+		t.Errorf("legacy ref should render kind: unknown in the envelope, got:\n%s", out)
+	}
+	if !contains(out, "- refs 20260410-100000-s-stg-aaa (gap, open)") {
+		t.Errorf("legacy ref should render the generic refs verb in the tree, got:\n%s", out)
 	}
 }
 
@@ -216,37 +223,76 @@ func TestRenderShow_EntryNotFound(t *testing.T) {
 	}
 }
 
-func TestWriteEntryFull_SummarySectionPresent(t *testing.T) {
+func TestRenderShow_SummaryOmittedByDefault(t *testing.T) {
 	e := entry("20260410-100000-d-tac-aaa",
 		withKind(model.KindPlan),
 		withSummary("Compact synthesis of the plan."),
 		withContent("Body content describing the plan in full detail."))
 	g := model.NewGraph([]*model.Entry{e})
-	var buf bytes.Buffer
-	presenters.WriteEntryFull(&buf, e, g)
-	out := buf.String()
-	if !contains(out, "Summary:") {
-		t.Errorf("expected 'Summary:' label in output:\n%s", out)
+	out := renderShow(t, g, []string{e.ID})
+	if contains(out, "summary:") {
+		t.Errorf("summary should be omitted from the envelope by default:\n%s", out)
 	}
-	if !contains(out, "Compact synthesis of the plan.") {
-		t.Errorf("expected summary text in output:\n%s", out)
-	}
-	// Summary must appear before the body so it sits between metadata and content.
-	if idxSum, idxBody := indexOf(out, "Summary:"), indexOf(out, "Body content describing"); idxSum < 0 || idxBody < 0 || idxSum >= idxBody {
-		t.Errorf("Summary should appear before body content (sum=%d, body=%d):\n%s", idxSum, idxBody, out)
+	if contains(out, "Compact synthesis of the plan.") {
+		t.Errorf("summary text should not appear by default:\n%s", out)
 	}
 }
 
-func TestWriteEntryFull_SummarySectionOmittedWhenEmpty(t *testing.T) {
+func TestRenderShow_SupersededPrimaryTrail(t *testing.T) {
+	// A primary superseded through more than one hop renders its full
+	// origin→head trail in the envelope status — the supersede-chain
+	// resolution the tree-node/envelope status slot must accept.
+	origin := entry("20260410-100000-d-tac-aaa", withContent("Origin"))
+	mid := entry("20260410-100100-d-tac-bbb", withContent("Mid"), withSupersedes(origin.ID))
+	head := entry("20260410-100200-d-tac-ccc", withContent("Head"), withSupersedes(mid.ID))
+	g := model.NewGraph([]*model.Entry{origin, mid, head})
+	out := renderShow(t, g, []string{origin.ID})
+	want := "status: superseded-by 20260410-100100-d-tac-bbb → 20260410-100200-d-tac-ccc"
+	if !contains(out, want) {
+		t.Errorf("expected supersede trail %q in envelope:\n%s", want, out)
+	}
+}
+
+func TestRenderShow_SummaryShownWithFlag(t *testing.T) {
 	e := entry("20260410-100000-d-tac-aaa",
 		withKind(model.KindPlan),
-		withContent("Body content only — no stored summary."))
+		withSummary("Compact synthesis of the plan."),
+		withContent("Body content describing the plan in full detail."))
 	g := model.NewGraph([]*model.Entry{e})
+	out := renderShow(t, g, []string{e.ID}, renderWithSummary())
+	if !contains(out, "summary: Compact synthesis of the plan.") {
+		t.Errorf("summary should appear in the envelope with --with-summary:\n%s", out)
+	}
+}
+
+func TestRenderShowStyled_ColorDisabled(t *testing.T) {
+	// Writing to a non-TTY buffer downsamples to Ascii through the colorprofile
+	// writer, so the styled output arrives color-free — we assert on its plain
+	// structure (envelope, glamour-rendered body, styled tree node).
+	root := entry("20260410-100000-s-stg-aaa", withSummary("Root signal about the foundation"))
+	primary := entry("20260410-100100-d-tac-ccc",
+		withContent("Decision body paragraph rendered through glamour."),
+		withRefs("20260410-100000-s-stg-aaa"))
+	g := model.NewGraph([]*model.Entry{root, primary})
+
+	f := finders.New(finders.Options{})
+	result, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{primary.ID}, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var buf bytes.Buffer
-	presenters.WriteEntryFull(&buf, e, g)
+	presenters.RenderShowStyled(&buf, result, presenters.ShowOptions{Width: 80})
 	out := buf.String()
-	if contains(out, "Summary:") {
-		t.Errorf("Summary label should be omitted when entry has no summary:\n%s", out)
+
+	for _, want := range []string{
+		"id: 20260410-100100-d-tac-ccc",                    // envelope
+		"Decision body paragraph rendered through glamour", // glamour body (color-free)
+		"related 20260410-100000-s-stg-aaa",                // styled tree node, color stripped
+		"# upstream",
+	} {
+		if !contains(out, want) {
+			t.Errorf("styled (color-disabled) output missing %q in:\n%s", want, out)
+		}
 	}
 }
 
@@ -262,15 +308,18 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-func TestWriteEntryFull_KindDisplayed(t *testing.T) {
+func TestRenderShow_EnvelopeKind(t *testing.T) {
+	// The envelope mirrors on-disk storage: the kind line reflects e.Kind
+	// verbatim (shown when set, omitted when empty) rather than special-casing
+	// directive the way the old full block did.
 	tests := []struct {
 		name     string
 		kind     model.Kind
-		wantKind string
+		wantKind string // "" means no kind line should appear
 	}{
-		{"plan", model.KindPlan, "Kind:   plan"},
-		{"contract", model.KindContract, "Kind:   contract"},
-		{"directive_omitted", model.KindDirective, ""},
+		{"plan", model.KindPlan, "kind: plan"},
+		{"contract", model.KindContract, "kind: contract"},
+		{"directive_explicit", model.KindDirective, "kind: directive"},
 		{"empty_omitted", "", ""},
 	}
 
@@ -278,9 +327,16 @@ func TestWriteEntryFull_KindDisplayed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			e := entry("20260410-100000-d-tac-aaa", withKind(tt.kind), withContent("Test"))
 			g := model.NewGraph([]*model.Entry{e})
-			var buf bytes.Buffer
-			presenters.WriteEntryFull(&buf, e, g)
-			cupaloy.SnapshotT(t, buf.String())
+			out := renderShow(t, g, []string{e.ID})
+			if tt.wantKind == "" {
+				if contains(out, "kind:") {
+					t.Errorf("kind line should be omitted for %q:\n%s", tt.name, out)
+				}
+				return
+			}
+			if !contains(out, tt.wantKind) {
+				t.Errorf("expected %q in envelope:\n%s", tt.wantKind, out)
+			}
 		})
 	}
 }

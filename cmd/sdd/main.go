@@ -425,13 +425,22 @@ func showCmd() *cli.Command {
 		ArgsUsage: "<id> [id2 id3 ...]",
 		Flags: []cli.Flag{
 			&cli.IntFlag{
-				Name:  "max-depth",
-				Value: query.DefaultMaxDepth,
-				Usage: "Maximum depth for upstream/downstream expansion (0 = primary only)",
+				Name:  "up",
+				Value: query.DefaultUpDepth,
+				Usage: "Upstream (grounding) expansion depth; 0 = no upstream",
+			},
+			&cli.IntFlag{
+				Name:  "down",
+				Value: query.DefaultDownDepth,
+				Usage: "Downstream (consumers) expansion depth; 0 = no downstream",
 			},
 			&cli.BoolFlag{
-				Name:  "downstream",
-				Usage: "Include downstream entries (refd-by, closed-by, superseded-by)",
+				Name:  "with-summary",
+				Usage: "Include the primary's stored summary in the envelope (for drift review)",
+			},
+			&cli.StringFlag{
+				Name:  "format",
+				Usage: "Output format: auto (default — styled on a TTY, plain markdown otherwise) or text",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -450,15 +459,27 @@ func showCmd() *cli.Command {
 				return err
 			}
 			result, err := f.Show(query.ShowQuery{
-				Graph:      g,
-				IDs:        ids,
-				MaxDepth:   int(cmd.Int("max-depth")),
-				Downstream: cmd.Bool("downstream"),
+				Graph:     g,
+				IDs:       ids,
+				UpDepth:   int(cmd.Int("up")),
+				DownDepth: int(cmd.Int("down")),
 			})
 			if err != nil {
 				return err
 			}
-			presenters.RenderShow(os.Stdout, result)
+			opts := presenters.ShowOptions{WithSummary: cmd.Bool("with-summary")}
+
+			// Renderer selection: an explicit --format text, NO_COLOR, or a
+			// non-terminal stdout all take the plain markdown renderer; an
+			// interactive terminal gets the styled view (d-cpt-5f4 / d-cpt-mvb).
+			if cmd.String("format") == "text" || os.Getenv("NO_COLOR") != "" || !isTerminal(os.Stdout) {
+				presenters.RenderShow(os.Stdout, result, opts)
+				return nil
+			}
+			if w, _, err := term.GetSize(os.Stdout.Fd()); err == nil {
+				opts.Width = w
+			}
+			presenters.RenderShowStyled(os.Stdout, result, opts)
 			return nil
 		},
 	}
