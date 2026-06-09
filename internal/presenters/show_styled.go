@@ -26,7 +26,8 @@ var (
 	clrID       = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))           // every rendered id outside the body (gold)
 	clrKey      = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))             // YAML keys (cyan)
 	clrRefKind  = lipgloss.NewStyle().Foreground(lipgloss.Color("141"))           // ref kinds: frontmatter ref values + tree verbs (purple)
-	clrBody     = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))           // glamour body grey: secondary values, qualifier, summary, desc
+	clrBody     = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))           // glamour body grey: secondary values, summary, desc
+	clrQual     = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true) // (kind, status) words inside a live node's qualifier
 	clrFaint    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // punctuation, guides, truncation
 	clrInactive = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))           // whole node when closed/superseded (recedes)
 )
@@ -213,8 +214,8 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 		line.WriteString(clrRefKind.Render(verb))
 		line.WriteString(" ")
 		line.WriteString(clrID.Render(item.Entry.ID))
-		if qual != "" {
-			line.WriteString(" " + clrBody.Render(qual))
+		if q := styledQualifier(item); q != "" {
+			line.WriteString(" " + q)
 		}
 		if sentence != "" {
 			line.WriteString(" — " + clrBody.Render(sentence))
@@ -248,6 +249,26 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 		trunc := fmt.Sprintf("+%d more refs truncated (depth %d): %s",
 			len(item.Truncated), item.Depth, strings.Join(ids, ", "))
 		fmt.Fprintf(w, "%s%s\n", subGuide, clrFaint.Render(trunc))
+	}
+}
+
+// styledQualifier renders a live node's `(<kind>, <status>)` slot with the kind
+// and status words white-bold so they read at a glance, while the parens and
+// comma stay in the body grey. Returns "" when there is nothing to qualify.
+// Live nodes never carry an id in the status (active/open/done only), so the
+// words are safe to bold wholesale.
+func styledQualifier(item model.ShowTreeItem) string {
+	kind := entryKindLabel(item.Entry)
+	status := formatStatusTrailValue(item.Status, item.SupersedePath)
+	switch {
+	case kind != "" && status != "":
+		return clrBody.Render("(") + clrQual.Render(kind) + clrBody.Render(", ") + clrQual.Render(status) + clrBody.Render(")")
+	case kind != "":
+		return clrBody.Render("(") + clrQual.Render(kind) + clrBody.Render(")")
+	case status != "":
+		return clrBody.Render("(") + clrQual.Render(status) + clrBody.Render(")")
+	default:
+		return ""
 	}
 }
 
