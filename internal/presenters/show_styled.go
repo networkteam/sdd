@@ -15,16 +15,20 @@ import (
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// Show styling. Colors render only through the colorprofile writer on the TTY
-// path; a plain io.Writer (test buffer, pipe) is downsampled to Ascii and gets
-// clean text. The concrete palette is a starting point, not a frozen spec.
+// Show styling. Each color encodes one concept; prominence comes from white vs
+// the glamour body grey vs faint. Colors render only through the colorprofile
+// writer on the TTY path; a plain io.Writer (test buffer, pipe) is downsampled
+// to Ascii and gets clean text. The palette tracks glamour's dark style — body
+// text 252, faint 240 — so the chrome and the rendered body read as one piece.
 var (
-	showHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // section headings (bright white)
-	envKeyStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))             // YAML keys (cyan)
-	envPunctStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // fences, list markers, colons
-	showGuideStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // indent guides
-	showVerbStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))             // relation kind
-	showDimStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))           // secondary: (kind, status), desc, truncation
+	clrHeading  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // section headings (bright white)
+	clrIdentity = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))            // prominent identity values: type, kind, layer
+	clrID       = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))           // every rendered id outside the body (gold)
+	clrKey      = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))             // YAML keys (cyan)
+	clrRefKind  = lipgloss.NewStyle().Foreground(lipgloss.Color("141"))           // ref kinds: frontmatter ref values + tree verbs (purple)
+	clrBody     = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))           // glamour body grey: secondary values, qualifier, summary, desc
+	clrFaint    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // punctuation, guides, truncation
+	clrInactive = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))           // whole node when closed/superseded (recedes)
 )
 
 // defaultBodyWidth is the glamour wrap width used when no terminal width is
@@ -61,12 +65,12 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 
 	// Body under a top-level heading so the body's own `##` sections nest
 	// beneath it; glamour-rendered (raw fallback on any render error).
-	fmt.Fprintln(w, showHeaderStyle.Render("# body"))
+	fmt.Fprintln(w, clrHeading.Render("# body"))
 	fmt.Fprint(w, renderStyledBody(g.Primary.Content, opts.Width))
 
 	if len(g.Upstream) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, showHeaderStyle.Render("# upstream"))
+		fmt.Fprintln(w, clrHeading.Render("# upstream"))
 		fmt.Fprintln(w)
 		for _, item := range g.Upstream {
 			renderTreeItemStyled(w, item, g.Primary.ID)
@@ -74,7 +78,7 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 	}
 	if len(g.Downstream) > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, showHeaderStyle.Render("# downstream"))
+		fmt.Fprintln(w, clrHeading.Render("# downstream"))
 		fmt.Fprintln(w)
 		for _, item := range g.Downstream {
 			renderTreeItemStyled(w, item, g.Primary.ID)
@@ -82,40 +86,76 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 	}
 }
 
-// styleEnvelopeYAML applies light syntax highlighting to the marshaled
-// envelope YAML so keys read distinctly from values: keys in the key color,
-// structural punctuation (fences, list markers, colons) dimmed, and values
-// left in the default foreground for contrast. Line-based and deliberately
-// simple — the envelope is shallow, single-line-valued YAML.
+// styleEnvelopeYAML highlights the marshaled envelope YAML by concept: keys in
+// the key color, ids gold, the prominent identity values (type/kind/layer)
+// white, ref kinds purple, and everything else in the body grey — so the
+// scannable fields and the relationships pop while the rest recedes. It tracks
+// the current top-level section (refs vs a scalar/list field) to colour values
+// correctly, since the same key (`id`, `kind`) means different things inside a
+// ref. Line-based — the envelope is shallow, single-line-valued YAML.
 func styleEnvelopeYAML(yamlText string) string {
 	lines := strings.Split(strings.TrimRight(yamlText, "\n"), "\n")
+	section := ""
 	for i, line := range lines {
-		lines[i] = styleEnvelopeLine(line)
+		lines[i], section = styleEnvelopeLine(line, section)
 	}
 	return strings.Join(lines, "\n")
 }
 
-func styleEnvelopeLine(line string) string {
+func styleEnvelopeLine(line, section string) (string, string) {
 	trimmed := strings.TrimLeft(line, " ")
 	indent := line[:len(line)-len(trimmed)]
+	topLevel := indent == ""
 
 	if trimmed == "---" {
-		return indent + envPunctStyle.Render(trimmed)
+		return indent + clrFaint.Render(trimmed), section
 	}
 
 	marker := ""
 	rest := trimmed
 	if strings.HasPrefix(rest, "- ") {
-		marker = envPunctStyle.Render("- ")
+		marker = clrFaint.Render("- ")
 		rest = rest[len("- "):]
 	}
 
-	// `key: value` — color the key, dim the colon, leave the value default.
+	// `key: value` — colour the key, dim the colon, colour the value by field.
 	if i := strings.IndexByte(rest, ':'); i > 0 && isYAMLKey(rest[:i]) {
-		return indent + marker + envKeyStyle.Render(rest[:i]) + envPunctStyle.Render(":") + rest[i+1:]
+		key := rest[:i]
+		if topLevel {
+			section = key
+		}
+		return indent + marker + clrKey.Render(key) + clrFaint.Render(":") + styleEnvelopeValue(key, rest[i+1:], topLevel, section), section
 	}
-	// Bare scalar list item (value only, e.g. a participant or topic).
-	return indent + marker + rest
+	// Bare scalar list item (value only): closes/supersedes are ids, the rest
+	// (participants, topics, aliases, attachments) is body text.
+	if section == "closes" || section == "supersedes" {
+		return indent + marker + clrID.Render(rest), section
+	}
+	return indent + marker + clrBody.Render(rest), section
+}
+
+// styleEnvelopeValue colours a `key: value` value by what the field means: ids
+// gold, the prominent identity fields white, a ref's kind purple, everything
+// else body grey. The leading space stays outside the styled span.
+func styleEnvelopeValue(key, value string, topLevel bool, section string) string {
+	if strings.TrimSpace(value) == "" {
+		return value // header-only line, e.g. `refs:`
+	}
+	v := strings.TrimPrefix(value, " ")
+	lead := value[:len(value)-len(v)]
+
+	var st lipgloss.Style
+	switch {
+	case key == "id":
+		st = clrID
+	case section == "refs" && key == "kind":
+		st = clrRefKind
+	case topLevel && (key == "type" || key == "kind" || key == "layer"):
+		st = clrIdentity
+	default:
+		st = clrBody
+	}
+	return lead + st.Render(v)
 }
 
 // isYAMLKey reports whether s looks like an envelope key — a single token with
@@ -151,32 +191,53 @@ func renderStyledBody(content string, width int) string {
 	return out
 }
 
-// renderTreeItemStyled is the styled analog of renderTreeItem: dim indent
-// guides encode depth, the relation verb is colored, and the (kind, status)
-// qualifier plus desc/truncation sub-lines are dimmed. The node shape is
-// otherwise identical to the plain renderer.
+// renderTreeItemStyled is the styled analog of renderTreeItem: faint indent
+// guides encode depth, the relation verb is purple, the id gold, and the
+// (kind, status) qualifier plus summary and `↳` why sub-line sit in the body
+// grey. A closed/superseded node is rendered whole in the receded grey with no
+// colour accents, so the live entries stand out. The node shape is otherwise
+// identical to the plain renderer.
 func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string) {
-	guide := showGuideStyle.Render(strings.Repeat("│ ", item.Depth-1))
-	subGuide := showGuideStyle.Render(strings.Repeat("│ ", item.Depth))
+	guide := clrFaint.Render(strings.Repeat("│ ", item.Depth-1))
+	subGuide := clrFaint.Render(strings.Repeat("│ ", item.Depth))
+	live := isLiveStatus(item.Status)
+
+	verb := treeVerb(item)
+	qual := treeQualifier(item)
+	sentence := treeSentence(item, primaryID)
 
 	var line strings.Builder
 	line.WriteString(guide)
 	line.WriteString("- ")
-	line.WriteString(showVerbStyle.Render(treeVerb(item)))
-	line.WriteString(" ")
-	line.WriteString(item.Entry.ID)
-	if qual := treeQualifier(item); qual != "" {
+	if live {
+		line.WriteString(clrRefKind.Render(verb))
 		line.WriteString(" ")
-		line.WriteString(showDimStyle.Render(qual))
-	}
-	if sentence := treeSentence(item, primaryID); sentence != "" {
-		line.WriteString(" — ")
-		line.WriteString(sentence)
+		line.WriteString(clrID.Render(item.Entry.ID))
+		if qual != "" {
+			line.WriteString(" " + clrBody.Render(qual))
+		}
+		if sentence != "" {
+			line.WriteString(" — " + clrBody.Render(sentence))
+		}
+	} else {
+		// Closed/superseded: recede the whole node, no colour accents.
+		text := verb + " " + item.Entry.ID
+		if qual != "" {
+			text += " " + qual
+		}
+		if sentence != "" {
+			text += " — " + sentence
+		}
+		line.WriteString(clrInactive.Render(text))
 	}
 	fmt.Fprintln(w, line.String())
 
 	if item.RefDesc != "" {
-		fmt.Fprintf(w, "%s%s\n", subGuide, showDimStyle.Render("desc: "+item.RefDesc))
+		why := clrBody
+		if !live {
+			why = clrInactive
+		}
+		fmt.Fprintf(w, "%s%s\n", subGuide, why.Render("↳ "+item.RefDesc))
 	}
 
 	if len(item.Truncated) > 0 {
@@ -186,6 +247,18 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 		}
 		trunc := fmt.Sprintf("+%d more refs truncated (depth %d): %s",
 			len(item.Truncated), item.Depth, strings.Join(ids, ", "))
-		fmt.Fprintf(w, "%s%s\n", subGuide, showDimStyle.Render(trunc))
+		fmt.Fprintf(w, "%s%s\n", subGuide, clrFaint.Render(trunc))
+	}
+}
+
+// isLiveStatus reports whether a node is still in play — an active decision, an
+// open signal, or a terminal done — versus closed/superseded/cascade-retired,
+// which the styled tree dims so live entries draw the eye.
+func isLiveStatus(s model.Status) bool {
+	switch s.Kind {
+	case model.StatusClosedBy, model.StatusSupersededBy, model.StatusCascadeClosedBy, model.StatusCascadeOrphan:
+		return false
+	default:
+		return true
 	}
 }

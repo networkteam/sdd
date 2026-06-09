@@ -189,8 +189,8 @@ func TestRenderShow_DownstreamCarriesRefKind(t *testing.T) {
 	if !contains(out, "- grounded-in 20260410-100100-d-tac-src (directive, active)") {
 		t.Errorf("downstream missing kind-verb node in:\n%s", out)
 	}
-	if !contains(out, "desc: anchors to the standing observation") {
-		t.Errorf("downstream missing desc sub-line in:\n%s", out)
+	if !contains(out, "↳ anchors to the standing observation") {
+		t.Errorf("downstream missing why sub-line in:\n%s", out)
 	}
 }
 

@@ -1,8 +1,8 @@
 ---
 id: 20260410-100100-s-tac-bbb
 type: signal
-layer: tactical
 kind: done
+layer: tactical
 refs:
     - id: 20260410-100000-s-tac-aaa
       kind: related

@@ -1,8 +1,8 @@
 ---
 id: 20260410-100000-s-stg-aaa
 type: signal
-layer: strategic
 kind: gap
+layer: strategic
 status: closed-by 20260410-100200-a-tac-ccc
 time: "2026-04-10 10:00:00"
 ---

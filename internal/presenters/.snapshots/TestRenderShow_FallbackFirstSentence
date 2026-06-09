@@ -1,8 +1,8 @@
 ---
 id: 20260410-100100-d-tac-bbb
 type: decision
-layer: tactical
 kind: directive
+layer: tactical
 refs:
     - id: 20260410-100000-s-stg-aaa
       kind: related

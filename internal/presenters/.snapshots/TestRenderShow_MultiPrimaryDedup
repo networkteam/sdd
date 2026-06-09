@@ -1,8 +1,8 @@
 ---
 id: 20260410-100100-d-cpt-bbb
 type: decision
-layer: conceptual
 kind: directive
+layer: conceptual
 refs:
     - id: 20260410-100000-s-stg-aaa
       kind: related
@@ -21,8 +21,8 @@ First primary
 ---
 id: 20260410-100200-d-cpt-ccc
 type: decision
-layer: conceptual
 kind: directive
+layer: conceptual
 refs:
     - id: 20260410-100000-s-stg-aaa
       kind: related

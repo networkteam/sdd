@@ -77,8 +77,8 @@ func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 type showEnvelope struct {
 	ID           string      `yaml:"id"`
 	Type         string      `yaml:"type"`
-	Layer        string      `yaml:"layer"`
 	Kind         string      `yaml:"kind,omitempty"`
+	Layer        string      `yaml:"layer"`
 	Confidence   string      `yaml:"confidence,omitempty"`
 	Participants []string    `yaml:"participants,omitempty"`
 	Canonical    string      `yaml:"canonical,omitempty"`
@@ -126,8 +126,8 @@ func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 
 // renderTreeItem renders one neighborhood node as a markdown bullet. Indent
 // encodes depth (depth 1 sits flush-left); the line shape is
-// `- <verb> <full-id> (<kind>, <status>) — <first-sentence>`. A `desc:`
-// sub-line follows when the ref carries one, and unexpanded children at the
+// `- <verb> <full-id> (<kind>, <status>) — <first-sentence>`. An `↳` why
+// sub-line follows when the ref carries a desc, and unexpanded children at the
 // max-depth boundary render as an indented child-level truncation line — never
 // inline on this node.
 func renderTreeItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
@@ -151,7 +151,7 @@ func renderTreeItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 	fmt.Fprintln(w, line.String())
 
 	if item.RefDesc != "" {
-		fmt.Fprintf(w, "%sdesc: %s\n", subIndent, item.RefDesc)
+		fmt.Fprintf(w, "%s↳ %s\n", subIndent, item.RefDesc)
 	}
 
 	if len(item.Truncated) > 0 {

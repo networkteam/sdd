@@ -1,8 +1,8 @@
 ---
 id: 20260410-100000-s-tac-aaa
 type: signal
-layer: tactical
 kind: gap
+layer: tactical
 status: open
 time: "2026-04-10 10:00:00"
 ---
