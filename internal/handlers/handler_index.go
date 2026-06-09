@@ -93,7 +93,7 @@ func (h *IndexHandler) Build(ctx context.Context, cmd *command.BuildIndexCmd) er
 	if cmd == nil {
 		return errors.New("BuildIndexCmd is required")
 	}
-	return h.indexEntries(ctx, cmd.Force, cmd.OnEntryIndexed, cmd.OnEntrySkipped, cmd.OnComplete)
+	return h.indexEntries(ctx, cmd.Force, cmd.OnBatchStart, cmd.OnEntryIndexed, cmd.OnEntrySkipped, cmd.OnComplete)
 }
 
 // LazyFill is the sdd-search prelude — only entries missing from the
@@ -108,7 +108,7 @@ func (h *IndexHandler) LazyFill(ctx context.Context, cmd *command.LazyFillIndexC
 			cmd.OnComplete(indexed)
 		}
 	}
-	return h.indexEntries(ctx, false, cmd.OnEntryIndexed, nil, onComplete)
+	return h.indexEntries(ctx, false, nil, cmd.OnEntryIndexed, nil, onComplete)
 }
 
 // indexEntries is the shared core for Build and LazyFill. The
@@ -126,7 +126,7 @@ func (h *IndexHandler) LazyFill(ctx context.Context, cmd *command.LazyFillIndexC
 // The manifest is saved after every bucket so a crash mid-build leaves
 // a resumable state.
 func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
-	onIndexed func(string, int), onSkipped func(string), onComplete func(int, int)) error {
+	onBatchStart func([]string), onIndexed func(string, int), onSkipped func(string), onComplete func(int, int)) error {
 
 	logger := slogutils.FromContext(ctx)
 
@@ -159,6 +159,7 @@ func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 		}
 		if !force {
 			if state, ok := manifest.Entries[e.ID]; ok && state.Hash == hash && state.Fingerprint == fingerprint {
+				logger.Debug("skipped, up to date", "entry", e.ID)
 				if onSkipped != nil {
 					onSkipped(e.ID)
 				}
@@ -189,7 +190,7 @@ func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 		// batchSize) takes the entry on its own — the embedder will
 		// split internally on its way to the wire.
 		if bucketChunks > 0 && bucketChunks+len(w.chunks) > batchSize {
-			if err := h.indexBucket(ctx, work[bucketStart:i], manifest, fingerprint, onIndexed); err != nil {
+			if err := h.indexBucket(ctx, work[bucketStart:i], manifest, fingerprint, onBatchStart, onIndexed); err != nil {
 				return err
 			}
 			if err := manifest.Save(h.indexDir); err != nil {
@@ -203,7 +204,7 @@ func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 	}
 	// Flush the trailing bucket.
 	if bucketStart < len(work) {
-		if err := h.indexBucket(ctx, work[bucketStart:], manifest, fingerprint, onIndexed); err != nil {
+		if err := h.indexBucket(ctx, work[bucketStart:], manifest, fingerprint, onBatchStart, onIndexed); err != nil {
 			return err
 		}
 		if err := manifest.Save(h.indexDir); err != nil {
@@ -226,7 +227,29 @@ func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 // the manifest entry follows.
 func (h *IndexHandler) indexBucket(ctx context.Context, bucket []entryWithChunks,
 	manifest *index.Manifest, fingerprint string,
-	onIndexed func(string, int)) error {
+	onBatchStart func([]string), onIndexed func(string, int)) error {
+
+	logger := slogutils.FromContext(ctx)
+
+	// Report the batch before the embedding round-trip so the progress bar
+	// advances as work begins, not only when it returns.
+	bucketIDs := make([]string, len(bucket))
+	for i, w := range bucket {
+		bucketIDs[i] = w.entry.ID
+	}
+	if onBatchStart != nil {
+		onBatchStart(bucketIDs)
+	}
+
+	// report logs the entry at Info (the operational record routed to the
+	// transient view or the leveled stderr handler) and fires the progress
+	// callback. Keeps the log and the count advance together at each site.
+	report := func(id string, n int) {
+		logger.Info("indexed", "entry", id, "chunks", n)
+		if onIndexed != nil {
+			onIndexed(id, n)
+		}
+	}
 
 	// Flatten chunks across the bucket while remembering which entry each
 	// embedding belongs to.
@@ -253,9 +276,7 @@ func (h *IndexHandler) indexBucket(ctx context.Context, bucket []entryWithChunks
 				ChunkIDs:    nil,
 				IndexedAt:   h.now(),
 			}
-			if onIndexed != nil {
-				onIndexed(w.entry.ID, 0)
-			}
+			report(w.entry.ID, 0)
 		}
 		return nil
 	}
@@ -306,9 +327,7 @@ func (h *IndexHandler) indexBucket(ctx context.Context, bucket []entryWithChunks
 			ChunkIDs:    newChunkIDs,
 			IndexedAt:   h.now(),
 		}
-		if onIndexed != nil {
-			onIndexed(w.entry.ID, len(rows))
-		}
+		report(w.entry.ID, len(rows))
 	}
 	return nil
 }

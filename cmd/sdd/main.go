@@ -228,6 +228,12 @@ func main() {
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			level := slog.LevelWarn
+			// sdd index is an explicit progress command: on a non-TTY it shows
+			// its per-entry indexed lines (Info) by default. The transient TTY
+			// view governs its own display level independently.
+			if cmd.Args().First() == "index" {
+				level = slog.LevelInfo
+			}
 			if cmd.Bool("extra-verbose") {
 				level = slog.LevelDebug
 			} else if cmd.Bool("verbose") {

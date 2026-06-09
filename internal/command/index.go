@@ -11,6 +11,12 @@ type BuildIndexCmd struct {
 	// an up-to-date row set.
 	Force bool
 
+	// OnBatchStart is called before each embedding round-trip with the entry
+	// IDs in that batch. Optional; intended for progress reporting — the
+	// determinate bar advances per batch as embedding begins, rather than in
+	// one jump at the end.
+	OnBatchStart func(entryIDs []string)
+
 	// OnEntryIndexed is called once per entry after its rows are upserted.
 	// Optional; intended for CLI progress output.
 	OnEntryIndexed func(entryID string, chunkCount int)

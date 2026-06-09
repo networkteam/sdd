@@ -113,6 +113,23 @@ func (m *Manifest) MismatchCount(current string) int {
 	return n
 }
 
+// PendingCount returns how many of entryIDs are absent from the manifest or
+// recorded under a different embedder fingerprint — the entries a build or
+// lazy-fill would (re-)embed. Entry bodies are immutable, so a stored content
+// hash never goes stale on its own; presence and fingerprint are the
+// reconciliation axes that decide whether there is work worth showing a
+// transient progress view for.
+func (m *Manifest) PendingCount(entryIDs []string, fingerprint string) int {
+	n := 0
+	for _, id := range entryIDs {
+		st, ok := m.Entries[id]
+		if !ok || st.Fingerprint != fingerprint {
+			n++
+		}
+	}
+	return n
+}
+
 func manifestPath(indexDir string) string {
 	return filepath.Join(indexDir, "manifest.json")
 }

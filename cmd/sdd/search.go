@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/networkteam/sdd/internal/cliout"
+	clitui "github.com/networkteam/sdd/internal/cliout/tui"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
@@ -182,21 +185,55 @@ func indexCmd() *cli.Command {
 				Reader:     reader,
 			})
 
+			// Pre-pass: how many entries need (re-)embedding? This sets the
+			// progress total and decides whether to show a transient view at
+			// all — a fully warm index does no work, so skip the program and
+			// its alt-screen flash.
+			g, err := reader.LoadGraph(graphDir)
+			if err != nil {
+				return err
+			}
+			manifest, err := index.LoadManifest(idxDir)
+			if err != nil {
+				return err
+			}
+			force := cmd.Bool("force")
+			total := manifest.PendingCount(entryIDs(g), emb.Fingerprint())
+			if force {
+				total = len(g.Entries) // force re-embeds everything
+			}
+
 			start := time.Now()
+			reporter := cliout.NewReporter()
+			reporter.SetUnit("entries")
+			reporter.SetTotal(total)
+
+			var summary string
 			buildCmd := &command.BuildIndexCmd{
-				Force: cmd.Bool("force"),
-				OnEntryIndexed: func(id string, n int) {
-					fmt.Fprintf(os.Stderr, "  indexed %s (%d chunks)\n", id, n)
-				},
-				OnEntrySkipped: func(id string) {
-					fmt.Fprintf(os.Stderr, "  skipped %s\n", id)
-				},
+				Force:        force,
+				OnBatchStart: func(batchIDs []string) { reporter.Add(len(batchIDs)) },
 				OnComplete: func(indexed, skipped int) {
-					fmt.Printf("indexed %d entries (%d skipped) in %s\n",
+					summary = fmt.Sprintf("indexed %d entries (%d skipped) in %s",
 						indexed, skipped, time.Since(start).Round(time.Millisecond))
 				},
 			}
-			return h.Build(ctx, buildCmd)
+			work := func(ctx context.Context) (struct{}, error) {
+				return struct{}{}, h.Build(ctx, buildCmd)
+			}
+
+			if cliout.IsInteractive(os.Stderr) && total > 0 {
+				_, err = clitui.Interactive(ctx, transientViewPolicy(),
+					clitui.View{Label: "indexing", Progress: reporter}, work)
+			} else {
+				_, err = work(ctx)
+			}
+			if err != nil {
+				return err
+			}
+			if summary != "" {
+				fmt.Println(summary) // result to clean stdout, after teardown
+			}
+			return nil
 		},
 	}
 }
@@ -259,8 +296,12 @@ func searchCmd() *cli.Command {
 				return err
 			}
 
-			var emb llm.Embedder
-			var idxStore *index.Index
+			var (
+				emb      llm.Embedder
+				idxStore *index.Index
+				ih       *handlers.IndexHandler
+				willFill bool
+			)
 			needsVector := phrase != ""
 			if needsVector {
 				emb, err = buildEmbedder(cmd)
@@ -278,26 +319,25 @@ func searchCmd() *cli.Command {
 				if err != nil {
 					return err
 				}
-				// Lazy-fill before query so a fresh clone or branch
-				// switch still returns useful seeds.
 				reader, err := newReadFinder()
 				if err != nil {
 					return err
 				}
-				ih := handlers.NewIndexHandler(handlers.IndexHandlerOptions{
+				ih = handlers.NewIndexHandler(handlers.IndexHandlerOptions{
 					GraphDir:   graphDir,
 					IndexDir:   idxDir,
 					Embedder:   emb,
 					IndexStore: idxStore,
 					Reader:     reader,
 				})
-				if err := ih.LazyFill(ctx, &command.LazyFillIndexCmd{
-					OnEntryIndexed: func(id string, n int) {
-						fmt.Fprintf(os.Stderr, "  lazy-indexed %s (%d chunks)\n", id, n)
-					},
-				}); err != nil {
+				// Will lazy-fill actually embed anything? A warm index does no
+				// work, so the transient view is skipped and the result path
+				// stays quiet for agents.
+				manifest, err := index.LoadManifest(idxDir)
+				if err != nil {
 					return err
 				}
+				willFill = manifest.PendingCount(entryIDs(g), emb.Fingerprint()) > 0
 			}
 
 			finder := finders.NewSearchFinder(finders.SearchFinderOptions{
@@ -335,7 +375,7 @@ func searchCmd() *cli.Command {
 			if cmd.IsSet("max-citations") {
 				maxCitations = int(cmd.Int("max-citations"))
 			}
-			res, err := finder.Search(ctx, query.SearchQuery{
+			sq := query.SearchQuery{
 				Graph:                g,
 				Terms:                terms,
 				Phrase:               phrase,
@@ -343,7 +383,28 @@ func searchCmd() *cli.Command {
 				IncludeSuperseded:    cmd.Bool("include-superseded"),
 				Limit:                int(cmd.Int("limit")),
 				MaxCitationsPerEntry: maxCitations,
-			})
+			}
+
+			// Lazy-fill (when vector search needs a warm index) then query.
+			// On a TTY with fill work pending, both run under the transient
+			// view so the indexing chatter scrolls and clears before results;
+			// otherwise the plain path keeps agents quiet at the Warn floor.
+			work := func(ctx context.Context) (*query.SearchResult, error) {
+				if needsVector {
+					if err := ih.LazyFill(ctx, &command.LazyFillIndexCmd{}); err != nil {
+						return nil, err
+					}
+				}
+				return finder.Search(ctx, sq)
+			}
+
+			var res *query.SearchResult
+			if cliout.IsInteractive(os.Stderr) && willFill {
+				res, err = clitui.Interactive(ctx, transientViewPolicy(),
+					clitui.View{Label: "searching"}, work)
+			} else {
+				res, err = work(ctx)
+			}
 			if err != nil {
 				return err
 			}
@@ -351,5 +412,27 @@ func searchCmd() *cli.Command {
 			presenters.RenderSearch(os.Stdout, res, g)
 			return nil
 		},
+	}
+}
+
+// entryIDs collects the IDs of every entry in the graph — the universe the
+// index reconciles against when counting pending work.
+func entryIDs(g *model.Graph) []string {
+	ids := make([]string, len(g.Entries))
+	for i, e := range g.Entries {
+		ids[i] = e.ID
+	}
+	return ids
+}
+
+// transientViewPolicy is the durable-vs-ephemeral policy shared by the
+// indexing commands: the live view is chatty (Info), warnings and above
+// survive to the durable stderr sink, and on an error the last entries (any
+// level) are flushed so the context around a failure isn't lost with the view.
+func transientViewPolicy() cliout.Policy {
+	return cliout.Policy{
+		Display:        slog.LevelInfo,
+		KeepAtOrAbove:  slog.LevelWarn,
+		FingersCrossed: &cliout.FingersCrossed{Trigger: slog.LevelError, Tail: 50},
 	}
 }

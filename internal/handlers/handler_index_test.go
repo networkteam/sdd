@@ -139,6 +139,43 @@ func TestIndexHandler_Build(t *testing.T) {
 	}
 }
 
+func TestIndexHandler_BuildFiresOnBatchStart(t *testing.T) {
+	t.Parallel()
+
+	graphDir := t.TempDir()
+	indexDir := t.TempDir()
+
+	writeEntry(t, graphDir, "20260101-100000-s-tac-aaa", "## Section A\nFirst entry body.", "Summary of A.")
+	writeEntry(t, graphDir, "20260101-100001-s-tac-bbb", "## Section B\nSecond entry body.", "Summary of B.")
+
+	emb := &fakeEmbedder{}
+	idx := index.OpenInMemory()
+	h := NewIndexHandler(IndexHandlerOptions{
+		GraphDir:   graphDir,
+		IndexDir:   indexDir,
+		Embedder:   emb,
+		IndexStore: idx,
+		Reader:     readFinderFor(t),
+	})
+
+	var batches [][]string
+	cmd := &command.BuildIndexCmd{
+		OnBatchStart: func(ids []string) { batches = append(batches, ids) },
+	}
+	if err := h.Build(context.Background(), cmd); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// Both entries' chunks fit one batch, so OnBatchStart fires once carrying
+	// both entry IDs — before the single embed round-trip.
+	if len(batches) != 1 {
+		t.Fatalf("expected 1 batch, got %d (%v)", len(batches), batches)
+	}
+	if len(batches[0]) != 2 {
+		t.Errorf("batch carried %d entry IDs, want 2 (%v)", len(batches[0]), batches[0])
+	}
+}
+
 func TestIndexHandler_BuildSkipsUnchanged(t *testing.T) {
 	t.Parallel()
 
