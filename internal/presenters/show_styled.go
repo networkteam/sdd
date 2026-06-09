@@ -145,6 +145,12 @@ func styleEnvelopeValue(key, value string, topLevel bool, section string) string
 	v := strings.TrimPrefix(value, " ")
 	lead := value[:len(value)-len(v)]
 
+	// Status mirrors the tree qualifier: the state word white-bold, any id it
+	// carries (closed-by/superseded-by target) gold like every other id.
+	if topLevel && key == "status" {
+		return lead + styleStatusValue(v)
+	}
+
 	var st lipgloss.Style
 	switch {
 	case key == "id":
@@ -157,6 +163,22 @@ func styleEnvelopeValue(key, value string, topLevel bool, section string) string
 		st = clrBody
 	}
 	return lead + st.Render(v)
+}
+
+// styleStatusValue colours a status string the same way wherever it appears:
+// the leading state word (active / open / closed-by / superseded-by) white-bold,
+// and any trailing ids gold with faint `→` separators for a supersede trail.
+func styleStatusValue(status string) string {
+	word, rest, hasRest := strings.Cut(status, " ")
+	out := clrQual.Render(word)
+	if !hasRest {
+		return out
+	}
+	ids := strings.Split(rest, " → ")
+	for i, id := range ids {
+		ids[i] = clrID.Render(id)
+	}
+	return out + " " + strings.Join(ids, clrFaint.Render(" → "))
 }
 
 // isYAMLKey reports whether s looks like an envelope key — a single token with
