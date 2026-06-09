@@ -17,54 +17,33 @@ func logEntry(level slog.Level, msg string, attrs ...slog.Attr) cliout.LogEntry 
 
 // newTestModel builds a model with a throwaway consumer (the hand-driven tests
 // feed messages directly rather than running the command loop).
-func newTestModel(policy cliout.Policy, interrupt func()) (model, *cliout.Recorder) {
+func newTestModel(view View, policy cliout.Policy, interrupt func()) (model, *cliout.Recorder) {
 	_, consumer := cliout.NewLogPipe(policy.CaptureFloor())
 	rec := cliout.NewRecorder(policy)
-	return newModel(View{Label: "indexing"}, consumer, policy, rec, interrupt), rec
+	return newModel(view, consumer, policy, rec, interrupt), rec
 }
 
-func TestModel_DisplayEntryPushedToRingAndRecorder(t *testing.T) {
+func TestModel_ObservesEveryEntryForReEmit(t *testing.T) {
 	policy := cliout.Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn}
-	m, rec := newTestModel(policy, nil)
+	m, rec := newTestModel(View{Label: "indexing"}, policy, nil)
 
-	nm, cmd := m.Update(logMsg(logEntry(slog.LevelWarn, "slow embed")))
-	mm := nm.(model)
+	nm, cmd := m.Update(logMsg(logEntry(slog.LevelInfo, "below keep")))
+	m = nm.(model)
+	nm, _ = m.Update(logMsg(logEntry(slog.LevelWarn, "kept warning")))
+	_ = nm
 
-	if len(mm.ring) != 1 || mm.ring[0].Message != "slow embed" {
-		t.Errorf("ring = %v, want one entry 'slow embed'", mm.ring)
-	}
 	if cmd == nil {
 		t.Error("expected the log stream to be re-issued (non-nil cmd)")
 	}
-	// Warn is at/above the keep threshold → retained for re-emit.
-	if got := len(rec.Flush()); got != 1 {
-		t.Errorf("recorder kept %d entries, want 1", got)
-	}
-}
-
-func TestModel_BelowDisplayLevelSkipsRingButRecorded(t *testing.T) {
-	policy := cliout.Policy{
-		Display:        slog.LevelInfo,
-		KeepAtOrAbove:  slog.LevelError,
-		FingersCrossed: &cliout.FingersCrossed{Trigger: slog.LevelError, Tail: 5},
-	}
-	m, rec := newTestModel(policy, nil)
-
-	// Debug is below the Info display floor: not shown, but still observed so
-	// fingers-crossed can flush it on a later failure.
-	nm, _ := m.Update(logMsg(logEntry(slog.LevelDebug, "chunked")))
-	mm := nm.(model)
-	if len(mm.ring) != 0 {
-		t.Errorf("ring = %v, want empty (below display level)", mm.ring)
-	}
-	rec.MarkFailed()
-	if got := len(rec.Flush()); got != 1 {
-		t.Errorf("recorder flush = %d, want 1 (tail flushed on failure)", got)
+	// Every entry feeds the recorder; only the Warn is at/above the keep level.
+	got := rec.Flush()
+	if len(got) != 1 || got[0].Message != "kept warning" {
+		t.Errorf("recorder kept %v, want [kept warning]", got)
 	}
 }
 
 func TestModel_LogDoneQuits(t *testing.T) {
-	m, _ := newTestModel(cliout.Policy{Display: slog.LevelInfo}, nil)
+	m, _ := newTestModel(View{Label: "indexing"}, cliout.Policy{Display: slog.LevelInfo}, nil)
 	nm, cmd := m.Update(logDoneMsg{})
 	mm := nm.(model)
 	if !mm.done {
@@ -80,7 +59,7 @@ func TestModel_LogDoneQuits(t *testing.T) {
 
 func TestModel_CtrlCInterruptsAndQuits(t *testing.T) {
 	interrupted := false
-	m, _ := newTestModel(cliout.Policy{Display: slog.LevelInfo}, func() { interrupted = true })
+	m, _ := newTestModel(View{Label: "indexing"}, cliout.Policy{Display: slog.LevelInfo}, func() { interrupted = true })
 
 	key := tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})
 	if key.String() != "ctrl+c" {
@@ -102,9 +81,7 @@ func TestModel_CtrlCInterruptsAndQuits(t *testing.T) {
 func TestModel_ProgressUpdatesLatest(t *testing.T) {
 	reporter := cliout.NewReporter()
 	policy := cliout.Policy{Display: slog.LevelInfo}
-	_, consumer := cliout.NewLogPipe(policy.CaptureFloor())
-	rec := cliout.NewRecorder(policy)
-	m := newModel(View{Label: "indexing", Progress: reporter}, consumer, policy, rec, nil)
+	m, _ := newTestModel(View{Label: "indexing", Progress: reporter}, policy, nil)
 
 	nm, _ := m.Update(progressMsg(cliout.Progress{Done: 2, Total: 10, Unit: "entries"}))
 	mm := nm.(model)
@@ -113,34 +90,28 @@ func TestModel_ProgressUpdatesLatest(t *testing.T) {
 	}
 }
 
-func TestModel_ViewRendersLabelAndEntries(t *testing.T) {
+func TestModel_ViewIsInlineFooter(t *testing.T) {
+	reporter := cliout.NewReporter()
 	policy := cliout.Policy{Display: slog.LevelInfo}
-	m, _ := newTestModel(policy, nil)
+	m, _ := newTestModel(View{Label: "indexing", Progress: reporter}, policy, nil)
 
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(model)
-	nm, _ = m.Update(logMsg(logEntry(slog.LevelInfo, "indexed", slog.String("entry", "d-tac-5g9"))))
+	nm, _ = m.Update(progressMsg(cliout.Progress{Done: 3, Total: 10, Unit: "entries"}))
 	m = nm.(model)
 
 	view := m.View()
-	if !view.AltScreen {
-		t.Error("transient view must run in the alt-screen")
+	if view.AltScreen {
+		t.Error("inline footer must not use the alt-screen")
 	}
 	if !strings.Contains(view.Content, "indexing") {
-		t.Errorf("view missing label; content=%q", view.Content)
+		t.Errorf("footer missing label; content=%q", view.Content)
 	}
-	if !strings.Contains(view.Content, "indexed") {
-		t.Errorf("view missing log message; content=%q", view.Content)
+	if !strings.Contains(view.Content, "3/10 entries") {
+		t.Errorf("footer missing count; content=%q", view.Content)
 	}
-}
-
-func TestModel_ResizeCapsViewportHeight(t *testing.T) {
-	policy := cliout.Policy{Display: slog.LevelInfo}
-	m, _ := newTestModel(policy, nil)
-	// Tall terminal: viewport caps at maxViewportLines, not the full height.
-	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 200})
-	mm := nm.(model)
-	if h := mm.viewport.Height(); h != maxViewportLines {
-		t.Errorf("viewport height = %d, want capped at %d", h, maxViewportLines)
+	// One footer line — no scrolling log region embedded in the managed view.
+	if strings.Count(view.Content, "\n") > 0 {
+		t.Errorf("footer should be a single line; content=%q", view.Content)
 	}
 }

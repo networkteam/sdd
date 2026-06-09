@@ -208,30 +208,34 @@ func indexCmd() *cli.Command {
 			reporter.SetUnit("entries")
 			reporter.SetTotal(total)
 
-			var summary string
+			var doneIndexed, doneSkipped int
+			var haveSummary bool
 			buildCmd := &command.BuildIndexCmd{
 				Force:        force,
 				OnBatchStart: func(batchIDs []string) { reporter.Add(len(batchIDs)) },
 				OnComplete: func(indexed, skipped int) {
-					summary = fmt.Sprintf("indexed %d entries (%d skipped) in %s",
-						indexed, skipped, time.Since(start).Round(time.Millisecond))
+					doneIndexed, doneSkipped, haveSummary = indexed, skipped, true
 				},
 			}
 			work := func(ctx context.Context) (struct{}, error) {
 				return struct{}{}, h.Build(ctx, buildCmd)
 			}
 
+			// Indexing logs persist (the per-entry indexed lines scroll above
+			// the footer); on a TTY with work to do, run under the inline view.
 			if cliout.IsInteractive(os.Stderr) && total > 0 {
 				_, err = clitui.Interactive(ctx, transientViewPolicy(),
-					clitui.View{Label: "indexing", Progress: reporter}, work)
+					clitui.View{Label: "indexing", Progress: reporter, StreamLogs: true}, work)
 			} else {
 				_, err = work(ctx)
 			}
 			if err != nil {
 				return err
 			}
-			if summary != "" {
-				fmt.Println(summary) // result to clean stdout, after teardown
+			if haveSummary { // styled summary to clean stdout, after teardown
+				presenters.RenderResultLine(os.Stdout,
+					fmt.Sprintf("indexed %d entries", doneIndexed),
+					fmt.Sprintf("(%d skipped) in %s", doneSkipped, time.Since(start).Round(time.Millisecond)))
 			}
 			return nil
 		},
@@ -301,6 +305,7 @@ func searchCmd() *cli.Command {
 				idxStore *index.Index
 				ih       *handlers.IndexHandler
 				willFill bool
+				pending  int
 			)
 			needsVector := phrase != ""
 			if needsVector {
@@ -337,7 +342,8 @@ func searchCmd() *cli.Command {
 				if err != nil {
 					return err
 				}
-				willFill = manifest.PendingCount(entryIDs(g), emb.Fingerprint()) > 0
+				pending = manifest.PendingCount(entryIDs(g), emb.Fingerprint())
+				willFill = pending > 0
 			}
 
 			finder := finders.NewSearchFinder(finders.SearchFinderOptions{
@@ -386,12 +392,24 @@ func searchCmd() *cli.Command {
 			}
 
 			// Lazy-fill (when vector search needs a warm index) then query.
-			// On a TTY with fill work pending, both run under the transient
-			// view so the indexing chatter scrolls and clears before results;
-			// otherwise the plain path keeps agents quiet at the Warn floor.
+			// On a TTY with fill work pending, the inline footer shows
+			// determinate progress and clears before results render — indexing
+			// is transient for search, so its per-entry log lines are not
+			// streamed. Off-TTY (and for agents) the plain path stays quiet at
+			// the Warn floor.
+			var reporter *cliout.Reporter
+			if willFill {
+				reporter = cliout.NewReporter()
+				reporter.SetUnit("entries")
+				reporter.SetTotal(pending)
+			}
 			work := func(ctx context.Context) (*query.SearchResult, error) {
 				if needsVector {
-					if err := ih.LazyFill(ctx, &command.LazyFillIndexCmd{}); err != nil {
+					lazy := &command.LazyFillIndexCmd{}
+					if reporter != nil {
+						lazy.OnBatchStart = func(batchIDs []string) { reporter.Add(len(batchIDs)) }
+					}
+					if err := ih.LazyFill(ctx, lazy); err != nil {
 						return nil, err
 					}
 				}
@@ -401,7 +419,7 @@ func searchCmd() *cli.Command {
 			var res *query.SearchResult
 			if cliout.IsInteractive(os.Stderr) && willFill {
 				res, err = clitui.Interactive(ctx, transientViewPolicy(),
-					clitui.View{Label: "searching"}, work)
+					clitui.View{Label: "searching", Progress: reporter, StreamLogs: false}, work)
 			} else {
 				res, err = work(ctx)
 			}

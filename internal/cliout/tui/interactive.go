@@ -27,6 +27,12 @@ type View struct {
 	// alone. The caller advances it from the work goroutine via absolute
 	// counts (SetTotal/Add).
 	Progress *cliout.Reporter
+	// StreamLogs, when true, emits display-eligible log entries as durable
+	// lines above the footer (they scroll into terminal history) — the
+	// "indexing logs persist" case. When false the live view is footer-only
+	// and logs stay hidden, surfaced only by the teardown re-emit on a
+	// warning/error — the "search indexing is transient" case.
+	StreamLogs bool
 }
 
 // programRunner runs the view's bubble tea program and returns the final
@@ -98,10 +104,16 @@ func interactiveWith[T any](
 	if fm, ok := finalModel.(model); ok && fm.rec != nil {
 		rec = fm.rec
 	}
-	if out.err != nil {
-		rec.MarkFailed()
+	// Footer-only (transient) views never showed their logs live, so surface
+	// the kept / fingers-crossed entries on teardown. Streaming views already
+	// persisted their display-eligible lines via tea.Printf — re-emitting would
+	// duplicate them, so the durable record is left as the live stream wrote it.
+	if !view.StreamLogs {
+		if out.err != nil {
+			rec.MarkFailed()
+		}
+		cliout.WriteEntries(ctx, durable, rec.Flush())
 	}
-	cliout.WriteEntries(ctx, durable, rec.Flush())
 
 	switch {
 	case out.err != nil:

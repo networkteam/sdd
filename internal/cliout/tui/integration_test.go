@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"bytes"
+	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,40 +13,57 @@ import (
 	"github.com/networkteam/sdd/internal/cliout"
 )
 
-// TestModel_TeatestSmoke runs the real bubble tea program end to end through a
-// simulated terminal: Init's commands fire, the log/progress adapters drain the
-// live pipe over the event loop, and the program quits on the done signal. This
-// confirms the wiring the hand-driven tests bypass (they call Update directly).
-func TestModel_TeatestSmoke(t *testing.T) {
+// TestModel_StreamLogsDurable runs the real inline program: a streamed log line
+// must land in the terminal output (durable, above the footer). We wait for it
+// to render before signalling end-of-work — in teatest every message fires
+// instantly, so closing first would quit before tea.Printf flushes (in a real
+// terminal the seconds of embedding work leave ample time).
+func TestModel_StreamLogsDurable(t *testing.T) {
 	policy := cliout.Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn}
 	handler, consumer := cliout.NewLogPipe(policy.CaptureFloor())
-	reporter := cliout.NewReporter()
 	rec := cliout.NewRecorder(policy)
 
-	m := newModel(View{Label: "indexing", Progress: reporter}, consumer, policy, rec, func() {})
+	m := newModel(View{Label: "indexing", StreamLogs: true}, consumer, policy, rec, func() {})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 24))
 
-	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
+	slog.New(handler).Info("indexed", "entry", "20260101-aaa")
 
-	// Drive the live pipe from the test goroutine while the program runs.
-	logger := slog.New(handler)
-	reporter.SetTotal(2)
-	logger.Info("indexed", "entry", "d-tac-5g9")
-	reporter.Add(1)
-	logger.Warn("slow embed")
-	reporter.Add(1)
+	// The streamed line reaches scrollback while the program is still running.
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return bytes.Contains(b, []byte("20260101-aaa"))
+	}, teatest.WithDuration(5*time.Second))
 
-	// End-of-work: the view drains its tail and quits.
 	consumer.Close()
-	reporter.Close()
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+
+	if fm := tm.FinalModel(t).(model); !fm.done {
+		t.Error("program did not quit on the done signal")
+	}
+}
+
+// TestModel_TransientHidesLogs runs the inline program in transient mode: the
+// footer label shows, but per-entry log lines are NOT streamed into output —
+// the "search indexing is transient" behaviour. The program still quits on done.
+func TestModel_TransientHidesLogs(t *testing.T) {
+	policy := cliout.Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn}
+	handler, consumer := cliout.NewLogPipe(policy.CaptureFloor())
+	rec := cliout.NewRecorder(policy)
+
+	m := newModel(View{Label: "searching", StreamLogs: false}, consumer, policy, rec, func() {})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 24))
+
+	logger := slog.New(handler)
+	logger.Info("indexed", "entry", "ZZZ-should-not-appear")
+	consumer.Close()
 
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 
-	fm := tm.FinalModel(t).(model)
-	if !fm.done {
-		t.Error("program did not quit on the done signal")
+	out, _ := io.ReadAll(tm.FinalOutput(t))
+	got := string(out)
+	if strings.Contains(got, "ZZZ-should-not-appear") {
+		t.Errorf("transient mode leaked a per-entry log line into output; output=%q", got)
 	}
-	// The recorder, fed over the real event loop, kept the Warn for re-emit.
-	if got := len(fm.rec.Flush()); got != 1 {
-		t.Errorf("recorder kept %d entries, want 1 (the Warn) — adapters did not drain over the loop", got)
+	if !strings.Contains(got, "searching") {
+		t.Errorf("footer label missing; output=%q", got)
 	}
 }

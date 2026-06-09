@@ -108,7 +108,7 @@ func (h *IndexHandler) LazyFill(ctx context.Context, cmd *command.LazyFillIndexC
 			cmd.OnComplete(indexed)
 		}
 	}
-	return h.indexEntries(ctx, false, nil, cmd.OnEntryIndexed, nil, onComplete)
+	return h.indexEntries(ctx, false, cmd.OnBatchStart, cmd.OnEntryIndexed, nil, onComplete)
 }
 
 // indexEntries is the shared core for Build and LazyFill. The

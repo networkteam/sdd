@@ -36,6 +36,10 @@ type BuildIndexCmd struct {
 // search before the query so cold-start cost on a fresh clone or branch
 // switch is paid lazily rather than requiring an explicit warm-up.
 type LazyFillIndexCmd struct {
+	// OnBatchStart mirrors BuildIndexCmd's callback — fired before each
+	// embedding round-trip with the batch's entry IDs, for progress reporting.
+	OnBatchStart func(entryIDs []string)
+
 	// OnEntryIndexed mirrors BuildIndexCmd's callback.
 	OnEntryIndexed func(entryID string, chunkCount int)
 

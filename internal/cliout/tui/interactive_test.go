@@ -119,6 +119,33 @@ func TestInteractive_PropagatesErrorAndFingersCrossedFlush(t *testing.T) {
 	}
 }
 
+func TestInteractive_StreamLogsSkipsReEmit(t *testing.T) {
+	realOrig := slog.Default()
+	defer slog.SetDefault(realOrig)
+
+	durable := &captureHandler{}
+	slog.SetDefault(slog.New(durable))
+
+	// Durable (streaming) mode: log lines already persisted live via tea.Printf,
+	// so even a kept Warn must NOT be re-emitted on teardown (no duplication).
+	policy := cliout.Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn}
+	work := func(ctx context.Context) (int, error) {
+		l := slogutils.FromContext(ctx)
+		l.Info("indexed", "entry", "a")
+		l.Warn("slow embed")
+		return 1, nil
+	}
+
+	val, err := interactiveWith(context.Background(), policy,
+		View{Label: "indexing", StreamLogs: true}, work, fakeRun)
+	if err != nil || val != 1 {
+		t.Fatalf("got (%d, %v), want (1, nil)", val, err)
+	}
+	if msgs := durable.messages(); len(msgs) != 0 {
+		t.Errorf("durable sink = %v, want empty (streamed lines must not re-emit)", msgs)
+	}
+}
+
 func TestInteractive_NoErrorNoKeptIsSilent(t *testing.T) {
 	realOrig := slog.Default()
 	defer slog.SetDefault(realOrig)
