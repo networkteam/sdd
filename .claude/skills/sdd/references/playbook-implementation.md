@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 3db2fc1e114701e218c1764acb54393679bffeac530144353704cf439683dbeb
+sdd-content-hash: 038a10fd50e0720abebed794313f02a1e35b4cea5cb272a753b876d33f1f689e
 sdd-version: dev
 ---
 # Transition to implementation
@@ -34,7 +34,7 @@ Add `--branch` for branch mode; in worktree mode create the marker on the base f
 
 Implementation stays in this session — the meta-process stays active.
 
-1. **First** run `sdd show <entry-id> --downstream` — augmenting directives that ref the entry extend the acceptance contract (the implicit AC chain is the real spec). Required for plans, recommended for any non-trivial decision.
+1. **First** run `sdd show <entry-id> --down 2` — augmenting directives that ref the entry extend the acceptance contract (the implicit AC chain is the real spec), and `--down 2` reaches them plus their own closures past the `sdd show` default of `--down 1`. Required for plans, recommended for any non-trivial decision.
 2. For a plan, work the union of its `## Acceptance criteria` and those downstream commitments as the checklist — each confirmed with evidence or its deviation explained.
 3. Hit a design choice no decision covers? **Stop**, capture a done signal for progress so far (marker still active), and capture a signal for the missing decision — don't decide yourself. A narrow refinement instead → an augmenting directive (see Augment Plan Playbook).
 4. Commit code first, then the done signal addressing every AC and augmenting commitment, closing them via `--closes <entry-id>,<dir-id>,...`. **Cite the commit hash(es) in the done signal** so the artifact pointer is explicit — "code committed" without a hash leaves a reader (and pre-flight's artifact-durability check) unable to find what landed. Then `sdd wip done <marker-id>`.
