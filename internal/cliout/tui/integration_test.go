@@ -49,7 +49,7 @@ func TestModel_TransientHidesLogs(t *testing.T) {
 	handler, consumer := cliout.NewLogPipe(policy.CaptureFloor())
 	rec := cliout.NewRecorder(policy)
 
-	m := newModel(View{Label: "searching", StreamLogs: false}, consumer, policy, rec, func() {})
+	m := newModel(View{Label: "indexing", StreamLogs: false}, consumer, policy, rec, func() {})
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 24))
 
 	logger := slog.New(handler)
@@ -63,7 +63,7 @@ func TestModel_TransientHidesLogs(t *testing.T) {
 	if strings.Contains(got, "ZZZ-should-not-appear") {
 		t.Errorf("transient mode leaked a per-entry log line into output; output=%q", got)
 	}
-	if !strings.Contains(got, "searching") {
+	if !strings.Contains(got, "indexing") {
 		t.Errorf("footer label missing; output=%q", got)
 	}
 }

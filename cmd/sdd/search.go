@@ -418,8 +418,11 @@ func searchCmd() *cli.Command {
 
 			var res *query.SearchResult
 			if cliout.IsInteractive(os.Stderr) && willFill {
+				// The footer tracks the lazy-fill (embedding) — that's the work
+				// taking time; the vector query after it is instant. So label it
+				// "indexing", matching what the bar actually measures.
 				res, err = clitui.Interactive(ctx, transientViewPolicy(),
-					clitui.View{Label: "searching", Progress: reporter, StreamLogs: false}, work)
+					clitui.View{Label: "indexing", Progress: reporter, StreamLogs: false}, work)
 			} else {
 				res, err = work(ctx)
 			}
