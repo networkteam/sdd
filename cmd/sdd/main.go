@@ -287,6 +287,7 @@ func main() {
 			summarizeCmd(),
 			indexCmd(),
 			searchCmd(),
+			serveCmd(),
 			syncCmd(),
 			statsCmd(),
 		},

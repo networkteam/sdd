@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/query"
 )
 
 // Attachment describes a file to attach to a new entry. For stdin attachments
@@ -86,6 +87,13 @@ type NewEntryCmd struct {
 	// invoked on dry-run or any failure path. For richer data (path,
 	// content), the caller issues a query against the appropriate finder.
 	OnNewEntry func(id, summary string)
+
+	// OnPreflight is invoked with the pre-flight result whenever the
+	// validator ran to completion — including when its findings block the
+	// entry. Not invoked on skip, hard validator errors, or paths that never
+	// reach pre-flight. Transport layers that need findings structurally
+	// (MCP) hook this; the CLI relies on the handler's stderr rendering.
+	OnPreflight func(result *query.PreflightResult)
 }
 
 // Validate checks that required fields are populated and internally
