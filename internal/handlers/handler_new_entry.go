@@ -154,6 +154,9 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	} else if pfErr != nil {
 		return fmt.Errorf("pre-flight error: %w (use --skip-preflight to bypass)", pfErr)
 	} else {
+		if cmd.OnPreflight != nil {
+			cmd.OnPreflight(pfResult)
+		}
 		blocking := 0
 		for _, f := range pfResult.Findings {
 			fmt.Fprintf(h.stderr, "  [%s] %s: %s\n", f.Severity, f.Category, f.Observation)
