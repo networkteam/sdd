@@ -98,12 +98,9 @@ func (s *Server) RunHTTP(ctx context.Context, addr, authToken string) error {
 	if authToken == "" {
 		return errors.New("mcpserver: HTTP transport requires an auth token")
 	}
-	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-		return s.mcp
-	}, nil)
 	httpServer := &http.Server{
 		Addr:    addr,
-		Handler: bearerAuth(authToken, mcpHandler),
+		Handler: s.httpHandler(authToken),
 		BaseContext: func(net.Listener) context.Context {
 			return ctx
 		},
@@ -128,9 +125,21 @@ func (s *Server) RunHTTP(ctx context.Context, addr, authToken string) error {
 // HTTPHandler exposes the bearer-guarded MCP handler for tests that drive
 // the server through an httptest.Server instead of a real listener.
 func (s *Server) HTTPHandler(authToken string) http.Handler {
+	return s.httpHandler(authToken)
+}
+
+func (s *Server) httpHandler(authToken string) http.Handler {
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return s.mcp
-	}, nil)
+	}, &mcp.StreamableHTTPOptions{
+		// The evaluation setup reaches this server through a tunnel (ngrok)
+		// that forwards to localhost while preserving the public Host
+		// header — the SDK's rebinding protection would 403 every such
+		// request. The mandatory bearer token already refuses anything a
+		// rebound browser request could send, so the Host check adds no
+		// protection here.
+		DisableLocalhostProtection: true,
+	})
 	return bearerAuth(authToken, mcpHandler)
 }
 

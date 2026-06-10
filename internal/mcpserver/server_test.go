@@ -367,6 +367,26 @@ func TestHTTPRequiresBearerToken(t *testing.T) {
 		t.Error("valid token: got 401")
 	}
 
+	// A tunneled request keeps the public Host header while arriving via
+	// localhost — the SDK's rebinding 403 must stay disabled (the bearer
+	// token is the guard).
+	treq, err := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader(initBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	treq.Host = "tunnel.example.ngrok-free.app"
+	treq.Header.Set("Content-Type", "application/json")
+	treq.Header.Set("Accept", "application/json, text/event-stream")
+	treq.Header.Set("Authorization", "Bearer sekrit")
+	tres, err := http.DefaultClient.Do(treq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = tres.Body.Close()
+	if tres.StatusCode == http.StatusForbidden || tres.StatusCode == http.StatusUnauthorized {
+		t.Errorf("foreign Host with valid token: got %d", tres.StatusCode)
+	}
+
 	// The full client handshake works through the auth middleware.
 	authed := &http.Client{Transport: authRoundTripper{token: "sekrit"}}
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
