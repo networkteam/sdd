@@ -119,7 +119,10 @@ func runEvalOnce(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llm.
 	t.Helper()
 	runner := evalRunner(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	// 240s: the claude-cli transport slows down late in a long sequential
+	// suite — two cases hit the previous 120s cap on calls that complete in
+	// ~90s when run alone.
+	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
 
 	// English default — the language-drift rubric only fires for non-empty locales.
@@ -660,6 +663,7 @@ func mentionsRefMeta(findings []llm.Finding) bool {
 		cat := strings.ToLower(f.Category)
 		if strings.Contains(cat, "ref-kind") ||
 			strings.Contains(cat, "ref-meta") ||
+			strings.Contains(cat, "ref-desc") ||
 			strings.HasPrefix(cat, "desc-") {
 			return true
 		}
