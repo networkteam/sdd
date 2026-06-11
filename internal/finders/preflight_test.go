@@ -477,6 +477,159 @@ func TestMechanical_RefKindValid_NoFindings(t *testing.T) {
 	}
 }
 
+// --- ref-kind applicability matrix checks (plan d-tac-tph AC 4) ---
+
+func TestMechanical_RefKindInapplicable_AddressesTerminalDone_Blocks(t *testing.T) {
+	// The s-prc-2lm leak class, now deterministic: a terminal done cannot be
+	// addressed. The finding must name admissible alternatives.
+	done := entry("20260410-120000-s-ops-don", withContent("created the ticket"))
+	done.Type = model.TypeSignal
+	done.Kind = model.KindDone
+	graph := model.NewGraph([]*model.Entry{done})
+
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Kind:    model.KindFact,
+		Layer:   model.LayerConceptual,
+		Content: "fact body",
+		Refs:    []model.Ref{{ID: done.ID, Kind: model.RefKindAddresses}},
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "ref-kind-inapplicable" && f.Severity == query.SeverityHigh {
+			found = true
+			if !strings.Contains(f.Observation, "builds-on") || !strings.Contains(f.Observation, "grounded-in") {
+				t.Errorf("finding should name admissible alternatives, got %q", f.Observation)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected ref-kind-inapplicable finding for addresses on terminal done, got %+v", got)
+	}
+}
+
+func TestMechanical_RefKindInapplicable_RefinesClosedTarget_Blocks(t *testing.T) {
+	target := entry("20260410-120000-d-tac-pln", withContent("plan body"))
+	target.Type = model.TypeDecision
+	target.Kind = model.KindPlan
+	closer := entry("20260411-120000-s-tac-don", withContent("done"))
+	closer.Type = model.TypeSignal
+	closer.Kind = model.KindDone
+	closer.Closes = []string{target.ID}
+	graph := model.NewGraph([]*model.Entry{target, closer})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindDirective,
+		Layer:   model.LayerTactical,
+		Content: "directive body",
+		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKindRefines}},
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "ref-kind-inapplicable" && f.Severity == query.SeverityHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected ref-kind-inapplicable finding for refines on closed target, got %+v", got)
+	}
+}
+
+func TestMechanical_RefKindInapplicable_RefinesSuperseded_PointsAtHead(t *testing.T) {
+	// A refines stranded on a superseded target usually means the author
+	// wanted the live head — the finding should say so explicitly.
+	old := entry("20260410-120000-d-tac-old", withContent("old plan"))
+	old.Type = model.TypeDecision
+	old.Kind = model.KindPlan
+	head := entry("20260411-120000-d-tac-new", withContent("new plan"))
+	head.Type = model.TypeDecision
+	head.Kind = model.KindPlan
+	head.Supersedes = []string{old.ID}
+	graph := model.NewGraph([]*model.Entry{old, head})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindDirective,
+		Layer:   model.LayerTactical,
+		Content: "directive body",
+		Refs:    []model.Ref{{ID: old.ID, Kind: model.RefKindRefines}},
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "ref-kind-inapplicable" && f.Severity == query.SeverityHigh {
+			found = true
+			if !strings.Contains(f.Observation, head.ID) {
+				t.Errorf("finding should point at the live head %s, got %q", head.ID, f.Observation)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected ref-kind-inapplicable finding for refines on superseded target, got %+v", got)
+	}
+}
+
+func TestMechanical_RefKindApplicable_NoFindings(t *testing.T) {
+	// The applicable cells the LLM kept escalating must never draw a
+	// mechanical finding: builds-on / grounded-in on a terminal done (the
+	// documented tie-break), addresses on an open gap (s-prc-l2d), and
+	// builds-on on an active plan (soft cell, accepted live-graph usage).
+	done := entry("20260410-120000-s-ops-don", withContent("recovery done"))
+	done.Type = model.TypeSignal
+	done.Kind = model.KindDone
+	gap := entry("20260410-130000-s-cpt-gap", withContent("open gap"))
+	gap.Type = model.TypeSignal
+	gap.Kind = model.KindGap
+	plan := entry("20260410-140000-d-tac-pln", withContent("active plan"))
+	plan.Type = model.TypeDecision
+	plan.Kind = model.KindPlan
+	graph := model.NewGraph([]*model.Entry{done, gap, plan})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindDirective,
+		Layer:   model.LayerTactical,
+		Content: "directive body",
+		Refs: []model.Ref{
+			{ID: done.ID, Kind: model.RefKindBuildsOn},
+			{ID: done.ID, Kind: model.RefKindGroundedIn},
+			{ID: gap.ID, Kind: model.RefKindAddresses},
+			{ID: plan.ID, Kind: model.RefKindBuildsOn},
+		},
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	for _, f := range got {
+		if f.Category == "ref-kind-inapplicable" {
+			t.Errorf("unexpected ref-kind-inapplicable finding on applicable kind: %+v", f)
+		}
+	}
+}
+
+func TestMechanical_RefKindApplicability_DanglingTargetSkipped(t *testing.T) {
+	graph := model.NewGraph(nil)
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Kind:    model.KindDirective,
+		Layer:   model.LayerTactical,
+		Content: "directive body",
+		Refs:    []model.Ref{{ID: "20260410-120000-s-cpt-xxx", Kind: model.RefKindRefines}},
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	for _, f := range got {
+		if f.Category == "ref-kind-inapplicable" {
+			t.Errorf("dangling target must be skipped (ref resolution reports it), got %+v", f)
+		}
+	}
+}
+
 // actorEntry is a test helper that builds a kind: actor signal.
 //
 //nolint:unparam // canonical is intentionally parameterized for future test cases
