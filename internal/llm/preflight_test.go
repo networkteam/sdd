@@ -685,6 +685,14 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 			if !strings.Contains(result.Combined(), `"severity"`) {
 				t.Errorf("renderPreflightPrompt(%s) missing severity field in schema", ct)
 			}
+			// Severity is a conclusion, not an opening bid: the schema must
+			// ask for the observation (reasoning) before the severity, so a
+			// finding cannot commit a severity its own prose then retracts.
+			obsIdx := strings.Index(result.Combined(), `"observation"`)
+			sevIdx := strings.Index(result.Combined(), `"severity"`)
+			if obsIdx < 0 || sevIdx < 0 || obsIdx > sevIdx {
+				t.Errorf("renderPreflightPrompt(%s) schema must order observation before severity (obs at %d, sev at %d)", ct, obsIdx, sevIdx)
+			}
 			// PASS/FAIL are the legacy binary verdict — must be gone.
 			if strings.Contains(result.Combined(), "\"PASS\"") || strings.Contains(result.Combined(), "\"FAIL\"") {
 				t.Errorf("renderPreflightPrompt(%s) still contains legacy PASS/FAIL output", ct)
@@ -999,6 +1007,17 @@ func Test_parsePreflightResult(t *testing.T) {
 			input: `{"findings": [{"severity": "HIGH", "category": "t", "observation": "x"}]}`,
 			wantFindings: []Finding{
 				{Severity: SeverityHigh, Category: "t", Observation: "x"},
+			},
+		},
+		{
+			// The reordered output contract: reasoning first, severity as the
+			// conclusion. encoding/json is field-order independent, but the
+			// contract order is pinned here so a parser change can't silently
+			// regress it.
+			name:  "severity last (reordered contract)",
+			input: `{"findings": [{"category": "ref-kind-sharpness", "observation": "the body frames the target as a prerequisite", "severity": "low"}]}`,
+			wantFindings: []Finding{
+				{Severity: SeverityLow, Category: "ref-kind-sharpness", Observation: "the body frames the target as a prerequisite"},
 			},
 		},
 		{
