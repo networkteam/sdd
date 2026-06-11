@@ -51,18 +51,45 @@ func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (*llm.RunRes
 }
 
 // evalRunner builds the production Runner the eval validates against, wrapped to
-// capture raw output. Provider/model come from SDD_EVAL_PROVIDER / SDD_EVAL_MODEL
-// (defaults: claude-cli + sonnet — keyless CLI transport on the reported model).
+// capture raw output. Provider/model come from SDD_EVAL_PROVIDER / SDD_EVAL_MODEL.
+// When ANTHROPIC_API_KEY is set (e.g. via a gitignored .env loaded by devbox
+// env_from), the default provider is the direct Anthropic API — much faster per
+// call than the claude CLI transport, which matters now that pass-rate cases
+// multiply the call count. Without a key it falls back to the keyless claude-cli.
+// Both defaults target the Sonnet class — the model the ref-meta non-determinism
+// was reported on (s-prc-uh3).
 func evalRunner(t *testing.T) *capturingRunner {
 	t.Helper()
-	runner, err := factory.New(model.LLMConfig{
-		Provider: getenvOr("SDD_EVAL_PROVIDER", "claude-cli"),
-		Model:    getenvOr("SDD_EVAL_MODEL", "sonnet"),
-	})
+	provider := getenvOr("SDD_EVAL_PROVIDER", defaultEvalProvider())
+	cfg := model.LLMConfig{
+		Provider: provider,
+		Model:    getenvOr("SDD_EVAL_MODEL", defaultEvalModel(provider)),
+	}
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		cfg.APIKeys = map[string]string{"anthropic": key}
+	}
+	runner, err := factory.New(cfg)
 	if err != nil {
 		t.Fatalf("building eval runner: %v", err)
 	}
 	return &capturingRunner{inner: runner}
+}
+
+func defaultEvalProvider() string {
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		return "anthropic"
+	}
+	return "claude-cli"
+}
+
+// defaultEvalModel maps the eval's Sonnet-class default to each provider's
+// model naming: the claude CLI resolves the "sonnet" alias itself; the
+// Anthropic API needs the full model ID.
+func defaultEvalModel(provider string) string {
+	if provider == "anthropic" {
+		return "claude-sonnet-4-6"
+	}
+	return "sonnet"
 }
 
 func getenvOr(key, def string) string {
