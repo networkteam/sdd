@@ -12,20 +12,50 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// AgentTarget identifies which agent a skill bundle installs for. Claude is
-// the only supported target for MVP; the type exists so the install flow can
-// grow additional agents (Codex, etc.) without structural change.
+// AgentTarget identifies which agent a skill bundle renders and installs for.
+// Each target is a render profile over the one neutral template tree — the
+// value drives {{ if eq .Agent "..." }} conditionals, the install directory,
+// and (eventually) the frontmatter shape.
 type AgentTarget string
 
 const (
-	// AgentClaude installs into Claude Code's skill directories
+	// AgentClaude renders into Claude Code's skill directories
 	// (~/.claude/skills or <repo>/.claude/skills).
 	AgentClaude AgentTarget = "claude"
+
+	// AgentCodex renders into the Agent Skills standard directories
+	// (~/.agents/skills or <repo>/.agents/skills), consumed by Codex and
+	// other agents reading the open Agent Skills format.
+	AgentCodex AgentTarget = "codex"
 )
 
-// DefaultAgentTarget is the target used when nothing is specified. Only one
-// agent is wired at MVP.
+// DefaultAgentTarget is the target used when nothing is specified.
 const DefaultAgentTarget = AgentClaude
+
+// KnownAgentTargets lists every target sdd can render, in the order the
+// `sdd init` multi-select presents them. Adding a target here surfaces it in
+// the selector and in supported_agents validation.
+var KnownAgentTargets = []AgentTarget{AgentClaude, AgentCodex}
+
+// DefaultSupportedAgents is the supported_agents value written on a fresh init
+// when the operator makes no other selection — Claude alone, matching the
+// pre-multi-agent default.
+var DefaultSupportedAgents = []AgentTarget{AgentClaude}
+
+// ParseAgentTarget validates s against KnownAgentTargets, returning the typed
+// value or an error naming the valid set.
+func ParseAgentTarget(s string) (AgentTarget, error) {
+	for _, t := range KnownAgentTargets {
+		if string(t) == s {
+			return t, nil
+		}
+	}
+	names := make([]string, len(KnownAgentTargets))
+	for i, t := range KnownAgentTargets {
+		names[i] = string(t)
+	}
+	return "", fmt.Errorf("unknown agent target %q (known: %s)", s, strings.Join(names, ", "))
+}
 
 // Scope selects where skills are installed for a given agent. User scope is
 // shared across all projects for a given OS user; Project scope lives beside
@@ -322,29 +352,35 @@ func SkillFileBody(content []byte) []byte {
 // SkillInstallDir returns the absolute directory where skills install for a
 // given agent target and scope.
 //
-// Claude skills install at <home>/.claude/skills (user scope) or
-// <repoRoot>/.claude/skills (project scope). The function errors if the
-// required base path is empty for the chosen scope — callers should populate
-// UserHome or RepoRoot before the query reaches the finder.
+// The per-target subpath (".claude/skills" for Claude, ".agents/skills" for
+// Codex) is joined under <home> for user scope or <repoRoot> for project
+// scope. The function errors if the required base path is empty for the chosen
+// scope — callers should populate UserHome or RepoRoot before the query
+// reaches the finder.
 func SkillInstallDir(target AgentTarget, scope Scope, repoRoot, userHome string) (string, error) {
+	var sub []string
 	switch target {
 	case AgentClaude:
-		switch scope {
-		case ScopeUser:
-			if userHome == "" {
-				return "", fmt.Errorf("user home is required for user scope")
-			}
-			return filepath.Join(userHome, ".claude", "skills"), nil
-		case ScopeProject:
-			if repoRoot == "" {
-				return "", fmt.Errorf("repo root is required for project scope")
-			}
-			return filepath.Join(repoRoot, ".claude", "skills"), nil
-		default:
-			return "", fmt.Errorf("unknown scope: %q", scope)
-		}
+		sub = []string{".claude", "skills"}
+	case AgentCodex:
+		sub = []string{".agents", "skills"}
 	default:
 		return "", fmt.Errorf("unsupported agent target: %q", target)
+	}
+
+	switch scope {
+	case ScopeUser:
+		if userHome == "" {
+			return "", fmt.Errorf("user home is required for user scope")
+		}
+		return filepath.Join(append([]string{userHome}, sub...)...), nil
+	case ScopeProject:
+		if repoRoot == "" {
+			return "", fmt.Errorf("repo root is required for project scope")
+		}
+		return filepath.Join(append([]string{repoRoot}, sub...)...), nil
+	default:
+		return "", fmt.Errorf("unknown scope: %q", scope)
 	}
 }
 

@@ -1462,6 +1462,101 @@ func promptScope() (model.Scope, error) {
 	return final.options[final.cursor].value, nil
 }
 
+// agentsPromptModel is a bubbletea model for the supported-agents multi-select
+// shown on fresh init. Options are toggled with space and confirmed with enter;
+// at least one must be selected. Claude starts selected so the keystroke-light
+// path matches the pre-multi-agent default.
+type agentsPromptModel struct {
+	options []agentOption
+	cursor  int
+	done    bool
+}
+
+type agentOption struct {
+	value    model.AgentTarget
+	label    string
+	hint     string
+	selected bool
+}
+
+func newAgentsPromptModel() agentsPromptModel {
+	return agentsPromptModel{
+		options: []agentOption{
+			{value: model.AgentClaude, label: "claude", hint: ".claude/skills/ — Claude Code", selected: true},
+			{value: model.AgentCodex, label: "codex", hint: ".agents/skills/ — Codex (Agent Skills standard)"},
+		},
+	}
+}
+
+func (m agentsPromptModel) Init() tea.Cmd { return nil }
+
+func (m agentsPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "enter":
+			for _, o := range m.options {
+				if o.selected {
+					m.done = true
+					return m, tea.Quit
+				}
+			}
+			// No selection yet — ignore enter until at least one is chosen.
+		case " ", "space":
+			m.options[m.cursor].selected = !m.options[m.cursor].selected
+		case "ctrl+c", "esc":
+			return m, tea.Quit
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.options)-1 {
+				m.cursor++
+			}
+		}
+	}
+	return m, nil
+}
+
+func (m agentsPromptModel) View() tea.View {
+	var b strings.Builder
+	b.WriteString("Which agents should sdd render skills for? (↑/↓ navigate, space toggle, enter confirm)\n")
+	for i, opt := range m.options {
+		cursor := "  "
+		if i == m.cursor {
+			cursor = "› "
+		}
+		check := "[ ]"
+		if opt.selected {
+			check = "[x]"
+		}
+		fmt.Fprintf(&b, "%s%s %s — %s\n", cursor, check, opt.label, opt.hint)
+	}
+	return tea.NewView(b.String())
+}
+
+// promptAgents runs the interactive supported-agents multi-select, returning
+// the chosen targets or an error on cancellation. The caller is responsible for
+// the non-interactive branch — this function unconditionally opens a TTY.
+func promptAgents() ([]model.AgentTarget, error) {
+	m := newAgentsPromptModel()
+	result, err := tea.NewProgram(m).Run()
+	if err != nil {
+		return nil, err
+	}
+	final := result.(agentsPromptModel)
+	if !final.done {
+		return nil, fmt.Errorf("prompt cancelled")
+	}
+	var chosen []model.AgentTarget
+	for _, o := range final.options {
+		if o.selected {
+			chosen = append(chosen, o.value)
+		}
+	}
+	return chosen, nil
+}
+
 // warnIfParticipantMissing emits a one-line stderr nudge when no local
 // participant is configured. Silently noops outside SDD-instrumented
 // repos and on any read error — the surface is informational, not a
@@ -1609,6 +1704,10 @@ func initCmd() *cli.Command {
 				Usage: "Where to install skills: user (~/.claude/skills) or project (.claude/skills)",
 				Value: string(model.DefaultScope),
 			},
+			&cli.StringSliceFlag{
+				Name:  "agents",
+				Usage: "Agent targets to render skills for: claude, codex (prompted interactively on fresh init; defaults to claude)",
+			},
 			&cli.BoolFlag{
 				Name:  "force",
 				Usage: "Overwrite user-modified skill files without prompting",
@@ -1740,13 +1839,34 @@ func initCmd() *cli.Command {
 				participant = prompted
 			}
 
+			// Resolve agent targets: an explicit --agents flag wins; otherwise,
+			// on a fresh tree with a TTY, run the multi-select. On existing
+			// trees we pass nothing and let the handler honor the recorded
+			// supported_agents (or the Claude-only default).
+			var targets []model.AgentTarget
+			if agentsFlag := cmd.StringSlice("agents"); len(agentsFlag) > 0 {
+				for _, a := range agentsFlag {
+					t, err := model.ParseAgentTarget(strings.TrimSpace(a))
+					if err != nil {
+						return fmt.Errorf("invalid --agents: %w", err)
+					}
+					targets = append(targets, t)
+				}
+			} else if !sddExists && isTerminal(os.Stdin) {
+				chosen, err := promptAgents()
+				if err != nil {
+					return fmt.Errorf("prompt: %w", err)
+				}
+				targets = chosen
+			}
+
 			icmd := &command.InitCmd{
 				RepoRoot:      repoRoot,
 				GraphDir:      graphDir,
 				Participant:   participant,
 				Language:      language,
 				BinaryVersion: version,
-				Target:        model.DefaultAgentTarget,
+				Targets:       targets,
 				Scope:         scope,
 				ScopeExplicit: scopeExplicit,
 				UserHome:      userHome,

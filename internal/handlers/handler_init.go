@@ -63,6 +63,15 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		return err
 	}
 
+	// Resolve which agent profiles to render. On a fresh tree this is the
+	// caller's selection (or the Claude-only default), persisted by the
+	// config write below; on an existing tree the recorded supported_agents
+	// wins.
+	effectiveAgents, err := resolveSupportedAgents(sddExisted, configPath, cmd.Targets)
+	if err != nil {
+		return err
+	}
+
 	// Tracks paths we touch so the final git commit covers exactly what
 	// changed. A repeat init that changes nothing yields no commit.
 	var touched []string
@@ -71,7 +80,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		if err := os.MkdirAll(sddDir, 0o755); err != nil {
 			return fmt.Errorf("creating %s: %w", sddDir, err)
 		}
-		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.Config{GraphDir: graphDir, Language: cmd.Language, SkillScope: effectiveScope})), 0o644); err != nil {
+		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.Config{GraphDir: graphDir, Language: cmd.Language, SkillScope: effectiveScope, SupportedAgents: effectiveAgents})), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", configPath, err)
 		}
 		touched = append(touched, configPath)
@@ -229,25 +238,27 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 
 	// Install (or refresh) the embedded skill bundle. Track every written
 	// file for the eventual commit.
-	err = h.InstallSkills(ctx, &command.InstallSkillsCmd{
-		Target:          cmd.Target,
-		Scope:           effectiveScope,
-		RepoRoot:        cmd.RepoRoot,
-		UserHome:        cmd.UserHome,
-		BinaryVersion:   cmd.BinaryVersion,
-		Force:           cmd.Force,
-		PromptOverwrite: cmd.PromptOverwrite,
-		OnInstalled: func(r command.SkillInstallResult) {
-			touched = append(touched, r.Installed...)
-			touched = append(touched, r.Refreshed...)
-			touched = append(touched, r.Overwritten...)
-			if cmd.OnSkillsInstalled != nil {
-				cmd.OnSkillsInstalled(r)
-			}
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("installing skills: %w", err)
+	for _, target := range effectiveAgents {
+		err = h.InstallSkills(ctx, &command.InstallSkillsCmd{
+			Target:          target,
+			Scope:           effectiveScope,
+			RepoRoot:        cmd.RepoRoot,
+			UserHome:        cmd.UserHome,
+			BinaryVersion:   cmd.BinaryVersion,
+			Force:           cmd.Force,
+			PromptOverwrite: cmd.PromptOverwrite,
+			OnInstalled: func(r command.SkillInstallResult) {
+				touched = append(touched, r.Installed...)
+				touched = append(touched, r.Refreshed...)
+				touched = append(touched, r.Overwritten...)
+				if cmd.OnSkillsInstalled != nil {
+					cmd.OnSkillsInstalled(r)
+				}
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("installing skills for %s: %w", target, err)
+		}
 	}
 
 	// Commit anything touched. Skill files installed under the user-global
@@ -319,6 +330,38 @@ func resolveSkillScope(sddExisted bool, configPath string, flagScope model.Scope
 	// Upgrade: config.yaml exists but predates skill_scope. Persist whatever
 	// the operator chose (or the default) so the next run is deterministic.
 	return requested, true, nil
+}
+
+// resolveSupportedAgents picks the agent targets `sdd init` should render.
+//
+//   - Fresh `.sdd/`: the caller-provided targets if any, else
+//     model.DefaultSupportedAgents. Persisted by the fresh-init config write.
+//   - Existing config with supported_agents recorded: the recorded value wins
+//     — the committed project decision is authoritative for every contributor.
+//   - Existing config missing the field (pre-multi-agent upgrade): the
+//     caller-provided targets if any, else the default. Not persisted here;
+//     the value is re-derived each run, matching the prior Claude-only
+//     behavior until the operator records a choice.
+func resolveSupportedAgents(sddExisted bool, configPath string, cmdTargets []model.AgentTarget) ([]model.AgentTarget, error) {
+	if sddExisted {
+		data, readErr := os.ReadFile(configPath)
+		if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+			return nil, fmt.Errorf("reading %s: %w", configPath, readErr)
+		}
+		if len(data) > 0 {
+			cfg, parseErr := model.ParseConfig(data)
+			if parseErr != nil {
+				return nil, fmt.Errorf("parsing %s: %w", configPath, parseErr)
+			}
+			if cfg != nil && len(cfg.SupportedAgents) > 0 {
+				return cfg.SupportedAgents, nil
+			}
+		}
+	}
+	if len(cmdTargets) > 0 {
+		return cmdTargets, nil
+	}
+	return model.DefaultSupportedAgents, nil
 }
 
 // pathExists reports whether path is accessible. A non-existence error is

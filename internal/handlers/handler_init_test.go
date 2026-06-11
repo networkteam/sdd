@@ -32,7 +32,7 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 	err := h.Init(context.Background(), &command.InitCmd{
 		RepoRoot:      tmp,
 		BinaryVersion: "v0.2.0",
-		Target:        model.AgentClaude,
+		Targets:       []model.AgentTarget{model.AgentClaude},
 		Scope:         model.ScopeProject,
 		OnCreated: func(sddDir, graphDir string) {
 			createdCalled = true
@@ -87,6 +87,53 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 		if !strings.Contains(string(data), want) {
 			t.Errorf(".gitignore missing %q, got:\n%s", want, data)
 		}
+	}
+}
+
+// TestInit_RendersMultipleAgents verifies a fresh init with several supported
+// agents renders each into its own scope directory, records the selection in
+// config.yaml, and gives each agent its own profile deviations.
+func TestInit_RendersMultipleAgents(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude, model.AgentCodex},
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, rel := range []string{".claude/skills/sdd/SKILL.md", ".agents/skills/sdd/SKILL.md"} {
+		if _, err := os.Stat(filepath.Join(tmp, rel)); err != nil {
+			t.Errorf("expected rendered skill at %s: %v", rel, err)
+		}
+	}
+
+	cfgData, err := os.ReadFile(filepath.Join(tmp, model.SDDDirName, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read config.yaml: %v", err)
+	}
+	if !strings.Contains(string(cfgData), "supported_agents: [claude, codex]") {
+		t.Errorf("config.yaml missing supported_agents selection:\n%s", cfgData)
+	}
+
+	// The Codex render must carry its own profile's deviations from the
+	// catch-up conditional and the inject helper — not Claude's.
+	codexSkill, err := os.ReadFile(filepath.Join(tmp, ".agents/skills/sdd/SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(codexSkill), "Then invoke the `/sdd-catchup` sub-skill via the Skill tool") {
+		t.Error("Codex render leaked the Claude branch of the catch-up conditional")
+	}
+	if !strings.Contains(string(codexSkill), "Then run the `sdd-catchup` skill") {
+		t.Error("Codex render missing the else branch of the catch-up conditional")
+	}
+	if !strings.Contains(string(codexSkill), "Run `sdd info`") {
+		t.Error("Codex render missing the instructed-injection form")
 	}
 }
 

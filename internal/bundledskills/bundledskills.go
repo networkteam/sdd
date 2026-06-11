@@ -59,7 +59,7 @@ type renderData struct {
 // stamping happens at install time (see model.RenderSkillFile).
 func Load(target model.AgentTarget) (*model.SkillBundle, error) {
 	switch target {
-	case model.AgentClaude:
+	case model.AgentClaude, model.AgentCodex:
 		// supported
 	default:
 		return nil, fmt.Errorf("unsupported agent target: %s", target)

@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -76,6 +77,12 @@ type Config struct {
 	// the repo. Empty means "no recorded preference" — typical of graphs
 	// initialized before the readiness-check work landed.
 	SkillScope Scope `yaml:"skill_scope,omitempty"`
+	// SupportedAgents lists the agent targets `sdd init` renders skills for
+	// (e.g. claude, codex). A project-level committed decision in
+	// .sdd/config.yaml: every contributor renders the same set, and each
+	// agent reads only its own dir. Chosen via multi-select on first run.
+	// Empty means the pre-multi-agent default (Claude alone).
+	SupportedAgents []AgentTarget `yaml:"supported_agents,omitempty"`
 }
 
 // SyncConfig governs background sync awareness: the auto-fetch cooldown and
@@ -268,6 +275,9 @@ func MergeConfig(base, overlay *Config) *Config {
 	if overlay.SkillScope != "" {
 		out.SkillScope = overlay.SkillScope
 	}
+	if len(overlay.SupportedAgents) > 0 {
+		out.SupportedAgents = overlay.SupportedAgents
+	}
 	out.LLM = mergeLLMConfig(base.LLM, overlay.LLM)
 	out.Embedding = mergeEmbeddingConfig(base.Embedding, overlay.Embedding)
 	out.Sync = mergeSyncConfig(base.Sync, overlay.Sync)
@@ -407,6 +417,19 @@ func FormatConfig(cfg Config) string {
 	} else {
 		skillScopeBlock += "# skill_scope: project\n"
 	}
+	supportedAgentsBlock := "# Agent targets `sdd init` renders skills for. Each listed agent gets its\n" +
+		"# own rendered, committed skill dir (claude → .claude/skills/, codex →\n" +
+		"# .agents/skills/). Chosen via multi-select on first run; every contributor\n" +
+		"# on the repo renders the same set.\n"
+	if len(cfg.SupportedAgents) > 0 {
+		names := make([]string, len(cfg.SupportedAgents))
+		for i, a := range cfg.SupportedAgents {
+			names[i] = string(a)
+		}
+		supportedAgentsBlock += "supported_agents: [" + strings.Join(names, ", ") + "]\n"
+	} else {
+		supportedAgentsBlock += "# supported_agents: [claude]\n"
+	}
 	return "# SDD configuration\n" +
 		"# See https://github.com/networkteam/sdd for documentation.\n" +
 		"\n" +
@@ -416,6 +439,8 @@ func FormatConfig(cfg Config) string {
 		languageBlock +
 		"\n" +
 		skillScopeBlock +
+		"\n" +
+		supportedAgentsBlock +
 		"\n" +
 		"# LLM provider settings (defaults shown — override here or in config.local.yaml).\n" +
 		"# llm:\n" +

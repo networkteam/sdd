@@ -113,3 +113,36 @@ func TestLoadRendersClaudeProfile(t *testing.T) {
 		t.Error("cli-reference.md: escaped {{attachments}} did not render to the literal token")
 	}
 }
+
+// TestLoadRendersCodexProfile checks that rendering the Codex profile resolves
+// all template actions and selects the non-Claude branches: the inject helper
+// emits the instructed-run form (not Claude's dynamic-injection token) and the
+// catch-up conditional renders its else branch.
+func TestLoadRendersCodexProfile(t *testing.T) {
+	b, err := bundledskills.Load(model.AgentCodex)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byPath := map[string][]byte{}
+	badMarkers := []string{"{{ inject", "{{inject", "{{ if", "{{if", "{{ template", "{{template", "{{ end", "{{ else"}
+	for _, e := range b.Entries {
+		byPath[e.Skill+"/"+e.RelPath] = e.Content
+		for _, m := range badMarkers {
+			if bytes.Contains(e.Content, []byte(m)) {
+				t.Errorf("%s/%s: unrendered template action %q survived render", e.Skill, e.RelPath, m)
+			}
+		}
+	}
+
+	sddSkill := byPath["sdd/SKILL.md"]
+	if bytes.Contains(sddSkill, []byte("!`sdd info`")) {
+		t.Error("sdd/SKILL.md: Codex render leaked Claude's !`sdd info` injection token")
+	}
+	if !bytes.Contains(sddSkill, []byte("Run `sdd info`")) {
+		t.Error("sdd/SKILL.md: Codex render missing the instructed-injection form")
+	}
+	if !bytes.Contains(sddSkill, []byte("Then run the `sdd-catchup` skill")) {
+		t.Error("sdd/SKILL.md: Codex render missing the else branch of the catch-up conditional")
+	}
+}

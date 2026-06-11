@@ -38,9 +38,11 @@ type InitCmd struct {
 	// to derive the graph's minimum_version (unless it's a dev build).
 	BinaryVersion string
 
-	// Target selects which agent's skills to install. Empty defaults to
-	// model.DefaultAgentTarget (Claude).
-	Target model.AgentTarget
+	// Targets lists the agent profiles to render and install. Empty defaults
+	// to the value resolved from supported_agents in .sdd/config.yaml (or
+	// model.DefaultSupportedAgents on a fresh tree). The handler renders each
+	// listed target into its own scope directory.
+	Targets []model.AgentTarget
 
 	// Scope selects user-global vs project-local skill installation. Empty
 	// defaults to model.DefaultScope (User). When ScopeExplicit is false the

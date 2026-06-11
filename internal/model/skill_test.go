@@ -3,6 +3,7 @@ package model
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 )
 
@@ -203,5 +204,42 @@ func TestRenderedEntryDriftStable(t *testing.T) {
 	installed := ParseSkillFile("/tmp/host.md", rendered)
 	if got := ComputeSkillStatus(host, installed); got != SkillStatusCurrent {
 		t.Errorf("rendered entry should classify Current, got %s", got)
+	}
+}
+
+func TestSkillInstallDir_PerAgentSubpath(t *testing.T) {
+	cases := []struct {
+		target AgentTarget
+		scope  Scope
+		want   string
+	}{
+		{AgentClaude, ScopeProject, filepath.Join("/repo", ".claude", "skills")},
+		{AgentCodex, ScopeProject, filepath.Join("/repo", ".agents", "skills")},
+		{AgentClaude, ScopeUser, filepath.Join("/home", ".claude", "skills")},
+		{AgentCodex, ScopeUser, filepath.Join("/home", ".agents", "skills")},
+	}
+	for _, tc := range cases {
+		got, err := SkillInstallDir(tc.target, tc.scope, "/repo", "/home")
+		if err != nil {
+			t.Fatalf("SkillInstallDir(%s, %s): %v", tc.target, tc.scope, err)
+		}
+		if got != tc.want {
+			t.Errorf("SkillInstallDir(%s, %s) = %q, want %q", tc.target, tc.scope, got, tc.want)
+		}
+	}
+}
+
+func TestParseAgentTarget(t *testing.T) {
+	for _, s := range []string{"claude", "codex"} {
+		got, err := ParseAgentTarget(s)
+		if err != nil {
+			t.Errorf("ParseAgentTarget(%q) unexpected error: %v", s, err)
+		}
+		if string(got) != s {
+			t.Errorf("ParseAgentTarget(%q) = %q, want %q", s, got, s)
+		}
+	}
+	if _, err := ParseAgentTarget("gemini"); err == nil {
+		t.Error(`ParseAgentTarget("gemini") should error on an unknown target`)
 	}
 }
