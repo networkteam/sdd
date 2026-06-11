@@ -17,6 +17,8 @@ Respond with a single JSON object matching this schema — nothing before or aft
 
 **Field order matters: `observation` comes before `severity`.** The observation is your reasoning — work through what you noticed first, and assign the severity only after the observation has reached its conclusion. The severity must match where the observation lands, not where it started. If the observation concludes that the concern does not hold ("withdrawn", "not a finding", "no issue"), emit no finding at all — drop it from the array rather than emitting it with any severity.
 
+All three fields are required on every finding — a finding without a `category` or without a `severity` is unparseable and fails the whole response.
+
 Category is a short hyphenated tag (e.g. `type-mismatch`, `missing-ref`, `plan-coverage-ambiguity`, `ac-unaddressed`). When you have nothing to report, return `{"findings": []}`.
 
 **Quoting inside `observation`.** When you cite an excerpt from the entry or a referenced entry, wrap it in single quotes (`'like this'`) or backticks — never a literal `"`, which terminates the JSON string early and makes the whole response unparseable. Keep observation values on a single logical line (no raw newlines). The `observation` value must be valid JSON string content.
