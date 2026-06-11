@@ -366,12 +366,13 @@ func formatReferencedEntry(graph *model.Graph, e *model.Entry) string {
 }
 
 // refApplicabilityLines renders the matrix verdict for one ref beneath its
-// target's entry block: the admissible kinds for the target class and the
-// chosen kind's cell (plan d-tac-tph AC 5). Applicability is decided by the
-// matrix and enforced by the mechanical check, so these lines settle that
-// question for the validator — its remaining job is kind-vs-body fit among
-// the admissible kinds and desc-vs-body consistency. Kinds outside the
-// capturable set render nothing (the mechanical check rejects them).
+// target's entry block via the ref_applicability template (plan d-tac-tph
+// AC 5): the admissible kinds for the target class and the chosen kind's
+// cell. Go prepares the data; the prose lives in the template alongside the
+// rest of the prompt surface. Kinds outside the capturable set render
+// nothing (the mechanical check rejects them), and a template failure
+// degrades to no lines rather than blocking capture — the templates are
+// embedded, so neither is expected.
 func refApplicabilityLines(graph *model.Graph, ref model.Ref, target *model.Entry) string {
 	class := model.ClassifyRefTarget(target, graph.DerivedStatus(target))
 	cell, ok := model.RefKindApplicability(ref.Kind, class)
@@ -383,23 +384,28 @@ func refApplicabilityLines(graph *model.Graph, ref model.Ref, target *model.Entr
 	for i, k := range kinds {
 		names[i] = string(k)
 	}
-	var sb strings.Builder
-	sb.WriteString("\nAdmissible ref kinds for this target (")
-	sb.WriteString(string(class))
-	sb.WriteString("): ")
-	sb.WriteString(strings.Join(names, ", "))
-	sb.WriteString("\nChosen ref kind: ")
-	sb.WriteString(string(ref.Kind))
-	if cell.Applicable {
-		sb.WriteString(" — applicable: ")
-		sb.WriteString(cell.Note)
-		sb.WriteString(". Applicability is settled mechanically; do not flag it.")
-	} else {
-		sb.WriteString(" — inapplicable: ")
-		sb.WriteString(cell.Note)
-		sb.WriteString(". The mechanical check already blocks this; do not add your own finding for it.")
+	tmpl, err := parsedPreflightTemplates()
+	if err != nil {
+		return ""
 	}
-	return sb.String()
+	var sb strings.Builder
+	err = tmpl.ExecuteTemplate(&sb, "ref_applicability", struct {
+		Class      model.RefTargetClass
+		Admissible string
+		Chosen     model.RefKind
+		Applicable bool
+		Note       string
+	}{
+		Class:      class,
+		Admissible: strings.Join(names, ", "),
+		Chosen:     ref.Kind,
+		Applicable: cell.Applicable,
+		Note:       cell.Note,
+	})
+	if err != nil {
+		return ""
+	}
+	return "\n" + strings.TrimSpace(sb.String())
 }
 
 // derivedStatusForPrompt renders a Status as plain prose for the validator
@@ -428,7 +434,21 @@ func derivedStatusForPrompt(s model.Status) string {
 var (
 	refKindVocabOnce sync.Once
 	refKindVocabText string
+
+	preflightTmplOnce sync.Once
+	preflightTmpl     *template.Template
+	preflightTmplErr  error
 )
+
+// parsedPreflightTemplates parses the embedded template set once and reuses
+// it across renders — all partials (including ref_applicability, executed
+// per ref during context assembly) resolve from the same set.
+func parsedPreflightTemplates() (*template.Template, error) {
+	preflightTmplOnce.Do(func() {
+		preflightTmpl, preflightTmplErr = template.ParseFS(preflightTemplates, "preflight_templates/*.tmpl")
+	})
+	return preflightTmpl, preflightTmplErr
+}
 
 // refKindVocabulary returns the canonical ref-kind vocabulary from the bundled
 // skill reference (references/ref-kinds.md), cached after first read. This is
@@ -463,7 +483,7 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (Request, error
 		return Request{}, fmt.Errorf("no template for check type %s", ct)
 	}
 
-	tmpl, err := template.ParseFS(preflightTemplates, "preflight_templates/*.tmpl")
+	tmpl, err := parsedPreflightTemplates()
 	if err != nil {
 		return Request{}, fmt.Errorf("parsing templates: %w", err)
 	}

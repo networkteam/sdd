@@ -1265,6 +1265,13 @@ Role-status derivation stays in a role-status finder (pure read), conforming to 
 		"Participant fields render grouped by canonical in status output",
 		"Legacy free-text participants reclassify onto actor chains",
 	)
+	// Both plans are conceptual-layer (matching their d-cpt IDs) — the
+	// baseline run proved the validator reads the ID's layer segment: a
+	// tactical Layer field on a d-cpt ID drew a correct id-layer-mismatch
+	// finding (at high, absent, and medium across three runs — the severity
+	// oscillation s-prc-vvd describes, on a true positive).
+	oldPlan.Layer = model.LayerConceptual
+	proposed.Layer = model.LayerConceptual
 	proposed.Supersedes = []string{oldPlan.ID}
 	proposed.Time = time.Date(2026, 4, 23, 19, 56, 49, 0, time.UTC)
 

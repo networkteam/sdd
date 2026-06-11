@@ -1,0 +1,13 @@
+{{/*
+  Per-ref applicability lines, rendered beneath each referenced entry's block
+  in the user prompt (plan d-tac-tph AC 5). Data comes from the Go-declared
+  applicability matrix (model.RefKindApplicability): the admissible-kind set
+  for the target's class and the chosen kind's cell verdict. These lines
+  settle the applicability question for the validator — its remaining job is
+  kind-vs-body fit among the admissible kinds and desc-vs-body consistency
+  (see ref_meta_consistency).
+*/}}
+{{ define "ref_applicability" -}}
+Admissible ref kinds for this target ({{ .Class }}): {{ .Admissible }}
+Chosen ref kind: {{ .Chosen }} — {{ if .Applicable }}applicable: {{ .Note }}. Applicability is settled mechanically; do not flag it.{{ else }}inapplicable: {{ .Note }}. The mechanical check already blocks this; do not add your own finding for it.{{ end }}
+{{- end }}
