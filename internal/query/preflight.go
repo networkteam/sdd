@@ -14,7 +14,7 @@ import (
 type PreflightQuery struct {
 	Entry   *model.Entry
 	Graph   *model.Graph
-	Model   string        // LLM model identifier (e.g. "claude-haiku-4-5-20251001")
+	Model   string        // LLM model identifier (e.g. "claude-sonnet-4-6")
 	Timeout time.Duration // hard timeout for the validator call
 }
 

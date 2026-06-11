@@ -28,6 +28,10 @@ import (
 //     new entry must carry a kind from the closed set, rejecting the legacy
 //     `unknown` sentinel which is reserved for read-side bare-string round-
 //     trip and not authorable.
+//   - ref-kind-inapplicable (d-tac-tph AC 4): a ref kind whose precondition
+//     is violated by the target's kind and derived status, per the
+//     applicability matrix in the model layer. Deterministic — the LLM
+//     advisory no longer scores applicability at all.
 //   - supersede-non-head (d-cpt-rgx): a new entry's supersedes must target the
 //     live head of a chain, not an entry that already has an active successor
 //     (which would create a fork). Settled branches — the existing successor
@@ -43,6 +47,7 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph) []query.Finding
 
 	findings = append(findings, participantCoverageFindings(entry, graph)...)
 	findings = append(findings, refKindFindings(entry)...)
+	findings = append(findings, refKindApplicabilityFindings(entry, graph)...)
 	findings = append(findings, supersedeForkFindings(entry, graph)...)
 
 	if entry.IsActor() {
@@ -80,6 +85,52 @@ func refKindFindings(entry *model.Entry) []query.Finding {
 		}
 	}
 	return findings
+}
+
+// refKindApplicabilityFindings enforces the ref-kind applicability matrix
+// (plan d-tac-tph AC 4): a ref whose kind's precondition is violated by the
+// target's kind and derived status is a deterministic high. This is the
+// lookup the LLM advisory kept getting wrong in both directions — blocking
+// applicable kinds (s-prc-pex, s-prc-lbv, s-prc-2lm) — so it runs in code
+// and the LLM rubric no longer scores applicability at all. Dangling targets
+// are skipped (reported by ref resolution); kinds outside the capturable set
+// are covered by refKindFindings.
+func refKindApplicabilityFindings(entry *model.Entry, graph *model.Graph) []query.Finding {
+	var findings []query.Finding
+	for i, r := range entry.Refs {
+		target, ok := graph.ByID[r.ID]
+		if !ok {
+			continue
+		}
+		status := graph.DerivedStatus(target)
+		class := model.ClassifyRefTarget(target, status)
+		cell, ok := model.RefKindApplicability(r.Kind, class)
+		if !ok || cell.Applicable {
+			continue
+		}
+		obs := fmt.Sprintf("refs[%d] (%s): kind %q does not apply to this target (%s) — %s. Admissible kinds here: %s",
+			i, r.ID, r.Kind, class, cell.Note, refKindNames(model.AdmissibleRefKinds(class)))
+		// A refines ref stranded on a superseded target usually means the
+		// author meant the live head — point there rather than only naming
+		// alternative kinds.
+		if status.Kind == model.StatusSupersededBy {
+			obs += fmt.Sprintf(". The target is superseded by %s — if the body sharpens the live head in place, re-point the ref at it", status.By)
+		}
+		findings = append(findings, query.Finding{
+			Severity:    query.SeverityHigh,
+			Category:    "ref-kind-inapplicable",
+			Observation: obs,
+		})
+	}
+	return findings
+}
+
+func refKindNames(kinds []model.RefKind) string {
+	parts := make([]string, len(kinds))
+	for i, k := range kinds {
+		parts[i] = string(k)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // supersedeForkFindings enforces capture-time fork prevention (d-cpt-rgx): a

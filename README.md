@@ -305,7 +305,7 @@ SDD calls an LLM in two places — summarizing each captured entry (the short te
 # Anthropic API
 llm:
   provider: anthropic
-  model: claude-haiku-4-5-20251001
+  model: claude-sonnet-4-6
   api_keys:
     anthropic: sk-ant-api03-...
   timeout: 5m
@@ -334,7 +334,7 @@ llm:
 # Claude Code CLI (uses your existing Claude Code authentication)
 llm:
   provider: claude-cli
-  model: claude-haiku-4-5
+  model: claude-sonnet-4-6
 ```
 
 Remote providers (`anthropic`, `openai`) get a conservative rate limit applied automatically, biased below tier-1 ceilings so bursty operations like `sdd summarize --all` don't trip 429s. Override with `rate_limit_rps` on higher tiers.

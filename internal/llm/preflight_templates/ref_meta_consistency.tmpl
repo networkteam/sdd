@@ -5,28 +5,24 @@ A ref carries a `kind` — why the pointer exists, chosen from what the entry **
 
 {{ .RefKindVocabulary }}
 
-**Use each referenced entry's `Derived status:` line** to separate the three status-sensitive kinds: `grounded-in` (the target is a basis the source rests on — any status), `builds-on` (the target is **closed** or a finished prior step), `refines` (the target is **active** and the body sharpens its commitments in place — the augmenting pattern). A `builds-on` whose target is active and whose body frames the relationship as "narrowing AC X" or "applying the plan's commitment to scope Y" is the wrong kind — `refines` is correct. A `refines` on a target that is already closed is wrong — `builds-on` is correct.
+**Applicability is not your question.** Each referenced entry carries an `Admissible ref kinds for this target` line and a `Chosen ref kind` verdict, both computed mechanically from the target's kind and derived status. An inapplicable chosen kind is already blocked by a separate mechanical check before your findings are read. Never emit a finding about whether a kind applies, and never recommend a kind outside the listed admissible set.
 
-Two axes of mismatch:
+Two axes remain yours — both read the **body**, which the mechanical check cannot:
 
-- **Kind-vs-body** — whether the chosen kind names the body's framing correctly, or another kind in the vocabulary (read against the target's status where relevant) would name it better.
+- **Kind-vs-body** — among the admissible kinds, does the chosen one name the relationship the body actually asserts, or does the body's own wording indicate a different admissible kind?
 - **Desc-vs-body** — what the desc claims about the relationship vs. what the body actually does with the reference. Skip this axis when no ref carries a `desc`.
 
 ## Calibration
 
-**Applicability gates `high`.** A kind whose *precondition holds* for this target — read against the target's `Derived status:` and kind — is **applicable**. An applicable kind is never a `high` finding: the most it can draw is `low`. `high` is reserved for a kind that is genuinely **inapplicable** (its precondition is violated) or a `desc` the body flatly refutes. When two or more kinds are each applicable for the same ref (e.g. `builds-on` vs `grounded-in` on a terminal `done`), none is wrong — name the sharper one as `low` at most, and **never recommend a kind whose precondition this target violates**. "A sharper kind exists" is never, on its own, a `high` (or even a `medium`) finding.
+- `high` — *Desc contradiction only*: the body affirmatively refutes the relationship the desc claims (e.g. `desc: "extends the predecessor contract"` while the body says "this directive retires that contract"). Cite the ref ID and the contradicting body excerpt so the author can resolve it unambiguously. A kind question is **never** `high`.
 
-- `high` — The chosen kind is inapplicable, or the desc is refuted by the body. Two flavors:
-  - *Inapplicable kind* (precondition violated): the target's status or kind makes the chosen kind impossible, and the precondition admits a different one. Examples: `grounded-in` on a **gap** the body acts on → `addresses` (a gap is something you address, not a basis you reason from). `grounded-in` on a plan the body says it "depends on landing first" → `depends-on` (a prerequisite, not a citation). `refines` on a **closed** target → `builds-on` (refines requires an **active** target). `builds-on` on an **active** target the body sharpens in place → `refines` (check the `Derived status:`). `addresses` on a **terminal `done`** → `builds-on`/`grounded-in` (a done is a completed fact, not a gap/question/insight/commitment, so it cannot be "addressed"). Name only a kind the precondition admits — never recommend one this target also forbids.
-  - *Desc contradiction*: the body affirmatively refutes the relationship the desc claims (e.g. `desc: "extends the predecessor contract"` while the body says "this directive retires that contract").
+- `medium` — Two cases, each requiring quotable evidence:
+  - *Evidence-backed kind mismatch*: the body's own wording indicates a different **admissible** kind — quote the body phrase in your observation (e.g. body says the work is "gated on X landing first" while the ref says `related`; `depends-on` is the admissible kind that phrase names, and the quote is the evidence). No quotable body anchor → this is `low`, not `medium`.
+  - *Genuinely misleading desc divergence* without flat contradiction: a future reader would reasonably read the wrong relationship from the desc alone (e.g. a `desc` naming a different basis than the body argues from). Reserve for real desc misreads.
 
-  Cite the ref ID and the contradicting body excerpt so the author can resolve it unambiguously.
+- `low` — Defensible but sharper, with no body phrase to quote: the chosen kind reads fine, yet another admissible kind might name the body slightly more precisely (e.g. `builds-on` vs `grounded-in` on a terminal `done` — a documented author's-call tie-break, never worth more than `low`). Also mild desc focal-length differences. The augmenting pattern (a directive that `refines` an active plan it sharpens in place) is correct, not a finding.
 
-- `medium` — A genuinely misleading `desc` divergence without flat contradiction: a future reader would reasonably read the wrong relationship from the desc alone (e.g. a `desc` naming a different basis than the body argues from). Reserve for real desc misreads. A *kind* question is never `medium` — an applicable kind is `low` (sharper exists) and an inapplicable kind is `high`.
+- No finding — the kind and desc read correctly against the body, or no ref carries a `desc` and every kind reads correctly.
 
-- `low` — Defensible but sharper: the chosen kind is **applicable** and not wrong, yet a different (also-applicable) kind would name the body more precisely (e.g. `related` on a ref the body uses as a functional prerequisite — `depends-on` is sharper but `related` is not wrong; or `builds-on` vs `grounded-in` on a terminal `done`). Also mild desc focal-length differences. Per the selection-and-calibration directive (d-prc-2is) and its high-tier generalization (d-prc-v0h), a defensible choice is `low`, never `medium` or `high`. The augmenting pattern (a directive that `refines` an active plan it sharpens in place) is correct, not a finding.
-
-- No finding — the kind and desc read correctly against the body (and the target's status), or no ref carries a `desc` and every kind reads correctly.
-
-The body is the source of truth; the kind is the structural commitment downstream consumers (heat ranking, render expansion) key on, so getting the kind right matters more than the prose-level desc. `related` is the floor — surface a sharper kind only as `low` unless a floor use is flatly wrong.
+The body is the source of truth; the kind is the structural commitment downstream consumers (heat ranking, render expansion) key on, so getting the kind right matters more than the prose-level desc. `related` is the floor — flag it only when the body itself names a sharper admissible relationship (then quote it, `medium`) or reads as a plain mistagging of a desc-stated relationship.
 {{ end }}

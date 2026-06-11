@@ -21,7 +21,11 @@ const (
 	DefaultLLMProvider = "claude-cli"
 
 	// DefaultLLMModel is the claude model used when none is configured.
-	DefaultLLMModel = "claude-haiku-4-5-20251001"
+	// Sonnet-class, matching the model the pre-flight calibration eval
+	// measures — pre-flight is the highest-stakes LLM call, and a blocking
+	// validator should not run on a cheaper tier than it was calibrated
+	// against (d-tac-b30).
+	DefaultLLMModel = "claude-sonnet-4-6"
 
 	// DefaultLLMConcurrency is the default worker count for concurrent
 	// LLM calls (e.g. sdd summarize --all).

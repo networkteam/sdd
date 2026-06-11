@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,18 +51,45 @@ func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (*llm.RunRes
 }
 
 // evalRunner builds the production Runner the eval validates against, wrapped to
-// capture raw output. Provider/model come from SDD_EVAL_PROVIDER / SDD_EVAL_MODEL
-// (defaults: claude-cli + sonnet — keyless CLI transport on the reported model).
+// capture raw output. Provider/model come from SDD_EVAL_PROVIDER / SDD_EVAL_MODEL.
+// When ANTHROPIC_API_KEY is set (e.g. via a gitignored .env loaded by devbox
+// env_from), the default provider is the direct Anthropic API — much faster per
+// call than the claude CLI transport, which matters now that pass-rate cases
+// multiply the call count. Without a key it falls back to the keyless claude-cli.
+// Both defaults target the Sonnet class — the model the ref-meta non-determinism
+// was reported on (s-prc-uh3).
 func evalRunner(t *testing.T) *capturingRunner {
 	t.Helper()
-	runner, err := factory.New(model.LLMConfig{
-		Provider: getenvOr("SDD_EVAL_PROVIDER", "claude-cli"),
-		Model:    getenvOr("SDD_EVAL_MODEL", "sonnet"),
-	})
+	provider := getenvOr("SDD_EVAL_PROVIDER", defaultEvalProvider())
+	cfg := model.LLMConfig{
+		Provider: provider,
+		Model:    getenvOr("SDD_EVAL_MODEL", defaultEvalModel(provider)),
+	}
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		cfg.APIKeys = map[string]string{"anthropic": key}
+	}
+	runner, err := factory.New(cfg)
 	if err != nil {
 		t.Fatalf("building eval runner: %v", err)
 	}
 	return &capturingRunner{inner: runner}
+}
+
+func defaultEvalProvider() string {
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		return "anthropic"
+	}
+	return "claude-cli"
+}
+
+// defaultEvalModel maps the eval's Sonnet-class default to each provider's
+// model naming: the claude CLI resolves the "sonnet" alias itself; the
+// Anthropic API needs the full model ID.
+func defaultEvalModel(provider string) string {
+	if provider == "anthropic" {
+		return "claude-sonnet-4-6"
+	}
+	return "sonnet"
 }
 
 func getenvOr(key, def string) string {
@@ -76,17 +104,120 @@ func getenvOr(key, def string) string {
 // failure.
 func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llm.PreflightResult, string) {
 	t.Helper()
+	result, raw, err := runEvalOnce(t, graph, proposed)
+	if err != nil {
+		t.Fatalf("Preflight error (raw output: %q): %v", raw, err)
+	}
+	return result, raw
+}
+
+// runEvalOnce is the non-fatal variant of runEval for pass-rate cases: an
+// infrastructure error (runner failure, malformed JSON) is returned instead of
+// aborting the test, so a single flaky response counts as a failed run rather
+// than killing the whole measurement (s-prc-vvd's run 5 was exactly that).
+func runEvalOnce(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llm.PreflightResult, string, error) {
+	t.Helper()
 	runner := evalRunner(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	// 240s: the claude-cli transport slows down late in a long sequential
+	// suite — two cases hit the previous 120s cap on calls that complete in
+	// ~90s when run alone.
+	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
 
 	// English default — the language-drift rubric only fires for non-empty locales.
 	result, err := llm.Preflight(ctx, runner, proposed, graph, "")
-	if err != nil {
-		t.Fatalf("Preflight error (raw output: %q): %v", runner.lastText, err)
+	return result, runner.lastText, err
+}
+
+// --- N-run pass-rate support (plan d-tac-tph, AC 2) ---
+
+// passRate is a per-case pass-rate requirement: at least MinPasses of Runs
+// must satisfy the case's check. Single-shot assertions can't see flakiness;
+// running each pinned case N times turns the validator's non-determinism into
+// a measured number. Blocking-tier cases (a spurious high blocks capture and
+// trains users to bypass the validator) pin stricter rates than advisory-tier
+// ones (a spurious medium costs a read-and-respond cycle).
+type passRate struct {
+	Runs      int
+	MinPasses int
+}
+
+var (
+	blockingTier = passRate{Runs: 3, MinPasses: 3}
+	advisoryTier = passRate{Runs: 3, MinPasses: 2}
+)
+
+// withRunsOverride applies SDD_EVAL_RUNS: when set, it replaces Runs and
+// rescales MinPasses to keep the case's required ratio (rounding up), so
+// `SDD_EVAL_RUNS=10` measures the same bar over a larger sample.
+func (p passRate) withRunsOverride() passRate {
+	v := os.Getenv("SDD_EVAL_RUNS")
+	if v == "" {
+		return p
 	}
-	return result, runner.lastText
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return p
+	}
+	return passRate{Runs: n, MinPasses: (p.MinPasses*n + p.Runs - 1) / p.Runs}
+}
+
+// runEvalPassRate runs the real pre-flight pipeline Runs times and requires at
+// least MinPasses runs where check returns nil. Infrastructure errors count as
+// failed runs (logged), not aborts.
+func runEvalPassRate(t *testing.T, graph *model.Graph, proposed *model.Entry, rate passRate, check func(*llm.PreflightResult) error) {
+	t.Helper()
+	rate = rate.withRunsOverride()
+	passes := 0
+	for i := 1; i <= rate.Runs; i++ {
+		result, raw, err := runEvalOnce(t, graph, proposed)
+		if err != nil {
+			t.Logf("run %d/%d FAIL (infrastructure): %v\nRaw output:\n%s", i, rate.Runs, err, raw)
+			continue
+		}
+		if checkErr := check(result); checkErr != nil {
+			t.Logf("run %d/%d FAIL: %v\nFindings: %+v\nRaw output:\n%s", i, rate.Runs, checkErr, result.Findings, raw)
+			continue
+		}
+		passes++
+		t.Logf("run %d/%d pass. Findings: %+v", i, rate.Runs, result.Findings)
+	}
+	if passes < rate.MinPasses {
+		t.Errorf("pass rate %d/%d below required %d/%d", passes, rate.Runs, rate.MinPasses, rate.Runs)
+	} else {
+		t.Logf("pass rate %d/%d (required %d/%d)", passes, rate.Runs, rate.MinPasses, rate.Runs)
+	}
+}
+
+// noHighRefMeta fails when a high-severity ref-meta finding fired — the
+// blocking-tier leak the applicable-never-high rule (d-prc-v0h) forbids.
+func noHighRefMeta(result *llm.PreflightResult) error {
+	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+		return fmt.Errorf("high ref-meta finding fired on an applicable kind")
+	}
+	return nil
+}
+
+// noMediumOrHighRefMeta fails when any ref-meta finding above low fired — the
+// advisory-precision bar: a defensible kind with no body support for a
+// different admissible kind stays at low.
+func noMediumOrHighRefMeta(result *llm.PreflightResult) error {
+	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+		return fmt.Errorf("high ref-meta finding fired on a defensible kind")
+	}
+	if hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsRefMetaPredicate) {
+		return fmt.Errorf("medium ref-meta finding fired on a defensible kind without body evidence")
+	}
+	return nil
+}
+
+// noBlocking fails when any high finding fired, regardless of category.
+func noBlocking(result *llm.PreflightResult) error {
+	if result.HasBlocking() {
+		return fmt.Errorf("blocking high finding fired")
+	}
+	return nil
 }
 
 // planWithACs returns a plan decision whose description embeds an AC section.
@@ -532,6 +663,7 @@ func mentionsRefMeta(findings []llm.Finding) bool {
 		cat := strings.ToLower(f.Category)
 		if strings.Contains(cat, "ref-kind") ||
 			strings.Contains(cat, "ref-meta") ||
+			strings.Contains(cat, "ref-desc") ||
 			strings.HasPrefix(cat, "desc-") {
 			return true
 		}
@@ -622,10 +754,15 @@ func TestPreflightEval_RefMeta_DescContradicts_High(t *testing.T) {
 	}
 }
 
-// TestPreflightEval_RefMeta_WrongKind_High exercises the wrong-kind branch
-// of the high-severity rubric: the ref's kind misrepresents the relationship
-// the body uses; another kind in the closed set names it correctly.
-func TestPreflightEval_RefMeta_WrongKind_High(t *testing.T) {
+// TestPreflightEval_RefMeta_WrongKind_EvidenceMedium exercises the
+// evidence-backed kind-mismatch branch: the ref's kind misrepresents the
+// relationship and the body itself supplies the quotable evidence ("This
+// addresses the temporal-blur gap"). grounded-in on an open gap is
+// *applicable* (a gap can be a basis), so this is no longer a high — the
+// matrix reserves high for precondition violations, which are mechanical.
+// The validator must still catch the mismatch at medium with the body
+// quote, and must not block.
+func TestPreflightEval_RefMeta_WrongKind_EvidenceMedium(t *testing.T) {
 	gap := &model.Entry{
 		ID:      "20260505-100000-s-cpt-blur",
 		Type:    model.TypeSignal,
@@ -657,10 +794,14 @@ func TestPreflightEval_RefMeta_WrongKind_High(t *testing.T) {
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	if !hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
-		t.Errorf("Expected a high finding mentioning the wrong kind (grounds on a gap signal), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+		t.Errorf("Expected no high (kind questions are never high — applicability is mechanical), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	}
+	if !hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsRefMetaPredicate) &&
+		!hasFindingAtSeverity(result.Findings, llm.SeverityLow, mentionsRefMetaPredicate) {
+		t.Errorf("Expected a medium (evidence-backed) or low ref-meta finding for the kind mismatch, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
-		t.Logf("Correctly flagged wrong kind as high. Findings: %+v", result.Findings)
+		t.Logf("Caught the kind mismatch without blocking. Findings: %+v", result.Findings)
 	}
 }
 
@@ -769,10 +910,16 @@ func TestPreflightEval_RefMeta_RefinesActivePlan_NoFinding(t *testing.T) {
 	}
 }
 
-// Status-sensitive wrong kind: the target is ACTIVE and the body sharpens its
-// commitments in place — that is `refines`, not `builds-on`. The validator must
-// use the target's Derived status (now threaded into the prompt) to catch this.
-func TestPreflightEval_RefMeta_BuildsOnActiveSharpened_High(t *testing.T) {
+// Status-sensitive kind mismatch with quotable evidence: the target is ACTIVE
+// and the body says outright that it "sharpens the plan's commitment in
+// place" — the augmenting pattern, which is `refines`. builds-on on a live
+// decision is *applicable* (the forward next-step reading exists, and the
+// live graph carries accepted builds-on refs to active targets), so this is
+// not a high — it is the textbook evidence-backed medium: the body supplies
+// the quote that names the other admissible kind. Recalibrated from the
+// earlier high expectation when applicability moved into the mechanical
+// matrix (d-tac-tph AC 6).
+func TestPreflightEval_RefMeta_BuildsOnActiveSharpened_EvidenceMedium(t *testing.T) {
 	plan := planWithACs("20260531-164326-d-tac-pln",
 		"Implement the ref-kind vocabulary redefinition across model, pre-flight, and skill.",
 		"The vocabulary is the eight principle-based kinds",
@@ -786,8 +933,12 @@ func TestPreflightEval_RefMeta_BuildsOnActiveSharpened_High(t *testing.T) {
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	if !hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
-		t.Errorf("Expected a high finding — builds-on on an active target sharpened in place should be refines. Got: %+v\nRaw:\n%s", result.Findings, raw)
+	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+		t.Errorf("Expected no high (kind questions are never high — applicability is mechanical), got: %+v\nRaw:\n%s", result.Findings, raw)
+	}
+	if !hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsRefMetaPredicate) &&
+		!hasFindingAtSeverity(result.Findings, llm.SeverityLow, mentionsRefMetaPredicate) {
+		t.Errorf("Expected a medium (evidence-backed) or low ref-meta finding — the body quotes itself sharpening in place. Got: %+v\nRaw:\n%s", result.Findings, raw)
 	}
 }
 
@@ -877,4 +1028,256 @@ func TestPreflightEval_RefMeta_BuildsOnTerminalDoneFollowup_NotHigh(t *testing.T
 	} else {
 		t.Logf("Correctly did not block builds-on on a terminal done. Findings: %+v", result.Findings)
 	}
+}
+
+// --- Pinned leak cases (plan d-tac-tph, AC 1) ---
+//
+// Each case below reconstructs a captured live leak from its attached verbatim
+// transcript or findings list. They are the regression surface for the
+// reliability rework: they must reproduce the reported failures before the fix
+// (some intermittently — that is what the pass rate measures) and pass at
+// their tier's rate after it.
+
+// Pinned from s-prc-l2d (verbatim transcript attached there): an `addresses`
+// ref to an OPEN gap drew a `[high]` ref-kind-inapplicable finding whose own
+// prose concluded "this finding is withdrawn. No issue." yet still counted
+// toward the blocking verdict (run 1), then flipped to a `[low]` recommending
+// the opposite kind (`grounded-in`) on retry with the ref unchanged (run 2).
+// `addresses` on an open gap is the textbook applicable case; the ceiling is
+// low. Blocking tier: a spurious high here blocks capture.
+func TestPreflightEval_RefMeta_AddressesOpenGap_NotHigh(t *testing.T) {
+	gap := &model.Entry{
+		ID:      "20260525-184931-s-cpt-prt",
+		Type:    model.TypeSignal,
+		Kind:    model.KindGap,
+		Layer:   model.LayerConceptual,
+		Content: "The graph access surface and skill content are bound to one agent runtime's bundle format and cannot run in other agent environments. Graph operations would need environment-specific adapters; skill content would need conversion to prompt templates. Instruction delivery to foreign runtimes is unproven — dynamic graph data injection remained hard-coded in the initial PoC.",
+		Time:    time.Date(2026, 5, 25, 18, 49, 31, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{gap})
+
+	proposed := &model.Entry{
+		Type:       model.TypeDecision,
+		Layer:      model.LayerConceptual,
+		Kind:       model.KindDirective,
+		Confidence: "low",
+		Refs: []model.Ref{
+			{ID: gap.ID, Kind: model.RefKindAddresses, Desc: "tests instruction delivery to foreign runtimes — the skill-content half of the gap"},
+		},
+		Content: "Run a workflow-agent experiment: an external generalist agent consults a graph-resident specialist that delivers per-mode instructions in-band through tool responses, instead of shipping skill bundles per runtime. Whether mode instructions can be delivered to a foreign runtime and followed reliably is exactly what the skill-content half of the portability gap (s-cpt-prt) predicts and this experiment directly tests. The experiment concludes when it returns a verdict on instruction compliance and coherence; that verdict decides the follow-up shape.",
+		Time:    time.Date(2026, 6, 9, 23, 46, 56, 0, time.UTC),
+	}
+
+	runEvalPassRate(t, graph, proposed, blockingTier, noHighRefMeta)
+}
+
+// Pinned from s-prc-2lm (redacted verbatim transcript attached there): a
+// `builds-on` ref to a terminal done whose relationship the body frames with
+// provenance language ("the answer came in response to the created ticket").
+// The single-run `[high]` performed the tie-break analysis correctly in its
+// own prose — naming `grounded-in` and `surfaces` as applicable — while
+// categorizing the defensible `builds-on` as inapplicable: internally coherent
+// and confidently wrong, with no retraction to detect. On a terminal done only
+// `addresses` is inapplicable; builds-on vs grounded-in is the documented
+// defensible choice. Complements BuildsOnTerminalDoneFollowup_NotHigh above,
+// whose clean next-step framing does not reproduce this leak — the
+// provenance-leaning body is what tempted the escalation.
+func TestPreflightEval_RefMeta_BuildsOnTerminalDoneProvenance_NotHigh(t *testing.T) {
+	done := &model.Entry{
+		ID:      "20260610-184443-s-ops-tkt",
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
+		Layer:   model.LayerOperational,
+		Content: "Created vendor support ticket #4711 asking the open cross-organization identification questions. The question stays open until the vendor's answer arrives.",
+		Time:    time.Date(2026, 6, 10, 18, 44, 43, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{done})
+
+	proposed := &model.Entry{
+		Type:       model.TypeSignal,
+		Kind:       model.KindFact,
+		Layer:      model.LayerConceptual,
+		Confidence: "high",
+		Refs: []model.Ref{
+			{ID: done.ID, Kind: model.RefKindBuildsOn, Desc: "takes up the point the ticket step left open"},
+		},
+		Content: "The vendor answered the integration questions (ticket #4711). Key statements: matching identifiers are defined per organization and exist only in the central database; a second identifier is shared across all organizations, so cross-organization identification is possible by combining the two. The answer came in response to the created ticket (s-ops-tkt); open remains whether the mapping can be delivered over the interfaces.",
+		Time:    time.Date(2026, 6, 10, 22, 0, 0, 0, time.UTC),
+	}
+
+	runEvalPassRate(t, graph, proposed, blockingTier, noHighRefMeta)
+}
+
+// --- Pinned advisory-precision cases (plan d-tac-tph, AC 1; from s-tac-4h7) ---
+//
+// Each reconstructs a verbatim `[medium]` ref-kind finding from s-tac-4h7's
+// attachment where the chosen kind was defensible per the vocabulary and the
+// suggested alternative was weaker or wrong. Under the evidence-gated
+// calibration, a kind question with no body support for a different admissible
+// kind stays at low — these must not fire medium or high.
+
+// s-tac-4h7 example 1: `builds-on` to a CLOSED gap in the same lineage — the
+// next observation after the prior gap's closure. The validator suggested
+// grounded-in/related at medium; builds-on on a closed target is the
+// vocabulary's own definition of the kind.
+func TestPreflightEval_RefMeta_BuildsOnClosedSameLineage_NoMedium(t *testing.T) {
+	priorGap := &model.Entry{
+		ID:      "20260411-120000-s-prc-tha",
+		Type:    model.TypeSignal,
+		Kind:    model.KindGap,
+		Layer:   model.LayerProcess,
+		Content: "Worktree sessions lose their SDD config and search index because gitignored local state does not carry over into the new directory.",
+		Time:    time.Date(2026, 4, 11, 12, 0, 0, 0, time.UTC),
+	}
+	closer := &model.Entry{
+		ID:      "20260411-233406-s-tac-p5x",
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
+		Layer:   model.LayerTactical,
+		Closes:  []string{priorGap.ID},
+		Content: "Shipped the worktree include recipe: gitignored local state listed in .worktreeinclude carries into new worktrees. Commit 4f2c1aa.",
+		Time:    time.Date(2026, 4, 11, 23, 34, 6, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{priorGap, closer})
+
+	proposed := &model.Entry{
+		Type:       model.TypeSignal,
+		Kind:       model.KindGap,
+		Layer:      model.LayerProcess,
+		Confidence: "medium",
+		Refs: []model.Ref{
+			{ID: priorGap.ID, Kind: model.RefKindBuildsOn, Desc: "next observation in the same worktree-session lineage"},
+		},
+		Content: "A new friction point in the worktree session workflow, discovered while running the shipped include recipe: the background sync can rewrite history between conclude steps, so the merge-back races against the cooldown. This is the next observation in the lineage the local-state gap (s-prc-tha) opened — that gap was closed by the recipe work, and this discovery emerged from operating it.",
+		Time:    time.Date(2026, 6, 1, 20, 0, 0, 0, time.UTC),
+	}
+
+	runEvalPassRate(t, graph, proposed, advisoryTier, noMediumOrHighRefMeta)
+}
+
+// s-tac-4h7 example 3: `related` where the validator suggested refines (the
+// lifecycle-split augmenting pattern does not apply — the target is guidance
+// this entry will trigger a future update to, not sharpen in place) and
+// depends-on (backwards — the target is not a prerequisite). The floor is the
+// honest choice.
+func TestPreflightEval_RefMeta_RelatedFutureUpdate_NoMedium(t *testing.T) {
+	guidance := &model.Entry{
+		ID:      "20260420-100000-s-prc-jpx",
+		Type:    model.TypeSignal,
+		Kind:    model.KindInsight,
+		Layer:   model.LayerProcess,
+		Content: "Conflict-resolution guidance for concurrent graph work: rebase local commits onto the remote head before concluding, so entry files merge cleanly.",
+		Time:    time.Date(2026, 4, 20, 10, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{guidance})
+
+	proposed := &model.Entry{
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindDirective,
+		Refs: []model.Ref{
+			{ID: guidance.ID, Kind: model.RefKindRelated, Desc: "sibling guidance that will need its own update once this lands"},
+		},
+		Content: "Switch graph sync to merge-based pulls — a rebase rewrites shared history and orphans concurrent branches, so the sync command pulls with merge only. Implementing this will make the rebase-shaped conflict guidance (s-prc-jpx) outdated; updating that guidance to a merge-shaped equivalent is its own follow-up, not part of this directive. The guidance is a sibling concern this directive accounts for but does not modify.",
+		Time:    time.Date(2026, 6, 1, 21, 0, 0, 0, time.UTC),
+	}
+
+	runEvalPassRate(t, graph, proposed, advisoryTier, noMediumOrHighRefMeta)
+}
+
+// s-tac-4h7 example 4: `builds-on` to a closed directive for a deliberate
+// PARTIAL reversal. The validator suggested "kind: supersedes" — which is not
+// a ref kind at all (supersession is a status-effect field, never a ref), and
+// a full supersede would overstate a partial reversal. The chosen kind is
+// defensible: the conditions enabling the reversal were built on the prior
+// decision's mechanics.
+func TestPreflightEval_RefMeta_BuildsOnPartialReversal_NoMedium(t *testing.T) {
+	prior := &model.Entry{
+		ID:      "20260415-100000-d-tac-ar2",
+		Type:    model.TypeDecision,
+		Kind:    model.KindDirective,
+		Layer:   model.LayerTactical,
+		Content: "Keep worktree creation out of the CLI: sdd wip offers --branch only, and worktree setup stays a manual git operation. Rationale: the CLI should not own directory lifecycle.",
+		Time:    time.Date(2026, 4, 15, 10, 0, 0, 0, time.UTC),
+	}
+	closer := &model.Entry{
+		ID:      "20260420-110000-s-tac-arc",
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
+		Layer:   model.LayerTactical,
+		Closes:  []string{prior.ID},
+		Content: "Shipped sdd wip --branch; worktrees documented as manual git operations. Commit 9c01dd2.",
+		Time:    time.Date(2026, 4, 20, 11, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{prior, closer})
+
+	proposed := &model.Entry{
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Kind:  model.KindDirective,
+		Refs: []model.Ref{
+			{ID: prior.ID, Kind: model.RefKindBuildsOn, Desc: "reverses one part of it; built on its branch mechanics"},
+		},
+		Content: "Reintroduce worktree support through the harness recipe (marker-on-base, include-file carry-over) while keeping plain --branch in the CLI unchanged. This deliberately reverses only the worktrees-stay-manual part of the prior stance (d-tac-ar2) — the branch mechanics that decision shipped are exactly what the recipe builds on, so the rest of it stands.",
+		Time:    time.Date(2026, 6, 1, 22, 0, 0, 0, time.UTC),
+	}
+
+	runEvalPassRate(t, graph, proposed, advisoryTier, noMediumOrHighRefMeta)
+}
+
+// --- Pinned supersede-oscillation case (plan d-tac-tph, AC 8; from s-prc-vvd) ---
+
+// Pinned from s-prc-vvd (per-run findings table attached there): a superseding
+// plan whose substance was unchanged across five runs drew two different sets
+// of `[high]` findings (runs 3 and 4), each a misread — a clause claimed
+// missing that the AC text contains verbatim ("AND `refs` includes that head
+// actor's entry ID"), and a contract-violation on framing identical to the
+// superseded plan, which had passed at its own capture. Reconstructed analog:
+// a superseding plan with acknowledged AC growth, the capture-time AND clause
+// kept verbatim, and finder-layer framing inherited from its predecessor under
+// an active decomposition contract. Expectation: no high finding of any
+// category. The post-fix N-run verdict on this case decides s-prc-vvd's
+// disposition (plan d-tac-tph AC 8).
+func TestPreflightEval_Supersedes_PlanRestructure_NoHigh(t *testing.T) {
+	contract := &model.Entry{
+		ID:      "20260413-142536-d-cpt-cqr",
+		Type:    model.TypeDecision,
+		Kind:    model.KindContract,
+		Layer:   model.LayerConceptual,
+		Content: "Functionality decomposes across command, query, handler, finder, and model packages. Side effects live only in handlers; finders are pure reads; pure computation pushes down into the model layer. Plans that add functionality name where each piece lands in this decomposition.",
+		Time:    time.Date(2026, 4, 13, 14, 25, 36, 0, time.UTC),
+	}
+	oldPlan := planWithACs("20260422-100000-d-cpt-thg",
+		`Implement actor identity and role entries: kind: actor signals carry a canonical participant name, kind: role decisions bind to an actor chain. Role status derives from the actor chain rather than direct closure — derivation is a query concern and lands in a finder (pure read), conforming to the decomposition contract.
+
+The legacy free-text participant convention is retired through the reclassification step in the final AC.`,
+		"Actor capture validates the canonical against existing chains (write-once)",
+		"Role capture validates the actor field against the current head canonical AND `refs` includes that head actor's entry ID",
+		"Role status derives from the bound actor chain in a role-status finder",
+		"Participant fields render grouped by canonical in status output",
+	)
+	graph := model.NewGraph([]*model.Entry{contract, oldPlan})
+
+	proposed := planWithACs("20260423-195649-d-cpt-d34",
+		`Restructure the actor/role plan with three material additions: a role-status cascade across full chain history, an orphan-role lint check, and a Participants status block. The AC set grows from four to six — the cascade and lint checks are new, the remaining ACs carry over with one refinement: capture-time validation still binds to the current head (AND-clause retained verbatim), while status derivation now walks the full chain history — capture-time and derivation-time are distinct requirements and both are kept.
+
+Role-status derivation stays in a role-status finder (pure read), conforming to the decomposition contract — derivation is a query concern. The legacy free-text participant convention is retired through the reclassification step in the final AC.`,
+		"Actor capture validates the canonical against existing chains (write-once)",
+		"Role capture validates the actor field against the current head canonical AND `refs` includes that head actor's entry ID",
+		"Role status derives from full chain history (cascade) in a role-status finder",
+		"Orphan roles (no matching actor chain) surface in sdd lint",
+		"Participant fields render grouped by canonical in status output",
+		"Legacy free-text participants reclassify onto actor chains",
+	)
+	// Both plans are conceptual-layer (matching their d-cpt IDs) — the
+	// baseline run proved the validator reads the ID's layer segment: a
+	// tactical Layer field on a d-cpt ID drew a correct id-layer-mismatch
+	// finding (at high, absent, and medium across three runs — the severity
+	// oscillation s-prc-vvd describes, on a true positive).
+	oldPlan.Layer = model.LayerConceptual
+	proposed.Layer = model.LayerConceptual
+	proposed.Supersedes = []string{oldPlan.ID}
+	proposed.Time = time.Date(2026, 4, 23, 19, 56, 49, 0, time.UTC)
+
+	runEvalPassRate(t, graph, proposed, blockingTier, noBlocking)
 }

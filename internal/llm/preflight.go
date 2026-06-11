@@ -281,7 +281,7 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 			if !ok {
 				continue
 			}
-			parts = append(parts, formatReferencedEntry(graph, e))
+			parts = append(parts, formatReferencedEntry(graph, e)+refApplicabilityLines(graph, ref, e))
 			if rr := graph.ResolveRef(ref.ID); rr.IsStale() {
 				if head, ok := graph.ByID[rr.Head()]; ok {
 					parts = append(parts, "(live head of "+ref.ID+")\n"+formatReferencedEntry(graph, head))
@@ -365,6 +365,49 @@ func formatReferencedEntry(graph *model.Graph, e *model.Entry) string {
 	return FormatEntryForPrompt(e) + "\nDerived status: " + derivedStatusForPrompt(graph.DerivedStatus(e))
 }
 
+// refApplicabilityLines renders the matrix verdict for one ref beneath its
+// target's entry block via the ref_applicability template (plan d-tac-tph
+// AC 5): the admissible kinds for the target class and the chosen kind's
+// cell. Go prepares the data; the prose lives in the template alongside the
+// rest of the prompt surface. Kinds outside the capturable set render
+// nothing (the mechanical check rejects them), and a template failure
+// degrades to no lines rather than blocking capture — the templates are
+// embedded, so neither is expected.
+func refApplicabilityLines(graph *model.Graph, ref model.Ref, target *model.Entry) string {
+	class := model.ClassifyRefTarget(target, graph.DerivedStatus(target))
+	cell, ok := model.RefKindApplicability(ref.Kind, class)
+	if !ok {
+		return ""
+	}
+	kinds := model.AdmissibleRefKinds(class)
+	names := make([]string, len(kinds))
+	for i, k := range kinds {
+		names[i] = string(k)
+	}
+	tmpl, err := parsedPreflightTemplates()
+	if err != nil {
+		return ""
+	}
+	var sb strings.Builder
+	err = tmpl.ExecuteTemplate(&sb, "ref_applicability", struct {
+		Class      model.RefTargetClass
+		Admissible string
+		Chosen     model.RefKind
+		Applicable bool
+		Note       string
+	}{
+		Class:      class,
+		Admissible: strings.Join(names, ", "),
+		Chosen:     ref.Kind,
+		Applicable: cell.Applicable,
+		Note:       cell.Note,
+	})
+	if err != nil {
+		return ""
+	}
+	return "\n" + strings.TrimSpace(sb.String())
+}
+
 // derivedStatusForPrompt renders a Status as plain prose for the validator
 // prompt (not the `{status: ...}` display notation, which is a view concern).
 func derivedStatusForPrompt(s model.Status) string {
@@ -391,7 +434,21 @@ func derivedStatusForPrompt(s model.Status) string {
 var (
 	refKindVocabOnce sync.Once
 	refKindVocabText string
+
+	preflightTmplOnce sync.Once
+	preflightTmpl     *template.Template
+	preflightTmplErr  error
 )
+
+// parsedPreflightTemplates parses the embedded template set once and reuses
+// it across renders — all partials (including ref_applicability, executed
+// per ref during context assembly) resolve from the same set.
+func parsedPreflightTemplates() (*template.Template, error) {
+	preflightTmplOnce.Do(func() {
+		preflightTmpl, preflightTmplErr = template.ParseFS(preflightTemplates, "preflight_templates/*.tmpl")
+	})
+	return preflightTmpl, preflightTmplErr
+}
 
 // refKindVocabulary returns the canonical ref-kind vocabulary from the bundled
 // skill reference (references/ref-kinds.md), cached after first read. This is
@@ -426,7 +483,7 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (Request, error
 		return Request{}, fmt.Errorf("no template for check type %s", ct)
 	}
 
-	tmpl, err := template.ParseFS(preflightTemplates, "preflight_templates/*.tmpl")
+	tmpl, err := parsedPreflightTemplates()
 	if err != nil {
 		return Request{}, fmt.Errorf("parsing templates: %w", err)
 	}

@@ -500,6 +500,66 @@ func Test_assembleContext_RefsCarryDerivedStatus(t *testing.T) {
 	}
 }
 
+func Test_assembleContext_RefsCarryApplicabilityLines(t *testing.T) {
+	done := &model.Entry{ID: "20260410-121000-s-tac-don", Type: model.TypeSignal, Kind: model.KindDone, Content: "did it"}
+	gap := &model.Entry{ID: "20260410-120000-s-cpt-gap", Type: model.TypeSignal, Kind: model.KindGap, Content: "a gap"}
+	graph := model.NewGraph([]*model.Entry{done, gap})
+
+	proposed := &model.Entry{
+		Type:  model.TypeDecision,
+		Layer: model.LayerTactical,
+		Refs: []model.Ref{
+			{ID: done.ID, Kind: model.RefKindBuildsOn},
+			{ID: gap.ID, Kind: model.RefKindAddresses},
+		},
+		Content: "new decision",
+	}
+
+	pctx := assembleContext(proposed, graph, checkDecisionRefs, "")
+
+	// Each ref block names the admissible set for its target class and
+	// settles applicability for the chosen kind.
+	if !strings.Contains(pctx.ReferencedEntries, "Admissible ref kinds for this target (terminal-done):") {
+		t.Errorf("expected admissible-kind line for the terminal done target\n%s", pctx.ReferencedEntries)
+	}
+	if !strings.Contains(pctx.ReferencedEntries, "Admissible ref kinds for this target (live-signal):") {
+		t.Errorf("expected admissible-kind line for the open gap target\n%s", pctx.ReferencedEntries)
+	}
+	if !strings.Contains(pctx.ReferencedEntries, "Chosen ref kind: builds-on — applicable:") {
+		t.Errorf("expected chosen-kind applicable line for builds-on on terminal done\n%s", pctx.ReferencedEntries)
+	}
+	if !strings.Contains(pctx.ReferencedEntries, "Applicability is settled mechanically; do not flag it.") {
+		t.Errorf("expected the settled-mechanically instruction\n%s", pctx.ReferencedEntries)
+	}
+	// The terminal-done admissible set must not offer the two excluded kinds.
+	if strings.Contains(pctx.ReferencedEntries, "(terminal-done): grounded-in, builds-on, refines") {
+		t.Errorf("terminal-done admissible set must exclude refines\n%s", pctx.ReferencedEntries)
+	}
+}
+
+func Test_assembleContext_LegacyRefKindNoApplicabilityLines(t *testing.T) {
+	// Legacy bare-string refs (kind unknown) get no applicability lines —
+	// the capturable-kind mechanical check rejects them; there is nothing
+	// for the validator to judge.
+	target := &model.Entry{ID: "20260410-120000-s-cpt-tgt", Type: model.TypeSignal, Kind: model.KindGap, Content: "target"}
+	graph := model.NewGraph([]*model.Entry{target})
+
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKindUnknown}},
+		Content: "new decision",
+	}
+
+	pctx := assembleContext(proposed, graph, checkDecisionRefs, "")
+	if strings.Contains(pctx.ReferencedEntries, "Admissible ref kinds") {
+		t.Errorf("unknown kind must not render applicability lines\n%s", pctx.ReferencedEntries)
+	}
+	if !strings.Contains(pctx.ReferencedEntries, "Derived status:") {
+		t.Errorf("derived status line should still render for legacy refs\n%s", pctx.ReferencedEntries)
+	}
+}
+
 // Test_assembleContext_SupersededRefSurfacesLiveHead verifies s-tac-5p5 at the
 // pre-flight layer: when a ref points at a superseded entry, the literal target
 // is kept (its superseded status is what the ref-meta check reasons against) and
@@ -684,6 +744,16 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 			}
 			if !strings.Contains(result.Combined(), `"severity"`) {
 				t.Errorf("renderPreflightPrompt(%s) missing severity field in schema", ct)
+			}
+			// Category and severity are conclusions, not opening bids: the
+			// schema must ask for the observation (reasoning) first, so a
+			// finding cannot commit a verdict its own prose then retracts —
+			// and category-first proved to get skipped by the model entirely.
+			obsIdx := strings.Index(result.Combined(), `"observation"`)
+			catIdx := strings.Index(result.Combined(), `"category"`)
+			sevIdx := strings.Index(result.Combined(), `"severity"`)
+			if obsIdx < 0 || catIdx < 0 || sevIdx < 0 || obsIdx > catIdx || catIdx > sevIdx {
+				t.Errorf("renderPreflightPrompt(%s) schema must order observation < category < severity (obs %d, cat %d, sev %d)", ct, obsIdx, catIdx, sevIdx)
 			}
 			// PASS/FAIL are the legacy binary verdict — must be gone.
 			if strings.Contains(result.Combined(), "\"PASS\"") || strings.Contains(result.Combined(), "\"FAIL\"") {
@@ -999,6 +1069,17 @@ func Test_parsePreflightResult(t *testing.T) {
 			input: `{"findings": [{"severity": "HIGH", "category": "t", "observation": "x"}]}`,
 			wantFindings: []Finding{
 				{Severity: SeverityHigh, Category: "t", Observation: "x"},
+			},
+		},
+		{
+			// The reordered output contract: reasoning first, severity as the
+			// conclusion. encoding/json is field-order independent, but the
+			// contract order is pinned here so a parser change can't silently
+			// regress it.
+			name:  "severity last (reordered contract)",
+			input: `{"findings": [{"category": "ref-kind-sharpness", "observation": "the body frames the target as a prerequisite", "severity": "low"}]}`,
+			wantFindings: []Finding{
+				{Severity: SeverityLow, Category: "ref-kind-sharpness", Observation: "the body frames the target as a prerequisite"},
 			},
 		},
 		{
