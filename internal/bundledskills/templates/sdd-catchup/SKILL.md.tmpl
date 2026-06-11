@@ -159,17 +159,17 @@ For focus: render a single italic summary line at the top, in plain language: "C
 
 The four blocks below are injected fresh each invocation. Read them as your sole input **for composing this briefing** — don't run extra lookups to assemble it.
 
-!`sdd view --layout='kind(done):rank(by(date)):n(10):name("Recent done"):as-list'`
+{{ inject `sdd view --layout='kind(done):rank(by(date)):n(10):name("Recent done"):as-list'` }}
 
-!`sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(refs(inactive)):name("Active and hot"):as-list'`
+{{ inject `sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(refs(inactive)):name("Active and hot"):as-list'` }}
 
 Each active plan/activity may carry indented `→ <verb> <id> {status: …}` sub-lines for references whose target is currently inactive (closed or superseded). The sub-line shows the referenced entry's present state only — no timestamp, and no relationship beyond the verb (which is the generic `refs` for older entries). Don't render the sub-lines verbatim.
 
-!`sdd view --layout='kind(gap,question,insight):active:rank(heat(exp-14d)):n(15):name("Open and warm"):as-list'`
+{{ inject `sdd view --layout='kind(gap,question,insight):active:rank(heat(exp-14d)):n(15):name("Open and warm"):as-list'` }}
 
 ## Work in progress
 
-!`sdd wip list`
+{{ inject "sdd wip list" }}
 
 # Render in this exact format
 

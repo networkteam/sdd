@@ -280,10 +280,10 @@ The `--attach` flag is repeatable and supports filename mapping:
 - `--attach path/to/file.md:renamed.md` — attach with a custom target filename
 - `--attach -:plan.md` — read stdin and save as `plan.md` (at most one `-` per invocation)
 
-Use `{{attachments}}/filename` in the entry description to link to attachments. The CLI resolves these to relative paths. Example:
+Use `{{"{{attachments}}"}}/filename` in the entry description to link to attachments. The CLI resolves these to relative paths. Example:
 
 ```
-sdd new d tac --attach /tmp/design.md:plan.md "See [plan]({{attachments}}/plan.md) for details."
+sdd new d tac --attach /tmp/design.md:plan.md "See [plan]({{"{{attachments}}"}}/plan.md) for details."
 ```
 
 ## Long descriptions

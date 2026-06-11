@@ -108,8 +108,7 @@ Three fields with distinct semantics:
 
 Every ref on a new entry carries a kind from the closed vocabulary below. Pre-flight rejects missing or invalid kinds at high severity; an LLM advisory check flags mismatches between kind/desc and the entry body. The vocabulary is defined once in [ref-kinds.md](ref-kinds.md) and reused verbatim by the pre-flight rubric:
 
-<!-- sdd:include references/ref-kinds.md -->
-
+{{ template "references/ref-kinds.md" . }}
 ## Retirement primitives
 
 Every entry is retireable. Two primitives:

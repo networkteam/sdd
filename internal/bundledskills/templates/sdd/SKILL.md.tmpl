@@ -12,19 +12,19 @@ The blocks below are injected fresh each time `/sdd` is invoked. Use them as str
 
 ### Session info
 
-!`sdd info`
+{{ inject "sdd info" }}
 
 ### Aspirations
 
-!`sdd view --layout='aspirations'`
+{{ inject "sdd view --layout='aspirations'" }}
 
 ### Active focus
 
-!`sdd view --layout='focus'`
+{{ inject "sdd view --layout='focus'" }}
 
 ### Participants
 
-!`sdd view --layout='participants'`
+{{ inject "sdd view --layout='participants'" }}
 
 ## First things first
 
@@ -35,7 +35,7 @@ If you haven't read the framework reference files in this session, read them now
 - [CLI reference](references/cli-reference.md) — command syntax, flags, attachments
 - [Search](references/search.md) — `sdd search` retrieval modes (text / vector / hybrid), citation reading, when to use which mode in explore and groom (load on demand the first time you reach for `sdd search` in a session)
 
-Then invoke the `/sdd-catchup` sub-skill via the Skill tool to brief the user on graph state. For empty graphs, invoke `/sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `/sdd-bootstrap` as an option.
+{{ if eq .Agent "claude" }}Then invoke the `/sdd-catchup` sub-skill via the Skill tool to brief the user on graph state. For empty graphs, invoke `/sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `/sdd-bootstrap` as an option.{{ else }}Then run the `sdd-catchup` skill to brief the user on graph state. For empty graphs, run `sdd-bootstrap` instead; for graphs with entries but no actors or aspirations, offer `sdd-bootstrap` as an option.{{ end }}
 
 Before you start the catch-up, say in one short line what you're about to do — in plain words and in the user's language. Don't name tools or graph operations. Example: *"Let me look at the recent entries to bring you up to speed."* See "Vocabulary register by surface" below for good/bad pairs.
 

@@ -1,124 +1,195 @@
-// Package bundledskills exposes the skill files embedded in the sdd binary.
+// Package bundledskills renders the agent-neutral skill templates embedded in
+// the sdd binary into per-agent skill bundles.
 //
-// Skills are committed under this package (one subdirectory per agent target)
-// and compiled into the binary via //go:embed. At runtime, sdd init extracts
-// them to the target agent's skill directory with install-time stamps
-// injected into each file's frontmatter.
+// The source of truth is one neutral template tree under templates/ (files
+// named *.md.tmpl). "claude" is no longer a source directory — it is a render
+// profile: a model.AgentTarget value, the inject helper's per-agent output, and
+// (at install) the frontmatter stamp shape. Load executes the templates for a
+// given target; per-agent deviations live in {{ if eq .Agent "..." }}
+// conditionals and the inject helper, never as duplicated files. //go:embed
+// compiles the templates into the binary; sdd init renders + stamps them into
+// the target agent's skill directory.
 //
-// Editing: skill source of truth is here (e.g. claude/sdd/SKILL.md). After
-// changes, rebuild the binary and run ./bin/sdd init to refresh the installed
-// copy under .claude/skills/ (or ~/.claude/skills/).
+// Editing: edit the templates under templates/<skill>/. After changes, rebuild
+// the binary and run ./bin/sdd init to refresh the installed copy under
+// .claude/skills/ (or ~/.claude/skills/).
 package bundledskills
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
 	"path"
 	"strings"
+	"text/template"
 
 	"github.com/networkteam/sdd/internal/model"
 )
 
-// claudeSkillsFS holds the embedded Claude skill tree.
+// templatesFS holds the embedded agent-neutral skill template tree.
 //
-// Plain `//go:embed claude` recurses the whole tree but excludes files whose
-// names start with '.' or '_' (Go's default). That keeps OS junk like a
-// `.DS_Store` out of the embedded FS, so it can't be installed by `sdd init`
-// and abort the init commit on a gitignored path. To ship a skill's own
-// dotfile (e.g. a `.gitignore`), add an explicit pattern naming that file.
+// Plain `//go:embed templates` recurses the whole tree but excludes files whose
+// names start with '.' or '_' (Go's default), keeping OS junk like a
+// `.DS_Store` out of the embedded FS. To ship a template's own dotfile, add an
+// explicit pattern naming that file.
 //
-//go:embed claude
-var claudeSkillsFS embed.FS
+//go:embed templates
+var templatesFS embed.FS
 
-// Load returns the embedded skill bundle for the given agent target, with
-// sdd:include directives resolved (see model.ResolveSkillIncludes). Resolving
-// here means every consumer — install (writeStampedEntry) and drift detection
-// (SkillStatus) — operates on identical resolved content.
+const templatesRoot = "templates"
+
+// templateExt is the extension carried by source template files. It is stripped
+// from the output path so a file at templates/sdd/SKILL.md.tmpl renders to the
+// bundle entry sdd/SKILL.md.
+const templateExt = ".tmpl"
+
+// renderData is the value passed to every skill template at execution.
+type renderData struct {
+	// Agent is the render target's identifier (e.g. "claude"), used by
+	// {{ if eq .Agent "claude" }} conditionals to express per-agent prose
+	// deviations from one source.
+	Agent string
+}
+
+// Load renders the embedded skill templates for the given agent target into a
+// SkillBundle. Each *.md.tmpl file is parsed and executed with the target's
+// render data and helper set; cross-file includes (`{{ template "rel/path" . }}`)
+// resolve within the same skill. The returned entries carry no install stamps —
+// stamping happens at install time (see model.RenderSkillFile).
 func Load(target model.AgentTarget) (*model.SkillBundle, error) {
 	switch target {
 	case model.AgentClaude:
-		bundle, err := loadFromFS(claudeSkillsFS, "claude", target)
-		if err != nil {
-			return nil, err
-		}
-		resolved, err := model.ResolveSkillIncludes(bundle.Entries)
-		if err != nil {
-			return nil, err
-		}
-		bundle.Entries = resolved
-		return bundle, nil
+		// supported
 	default:
 		return nil, fmt.Errorf("unsupported agent target: %s", target)
 	}
-}
 
-// ReadReference returns the body (frontmatter stripped) of a reference file in
-// the embedded Claude skill bundle. Pre-flight uses this to inject the canonical
-// ref-kind vocabulary into its prompt from the same source the skill ships,
-// rather than restating it.
-func ReadReference(skill, relPath string) ([]byte, error) {
-	full := path.Join("claude", skill, relPath)
-	data, err := claudeSkillsFS.ReadFile(full)
+	funcs := renderFuncs(target)
+	data := renderData{Agent: string(target)}
+
+	skills, err := skillDirs()
 	if err != nil {
-		return nil, fmt.Errorf("reading bundled reference %s: %w", full, err)
+		return nil, err
 	}
-	return model.SkillFileBody(data), nil
+
+	bundle := &model.SkillBundle{Target: target}
+	for _, skill := range skills {
+		entries, err := renderSkill(skill, funcs, data)
+		if err != nil {
+			return nil, err
+		}
+		bundle.Entries = append(bundle.Entries, entries...)
+	}
+	return bundle, nil
 }
 
-// loadFromFS walks the embedded FS under root and builds a SkillBundle. Each
-// leaf file becomes a SkillBundleEntry with its RelPath expressed relative to
-// the skill directory (e.g. "SKILL.md", "references/cli-reference.md").
-func loadFromFS(efs embed.FS, root string, target model.AgentTarget) (*model.SkillBundle, error) {
-	bundle := &model.SkillBundle{Target: target}
+// renderFuncs builds the template FuncMap bound to a specific target. inject
+// renders a CLI command as Claude's dynamic-injection token (`!`+"`cmd`"+`) that
+// Claude Code expands at skill-load, or — for agents without that mechanism — as
+// an explicit instruction to run the command. Binding the target via closure
+// lets templates call `{{ inject "sdd info" }}` without threading the agent
+// through every call site.
+func renderFuncs(target model.AgentTarget) template.FuncMap {
+	return template.FuncMap{
+		"inject": func(cmd string) string {
+			if target == model.AgentClaude {
+				return "!`" + cmd + "`"
+			}
+			return "Run `" + cmd + "` and use its output as context."
+		},
+	}
+}
 
-	err := fs.WalkDir(efs, root, func(p string, d fs.DirEntry, err error) error {
+// skillDirs returns the immediate subdirectories of templates/, one per skill.
+func skillDirs() ([]string, error) {
+	entries, err := templatesFS.ReadDir(templatesRoot)
+	if err != nil {
+		return nil, fmt.Errorf("reading templates root: %w", err)
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	return dirs, nil
+}
+
+// renderSkill parses every template file under one skill into a shared template
+// set (so `{{ template }}` includes resolve across files), then executes each
+// file with data. Templates are named by their skill-relative output path
+// (`.tmpl` stripped), e.g. "SKILL.md", "references/ref-kinds.md". Parsing all
+// files before executing any lets a file include another regardless of order.
+func renderSkill(skill string, funcs template.FuncMap, data renderData) ([]model.SkillBundleEntry, error) {
+	skillRoot := path.Join(templatesRoot, skill)
+	set := template.New(skill).Funcs(funcs)
+
+	var outRels []string
+	err := fs.WalkDir(templatesFS, skillRoot, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
 			return nil
 		}
-
-		// Relative to root: e.g. "sdd/SKILL.md", "sdd/references/cli-reference.md".
-		rel, err := relPath(root, p)
+		rel, err := relUnder(skillRoot, p)
 		if err != nil {
 			return err
 		}
+		outRel := strings.TrimSuffix(rel, templateExt)
 
-		// First path segment is the skill directory name.
-		skill, sub, ok := strings.Cut(rel, "/")
-		if !ok {
-			// File sitting directly under claude/ — skip; every file must
-			// live inside a skill dir.
-			return nil
-		}
-
-		data, err := efs.ReadFile(p)
+		content, err := templatesFS.ReadFile(p)
 		if err != nil {
 			return fmt.Errorf("reading embedded %s: %w", p, err)
 		}
-
-		bundle.Entries = append(bundle.Entries, model.SkillBundleEntry{
-			Skill:   skill,
-			RelPath: sub,
-			Content: data,
-		})
+		if _, err := set.New(outRel).Parse(string(content)); err != nil {
+			return fmt.Errorf("parsing template %s: %w", p, err)
+		}
+		outRels = append(outRels, outRel)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return bundle, nil
+
+	entries := make([]model.SkillBundleEntry, 0, len(outRels))
+	for _, outRel := range outRels {
+		var buf bytes.Buffer
+		if err := set.ExecuteTemplate(&buf, outRel, data); err != nil {
+			return nil, fmt.Errorf("executing template %s/%s: %w", skill, outRel, err)
+		}
+		entries = append(entries, model.SkillBundleEntry{
+			Skill:   skill,
+			RelPath: outRel,
+			Content: buf.Bytes(),
+		})
+	}
+	return entries, nil
 }
 
-func relPath(root, full string) (string, error) {
+// ReadReference returns the body (frontmatter stripped) of a reference template
+// in the embedded bundle. Pre-flight uses this to inject the canonical ref-kind
+// vocabulary into its prompt from the same source the skill ships. The reference
+// is read raw rather than executed — the vocabulary fragment is agent-neutral
+// and carries no template directives, so its source bytes equal its rendered
+// output.
+func ReadReference(skill, relPath string) ([]byte, error) {
+	full := path.Join(templatesRoot, skill, relPath+templateExt)
+	data, err := templatesFS.ReadFile(full)
+	if err != nil {
+		return nil, fmt.Errorf("reading bundled reference %s: %w", full, err)
+	}
+	return model.SkillFileBody(data), nil
+}
+
+// relUnder returns full expressed relative to root, with leading separators
+// trimmed and the path cleaned.
+func relUnder(root, full string) (string, error) {
 	rel := strings.TrimPrefix(full, root)
 	rel = strings.TrimPrefix(rel, "/")
 	if rel == "" {
 		return "", fmt.Errorf("unexpected empty relative path for %q", full)
 	}
-	// Normalize in case the platform embedder returned backslashes (it
-	// shouldn't — embed uses forward slashes — but be defensive).
 	return path.Clean(rel), nil
 }

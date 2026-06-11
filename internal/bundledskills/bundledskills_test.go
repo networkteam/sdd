@@ -74,3 +74,42 @@ func TestReadReference_RefKinds(t *testing.T) {
 		t.Errorf("ref-kinds reference missing expected kinds:\n%s", body)
 	}
 }
+
+// TestLoadRendersClaudeProfile checks that rendering the Claude profile produces
+// fully-resolved output: no template actions survive, the inject helper emits
+// Claude's dynamic-injection token, the agent conditional picks the Claude branch
+// (not the else branch), and the escaped attachments placeholder renders back to
+// its literal form. The byte-level parity guarantee (rendered == prior bundle) is
+// enforced by `sdd init` leaving .claude/skills/ unchanged on a clean tree.
+func TestLoadRendersClaudeProfile(t *testing.T) {
+	b, err := bundledskills.Load(model.AgentClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byPath := map[string][]byte{}
+	badMarkers := []string{"{{ inject", "{{inject", "{{ if", "{{if", "{{ template", "{{template", "{{ end", "{{ else"}
+	for _, e := range b.Entries {
+		byPath[e.Skill+"/"+e.RelPath] = e.Content
+		for _, m := range badMarkers {
+			if bytes.Contains(e.Content, []byte(m)) {
+				t.Errorf("%s/%s: unrendered template action %q survived render", e.Skill, e.RelPath, m)
+			}
+		}
+	}
+
+	sddSkill := byPath["sdd/SKILL.md"]
+	if !bytes.Contains(sddSkill, []byte("!`sdd info`")) {
+		t.Error("sdd/SKILL.md: inject helper did not render the Claude !`sdd info` token")
+	}
+	if !bytes.Contains(sddSkill, []byte("via the Skill tool")) {
+		t.Error("sdd/SKILL.md: Claude branch of the catch-up conditional missing")
+	}
+	if bytes.Contains(sddSkill, []byte("Then run the `sdd-catchup` skill")) {
+		t.Error("sdd/SKILL.md: non-Claude else branch leaked into the Claude render")
+	}
+
+	if cliRef := byPath["sdd/references/cli-reference.md"]; !bytes.Contains(cliRef, []byte("{{attachments}}/filename")) {
+		t.Error("cli-reference.md: escaped {{attachments}} did not render to the literal token")
+	}
+}

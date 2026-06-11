@@ -196,7 +196,7 @@ func runSyncCheck(ctx context.Context) {
 
 // emitSyncStatus renders a SyncStatus as one slog line. The phrasing is
 // the skill's pattern-match surface — changes here must stay coordinated
-// with `internal/bundledskills/claude/sdd/SKILL.md`.
+// with `internal/bundledskills/templates/sdd/SKILL.md.tmpl`.
 func emitSyncStatus(logger *slog.Logger, s model.SyncStatus) {
 	switch s.State {
 	case model.SyncStateUpToDate, model.SyncStateSkipped:

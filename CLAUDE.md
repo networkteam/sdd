@@ -77,9 +77,9 @@ sdd/
 │   ├── presenters/         # View rendering of query results
 │   ├── llm/                # Pre-flight + summarization via LLM
 │   ├── meta/               # Config resolution
-│   └── bundledskills/      # Skill source of truth, embedded via //go:embed
-│       └── claude/         # Claude skill tree (sdd, sdd-catchup, sdd-explore, sdd-groom)
-├── .claude/skills/         # Installed skill copy for this repo (rebuilt from internal/bundledskills)
+│   └── bundledskills/      # Skill source of truth (agent-neutral templates), embedded via //go:embed
+│       └── templates/      # Neutral *.md.tmpl skill tree, rendered per agent (sdd, sdd-catchup, sdd-explore, sdd-groom)
+├── .claude/skills/         # Installed Claude render for this repo (rebuilt from internal/bundledskills/templates)
 ├── .sdd/
 │   ├── config.yaml         # SDD config (graph_dir, etc.)
 │   └── graph/              # Entry files (markdown + frontmatter)
@@ -102,11 +102,11 @@ sdd/
 
 ## Skill source of truth
 
-Skills are **source-of-truth in `internal/bundledskills/claude/`** and compiled into the binary via `//go:embed`. The copy under `.claude/skills/` is the _installed_ output for this repo — it is what Claude Code loads during a session.
+Skills are **source-of-truth as agent-neutral templates in `internal/bundledskills/templates/`** (`*.md.tmpl`, Go `text/template` with default `{{ }}` delimiters) and compiled into the binary via `//go:embed`. `Load(target)` renders them per agent — "claude" is a render profile, not a source directory. The copy under `.claude/skills/` is the _installed_ Claude render for this repo — what Claude Code loads during a session.
 
 - **Never edit `.claude/skills/` directly.** Changes made there will be overwritten (or flagged as "modified") the next time `sdd init` runs.
-- Edit in `internal/bundledskills/claude/<skill>/` → rebuild (`devbox run build`) → reinstall (`sdd init --scope project`). The installed copy picks up the new bundle and refreshes `.claude/skills/` with fresh `sdd-version` + `sdd-content-hash` stamps.
-- Commits should include both locations when a skill changes: the source under `internal/bundledskills/claude/` and the re-stamped output under `.claude/skills/`.
+- Edit the templates in `internal/bundledskills/templates/<skill>/` → rebuild (`devbox run build`) → reinstall (`sdd init --scope project`). The installed copy picks up the new render and refreshes `.claude/skills/` with fresh `sdd-version` + `sdd-content-hash` stamps. Per-agent deviations are `{{ if eq .Agent "claude" }}…{{ else }}…{{ end }}` conditionals and the `inject` helper — never duplicated files. Literal `{{ }}` in skill prose (e.g. the attachments placeholder) must be escaped as `{{"{{...}}"}}`.
+- Commits should include both locations when a skill changes: the template source under `internal/bundledskills/templates/` and the re-stamped output under `.claude/skills/`.
 - **`sdd init` auto-commits the installed refresh.** Running `sdd init` (e.g. `--scope project`) commits the regenerated `.claude/skills/` files on its own as `sdd: refresh installed skills and metadata`. So after a reinstall the installed copy already shows clean in `git status` (it's committed), and your bundled-source edit stays as the separate change you commit yourself — the two halves land in two commits, not one. This is expected; don't go hunting for "missing" installed-file changes or try to fold the auto-commit back in.
 
 ## Git rules
