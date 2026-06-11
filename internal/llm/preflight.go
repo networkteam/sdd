@@ -281,7 +281,7 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 			if !ok {
 				continue
 			}
-			parts = append(parts, formatReferencedEntry(graph, e))
+			parts = append(parts, formatReferencedEntry(graph, e)+refApplicabilityLines(graph, ref, e))
 			if rr := graph.ResolveRef(ref.ID); rr.IsStale() {
 				if head, ok := graph.ByID[rr.Head()]; ok {
 					parts = append(parts, "(live head of "+ref.ID+")\n"+formatReferencedEntry(graph, head))
@@ -363,6 +363,43 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 // prompt uses FormatEntryForPrompt unchanged, so summary hashes don't drift.
 func formatReferencedEntry(graph *model.Graph, e *model.Entry) string {
 	return FormatEntryForPrompt(e) + "\nDerived status: " + derivedStatusForPrompt(graph.DerivedStatus(e))
+}
+
+// refApplicabilityLines renders the matrix verdict for one ref beneath its
+// target's entry block: the admissible kinds for the target class and the
+// chosen kind's cell (plan d-tac-tph AC 5). Applicability is decided by the
+// matrix and enforced by the mechanical check, so these lines settle that
+// question for the validator — its remaining job is kind-vs-body fit among
+// the admissible kinds and desc-vs-body consistency. Kinds outside the
+// capturable set render nothing (the mechanical check rejects them).
+func refApplicabilityLines(graph *model.Graph, ref model.Ref, target *model.Entry) string {
+	class := model.ClassifyRefTarget(target, graph.DerivedStatus(target))
+	cell, ok := model.RefKindApplicability(ref.Kind, class)
+	if !ok {
+		return ""
+	}
+	kinds := model.AdmissibleRefKinds(class)
+	names := make([]string, len(kinds))
+	for i, k := range kinds {
+		names[i] = string(k)
+	}
+	var sb strings.Builder
+	sb.WriteString("\nAdmissible ref kinds for this target (")
+	sb.WriteString(string(class))
+	sb.WriteString("): ")
+	sb.WriteString(strings.Join(names, ", "))
+	sb.WriteString("\nChosen ref kind: ")
+	sb.WriteString(string(ref.Kind))
+	if cell.Applicable {
+		sb.WriteString(" — applicable: ")
+		sb.WriteString(cell.Note)
+		sb.WriteString(". Applicability is settled mechanically; do not flag it.")
+	} else {
+		sb.WriteString(" — inapplicable: ")
+		sb.WriteString(cell.Note)
+		sb.WriteString(". The mechanical check already blocks this; do not add your own finding for it.")
+	}
+	return sb.String()
 }
 
 // derivedStatusForPrompt renders a Status as plain prose for the validator

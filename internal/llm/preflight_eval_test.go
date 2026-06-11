@@ -750,10 +750,15 @@ func TestPreflightEval_RefMeta_DescContradicts_High(t *testing.T) {
 	}
 }
 
-// TestPreflightEval_RefMeta_WrongKind_High exercises the wrong-kind branch
-// of the high-severity rubric: the ref's kind misrepresents the relationship
-// the body uses; another kind in the closed set names it correctly.
-func TestPreflightEval_RefMeta_WrongKind_High(t *testing.T) {
+// TestPreflightEval_RefMeta_WrongKind_EvidenceMedium exercises the
+// evidence-backed kind-mismatch branch: the ref's kind misrepresents the
+// relationship and the body itself supplies the quotable evidence ("This
+// addresses the temporal-blur gap"). grounded-in on an open gap is
+// *applicable* (a gap can be a basis), so this is no longer a high — the
+// matrix reserves high for precondition violations, which are mechanical.
+// The validator must still catch the mismatch at medium with the body
+// quote, and must not block.
+func TestPreflightEval_RefMeta_WrongKind_EvidenceMedium(t *testing.T) {
 	gap := &model.Entry{
 		ID:      "20260505-100000-s-cpt-blur",
 		Type:    model.TypeSignal,
@@ -785,10 +790,14 @@ func TestPreflightEval_RefMeta_WrongKind_High(t *testing.T) {
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	if !hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
-		t.Errorf("Expected a high finding mentioning the wrong kind (grounds on a gap signal), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+		t.Errorf("Expected no high (kind questions are never high — applicability is mechanical), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	}
+	if !hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsRefMetaPredicate) &&
+		!hasFindingAtSeverity(result.Findings, llm.SeverityLow, mentionsRefMetaPredicate) {
+		t.Errorf("Expected a medium (evidence-backed) or low ref-meta finding for the kind mismatch, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
-		t.Logf("Correctly flagged wrong kind as high. Findings: %+v", result.Findings)
+		t.Logf("Caught the kind mismatch without blocking. Findings: %+v", result.Findings)
 	}
 }
 
@@ -897,10 +906,16 @@ func TestPreflightEval_RefMeta_RefinesActivePlan_NoFinding(t *testing.T) {
 	}
 }
 
-// Status-sensitive wrong kind: the target is ACTIVE and the body sharpens its
-// commitments in place — that is `refines`, not `builds-on`. The validator must
-// use the target's Derived status (now threaded into the prompt) to catch this.
-func TestPreflightEval_RefMeta_BuildsOnActiveSharpened_High(t *testing.T) {
+// Status-sensitive kind mismatch with quotable evidence: the target is ACTIVE
+// and the body says outright that it "sharpens the plan's commitment in
+// place" — the augmenting pattern, which is `refines`. builds-on on a live
+// decision is *applicable* (the forward next-step reading exists, and the
+// live graph carries accepted builds-on refs to active targets), so this is
+// not a high — it is the textbook evidence-backed medium: the body supplies
+// the quote that names the other admissible kind. Recalibrated from the
+// earlier high expectation when applicability moved into the mechanical
+// matrix (d-tac-tph AC 6).
+func TestPreflightEval_RefMeta_BuildsOnActiveSharpened_EvidenceMedium(t *testing.T) {
 	plan := planWithACs("20260531-164326-d-tac-pln",
 		"Implement the ref-kind vocabulary redefinition across model, pre-flight, and skill.",
 		"The vocabulary is the eight principle-based kinds",
@@ -914,8 +929,12 @@ func TestPreflightEval_RefMeta_BuildsOnActiveSharpened_High(t *testing.T) {
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	if !hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
-		t.Errorf("Expected a high finding — builds-on on an active target sharpened in place should be refines. Got: %+v\nRaw:\n%s", result.Findings, raw)
+	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+		t.Errorf("Expected no high (kind questions are never high — applicability is mechanical), got: %+v\nRaw:\n%s", result.Findings, raw)
+	}
+	if !hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsRefMetaPredicate) &&
+		!hasFindingAtSeverity(result.Findings, llm.SeverityLow, mentionsRefMetaPredicate) {
+		t.Errorf("Expected a medium (evidence-backed) or low ref-meta finding — the body quotes itself sharpening in place. Got: %+v\nRaw:\n%s", result.Findings, raw)
 	}
 }
 
