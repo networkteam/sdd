@@ -745,13 +745,15 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 			if !strings.Contains(result.Combined(), `"severity"`) {
 				t.Errorf("renderPreflightPrompt(%s) missing severity field in schema", ct)
 			}
-			// Severity is a conclusion, not an opening bid: the schema must
-			// ask for the observation (reasoning) before the severity, so a
-			// finding cannot commit a severity its own prose then retracts.
+			// Category and severity are conclusions, not opening bids: the
+			// schema must ask for the observation (reasoning) first, so a
+			// finding cannot commit a verdict its own prose then retracts —
+			// and category-first proved to get skipped by the model entirely.
 			obsIdx := strings.Index(result.Combined(), `"observation"`)
+			catIdx := strings.Index(result.Combined(), `"category"`)
 			sevIdx := strings.Index(result.Combined(), `"severity"`)
-			if obsIdx < 0 || sevIdx < 0 || obsIdx > sevIdx {
-				t.Errorf("renderPreflightPrompt(%s) schema must order observation before severity (obs at %d, sev at %d)", ct, obsIdx, sevIdx)
+			if obsIdx < 0 || catIdx < 0 || sevIdx < 0 || obsIdx > catIdx || catIdx > sevIdx {
+				t.Errorf("renderPreflightPrompt(%s) schema must order observation < category < severity (obs %d, cat %d, sev %d)", ct, obsIdx, catIdx, sevIdx)
 			}
 			// PASS/FAIL are the legacy binary verdict — must be gone.
 			if strings.Contains(result.Combined(), "\"PASS\"") || strings.Contains(result.Combined(), "\"FAIL\"") {

@@ -71,13 +71,13 @@ var refKindMatrix = map[RefKind]map[RefTargetClass]RefKindCell{
 		TargetRetired:      {Applicable: true, Note: "a retired entry can still be the basis the source reasons from"},
 	},
 	RefKindBuildsOn: {
-		TargetLiveDecision: {Applicable: true, Note: "only as the forward next-step reading; a live decision the body sharpens in place is refines instead"},
+		TargetLiveDecision: {Applicable: true, Note: "only as the forward next-step reading; a live decision the body sharpens in place is refines instead, and a body that overturns or replaces the target's commitments is supersession territory, not a ref-kind question"},
 		TargetLiveSignal:   {Applicable: true, Note: "only as the forward next-step after that line of observation; merely reasoning from an open signal is grounded-in"},
 		TargetTerminalDone: {Applicable: true, Note: "extending a finished chain; defensible alongside grounded-in — the tie-break is the author's call"},
 		TargetRetired:      {Applicable: true, Note: "extending a closed line of work — the kind's home case"},
 	},
 	RefKindRefines: {
-		TargetLiveDecision: {Applicable: true, Note: "sharpens an active commitment in place — the augmenting pattern; the refining entry closes alongside the target"},
+		TargetLiveDecision: {Applicable: true, Note: "sharpens an active commitment in place without replacing it — the augmenting pattern; a body that overturns the target's commitments is supersession territory, not a ref-kind question"},
 		TargetLiveSignal:   {Applicable: true, Note: "unusual — narrowing a signal is normally supersession; in-place sharpening of an open signal is rare but not impossible"},
 		TargetTerminalDone: {Applicable: false, Note: "refines requires an active target sharpened in place — a done signal is terminal, there is nothing active to sharpen"},
 		TargetRetired:      {Applicable: false, Note: "refines requires an active target sharpened in place — for a closed or superseded target, builds-on extends it instead"},

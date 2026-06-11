@@ -7,15 +7,15 @@ Respond with a single JSON object matching this schema — nothing before or aft
 {
   "findings": [
     {
-      "category": "short-hyphenated-tag",
       "observation": "one to three sentences working through what you noticed, ending in a conclusion",
+      "category": "short-hyphenated-tag",
       "severity": "high" | "medium" | "low"
     }
   ]
 }
 ```
 
-**Field order matters: `observation` comes before `severity`.** The observation is your reasoning — work through what you noticed first, and assign the severity only after the observation has reached its conclusion. The severity must match where the observation lands, not where it started. If the observation concludes that the concern does not hold ("withdrawn", "not a finding", "no issue"), emit no finding at all — drop it from the array rather than emitting it with any severity.
+**Field order matters: reasoning first, verdict last.** The `observation` is your reasoning — work through what you noticed first. Then `category` names what the observation found, and `severity` scores it; both are conclusions, assigned only after the observation has reached its own. The severity must match where the observation lands, not where it started. If the observation concludes that the concern does not hold ("withdrawn", "not a finding", "no issue"), emit no finding at all — drop it from the array rather than emitting it with any severity.
 
 All three fields are required on every finding — a finding without a `category` or without a `severity` is unparseable and fails the whole response.
 
