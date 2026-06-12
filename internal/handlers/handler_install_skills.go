@@ -50,13 +50,13 @@ func (h *Handler) InstallSkills(ctx context.Context, cmd *command.InstallSkillsC
 			result.Current = append(result.Current, entry.AbsPath)
 
 		case model.SkillStatusMissing:
-			if err := writeStampedEntry(entry.AbsPath, entry.Embedded, cmd.BinaryVersion); err != nil {
+			if err := writeStampedEntry(entry.AbsPath, entry.Embedded, target, cmd.BinaryVersion); err != nil {
 				return err
 			}
 			result.Installed = append(result.Installed, entry.AbsPath)
 
 		case model.SkillStatusPristine:
-			if err := writeStampedEntry(entry.AbsPath, entry.Embedded, cmd.BinaryVersion); err != nil {
+			if err := writeStampedEntry(entry.AbsPath, entry.Embedded, target, cmd.BinaryVersion); err != nil {
 				return err
 			}
 			result.Refreshed = append(result.Refreshed, entry.AbsPath)
@@ -71,7 +71,7 @@ func (h *Handler) InstallSkills(ctx context.Context, cmd *command.InstallSkillsC
 				overwrite = ok
 			}
 			if overwrite {
-				if err := writeStampedEntry(entry.AbsPath, entry.Embedded, cmd.BinaryVersion); err != nil {
+				if err := writeStampedEntry(entry.AbsPath, entry.Embedded, target, cmd.BinaryVersion); err != nil {
 					return err
 				}
 				result.Overwritten = append(result.Overwritten, entry.AbsPath)
@@ -91,9 +91,9 @@ func (h *Handler) InstallSkills(ctx context.Context, cmd *command.InstallSkillsC
 // writeStampedEntry renders entry with injected stamps and writes the result
 // atomically (via a temp file + rename) to absPath, creating intermediate
 // directories as needed.
-func writeStampedEntry(absPath string, entry model.SkillBundleEntry, version string) error {
+func writeStampedEntry(absPath string, entry model.SkillBundleEntry, target model.AgentTarget, version string) error {
 	hash := model.ComputeSkillHash(entry.Content)
-	rendered, err := model.RenderSkillFile(entry, version, hash)
+	rendered, err := model.RenderSkillFile(entry, target, version, hash)
 	if err != nil {
 		return fmt.Errorf("rendering %s: %w", absPath, err)
 	}

@@ -3,6 +3,7 @@ package model
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 )
 
@@ -59,7 +60,7 @@ Body content here.
 `)
 	embeddedHash := ComputeSkillHash(embedded)
 
-	stamped, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, "v0.2.0", embeddedHash)
+	stamped, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, AgentClaude, "v0.2.0", embeddedHash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestComputeSkillStatus_Current(t *testing.T) {
 	embedded := []byte("---\nname: a\n---\nbody\n")
 	entry := SkillBundleEntry{Content: embedded}
 	hash := ComputeSkillHash(embedded)
-	rendered, err := RenderSkillFile(entry, "v0.2.0", hash)
+	rendered, err := RenderSkillFile(entry, AgentClaude, "v0.2.0", hash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestComputeSkillStatus_Pristine(t *testing.T) {
 	// the embedded content has changed.
 	oldEmbedded := []byte("---\nname: a\n---\nold body\n")
 	oldHash := ComputeSkillHash(oldEmbedded)
-	installedBytes, err := RenderSkillFile(SkillBundleEntry{Content: oldEmbedded}, "v0.1.0", oldHash)
+	installedBytes, err := RenderSkillFile(SkillBundleEntry{Content: oldEmbedded}, AgentClaude, "v0.1.0", oldHash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestComputeSkillStatus_Modified(t *testing.T) {
 	embedded := []byte("---\nname: a\n---\nbody\n")
 	entry := SkillBundleEntry{Content: embedded}
 	hash := ComputeSkillHash(embedded)
-	rendered, err := RenderSkillFile(entry, "v0.1.0", hash)
+	rendered, err := RenderSkillFile(entry, AgentClaude, "v0.1.0", hash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -176,7 +177,7 @@ func TestSplitFrontmatter_NoFrontmatter(t *testing.T) {
 
 func TestRenderSkillFile_RoundTripsThroughParse(t *testing.T) {
 	embedded := []byte("---\nname: x\ndescription: d\n---\nbody\n")
-	rendered, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, "v0.2.0", "deadbeef")
+	rendered, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, AgentClaude, "v0.2.0", "deadbeef")
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -189,99 +190,89 @@ func TestRenderSkillFile_RoundTripsThroughParse(t *testing.T) {
 	}
 }
 
-func findSkillEntry(t *testing.T, entries []SkillBundleEntry, relPath string) SkillBundleEntry {
-	t.Helper()
-	for _, e := range entries {
-		if e.RelPath == relPath {
-			return e
-		}
-	}
-	t.Fatalf("entry %q not found", relPath)
-	return SkillBundleEntry{}
-}
-
-func TestResolveSkillIncludes_ReplacesMarkerWithBody(t *testing.T) {
-	entries := []SkillBundleEntry{
-		{Skill: "sdd", RelPath: "references/frag.md", Content: []byte("VOCAB LINE ONE\nVOCAB LINE TWO\n")},
-		{Skill: "sdd", RelPath: "references/host.md", Content: []byte("before\n<!-- sdd:include references/frag.md -->\nafter\n")},
-	}
-	out, err := ResolveSkillIncludes(entries)
+// TestRenderSkillFile_CodexNestsStampsUnderMetadata proves the Codex render
+// keeps stamps out of the top-level frontmatter (which the Agent Skills
+// standard rejects) by nesting them under metadata:, while the read and hash
+// paths still recognise them — so a fresh Codex install classifies as Current.
+func TestRenderSkillFile_CodexNestsStampsUnderMetadata(t *testing.T) {
+	embedded := []byte("---\nname: sdd\ndescription: d\ncompatibility: Designed for OpenAI Codex\n---\nbody\n")
+	hash := ComputeSkillHash(embedded)
+	rendered, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, AgentCodex, "v0.2.0", hash)
 	if err != nil {
-		t.Fatalf("ResolveSkillIncludes: %v", err)
+		t.Fatalf("RenderSkillFile: %v", err)
 	}
-	host := findSkillEntry(t, out, "references/host.md")
-	if bytes.Contains(host.Content, []byte("sdd:include")) {
-		t.Errorf("marker not resolved:\n%s", host.Content)
+
+	fm, _ := splitFrontmatter(rendered)
+	if _, top := fm[SkillStampVersion]; top {
+		t.Error("codex render placed sdd-version at the top level")
 	}
-	for _, want := range []string{"before", "VOCAB LINE ONE", "VOCAB LINE TWO", "after"} {
-		if !bytes.Contains(host.Content, []byte(want)) {
-			t.Errorf("resolved content missing %q:\n%s", want, host.Content)
-		}
+	meta, ok := asStringMap(fm["metadata"])
+	if !ok {
+		t.Fatalf("codex render did not produce a metadata map: %v", fm)
+	}
+	if meta[SkillStampVersion] != "v0.2.0" || meta[SkillStampHash] != hash {
+		t.Errorf("stamps not nested under metadata: %v", meta)
+	}
+
+	installed := ParseSkillFile("/tmp/sdd", rendered)
+	if installed.StoredVersion != "v0.2.0" || installed.StoredHash != hash {
+		t.Errorf("ParseSkillFile did not read nested stamps: %+v", installed)
+	}
+	if got := ComputeSkillStatus(SkillBundleEntry{Content: embedded}, installed); got != SkillStatusCurrent {
+		t.Errorf("codex rendered entry should classify Current, got %s", got)
 	}
 }
 
-func TestResolveSkillIncludes_MissingTargetErrors(t *testing.T) {
-	entries := []SkillBundleEntry{
-		{Skill: "sdd", RelPath: "host.md", Content: []byte("<!-- sdd:include references/nope.md -->\n")},
-	}
-	if _, err := ResolveSkillIncludes(entries); err == nil {
-		t.Fatal("want error for missing include target, got nil")
-	}
-}
-
-func TestResolveSkillIncludes_NoMarkerUnchanged(t *testing.T) {
-	entries := []SkillBundleEntry{
-		{Skill: "sdd", RelPath: "plain.md", Content: []byte("no markers here\n")},
-	}
-	out, err := ResolveSkillIncludes(entries)
-	if err != nil {
-		t.Fatalf("ResolveSkillIncludes: %v", err)
-	}
-	if !bytes.Equal(out[0].Content, entries[0].Content) {
-		t.Error("content changed though there was no marker")
-	}
-}
-
-func TestResolveSkillIncludes_StripsIncludedFrontmatter(t *testing.T) {
-	entries := []SkillBundleEntry{
-		{Skill: "sdd", RelPath: "references/frag.md", Content: []byte("---\nstamp: x\n---\nFRAGMENT BODY\n")},
-		{Skill: "sdd", RelPath: "host.md", Content: []byte("<!-- sdd:include references/frag.md -->\n")},
-	}
-	out, err := ResolveSkillIncludes(entries)
-	if err != nil {
-		t.Fatalf("ResolveSkillIncludes: %v", err)
-	}
-	host := findSkillEntry(t, out, "host.md")
-	if bytes.Contains(host.Content, []byte("stamp: x")) {
-		t.Errorf("included frontmatter should be stripped:\n%s", host.Content)
-	}
-	if !bytes.Contains(host.Content, []byte("FRAGMENT BODY")) {
-		t.Errorf("included body missing:\n%s", host.Content)
-	}
-}
-
-// TestResolveSkillIncludes_ResolvedContentDriftStable proves the install writer
-// and drift detection agree on the *resolved* content: a resolved entry written
-// with stamps and parsed back classifies as Current against that same resolved
-// entry. This is the property that keeps included skills out of false "modified"
-// state — both paths consume Load's resolved output.
-func TestResolveSkillIncludes_ResolvedContentDriftStable(t *testing.T) {
-	entries := []SkillBundleEntry{
-		{Skill: "sdd", RelPath: "references/frag.md", Content: []byte("FRAGMENT\n")},
-		{Skill: "sdd", RelPath: "host.md", Content: []byte("---\nname: host\n---\nbefore\n<!-- sdd:include references/frag.md -->\nafter\n")},
-	}
-	out, err := ResolveSkillIncludes(entries)
-	if err != nil {
-		t.Fatalf("ResolveSkillIncludes: %v", err)
-	}
-	host := findSkillEntry(t, out, "host.md")
+// TestRenderedEntryDriftStable proves the install writer and drift detection
+// agree on bundle content: an entry written with stamps and parsed back
+// classifies as Current against that same entry. This is the property that keeps
+// freshly-installed skills out of false "modified" state.
+func TestRenderedEntryDriftStable(t *testing.T) {
+	host := SkillBundleEntry{Skill: "sdd", RelPath: "host.md", Content: []byte("---\nname: host\n---\nbefore\nbody\nafter\n")}
 	hash := ComputeSkillHash(host.Content)
-	rendered, err := RenderSkillFile(host, "v1", hash)
+	rendered, err := RenderSkillFile(host, AgentClaude, "v1", hash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
 	installed := ParseSkillFile("/tmp/host.md", rendered)
 	if got := ComputeSkillStatus(host, installed); got != SkillStatusCurrent {
-		t.Errorf("resolved entry should classify Current, got %s", got)
+		t.Errorf("rendered entry should classify Current, got %s", got)
+	}
+}
+
+func TestSkillInstallDir_PerAgentSubpath(t *testing.T) {
+	cases := []struct {
+		target AgentTarget
+		scope  Scope
+		want   string
+	}{
+		{AgentClaude, ScopeProject, filepath.Join("/repo", ".claude", "skills")},
+		{AgentCodex, ScopeProject, filepath.Join("/repo", ".agents", "skills")},
+		{AgentClaude, ScopeUser, filepath.Join("/home", ".claude", "skills")},
+		{AgentCodex, ScopeUser, filepath.Join("/home", ".agents", "skills")},
+	}
+	for _, tc := range cases {
+		got, err := SkillInstallDir(tc.target, tc.scope, "/repo", "/home")
+		if err != nil {
+			t.Fatalf("SkillInstallDir(%s, %s): %v", tc.target, tc.scope, err)
+		}
+		if got != tc.want {
+			t.Errorf("SkillInstallDir(%s, %s) = %q, want %q", tc.target, tc.scope, got, tc.want)
+		}
+	}
+}
+
+func TestParseAgentTarget(t *testing.T) {
+	for _, s := range []string{"claude", "codex"} {
+		got, err := ParseAgentTarget(s)
+		if err != nil {
+			t.Errorf("ParseAgentTarget(%q) unexpected error: %v", s, err)
+		}
+		if string(got) != s {
+			t.Errorf("ParseAgentTarget(%q) = %q, want %q", s, got, s)
+		}
+	}
+	if _, err := ParseAgentTarget("gemini"); err == nil {
+		t.Error(`ParseAgentTarget("gemini") should error on an unknown target`)
 	}
 }

@@ -52,7 +52,7 @@ func TestSkillStatus_CurrentWhenInstalledFromSameBundle(t *testing.T) {
 	// Render + write each file exactly as SkillHandler.Install will.
 	for _, e := range res.Entries {
 		hash := model.ComputeSkillHash(e.Embedded.Content)
-		out, err := model.RenderSkillFile(e.Embedded, "v0.2.0", hash)
+		out, err := model.RenderSkillFile(e.Embedded, model.AgentClaude, "v0.2.0", hash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestSkillStatus_ModifiedWhenBodyEdited(t *testing.T) {
 	var tampered string
 	for i, e := range first.Entries {
 		hash := model.ComputeSkillHash(e.Embedded.Content)
-		out, err := model.RenderSkillFile(e.Embedded, "v0.2.0", hash)
+		out, err := model.RenderSkillFile(e.Embedded, model.AgentClaude, "v0.2.0", hash)
 		if err != nil {
 			t.Fatal(err)
 		}

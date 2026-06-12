@@ -32,7 +32,7 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 	err := h.Init(context.Background(), &command.InitCmd{
 		RepoRoot:      tmp,
 		BinaryVersion: "v0.2.0",
-		Target:        model.AgentClaude,
+		Targets:       []model.AgentTarget{model.AgentClaude},
 		Scope:         model.ScopeProject,
 		OnCreated: func(sddDir, graphDir string) {
 			createdCalled = true
@@ -86,6 +86,118 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/index/", ".sdd/stats/"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf(".gitignore missing %q, got:\n%s", want, data)
+		}
+	}
+}
+
+// TestInit_RendersMultipleAgents verifies a fresh init with several supported
+// agents renders each into its own scope directory, records the selection in
+// config.yaml, and gives each agent its own profile deviations.
+func TestInit_RendersMultipleAgents(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude, model.AgentCodex},
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, rel := range []string{".claude/skills/sdd/SKILL.md", ".agents/skills/sdd/SKILL.md"} {
+		if _, err := os.Stat(filepath.Join(tmp, rel)); err != nil {
+			t.Errorf("expected rendered skill at %s: %v", rel, err)
+		}
+	}
+
+	cfgData, err := os.ReadFile(filepath.Join(tmp, model.SDDDirName, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read config.yaml: %v", err)
+	}
+	if !strings.Contains(string(cfgData), "supported_agents: [claude, codex]") {
+		t.Errorf("config.yaml missing supported_agents selection:\n%s", cfgData)
+	}
+
+	// The Codex render must carry its own profile's deviations from the
+	// catch-up conditional and the inject helper — not Claude's.
+	codexSkill, err := os.ReadFile(filepath.Join(tmp, ".agents/skills/sdd/SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(codexSkill), "Then invoke the `/sdd-catchup` sub-skill via the Skill tool") {
+		t.Error("Codex render leaked the Claude branch of the catch-up conditional")
+	}
+	if !strings.Contains(string(codexSkill), "Then run the `sdd-catchup` skill") {
+		t.Error("Codex render missing the else branch of the catch-up conditional")
+	}
+	if !strings.Contains(string(codexSkill), "Run `sdd info`") {
+		t.Error("Codex render missing the instructed-injection form")
+	}
+}
+
+// TestInit_ScaffoldsInstructionBridge covers the AGENTS.md / CLAUDE.md bridge:
+// it is created when a non-Claude agent is selected and the files are absent,
+// CLAUDE.md imports AGENTS.md, and an existing CLAUDE.md is never overwritten.
+func TestInit_ScaffoldsInstructionBridge(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	// A project file that must survive untouched.
+	claudePath := filepath.Join(tmp, "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte("# existing project rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var scaffolded []string
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude, model.AgentCodex},
+		Scope:         model.ScopeProject,
+		OnBridgeScaffolded: func(paths []string) {
+			scaffolded = append(scaffolded, paths...)
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// AGENTS.md created and importable; CLAUDE.md preserved verbatim.
+	agents, err := os.ReadFile(filepath.Join(tmp, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("AGENTS.md not created: %v", err)
+	}
+	if !strings.Contains(string(agents), "# AGENTS.md") {
+		t.Errorf("AGENTS.md missing expected heading:\n%s", agents)
+	}
+	if got, _ := os.ReadFile(claudePath); string(got) != "# existing project rules\n" {
+		t.Errorf("CLAUDE.md was overwritten: %q", got)
+	}
+	if len(scaffolded) != 1 || filepath.Base(scaffolded[0]) != "AGENTS.md" {
+		t.Errorf("callback should report only the created AGENTS.md, got %v", scaffolded)
+	}
+}
+
+// TestInit_ClaudeOnlySkipsBridge verifies a Claude-only project gets no
+// AGENTS.md / CLAUDE.md scaffold — the bridge only appears when it has a
+// non-Claude consumer.
+func TestInit_ClaudeOnlySkipsBridge(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude},
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		if _, err := os.Stat(filepath.Join(tmp, name)); !os.IsNotExist(err) {
+			t.Errorf("%s should not be scaffolded for a Claude-only project", name)
 		}
 	}
 }
@@ -223,7 +335,7 @@ func TestInit_PostUpgradeRefreshesDriftedPristine(t *testing.T) {
 
 	oldContent := []byte("---\nname: " + entry.Skill + "\n---\nprior bundle body\n")
 	oldHash := model.ComputeSkillHash(oldContent)
-	oldFile, err := model.RenderSkillFile(model.SkillBundleEntry{Content: oldContent}, "v0.1.0", oldHash)
+	oldFile, err := model.RenderSkillFile(model.SkillBundleEntry{Content: oldContent}, model.AgentClaude, "v0.1.0", oldHash)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,3 +1,8 @@
+---
+metadata:
+    sdd-content-hash: 04dcb9ba096f5213546ea3ce6b765a4c81ab03f404b217c44eba23a290962bec
+    sdd-version: dev
+---
 # SDD CLI Reference
 
 ## Commands

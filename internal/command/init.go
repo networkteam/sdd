@@ -38,9 +38,11 @@ type InitCmd struct {
 	// to derive the graph's minimum_version (unless it's a dev build).
 	BinaryVersion string
 
-	// Target selects which agent's skills to install. Empty defaults to
-	// model.DefaultAgentTarget (Claude).
-	Target model.AgentTarget
+	// Targets lists the agent profiles to render and install. Empty defaults
+	// to the value resolved from supported_agents in .sdd/config.yaml (or
+	// model.DefaultSupportedAgents on a fresh tree). The handler renders each
+	// listed target into its own scope directory.
+	Targets []model.AgentTarget
 
 	// Scope selects user-global vs project-local skill installation. Empty
 	// defaults to model.DefaultScope (User). When ScopeExplicit is false the
@@ -115,6 +117,13 @@ type InitCmd struct {
 	// OnSkillsInstalled fires after the skill install pass completes,
 	// carrying a per-category summary suitable for presenter output.
 	OnSkillsInstalled func(result SkillInstallResult)
+
+	// OnBridgeScaffolded fires when the AGENTS.md / CLAUDE.md instruction
+	// bridge was created from scratch, carrying the absolute paths written.
+	// Only fires for files that were absent — existing files are never
+	// overwritten, so a repeat init or a project with its own files
+	// produces no callback.
+	OnBridgeScaffolded func(paths []string)
 }
 
 // Validate checks required fields.

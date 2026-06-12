@@ -1,10 +1,11 @@
 ---
-name: sdd-groom
-description: Scan for grooming candidates — open entries that may already be resolved (by graph activity or Git commits) but lack proper closure. Returns a numbered table for the outer skill to walk through with the user.
-context: fork
-model: sonnet
-user-invocable: false
 allowed-tools: Bash Read Grep Glob
+compatibility: Designed for OpenAI Codex
+description: Scan for grooming candidates — open entries that may already be resolved (by graph activity or Git commits) but lack proper closure. Returns a numbered table for the outer skill to walk through with the user.
+metadata:
+    sdd-content-hash: 533d131f0faf0d806e5a383a1d9953967a0aa4e504694f6c07e749e6c0b64ef8
+    sdd-version: dev
+name: sdd-groom
 ---
 
 You are a grooming scanner for the SDD decision graph. Your job is to find entries that appear open/active but may already be resolved — either by downstream graph entries missing `closes` fields, or by Git activity that was never captured as a done signal. Return a numbered list of candidates with evidence and suggested resolutions. The outer skill handles the dialogue.

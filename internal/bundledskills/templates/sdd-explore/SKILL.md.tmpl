@@ -1,9 +1,13 @@
 ---
 name: sdd-explore
 description: Compress a goal-tagged research mission around a graph entry — chain plus search-surfaced neighbors, filtered against a stated goal. Returns a compressed brief for the outer skill to dialogue with.
+{{- if eq .Agent "codex" }}
+compatibility: Designed for OpenAI Codex
+{{- else }}
 context: fork
 model: sonnet
 user-invocable: false
+{{- end }}
 allowed-tools: Bash Read Grep Glob
 ---
 

@@ -12,20 +12,50 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// AgentTarget identifies which agent a skill bundle installs for. Claude is
-// the only supported target for MVP; the type exists so the install flow can
-// grow additional agents (Codex, etc.) without structural change.
+// AgentTarget identifies which agent a skill bundle renders and installs for.
+// Each target is a render profile over the one neutral template tree — the
+// value drives {{ if eq .Agent "..." }} conditionals, the install directory,
+// and (eventually) the frontmatter shape.
 type AgentTarget string
 
 const (
-	// AgentClaude installs into Claude Code's skill directories
+	// AgentClaude renders into Claude Code's skill directories
 	// (~/.claude/skills or <repo>/.claude/skills).
 	AgentClaude AgentTarget = "claude"
+
+	// AgentCodex renders into the Agent Skills standard directories
+	// (~/.agents/skills or <repo>/.agents/skills), consumed by Codex and
+	// other agents reading the open Agent Skills format.
+	AgentCodex AgentTarget = "codex"
 )
 
-// DefaultAgentTarget is the target used when nothing is specified. Only one
-// agent is wired at MVP.
+// DefaultAgentTarget is the target used when nothing is specified.
 const DefaultAgentTarget = AgentClaude
+
+// KnownAgentTargets lists every target sdd can render, in the order the
+// `sdd init` multi-select presents them. Adding a target here surfaces it in
+// the selector and in supported_agents validation.
+var KnownAgentTargets = []AgentTarget{AgentClaude, AgentCodex}
+
+// DefaultSupportedAgents is the supported_agents value written on a fresh init
+// when the operator makes no other selection — Claude alone, matching the
+// pre-multi-agent default.
+var DefaultSupportedAgents = []AgentTarget{AgentClaude}
+
+// ParseAgentTarget validates s against KnownAgentTargets, returning the typed
+// value or an error naming the valid set.
+func ParseAgentTarget(s string) (AgentTarget, error) {
+	for _, t := range KnownAgentTargets {
+		if string(t) == s {
+			return t, nil
+		}
+	}
+	names := make([]string, len(KnownAgentTargets))
+	for i, t := range KnownAgentTargets {
+		names[i] = string(t)
+	}
+	return "", fmt.Errorf("unknown agent target %q (known: %s)", s, strings.Join(names, ", "))
+}
 
 // Scope selects where skills are installed for a given agent. User scope is
 // shared across all projects for a given OS user; Project scope lives beside
@@ -224,6 +254,11 @@ func normalizeForJSON(v any) any {
 // stripStampKeys returns a copy of fm without the install-time stamps. Used
 // to exclude sdd-version and sdd-content-hash from the hash input so the hash
 // is stable under re-stamping.
+//
+// Stamps are stripped wherever they live — top level (Claude) or nested under
+// metadata: (Codex). A metadata map emptied by the strip is dropped entirely
+// so a stamped Codex file hashes identically to its unstamped embedded source
+// (which carries no metadata key).
 func stripStampKeys(fm map[string]any) map[string]any {
 	out := make(map[string]any, len(fm))
 	for k, v := range fm {
@@ -232,7 +267,84 @@ func stripStampKeys(fm map[string]any) map[string]any {
 		}
 		out[k] = v
 	}
+	if meta, ok := asStringMap(out["metadata"]); ok {
+		stripped := make(map[string]any, len(meta))
+		for k, v := range meta {
+			if k == SkillStampVersion || k == SkillStampHash {
+				continue
+			}
+			stripped[k] = v
+		}
+		if len(stripped) == 0 {
+			delete(out, "metadata")
+		} else {
+			out["metadata"] = stripped
+		}
+	}
 	return out
+}
+
+// setStamps injects the install-time version and content-hash stamps into fm.
+// Claude keeps them at the top level; Codex nests them under metadata: so the
+// rendered SKILL.md conforms to the Agent Skills standard. Stamps merge into
+// any metadata the template already authored rather than replacing it.
+func setStamps(fm map[string]any, target AgentTarget, version, contentHash string) {
+	if target == AgentCodex {
+		meta, ok := asStringMap(fm["metadata"])
+		if !ok {
+			meta = map[string]any{}
+		}
+		meta[SkillStampVersion] = version
+		meta[SkillStampHash] = contentHash
+		fm["metadata"] = meta
+		return
+	}
+	fm[SkillStampVersion] = version
+	fm[SkillStampHash] = contentHash
+}
+
+// readStamps extracts the install-time stamps from fm, accepting either the
+// top-level placement (Claude) or the metadata-nested placement (Codex).
+func readStamps(fm map[string]any) (version, hash string) {
+	if v, ok := fm[SkillStampVersion].(string); ok {
+		version = v
+	}
+	if h, ok := fm[SkillStampHash].(string); ok {
+		hash = h
+	}
+	if version != "" && hash != "" {
+		return version, hash
+	}
+	if meta, ok := asStringMap(fm["metadata"]); ok {
+		if version == "" {
+			if v, ok := meta[SkillStampVersion].(string); ok {
+				version = v
+			}
+		}
+		if hash == "" {
+			if h, ok := meta[SkillStampHash].(string); ok {
+				hash = h
+			}
+		}
+	}
+	return version, hash
+}
+
+// asStringMap coerces a frontmatter value into a map[string]any, tolerating the
+// map[any]any that some YAML decode paths produce for nested mappings.
+func asStringMap(v any) (map[string]any, bool) {
+	switch m := v.(type) {
+	case map[string]any:
+		return m, true
+	case map[any]any:
+		out := make(map[string]any, len(m))
+		for k, val := range m {
+			out[fmt.Sprint(k)] = val
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 // splitFrontmatter separates a YAML frontmatter block from the body of a
@@ -286,17 +398,22 @@ func splitFrontmatter(content []byte) (map[string]any, []byte) {
 // given install-time stamps injected. If the entry has no original
 // frontmatter, a fresh block with just the stamps is written.
 //
+// Stamp placement is target-aware: Claude keeps them at the top level (its
+// historical shape), while Codex nests them under metadata: so the rendered
+// SKILL.md conforms to the Agent Skills standard, which rejects unknown
+// top-level keys. The read (ParseSkillFile) and hash (stripStampKeys) paths
+// accept either placement, so they stay target-agnostic.
+//
 // The returned bytes are what gets hashed by ComputeSkillHash once the stamps
 // are stripped — callers writing new installations should compute the hash
 // from the embedded entry content (which has no stamps) to populate the
 // sdd-content-hash stamp itself.
-func RenderSkillFile(entry SkillBundleEntry, version, contentHash string) ([]byte, error) {
+func RenderSkillFile(entry SkillBundleEntry, target AgentTarget, version, contentHash string) ([]byte, error) {
 	fm, body := splitFrontmatter(entry.Content)
 	if fm == nil {
 		fm = map[string]any{}
 	}
-	fm[SkillStampVersion] = version
-	fm[SkillStampHash] = contentHash
+	setStamps(fm, target, version, contentHash)
 
 	yamlBytes, err := yaml.Marshal(fm)
 	if err != nil {
@@ -311,20 +428,6 @@ func RenderSkillFile(entry SkillBundleEntry, version, contentHash string) ([]byt
 	return buf.Bytes(), nil
 }
 
-// Skill include directive. A line of the form
-//
-//	<!-- sdd:include references/ref-kinds.md -->
-//
-// is replaced at bundle-load time with the body of the referenced file in the
-// same skill. This lets one canonical fragment be reused across skill files
-// without restating it. Resolution runs once at load (see ResolveSkillIncludes)
-// so drift detection (ComputeSkillStatus) and the install writer
-// (writeStampedEntry) both operate on identical resolved content.
-const (
-	skillIncludePrefix = "<!-- sdd:include "
-	skillIncludeSuffix = " -->"
-)
-
 // SkillFileBody returns the body of a skill file (frontmatter stripped). Bundle
 // sources carry no install stamps, so this is usually the whole content; the
 // strip keeps it correct if a fragment ever grows frontmatter.
@@ -333,87 +436,38 @@ func SkillFileBody(content []byte) []byte {
 	return body
 }
 
-// ResolveSkillIncludes replaces sdd:include directives in each entry with the
-// body of the referenced file in the same skill. It runs once at bundle load so
-// every downstream consumer sees identical resolved content. Resolution is
-// single-pass: an included fragment is not itself rescanned for includes. A
-// directive whose target is absent from the bundle is an error.
-func ResolveSkillIncludes(entries []SkillBundleEntry) ([]SkillBundleEntry, error) {
-	bodies := make(map[string][]byte, len(entries))
-	for _, e := range entries {
-		bodies[e.Skill+"/"+e.RelPath] = SkillFileBody(e.Content)
-	}
-
-	out := make([]SkillBundleEntry, len(entries))
-	for i, e := range entries {
-		if !bytes.Contains(e.Content, []byte(skillIncludePrefix)) {
-			out[i] = e
-			continue
-		}
-		lines := strings.Split(string(e.Content), "\n")
-		var b strings.Builder
-		for j, line := range lines {
-			if j > 0 {
-				b.WriteByte('\n')
-			}
-			target, ok := parseSkillInclude(line)
-			if !ok {
-				b.WriteString(line)
-				continue
-			}
-			body, found := bodies[e.Skill+"/"+target]
-			if !found {
-				return nil, fmt.Errorf("skill %s/%s: include target %q not found in bundle", e.Skill, e.RelPath, target)
-			}
-			b.Write(bytes.TrimRight(body, "\n"))
-		}
-		resolved := e
-		resolved.Content = []byte(b.String())
-		out[i] = resolved
-	}
-	return out, nil
-}
-
-// parseSkillInclude returns the include target path when line is an sdd:include
-// directive (surrounding whitespace ignored), else ok=false.
-func parseSkillInclude(line string) (string, bool) {
-	t := strings.TrimSpace(line)
-	if !strings.HasPrefix(t, skillIncludePrefix) || !strings.HasSuffix(t, skillIncludeSuffix) {
-		return "", false
-	}
-	inner := strings.TrimSpace(t[len(skillIncludePrefix) : len(t)-len(skillIncludeSuffix)])
-	if inner == "" {
-		return "", false
-	}
-	return inner, true
-}
-
 // SkillInstallDir returns the absolute directory where skills install for a
 // given agent target and scope.
 //
-// Claude skills install at <home>/.claude/skills (user scope) or
-// <repoRoot>/.claude/skills (project scope). The function errors if the
-// required base path is empty for the chosen scope — callers should populate
-// UserHome or RepoRoot before the query reaches the finder.
+// The per-target subpath (".claude/skills" for Claude, ".agents/skills" for
+// Codex) is joined under <home> for user scope or <repoRoot> for project
+// scope. The function errors if the required base path is empty for the chosen
+// scope — callers should populate UserHome or RepoRoot before the query
+// reaches the finder.
 func SkillInstallDir(target AgentTarget, scope Scope, repoRoot, userHome string) (string, error) {
+	var sub []string
 	switch target {
 	case AgentClaude:
-		switch scope {
-		case ScopeUser:
-			if userHome == "" {
-				return "", fmt.Errorf("user home is required for user scope")
-			}
-			return filepath.Join(userHome, ".claude", "skills"), nil
-		case ScopeProject:
-			if repoRoot == "" {
-				return "", fmt.Errorf("repo root is required for project scope")
-			}
-			return filepath.Join(repoRoot, ".claude", "skills"), nil
-		default:
-			return "", fmt.Errorf("unknown scope: %q", scope)
-		}
+		sub = []string{".claude", "skills"}
+	case AgentCodex:
+		sub = []string{".agents", "skills"}
 	default:
 		return "", fmt.Errorf("unsupported agent target: %q", target)
+	}
+
+	switch scope {
+	case ScopeUser:
+		if userHome == "" {
+			return "", fmt.Errorf("user home is required for user scope")
+		}
+		return filepath.Join(append([]string{userHome}, sub...)...), nil
+	case ScopeProject:
+		if repoRoot == "" {
+			return "", fmt.Errorf("repo root is required for project scope")
+		}
+		return filepath.Join(append([]string{repoRoot}, sub...)...), nil
+	default:
+		return "", fmt.Errorf("unknown scope: %q", scope)
 	}
 }
 
@@ -425,11 +479,6 @@ func ParseSkillFile(absPath string, content []byte) *SkillFile {
 	if fm == nil {
 		return sf
 	}
-	if v, ok := fm[SkillStampVersion].(string); ok {
-		sf.StoredVersion = v
-	}
-	if h, ok := fm[SkillStampHash].(string); ok {
-		sf.StoredHash = h
-	}
+	sf.StoredVersion, sf.StoredHash = readStamps(fm)
 	return sf
 }
