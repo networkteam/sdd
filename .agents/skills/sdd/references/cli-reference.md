@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: 04dcb9ba096f5213546ea3ce6b765a4c81ab03f404b217c44eba23a290962bec
+    sdd-content-hash: af8bd8387ee5d7e13cb16c222cd5a1018ffb0a96fe839c2ad6428f9cbc755105
     sdd-version: dev
 ---
 # SDD CLI Reference
@@ -80,7 +80,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `group(by(<field>))` | Bucket entries by field; produces grouped shape (consume with `as-grouped`) |
 | `stalled(<value>)` | Threshold below which a focus target with assigned actors is "stalled" (default 1.0) |
 
-**`expand(refs)` sub-line shape.** Each ref renders as `→ <verb> <full-id> {status: …}` with an optional `: "<desc>"` clause when the ref carries a description. The verb is the per-ref kind (`grounded-in`, `builds-on`, `refines`, `addresses`, `surfaces`, `depends-on`, `required-by`, `related`); legacy bare-string refs (kind `unknown`) render with the generic verb `refs`, and legacy on-disk `grounds`/`evidence` render as `grounded-in` (resolved at parse). Status surfaces the referenced entry's *current* derived state, so stale summary prose can't mislead a reader into treating a closed dependency as still open. Done-signal targets carry no status segment (they are terminal). Three shapes:
+**`expand(refs)` sub-line shape.** Each ref renders as `→ <verb> <full-id> {status: …}` with an optional `: "<desc>"` clause when the ref carries a description. The verb is the per-ref kind (`grounded-in`, `builds-on`, `refines`, `addresses`, `surfaces`, `surfaced-by`, `depends-on`, `required-by`, `related`); legacy bare-string refs (kind `unknown`) render with the generic verb `refs`, and legacy on-disk `grounds`/`evidence` render as `grounded-in` (resolved at parse). Status surfaces the referenced entry's *current* derived state, so stale summary prose can't mislead a reader into treating a closed dependency as still open. Done-signal targets carry no status segment (they are terminal). Three shapes:
 
 ```
 → refs 20260506-151345-d-tac-uww {status: closed-by 20260507-133746-s-tac-z2o}     # legacy bare-string ref
