@@ -990,6 +990,44 @@ func TestPreflightEval_RefMeta_RelatedFloor_NoFinding(t *testing.T) {
 	}
 }
 
+// `surfaced-by` is the ninth kind (d-tac-53l) — the backward inverse of
+// `surfaces`. Pins the scenario the gap (s-cpt-seg) named: a surfaced entry
+// captured AFTER its surfacer, where the surfacer is a terminal `done`. This is
+// the case the lossy fallbacks fail — `addresses` is mechanically blocked on a
+// terminal done, `grounded-in`/`builds-on` understate "raised by", and `related`
+// is the floor. The validator must accept `surfaced-by` as the precise kind and
+// not push any of those alternatives at a noise/blocking band. Advisory tier: a
+// spurious sharper-kind nudge at low is tolerable; a medium/high recommending
+// grounded-in/addresses/related is the boundary regression this guards.
+func TestPreflightEval_RefMeta_SurfacedByAfterTerminalDone_NoMedium(t *testing.T) {
+	done := &model.Entry{
+		ID:      "20260610-090000-s-tac-idx",
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
+		Layer:   model.LayerTactical,
+		Content: "Shipped lazy search-index fill: sdd search now embeds missing entries on demand rather than requiring an upfront sdd index. Commit a1b2c3d. While wiring it, observed once in a parallel session that two participants embedding the same entry concurrently both rewrite the index manifest — not yet handled.",
+		Time:    time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{done})
+
+	proposed := &model.Entry{
+		Type:       model.TypeSignal,
+		Kind:       model.KindGap,
+		Layer:      model.LayerTactical,
+		Confidence: "medium",
+		Refs: []model.Ref{
+			// surfaced-by: the done's work raised this gap. addresses is blocked
+			// (terminal done); grounded-in would understate that the work
+			// *produced* this; this is the surfacer case the new kind fills.
+			{ID: done.ID, Kind: model.RefKindSurfacedBy, Desc: "raised by the lazy-fill work, which exposed the concurrent manifest write"},
+		},
+		Content: "Concurrent search-index manifest writes can race: two participants embedding the same entry at once both rewrite the manifest, and the later write clobbers the earlier's entries. The lazy-fill implementation (s-tac-idx) raised this — its work surfaced the collision, and on-demand embedding makes the race likely rather than theoretical.",
+		Time:    time.Date(2026, 6, 10, 14, 0, 0, 0, time.UTC),
+	}
+
+	runEvalPassRate(t, graph, proposed, advisoryTier, noMediumOrHighRefMeta)
+}
+
 // Terminal-`done` tie-break (d-prc-v0h / d-prc-uh3): the target is a terminal
 // `done` whose body flagged a follow-up, and the source is the next step taking
 // that follow-up up. `builds-on` (next step after a finished chain) is

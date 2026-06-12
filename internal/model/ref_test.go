@@ -181,6 +181,7 @@ func TestRefUnmarshal_ClosedSetCoverage(t *testing.T) {
 		{"refines", RefKindRefines},
 		{"addresses", RefKindAddresses},
 		{"surfaces", RefKindSurfaces},
+		{"surfaced-by", RefKindSurfacedBy},
 		{"depends-on", RefKindDependsOn},
 		{"required-by", RefKindRequiredBy},
 		{"related", RefKindRelated},
@@ -258,7 +259,7 @@ func TestRefMarshal_LegacyUnknownStillEmitsObjectForm(t *testing.T) {
 func TestIsValidRefKind(t *testing.T) {
 	for _, k := range []RefKind{
 		RefKindGroundedIn, RefKindBuildsOn, RefKindRefines, RefKindAddresses,
-		RefKindSurfaces, RefKindDependsOn, RefKindRequiredBy, RefKindRelated,
+		RefKindSurfaces, RefKindSurfacedBy, RefKindDependsOn, RefKindRequiredBy, RefKindRelated,
 		RefKindUnknown,
 	} {
 		if !IsValidRefKind(k) {
@@ -280,7 +281,7 @@ func TestIsValidRefKind(t *testing.T) {
 func TestIsCapturableRefKind(t *testing.T) {
 	for _, k := range []RefKind{
 		RefKindGroundedIn, RefKindBuildsOn, RefKindRefines, RefKindAddresses,
-		RefKindSurfaces, RefKindDependsOn, RefKindRequiredBy, RefKindRelated,
+		RefKindSurfaces, RefKindSurfacedBy, RefKindDependsOn, RefKindRequiredBy, RefKindRelated,
 	} {
 		if !IsCapturableRefKind(k) {
 			t.Errorf("%q should be capturable", k)

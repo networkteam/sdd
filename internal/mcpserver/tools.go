@@ -51,7 +51,7 @@ type GroundResult struct {
 
 type RefArg struct {
 	ID   string `json:"id" jsonschema:"full ID of the referenced entry"`
-	Kind string `json:"kind" jsonschema:"why the reference exists: grounded-in, builds-on, refines, addresses, surfaces, depends-on, required-by, or related"`
+	Kind string `json:"kind" jsonschema:"why the reference exists: grounded-in, builds-on, refines, addresses, surfaces, surfaced-by, depends-on, required-by, or related"`
 	Desc string `json:"desc,omitempty" jsonschema:"optional one-line why for this reference"`
 }
 

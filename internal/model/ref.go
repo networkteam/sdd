@@ -23,6 +23,7 @@ const (
 	RefKindRefines    RefKind = "refines"     // sharpens, narrows, or clarifies an active target in place — the augmenting-directive pattern (d-prc-9ti)
 	RefKindAddresses  RefKind = "addresses"   // acts on / realizes the target — responds to a signal or fulfils a decision's commitment
 	RefKindSurfaces   RefKind = "surfaces"    // forward class: created or discovered the target during this work
+	RefKindSurfacedBy RefKind = "surfaced-by" // backward class: inverse of surfaces — this entry was raised/produced by the target's work
 	RefKindDependsOn  RefKind = "depends-on"  // functional prerequisite — source needs target first
 	RefKindRequiredBy RefKind = "required-by" // forward class: inverse of depends-on — target needs source first
 	RefKindRelated    RefKind = "related"     // parallel sibling / contextual neighbor — the floor, never a default
@@ -46,6 +47,7 @@ var refKinds = map[RefKind]bool{
 	RefKindRefines:    true,
 	RefKindAddresses:  true,
 	RefKindSurfaces:   true,
+	RefKindSurfacedBy: true,
 	RefKindDependsOn:  true,
 	RefKindRequiredBy: true,
 	RefKindRelated:    true,
@@ -86,6 +88,7 @@ func RefKindValues() []RefKind {
 		RefKindRefines,
 		RefKindAddresses,
 		RefKindSurfaces,
+		RefKindSurfacedBy,
 		RefKindDependsOn,
 		RefKindRequiredBy,
 		RefKindRelated,

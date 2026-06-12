@@ -169,4 +169,9 @@ func Test_AdmissibleRefKinds_AgreesWithGraphStatus(t *testing.T) {
 			t.Errorf("%s on a terminal done must be applicable (the documented tie-break)", k)
 		}
 	}
+	// surfaced-by must be applicable on a terminal done — that is precisely the
+	// surfacer case addresses cannot serve (a done's work raised this entry).
+	if cell, _ := RefKindApplicability(RefKindSurfacedBy, doneClass); !cell.Applicable {
+		t.Error("surfaced-by on a terminal done must be applicable (the surfacer case addresses cannot serve)")
+	}
 }

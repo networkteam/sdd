@@ -94,6 +94,12 @@ var refKindMatrix = map[RefKind]map[RefTargetClass]RefKindCell{
 		TargetTerminalDone: {Applicable: true, Note: "doing this entry's work created or discovered the target"},
 		TargetRetired:      {Applicable: true, Note: "doing this entry's work created or discovered the target, which has since been retired"},
 	},
+	RefKindSurfacedBy: {
+		TargetLiveDecision: {Applicable: true, Note: "backward inverse of surfaces — the target's work raised or produced this entry, captured after the surfacer"},
+		TargetLiveSignal:   {Applicable: true, Note: "backward inverse of surfaces — the target's work raised or produced this entry, captured after the surfacer"},
+		TargetTerminalDone: {Applicable: true, Note: "backward inverse of surfaces — the target's done work raised or produced this entry; addresses cannot serve here (a terminal done is unaddressable), which is exactly the case this kind fills"},
+		TargetRetired:      {Applicable: true, Note: "backward inverse of surfaces — the target's work raised or produced this entry, and the target has since been retired"},
+	},
 	RefKindDependsOn: {
 		TargetLiveDecision: {Applicable: true, Note: "gated on the target landing or holding first"},
 		TargetLiveSignal:   {Applicable: true, Note: "gated on the target landing or holding first"},

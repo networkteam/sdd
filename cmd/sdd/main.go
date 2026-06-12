@@ -599,7 +599,7 @@ func newCmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.StringSliceFlag{
 				Name:  "refs",
-				Usage: "Reference (repeatable) — JSON object {\"id\":\"<id>\",\"kind\":\"<kind>\",\"desc\":\"<optional>\"}. Kind is one of: grounded-in, builds-on, refines, addresses, surfaces, depends-on, required-by, related.",
+				Usage: "Reference (repeatable) — JSON object {\"id\":\"<id>\",\"kind\":\"<kind>\",\"desc\":\"<optional>\"}. Kind is one of: grounded-in, builds-on, refines, addresses, surfaces, surfaced-by, depends-on, required-by, related.",
 			},
 			&cli.StringFlag{
 				Name:  "supersedes",
