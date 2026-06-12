@@ -60,7 +60,7 @@ Body content here.
 `)
 	embeddedHash := ComputeSkillHash(embedded)
 
-	stamped, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, "v0.2.0", embeddedHash)
+	stamped, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, AgentClaude, "v0.2.0", embeddedHash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestComputeSkillStatus_Current(t *testing.T) {
 	embedded := []byte("---\nname: a\n---\nbody\n")
 	entry := SkillBundleEntry{Content: embedded}
 	hash := ComputeSkillHash(embedded)
-	rendered, err := RenderSkillFile(entry, "v0.2.0", hash)
+	rendered, err := RenderSkillFile(entry, AgentClaude, "v0.2.0", hash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestComputeSkillStatus_Pristine(t *testing.T) {
 	// the embedded content has changed.
 	oldEmbedded := []byte("---\nname: a\n---\nold body\n")
 	oldHash := ComputeSkillHash(oldEmbedded)
-	installedBytes, err := RenderSkillFile(SkillBundleEntry{Content: oldEmbedded}, "v0.1.0", oldHash)
+	installedBytes, err := RenderSkillFile(SkillBundleEntry{Content: oldEmbedded}, AgentClaude, "v0.1.0", oldHash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestComputeSkillStatus_Modified(t *testing.T) {
 	embedded := []byte("---\nname: a\n---\nbody\n")
 	entry := SkillBundleEntry{Content: embedded}
 	hash := ComputeSkillHash(embedded)
-	rendered, err := RenderSkillFile(entry, "v0.1.0", hash)
+	rendered, err := RenderSkillFile(entry, AgentClaude, "v0.1.0", hash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestSplitFrontmatter_NoFrontmatter(t *testing.T) {
 
 func TestRenderSkillFile_RoundTripsThroughParse(t *testing.T) {
 	embedded := []byte("---\nname: x\ndescription: d\n---\nbody\n")
-	rendered, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, "v0.2.0", "deadbeef")
+	rendered, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, AgentClaude, "v0.2.0", "deadbeef")
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}
@@ -190,6 +190,39 @@ func TestRenderSkillFile_RoundTripsThroughParse(t *testing.T) {
 	}
 }
 
+// TestRenderSkillFile_CodexNestsStampsUnderMetadata proves the Codex render
+// keeps stamps out of the top-level frontmatter (which the Agent Skills
+// standard rejects) by nesting them under metadata:, while the read and hash
+// paths still recognise them — so a fresh Codex install classifies as Current.
+func TestRenderSkillFile_CodexNestsStampsUnderMetadata(t *testing.T) {
+	embedded := []byte("---\nname: sdd\ndescription: d\ncompatibility: Designed for OpenAI Codex\n---\nbody\n")
+	hash := ComputeSkillHash(embedded)
+	rendered, err := RenderSkillFile(SkillBundleEntry{Content: embedded}, AgentCodex, "v0.2.0", hash)
+	if err != nil {
+		t.Fatalf("RenderSkillFile: %v", err)
+	}
+
+	fm, _ := splitFrontmatter(rendered)
+	if _, top := fm[SkillStampVersion]; top {
+		t.Error("codex render placed sdd-version at the top level")
+	}
+	meta, ok := asStringMap(fm["metadata"])
+	if !ok {
+		t.Fatalf("codex render did not produce a metadata map: %v", fm)
+	}
+	if meta[SkillStampVersion] != "v0.2.0" || meta[SkillStampHash] != hash {
+		t.Errorf("stamps not nested under metadata: %v", meta)
+	}
+
+	installed := ParseSkillFile("/tmp/sdd", rendered)
+	if installed.StoredVersion != "v0.2.0" || installed.StoredHash != hash {
+		t.Errorf("ParseSkillFile did not read nested stamps: %+v", installed)
+	}
+	if got := ComputeSkillStatus(SkillBundleEntry{Content: embedded}, installed); got != SkillStatusCurrent {
+		t.Errorf("codex rendered entry should classify Current, got %s", got)
+	}
+}
+
 // TestRenderedEntryDriftStable proves the install writer and drift detection
 // agree on bundle content: an entry written with stamps and parsed back
 // classifies as Current against that same entry. This is the property that keeps
@@ -197,7 +230,7 @@ func TestRenderSkillFile_RoundTripsThroughParse(t *testing.T) {
 func TestRenderedEntryDriftStable(t *testing.T) {
 	host := SkillBundleEntry{Skill: "sdd", RelPath: "host.md", Content: []byte("---\nname: host\n---\nbefore\nbody\nafter\n")}
 	hash := ComputeSkillHash(host.Content)
-	rendered, err := RenderSkillFile(host, "v1", hash)
+	rendered, err := RenderSkillFile(host, AgentClaude, "v1", hash)
 	if err != nil {
 		t.Fatalf("RenderSkillFile: %v", err)
 	}

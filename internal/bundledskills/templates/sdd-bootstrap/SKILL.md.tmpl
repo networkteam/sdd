@@ -1,6 +1,9 @@
 ---
 name: sdd-bootstrap
 description: Set up an SDD graph on a fresh or sparse project — walk through a readiness sweep, brownfield context gather, actor capture, and Golden Circle strategic seeding, then hand back to /sdd via catch-up. Invoke when the graph lacks actors or aspirations.
+{{- if eq .Agent "codex" }}
+compatibility: Designed for OpenAI Codex
+{{- end }}
 allowed-tools: Read Grep Bash
 ---
 

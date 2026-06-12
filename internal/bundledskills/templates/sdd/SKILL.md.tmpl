@@ -1,6 +1,9 @@
 ---
 name: sdd
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
+{{- if eq .Agent "codex" }}
+compatibility: Designed for OpenAI Codex
+{{- end }}
 allowed-tools: Read Grep Bash(sdd *)
 ---
 

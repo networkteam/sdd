@@ -1,6 +1,9 @@
 ---
 name: sdd-catchup
 description: Produce a colleague-style catch-up briefing on the SDD project. Threads recent activity, active work, and warm gaps into 2–4 story-arc clusters with action-tight numbered items. Use as the check-in mode when starting a session or whenever a fresh briefing is wanted.
+{{- if eq .Agent "codex" }}
+compatibility: Designed for OpenAI Codex
+{{- end }}
 allowed-tools: Bash(sdd *)
 ---
 

@@ -254,6 +254,11 @@ func normalizeForJSON(v any) any {
 // stripStampKeys returns a copy of fm without the install-time stamps. Used
 // to exclude sdd-version and sdd-content-hash from the hash input so the hash
 // is stable under re-stamping.
+//
+// Stamps are stripped wherever they live — top level (Claude) or nested under
+// metadata: (Codex). A metadata map emptied by the strip is dropped entirely
+// so a stamped Codex file hashes identically to its unstamped embedded source
+// (which carries no metadata key).
 func stripStampKeys(fm map[string]any) map[string]any {
 	out := make(map[string]any, len(fm))
 	for k, v := range fm {
@@ -262,7 +267,84 @@ func stripStampKeys(fm map[string]any) map[string]any {
 		}
 		out[k] = v
 	}
+	if meta, ok := asStringMap(out["metadata"]); ok {
+		stripped := make(map[string]any, len(meta))
+		for k, v := range meta {
+			if k == SkillStampVersion || k == SkillStampHash {
+				continue
+			}
+			stripped[k] = v
+		}
+		if len(stripped) == 0 {
+			delete(out, "metadata")
+		} else {
+			out["metadata"] = stripped
+		}
+	}
 	return out
+}
+
+// setStamps injects the install-time version and content-hash stamps into fm.
+// Claude keeps them at the top level; Codex nests them under metadata: so the
+// rendered SKILL.md conforms to the Agent Skills standard. Stamps merge into
+// any metadata the template already authored rather than replacing it.
+func setStamps(fm map[string]any, target AgentTarget, version, contentHash string) {
+	if target == AgentCodex {
+		meta, ok := asStringMap(fm["metadata"])
+		if !ok {
+			meta = map[string]any{}
+		}
+		meta[SkillStampVersion] = version
+		meta[SkillStampHash] = contentHash
+		fm["metadata"] = meta
+		return
+	}
+	fm[SkillStampVersion] = version
+	fm[SkillStampHash] = contentHash
+}
+
+// readStamps extracts the install-time stamps from fm, accepting either the
+// top-level placement (Claude) or the metadata-nested placement (Codex).
+func readStamps(fm map[string]any) (version, hash string) {
+	if v, ok := fm[SkillStampVersion].(string); ok {
+		version = v
+	}
+	if h, ok := fm[SkillStampHash].(string); ok {
+		hash = h
+	}
+	if version != "" && hash != "" {
+		return version, hash
+	}
+	if meta, ok := asStringMap(fm["metadata"]); ok {
+		if version == "" {
+			if v, ok := meta[SkillStampVersion].(string); ok {
+				version = v
+			}
+		}
+		if hash == "" {
+			if h, ok := meta[SkillStampHash].(string); ok {
+				hash = h
+			}
+		}
+	}
+	return version, hash
+}
+
+// asStringMap coerces a frontmatter value into a map[string]any, tolerating the
+// map[any]any that some YAML decode paths produce for nested mappings.
+func asStringMap(v any) (map[string]any, bool) {
+	switch m := v.(type) {
+	case map[string]any:
+		return m, true
+	case map[any]any:
+		out := make(map[string]any, len(m))
+		for k, val := range m {
+			out[fmt.Sprint(k)] = val
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 // splitFrontmatter separates a YAML frontmatter block from the body of a
@@ -316,17 +398,22 @@ func splitFrontmatter(content []byte) (map[string]any, []byte) {
 // given install-time stamps injected. If the entry has no original
 // frontmatter, a fresh block with just the stamps is written.
 //
+// Stamp placement is target-aware: Claude keeps them at the top level (its
+// historical shape), while Codex nests them under metadata: so the rendered
+// SKILL.md conforms to the Agent Skills standard, which rejects unknown
+// top-level keys. The read (ParseSkillFile) and hash (stripStampKeys) paths
+// accept either placement, so they stay target-agnostic.
+//
 // The returned bytes are what gets hashed by ComputeSkillHash once the stamps
 // are stripped — callers writing new installations should compute the hash
 // from the embedded entry content (which has no stamps) to populate the
 // sdd-content-hash stamp itself.
-func RenderSkillFile(entry SkillBundleEntry, version, contentHash string) ([]byte, error) {
+func RenderSkillFile(entry SkillBundleEntry, target AgentTarget, version, contentHash string) ([]byte, error) {
 	fm, body := splitFrontmatter(entry.Content)
 	if fm == nil {
 		fm = map[string]any{}
 	}
-	fm[SkillStampVersion] = version
-	fm[SkillStampHash] = contentHash
+	setStamps(fm, target, version, contentHash)
 
 	yamlBytes, err := yaml.Marshal(fm)
 	if err != nil {
@@ -392,11 +479,6 @@ func ParseSkillFile(absPath string, content []byte) *SkillFile {
 	if fm == nil {
 		return sf
 	}
-	if v, ok := fm[SkillStampVersion].(string); ok {
-		sf.StoredVersion = v
-	}
-	if h, ok := fm[SkillStampHash].(string); ok {
-		sf.StoredHash = h
-	}
+	sf.StoredVersion, sf.StoredHash = readStamps(fm)
 	return sf
 }

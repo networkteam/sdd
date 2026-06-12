@@ -270,7 +270,7 @@ func TestInit_PostUpgradeRefreshesDriftedPristine(t *testing.T) {
 
 	oldContent := []byte("---\nname: " + entry.Skill + "\n---\nprior bundle body\n")
 	oldHash := model.ComputeSkillHash(oldContent)
-	oldFile, err := model.RenderSkillFile(model.SkillBundleEntry{Content: oldContent}, "v0.1.0", oldHash)
+	oldFile, err := model.RenderSkillFile(model.SkillBundleEntry{Content: oldContent}, model.AgentClaude, "v0.1.0", oldHash)
 	if err != nil {
 		t.Fatal(err)
 	}
