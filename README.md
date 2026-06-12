@@ -88,19 +88,25 @@ Whether you cloned an SDD-instrumented repo or you're adding SDD to a project fr
 sdd init
 ```
 
-For a cloned repo it reads the recorded config and installs the Claude Code skills at the same place every contributor uses. For a fresh project it prompts for the basics — graph directory, authoring language, where to install skills, your participant name — and writes the config.
+For a cloned repo it reads the recorded config and installs the skills for the configured agents at the same place every contributor uses. For a fresh project it prompts for the basics — graph directory, authoring language, which agents to render skills for, where to install them, your participant name — and writes the config.
 
 See [Configuration](#configuration) for re-running, version bumps, and non-interactive flags.
 
 ### 2. Start a session
 
-Open Claude Code in your project and run:
+In **Claude Code**, run:
 
 ```
 /sdd
 ```
 
-The skill loads the graph state and suggests where to start. Everything after that is dialogue.
+In **OpenAI Codex**, invoke the skill:
+
+```
+$sdd
+```
+
+The skill loads the graph state and suggests where to start. Everything after that is dialogue. See [Multiple agents](#multiple-agents) for how the same skill source renders to each.
 
 ## What's here today
 
@@ -296,6 +302,17 @@ Project-wide config lives in `.sdd/config.yaml` (committed — graph directory, 
 Pass `--bump` from a released binary to raise `.sdd/meta.json`'s `minimum_version` — this locks older binaries out of the graph after a breaking change.
 
 Run non-interactively by passing every required flag: `sdd init --scope project --participant <name> --language en`. Missing flags produce a single error naming what's still needed.
+
+### Multiple agents
+
+SDD runs on more than one agent harness. Skills are authored once as agent-neutral templates and rendered per agent into that agent's own committed directory:
+
+- **Claude Code** — `.claude/skills/`, invoked as `/sdd`.
+- **OpenAI Codex** — `.agents/skills/` (the open [Agent Skills standard](https://agentskills.io)), invoked as `$sdd`.
+
+A committed `supported_agents` list in `.sdd/config.yaml` records which agents the project renders; `sdd init` offers a multi-select on a fresh project and re-renders every listed agent on each run. Add agents with `sdd init --agents claude,codex`.
+
+Instructions bridge through `AGENTS.md` — the cross-tool standard read by Codex and others. `CLAUDE.md` imports it via `@AGENTS.md` so Claude Code shares the same baseline, keeping only Claude-specific notes of its own. `sdd init` scaffolds this bridge for a fresh project when a non-Claude agent is selected, and never overwrites files you already have.
 
 ### LLM provider (summaries + pre-flight)
 

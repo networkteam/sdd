@@ -137,6 +137,71 @@ func TestInit_RendersMultipleAgents(t *testing.T) {
 	}
 }
 
+// TestInit_ScaffoldsInstructionBridge covers the AGENTS.md / CLAUDE.md bridge:
+// it is created when a non-Claude agent is selected and the files are absent,
+// CLAUDE.md imports AGENTS.md, and an existing CLAUDE.md is never overwritten.
+func TestInit_ScaffoldsInstructionBridge(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	// A project file that must survive untouched.
+	claudePath := filepath.Join(tmp, "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte("# existing project rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var scaffolded []string
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude, model.AgentCodex},
+		Scope:         model.ScopeProject,
+		OnBridgeScaffolded: func(paths []string) {
+			scaffolded = append(scaffolded, paths...)
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// AGENTS.md created and importable; CLAUDE.md preserved verbatim.
+	agents, err := os.ReadFile(filepath.Join(tmp, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("AGENTS.md not created: %v", err)
+	}
+	if !strings.Contains(string(agents), "# AGENTS.md") {
+		t.Errorf("AGENTS.md missing expected heading:\n%s", agents)
+	}
+	if got, _ := os.ReadFile(claudePath); string(got) != "# existing project rules\n" {
+		t.Errorf("CLAUDE.md was overwritten: %q", got)
+	}
+	if len(scaffolded) != 1 || filepath.Base(scaffolded[0]) != "AGENTS.md" {
+		t.Errorf("callback should report only the created AGENTS.md, got %v", scaffolded)
+	}
+}
+
+// TestInit_ClaudeOnlySkipsBridge verifies a Claude-only project gets no
+// AGENTS.md / CLAUDE.md scaffold — the bridge only appears when it has a
+// non-Claude consumer.
+func TestInit_ClaudeOnlySkipsBridge(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude},
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		if _, err := os.Stat(filepath.Join(tmp, name)); !os.IsNotExist(err) {
+			t.Errorf("%s should not be scaffolded for a Claude-only project", name)
+		}
+	}
+}
+
 // TestInit_GitignoreIdempotent verifies re-running init against an
 // already-configured .gitignore does not duplicate entries. Regression guard
 // for the housekeeping pass that now runs on every init (not just fresh).

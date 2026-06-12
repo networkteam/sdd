@@ -1912,6 +1912,11 @@ func initCmd() *cli.Command {
 					// variable is just the fallback.
 					presenters.RenderInitSkills(os.Stdout, result.InstallDir, result)
 				},
+				OnBridgeScaffolded: func(paths []string) {
+					for _, p := range paths {
+						fmt.Printf("  bridge: %s\n", p)
+					}
+				},
 			}
 
 			reader, err := newReadFinder()

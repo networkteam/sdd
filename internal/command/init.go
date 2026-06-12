@@ -117,6 +117,13 @@ type InitCmd struct {
 	// OnSkillsInstalled fires after the skill install pass completes,
 	// carrying a per-category summary suitable for presenter output.
 	OnSkillsInstalled func(result SkillInstallResult)
+
+	// OnBridgeScaffolded fires when the AGENTS.md / CLAUDE.md instruction
+	// bridge was created from scratch, carrying the absolute paths written.
+	// Only fires for files that were absent — existing files are never
+	// overwritten, so a repeat init or a project with its own files
+	// produces no callback.
+	OnBridgeScaffolded func(paths []string)
 }
 
 // Validate checks required fields.

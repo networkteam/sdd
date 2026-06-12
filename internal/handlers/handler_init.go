@@ -153,6 +153,19 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 	}
 
+	// Scaffold the AGENTS.md / CLAUDE.md instruction bridge when a non-Claude
+	// agent is in play and the files are absent. AGENTS.md is the cross-tool
+	// canonical instruction file; CLAUDE.md imports it via @AGENTS.md. Existing
+	// files are never overwritten — a project's own instructions are sacred.
+	if bridgePaths, err := scaffoldInstructionBridge(cmd.RepoRoot, effectiveAgents); err != nil {
+		return err
+	} else if len(bridgePaths) > 0 {
+		touched = append(touched, bridgePaths...)
+		if cmd.OnBridgeScaffolded != nil {
+			cmd.OnBridgeScaffolded(bridgePaths)
+		}
+	}
+
 	// Write the participant into .sdd/config.local.yaml when a value was
 	// resolved by the caller. Preserves any other keys already present in
 	// the file (notably the llm: block from d-tac-bes) by operating on a
@@ -362,6 +375,72 @@ func resolveSupportedAgents(sddExisted bool, configPath string, cmdTargets []mod
 		return cmdTargets, nil
 	}
 	return model.DefaultSupportedAgents, nil
+}
+
+// Instruction-bridge scaffold content. AGENTS.md is the cross-tool canonical
+// instruction file (read by Codex and other AGENTS.md-aware tools); CLAUDE.md
+// imports it through Claude Code's documented @AGENTS.md mechanism so both
+// agents share one baseline. Written only when absent — never overwriting a
+// project's own files. Backticks rule out a raw string literal here.
+const agentsMDScaffold = "# AGENTS.md\n" +
+	"\n" +
+	"This project uses SDD (Signal → Dialogue → Decision): decisions and\n" +
+	"signals live in a graph under `.sdd/graph/`, managed by the `sdd` CLI.\n" +
+	"\n" +
+	"- Run `sdd status` for the current state.\n" +
+	"- Work with the graph through dialogue using the SDD skill — `/sdd` in\n" +
+	"  Claude Code, or the `sdd` skill in Codex.\n" +
+	"- Skills are rendered per agent and committed under `.claude/skills/`\n" +
+	"  (Claude Code) and `.agents/skills/` (Codex). Don't edit them by hand;\n" +
+	"  regenerate with `sdd init`.\n" +
+	"\n" +
+	"<!-- Add project-specific, agent-neutral guidance below. -->\n"
+
+const claudeMDScaffold = "@AGENTS.md\n" +
+	"\n" +
+	"<!-- Claude Code-specific guidance goes here, after the import above. -->\n"
+
+// scaffoldInstructionBridge writes the AGENTS.md / CLAUDE.md bridge when a
+// non-Claude agent is among the rendered targets and the files do not already
+// exist. Returns the absolute paths it created (empty when nothing was
+// written). Existing files are left untouched.
+func scaffoldInstructionBridge(repoRoot string, agents []model.AgentTarget) ([]string, error) {
+	if !includesNonClaude(agents) {
+		return nil, nil
+	}
+
+	files := []struct{ name, content string }{
+		{"AGENTS.md", agentsMDScaffold},
+		{"CLAUDE.md", claudeMDScaffold},
+	}
+
+	var written []string
+	for _, f := range files {
+		p := filepath.Join(repoRoot, f.name)
+		exists, err := pathExists(p)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			continue
+		}
+		if err := os.WriteFile(p, []byte(f.content), 0o644); err != nil {
+			return nil, fmt.Errorf("writing %s: %w", p, err)
+		}
+		written = append(written, p)
+	}
+	return written, nil
+}
+
+// includesNonClaude reports whether the target set contains any agent other
+// than Claude — the condition under which the AGENTS.md bridge has a consumer.
+func includesNonClaude(agents []model.AgentTarget) bool {
+	for _, a := range agents {
+		if a != model.AgentClaude {
+			return true
+		}
+	}
+	return false
 }
 
 // pathExists reports whether path is accessible. A non-existence error is
