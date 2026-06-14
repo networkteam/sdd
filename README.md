@@ -116,7 +116,7 @@ The skill loads the graph state and suggests where to start. Everything after th
 - Focus decisions that commit the project's attention to a set of entries for a period, with actors assigned per target
 - A pre-flight validator (LLM based) — reviews a capture before it lands
 - Three-mode search: keyword, semantic (vector search), or a hybrid that fuses both
-- Composable views — filter, rank, and render the graph to make it accessible for the agent (CLI - not MCP)
+- Composable views — filter, rank, and render the graph to make it accessible for the agent
 - Mining external material — transcripts, articles, meeting notes — into the graph through dialogue
 - Multilingual graph authoring, with translated SDD vocabulary in the skill
 - Git-native and immutable, with background awareness of remote state
@@ -125,6 +125,8 @@ The skill loads the graph state and suggests where to start. Everything after th
 ## Where this is heading
 
 Today SDD lives in the terminal and assumes a developer at the keyboard. We want anyone on the project — a designer reviewing a flow, an operator triaging an incident, a business owner weighing a trade-off — to engage the graph directly, through chat, voice, or whatever interface fits their work. Capture should happen inside that work — a finding while testing, a question raised in a meeting — without stepping into a separate mode for it. And AI agents should work autonomously, guided by the decisions and guidelines already in the graph, while humans focus on reviewing what comes back and steering what comes next.
+
+SDD also shouldn't be tied to one agent harness. It runs in Claude Code and Codex today; the direction is to let any agent or runtime drive the graph over an open interface (MCP), so the choice of tool never locks you in.
 
 ## What a session looks like
 
@@ -314,6 +316,12 @@ A committed `supported_agents` list in `.sdd/config.yaml` records which agents t
 
 Instructions bridge through `AGENTS.md` — the cross-tool standard read by Codex and others. `CLAUDE.md` imports it via `@AGENTS.md` so Claude Code shares the same baseline, keeping only Claude-specific notes of its own. `sdd init` scaffolds this bridge for a fresh project when a non-Claude agent is selected, and never overwrites files you already have.
 
+Claude Code is the primary, most-exercised harness; Codex support is recent and has a few rough edges:
+
+- On an **existing** project, `sdd init --agents` doesn't yet persist the selection — add the agent to `supported_agents` in `.sdd/config.yaml` by hand (a fresh `sdd init` persists it correctly).
+- Codex's sandbox prompts for approval on the network- and LLM-backed commands SDD runs (search, capture) the first time it hits them — approve them so the first capture completes.
+- OpenAI's gpt-5-class models aren't usable as the LLM provider yet — see [LLM provider](#llm-provider-summaries--pre-flight) below.
+
 ### LLM provider (summaries + pre-flight)
 
 SDD calls an LLM in two places — summarizing each captured entry (the short text rendered in `sdd status`) and running pre-flight validation on every draft before it lands. Four providers supported: `anthropic` (cloud API), `openai` (cloud API), `ollama` (local), and `claude-cli` (your local Claude Code CLI authentication).
@@ -354,6 +362,8 @@ llm:
   model: claude-sonnet-4-6
 ```
 
+**Note:** OpenAI's gpt-5-class models aren't supported yet — they reject the `max_tokens` parameter SDD sends (they require `max_completion_tokens`), which breaks summary and pre-flight calls. Use a `gpt-4o` model, or another provider, for now.
+
 Remote providers (`anthropic`, `openai`) get a conservative rate limit applied automatically, biased below tier-1 ceilings so bursty operations like `sdd summarize --all` don't trip 429s. Override with `rate_limit_rps` on higher tiers.
 
 ### Embedding provider (vector search)
@@ -387,7 +397,7 @@ After configuring an embedding provider, run `sdd index` once to embed the exist
 
 ## Browsing the graph yourself
 
-Day to day, the agent calls the CLI for you. Two commands are useful to run yourself when you want to look around.
+Day to day, the agent calls the CLI for you. A few commands are useful to run yourself when you want to look around.
 
 **`sdd view --layout='...'`** — composable pipeline. Filter, rank, and render in one expression. A few useful starters:
 
@@ -408,7 +418,14 @@ sdd search --query "variants and references"   # semantic (vector)
 sdd search --term importer --query "variants"  # hybrid (RRF fusion)
 ```
 
-Vector and hybrid modes require an embedding provider — see [Configuring LLM integrations](#configuring-llm-integrations) above.
+Vector and hybrid modes require an embedding provider — see [Embedding provider](#embedding-provider-vector-search) above.
+
+**`sdd show <id>`** — one entry in full, with its upstream and downstream chains:
+
+```bash
+sdd show d-cpt-vr4              # the entry plus its grounding and consumers
+sdd show d-cpt-vr4 --up 4 --down 3   # widen the neighborhood
+```
 
 For the full CLI surface, run `sdd --help`.
 
