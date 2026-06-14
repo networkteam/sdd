@@ -179,3 +179,71 @@ func TestSetYAMLField_Indentation2Spaces(t *testing.T) {
 		t.Errorf("expected 2-space indent under llm, got:\n%s", out)
 	}
 }
+
+func TestSetYAMLSequence_AppendsFlowSequence(t *testing.T) {
+	// Upgrade case: config predates supported_agents; the upsert adds it as
+	// a flow-style list while preserving the existing keys.
+	existing := []byte(`graph_dir: .sdd/graph
+skill_scope: project
+`)
+	out, err := SetYAMLSequence(existing, "supported_agents", []string{"claude", "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "supported_agents: [claude, codex]") {
+		t.Errorf("expected flow-style sequence matching FormatConfig, got:\n%s", out)
+	}
+	cfg, err := ParseConfig(out)
+	if err != nil {
+		t.Fatalf("round-trip parse: %v", err)
+	}
+	if got := cfg.SupportedAgents; len(got) != 2 || got[0] != AgentClaude || got[1] != AgentCodex {
+		t.Errorf("SupportedAgents = %v, want [claude codex]", got)
+	}
+	if cfg.SkillScope != ScopeProject {
+		t.Errorf("sibling skill_scope lost, got %q", cfg.SkillScope)
+	}
+}
+
+func TestSetYAMLSequence_ReplacesExistingSequenceWholesale(t *testing.T) {
+	// Replace semantics (d-tac-jin): an explicit selection overwrites the
+	// recorded list rather than merging into it.
+	existing := []byte(`supported_agents: [claude, codex]
+skill_scope: project
+`)
+	out, err := SetYAMLSequence(existing, "supported_agents", []string{"claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(out)
+	if err != nil {
+		t.Fatalf("round-trip parse: %v", err)
+	}
+	if got := cfg.SupportedAgents; len(got) != 1 || got[0] != AgentClaude {
+		t.Errorf("SupportedAgents = %v, want [claude] (codex dropped wholesale)", got)
+	}
+}
+
+func TestSetYAMLSequence_PreservesHeadComments(t *testing.T) {
+	existing := []byte(`# committed header comment
+supported_agents: [claude]
+`)
+	out, err := SetYAMLSequence(existing, "supported_agents", []string{"claude", "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"# committed header comment",
+		"supported_agents: [claude, codex]",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("comment or value missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSetYAMLSequence_EmptyPathRejected(t *testing.T) {
+	if _, err := SetYAMLSequence(nil, "", []string{"claude"}); err == nil {
+		t.Error("empty path should be rejected")
+	}
+}

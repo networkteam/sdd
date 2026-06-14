@@ -1917,6 +1917,9 @@ func initCmd() *cli.Command {
 						fmt.Printf("  bridge: %s\n", p)
 					}
 				},
+				OnAgentSkillsPruned: func(result command.AgentPruneResult) {
+					presenters.RenderInitPrune(os.Stdout, result)
+				},
 			}
 
 			reader, err := newReadFinder()

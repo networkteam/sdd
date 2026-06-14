@@ -18,7 +18,8 @@ import (
 //
 // Value may be anything yaml.Node.Encode accepts as a scalar (string, int,
 // bool, nil, etc.). Sequences and nested mappings are out of scope —
-// targeting a non-scalar leaf (or a slice/map value) is rejected.
+// targeting a non-scalar leaf (or a slice/map value) is rejected. Use
+// SetYAMLSequence for list-valued fields.
 //
 // Path uses dotted segments (e.g. "participant", "llm.provider"). No
 // support for array indexing or filter expressions — keep paths flat.
@@ -28,6 +29,82 @@ import (
 // settings are flat config, so the simpler dotted-path form covers the
 // need without the extra dependency.
 func SetYAMLField(existing []byte, path string, value any) ([]byte, error) {
+	segments, err := splitYAMLPath(path)
+	if err != nil {
+		return nil, err
+	}
+
+	root, err := parseYAMLRoot(existing)
+	if err != nil {
+		return nil, err
+	}
+
+	target, err := descendToLeaf(root.Content[0], segments)
+	if err != nil {
+		return nil, err
+	}
+	if target.Kind != yaml.ScalarNode {
+		return nil, fmt.Errorf("target at %q is a %s, not a scalar", path, kindName(target.Kind))
+	}
+
+	valueNode := &yaml.Node{Kind: yaml.ScalarNode}
+	if err := valueNode.Encode(value); err != nil {
+		return nil, fmt.Errorf("encoding value: %w", err)
+	}
+	if valueNode.Kind != yaml.ScalarNode {
+		return nil, fmt.Errorf("value for %q is not scalar", path)
+	}
+
+	target.Kind = yaml.ScalarNode
+	target.Tag = valueNode.Tag
+	target.Value = valueNode.Value
+	target.Style = valueNode.Style
+
+	return encodeYAML(root)
+}
+
+// SetYAMLSequence sets the value at dotted path to a flow-style sequence of
+// string scalars (e.g. "supported_agents: [claude, codex]") in an existing
+// YAML document. Like SetYAMLField it preserves unknown keys, comments, and
+// sibling order, touching only the target. An existing scalar or sequence at
+// the leaf is replaced wholesale; a non-mapping intermediate segment is
+// rejected. Empty input yields a fresh mapping holding just the target.
+//
+// Flow style matches how FormatConfig renders the same field on a fresh init,
+// so a sequence upsert and a fresh write produce the same on-disk shape.
+func SetYAMLSequence(existing []byte, path string, values []string) ([]byte, error) {
+	segments, err := splitYAMLPath(path)
+	if err != nil {
+		return nil, err
+	}
+
+	root, err := parseYAMLRoot(existing)
+	if err != nil {
+		return nil, err
+	}
+
+	target, err := descendToLeaf(root.Content[0], segments)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]*yaml.Node, 0, len(values))
+	for _, v := range values {
+		items = append(items, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v})
+	}
+
+	target.Kind = yaml.SequenceNode
+	target.Tag = ""
+	target.Value = ""
+	target.Style = yaml.FlowStyle
+	target.Content = items
+
+	return encodeYAML(root)
+}
+
+// splitYAMLPath validates a dotted path and returns its segments. Empty paths
+// and empty segments (leading/trailing/consecutive dots) are rejected.
+func splitYAMLPath(path string) ([]string, error) {
 	if path == "" {
 		return nil, fmt.Errorf("path is required")
 	}
@@ -35,7 +112,12 @@ func SetYAMLField(existing []byte, path string, value any) ([]byte, error) {
 	if slices.Contains(segments, "") {
 		return nil, fmt.Errorf("invalid path %q: empty segment", path)
 	}
+	return segments, nil
+}
 
+// parseYAMLRoot unmarshals existing into a DocumentNode whose single child is
+// the root mapping. Empty input becomes a fresh document with an empty mapping.
+func parseYAMLRoot(existing []byte) (*yaml.Node, error) {
 	var root yaml.Node
 	if len(existing) > 0 {
 		if err := yaml.Unmarshal(existing, &root); err != nil {
@@ -52,29 +134,15 @@ func SetYAMLField(existing []byte, path string, value any) ([]byte, error) {
 	if root.Kind != yaml.DocumentNode || len(root.Content) != 1 {
 		return nil, fmt.Errorf("expected a single-document YAML root")
 	}
+	return &root, nil
+}
 
-	target, err := descendMapping(root.Content[0], segments)
-	if err != nil {
-		return nil, err
-	}
-
-	valueNode := &yaml.Node{Kind: yaml.ScalarNode}
-	if err := valueNode.Encode(value); err != nil {
-		return nil, fmt.Errorf("encoding value: %w", err)
-	}
-	if valueNode.Kind != yaml.ScalarNode {
-		return nil, fmt.Errorf("value for %q is not scalar", path)
-	}
-
-	target.Kind = yaml.ScalarNode
-	target.Tag = valueNode.Tag
-	target.Value = valueNode.Value
-	target.Style = valueNode.Style
-
+// encodeYAML serialises a DocumentNode back to bytes with two-space indent.
+func encodeYAML(root *yaml.Node) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
-	if err := enc.Encode(&root); err != nil {
+	if err := enc.Encode(root); err != nil {
 		return nil, fmt.Errorf("encoding YAML: %w", err)
 	}
 	if err := enc.Close(); err != nil {
@@ -83,12 +151,13 @@ func SetYAMLField(existing []byte, path string, value any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// descendMapping walks segments through mapping nodes, creating missing
-// intermediate mappings and the final scalar placeholder. Returns the
-// scalar node the caller should populate. The root mapping node that
-// follows the DocumentNode wrapper (yaml.Node.Content[0]) is the expected
-// starting point.
-func descendMapping(node *yaml.Node, segments []string) (*yaml.Node, error) {
+// descendToLeaf walks segments through mapping nodes, creating missing
+// intermediate mappings and a scalar placeholder for a missing leaf. It
+// returns the leaf value node without asserting its kind — the scalar vs
+// sequence setters decide what is admissible there. Intermediate segments
+// that are not mappings are rejected. The root mapping node that follows the
+// DocumentNode wrapper (yaml.Node.Content[0]) is the expected starting point.
+func descendToLeaf(node *yaml.Node, segments []string) (*yaml.Node, error) {
 	if node.Kind != yaml.MappingNode {
 		// yaml.Unmarshal on an empty document gives a null scalar; accept
 		// it here as "empty mapping" for the first write into a fresh
@@ -127,9 +196,6 @@ func descendMapping(node *yaml.Node, segments []string) (*yaml.Node, error) {
 		}
 
 		if isLeaf {
-			if found.Kind != yaml.ScalarNode {
-				return nil, fmt.Errorf("target at %q is a %s, not a scalar", strings.Join(segments, "."), kindName(found.Kind))
-			}
 			return found, nil
 		}
 
