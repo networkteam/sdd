@@ -320,7 +320,6 @@ Claude Code is the primary, most-exercised harness; Codex support is recent and 
 
 - On an **existing** project, `sdd init --agents` doesn't yet persist the selection — add the agent to `supported_agents` in `.sdd/config.yaml` by hand (a fresh `sdd init` persists it correctly).
 - Codex's sandbox prompts for approval on the network- and LLM-backed commands SDD runs (search, capture) the first time it hits them — approve them so the first capture completes.
-- OpenAI's gpt-5-class models aren't usable as the LLM provider yet — see [LLM provider](#llm-provider-summaries--pre-flight) below.
 
 ### LLM provider (summaries + pre-flight)
 
@@ -361,8 +360,6 @@ llm:
   provider: claude-cli
   model: claude-sonnet-4-6
 ```
-
-**Note:** OpenAI's gpt-5-class models aren't supported yet — they reject the `max_tokens` parameter SDD sends (they require `max_completion_tokens`), which breaks summary and pre-flight calls. Use a `gpt-4o` model, or another provider, for now.
 
 Remote providers (`anthropic`, `openai`) get a conservative rate limit applied automatically, biased below tier-1 ceilings so bursty operations like `sdd summarize --all` don't trip 429s. Override with `rate_limit_rps` on higher tiers.
 
