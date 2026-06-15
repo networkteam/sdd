@@ -60,6 +60,8 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 
 - **Logging**: Use `log/slog`; retrieve the logger via `slogutils.FromContext(ctx)` (from `github.com/networkteam/slogutils`). Handler entry points take `ctx` and pull the logger from it — do not pass loggers as separate arguments, and do not use `fmt.Fprintf(h.stderr, ...)` for operational messages. Stderr writes are reserved for user-facing CLI output that isn't logging (prompts, structured CLI results).
 
+- **Frame cost as maintenance surface and dependencies, not time**: When weighing a technical option (a library, an integration, an adapter), don't estimate effort in hours or days — that's speculation. State what ongoing maintenance surface it opens (code you own, protocols/APIs you must track) and what dependencies it pulls in — how heavy, and how reversible (vendorable? official vs community?). Those are the durable cost signals.
+
 ## Structure
 
 ```
