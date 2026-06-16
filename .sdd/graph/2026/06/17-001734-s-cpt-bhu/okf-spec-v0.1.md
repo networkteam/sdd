@@ -1,0 +1,99 @@
+# Open Knowledge Format (OKF) v0.1 — spec summary
+
+Faithful reproduction of the OKF v0.1 specification as read on 2026-06-16, for durability independent of the source URLs.
+
+## Sources
+
+- [1] Blog: "How the Open Knowledge Format can improve data sharing" — https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing
+- [2] Spec: GoogleCloudPlatform/knowledge-catalog `okf/SPEC.md` — https://raw.githubusercontent.com/GoogleCloudPlatform/knowledge-catalog/main/okf/SPEC.md
+
+## Core definition
+
+An open, human- and agent-friendly format for representing knowledge with minimal structure: a directory of markdown files with YAML frontmatter. Content prioritizes being readable by humans without tooling, parseable by agents without bespoke SDKs, diffable in version control, and portable across tools, organizations, and time.
+
+## Terminology
+
+- **Knowledge Bundle** — a self-contained, hierarchical collection of knowledge documents; the unit of distribution.
+- **Concept** — a single unit of knowledge within a bundle, represented as one markdown document.
+- **Concept ID** — the path of the concept's file within the bundle, with the `.md` suffix removed.
+- **Frontmatter** — YAML metadata block delimited by `---` at the top of the file.
+- **Body** — everything after the frontmatter.
+- **Link** — a standard markdown link from one concept to another, expressing a relationship.
+- **Citation** — a link from a concept to an external source supporting a claim in the body.
+
+## Bundle structure & distribution
+
+Directory trees of markdown files with optional `index.md` and `log.md` at any level. Distribution: git repositories (recommended), tarballs/zip archives, or subdirectories within larger repositories.
+
+**Reserved filenames** (MUST NOT be used for concept documents):
+- `index.md` — directory listing
+- `log.md` — update history
+
+All other `.md` files are concept documents.
+
+## Frontmatter fields
+
+**REQUIRED:**
+- `type` — short string identifying the kind of concept; used for routing, filtering, presentation. Not centrally registered. Producers SHOULD pick descriptive, self-explanatory values; consumers MUST tolerate unknown types gracefully.
+
+**RECOMMENDED (priority order):**
+- `title` — human-readable display name; consumers MAY derive from filename if omitted
+- `description` — single-sentence summary used in index generation and previews
+- `resource` — URI uniquely identifying the underlying asset; absent for abstract concepts
+- `tags` — YAML list of short strings for cross-cutting categorization
+- `timestamp` — ISO 8601 datetime of last meaningful change
+
+**Extensions:** Producers MAY include additional keys. Consumers SHOULD preserve unknown keys when round-tripping and SHOULD NOT reject documents with unrecognized fields.
+
+## Body
+
+Standard markdown, no required sections. Conventional headings with defined meaning: `# Schema`, `# Examples`, `# Citations`. Producers SHOULD favor structural markdown (headings, lists, tables, code blocks) over freeform prose.
+
+## Cross-linking
+
+- **Absolute links** begin with `/`, interpreted relative to bundle root (recommended for stability when documents move): `[customers table](/tables/customers.md)`.
+- **Relative links** are standard markdown relative paths.
+- **Link semantics:** a link from concept A to concept B asserts a relationship; the specific type is conveyed by prose, not the link. Consumers building a graph view typically treat all links as directed edges of an untyped relationship.
+- **Tolerance:** consumers MUST tolerate broken links — a link whose target does not exist is not malformed.
+
+## Index files
+
+`index.md` MAY appear in any directory, with no frontmatter. Body groups concepts under section headings as bulleted `[Title](url) - description` lines. Producers MAY generate it automatically; consumers MAY synthesize one when absent.
+
+## Log files (optional)
+
+`log.md` records change history as date-grouped entries, newest first. Date headings MUST use ISO 8601 `YYYY-MM-DD`. Entries are prose with an optional convention of bold leading words (`**Update**`, `**Creation**`, `**Deprecation**`).
+
+## Citations
+
+External sources SHOULD be listed under a `# Citations` heading, numbered (`[1] [Title](url)`). May be absolute URLs, bundle-relative paths, or paths into a `references/` subdirectory.
+
+## Conformance
+
+A bundle is conformant with OKF v0.1 if:
+1. Every non-reserved `.md` file contains parseable YAML frontmatter
+2. Every frontmatter block contains a non-empty `type` field
+3. Reserved filenames follow the specified structure when present
+
+Consumers SHOULD treat all other constraints as soft guidance and MUST NOT reject bundles due to: missing optional fields, unknown `type` values, unknown additional keys, broken cross-links, or missing `index.md`. This permissive model is intentional — OKF is meant to stay useful as bundles grow, get refactored, and are partially generated by agents.
+
+## Versioning & extensibility
+
+`<major>.<minor>` versioning. Minor bump = backward-compatible additions; major bump = breaking changes. Bundles MAY declare the targeted version via `okf_version: "0.1"` in a bundle-root `index.md` frontmatter block. Consumers SHOULD attempt best-effort consumption rather than refusing the bundle. No central schema registry, authority, or required tooling exists.
+
+## Producer / consumer contract
+
+**Producer obligations:** choose descriptive, self-explanatory `type` values; use structural markdown; include descriptions in frontmatter; optionally generate/maintain index and log files.
+
+**Consumer obligations:** tolerate unknown types; preserve unknown frontmatter keys; handle broken links without rejection; support bundle-relative and relative link resolution; attempt best-effort consumption across versions.
+
+## Ecosystem (as of launch)
+
+- Reference **enrichment agent** — walks a BigQuery dataset, drafts an OKF concept doc per table/view, second LLM pass enriches with citations/schemas/join paths.
+- **Static HTML visualizer** — converts a bundle into an interactive graph view; self-contained single file, no backend, no install, no data egress.
+- **Sample bundles** — GA4 e-commerce, Stack Overflow, Bitcoin public datasets.
+- **Google Cloud Knowledge Catalog** — updated to ingest OKF and serve it to agents.
+
+## Lineage
+
+Formalizes the "LLM wiki / agent context files" pattern (Andrej Karpathy's LLM Wiki gist). Sits in the same family as AGENTS.md, llms.txt, and similar markdown-as-agent-context conventions, as a vendor-neutral interchange format.
