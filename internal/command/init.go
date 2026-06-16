@@ -124,6 +124,21 @@ type InitCmd struct {
 	// overwritten, so a repeat init or a project with its own files
 	// produces no callback.
 	OnBridgeScaffolded func(paths []string)
+
+	// OnAgentSkillsPruned fires once per agent that an explicit --agents
+	// selection dropped from the recorded set, reporting the rendered skill
+	// files removed and any user-modified files preserved.
+	OnAgentSkillsPruned func(result AgentPruneResult)
+}
+
+// AgentPruneResult reports the outcome of pruning a dropped agent's rendered
+// skills: which files were removed and which user-modified files were kept
+// (removable only under --force).
+type AgentPruneResult struct {
+	Target       model.AgentTarget
+	InstallDir   string
+	Removed      []string
+	KeptModified []string
 }
 
 // Validate checks required fields.

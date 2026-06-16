@@ -15,6 +15,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/query"
 )
 
 // Init executes an InitCmd. The operation is idempotent:
@@ -64,10 +65,11 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	}
 
 	// Resolve which agent profiles to render. On a fresh tree this is the
-	// caller's selection (or the Claude-only default), persisted by the
-	// config write below; on an existing tree the recorded supported_agents
-	// wins.
-	effectiveAgents, err := resolveSupportedAgents(sddExisted, configPath, cmd.Targets)
+	// caller's selection (or the Claude-only default), persisted by the config
+	// write below. On an existing tree an explicit --agents selection replaces
+	// and persists the recorded list (d-tac-jin); recordedAgents lets us prune
+	// the renders of any agent the selection drops.
+	effectiveAgents, recordedAgents, persistAgents, err := resolveSupportedAgents(sddExisted, configPath, cmd.Targets)
 	if err != nil {
 		return err
 	}
@@ -127,6 +129,43 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 				return fmt.Errorf("reading %s: %w", configPath, readErr)
 			}
 			updated, err := model.SetYAMLField(existing, "skill_scope", string(effectiveScope))
+			if err != nil {
+				return fmt.Errorf("updating %s: %w", configPath, err)
+			}
+			if !bytes.Equal(existing, updated) {
+				if err := os.WriteFile(configPath, updated, 0o644); err != nil {
+					return fmt.Errorf("writing %s: %w", configPath, err)
+				}
+				touched = append(touched, configPath)
+			}
+		}
+
+		// Persist an explicit --agents selection to supported_agents and prune
+		// the renders of any agent it drops (d-tac-jin). A bare init (no
+		// --agents) leaves the recorded value and its renders untouched. Prune
+		// runs before the config write: a failed prune then leaves
+		// supported_agents still recording the dropped agent, so a re-run
+		// retries the drop rather than orphaning files under a config that
+		// already claims they're gone.
+		if persistAgents {
+			// Prune only under project scope, where renders are per-project and
+			// committed. Under user scope the skill dirs are shared across every
+			// project on the machine, so a per-project drop must not delete a
+			// render another project relies on — the recorded list still updates
+			// below, leaving the shared render in place.
+			if effectiveScope == model.ScopeProject {
+				if dropped := agentsDiff(recordedAgents, effectiveAgents); len(dropped) > 0 {
+					if err := h.pruneAgentSkills(ctx, dropped, effectiveScope, cmd, &touched); err != nil {
+						return err
+					}
+				}
+			}
+
+			existing, readErr := os.ReadFile(configPath)
+			if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+				return fmt.Errorf("reading %s: %w", configPath, readErr)
+			}
+			updated, err := model.SetYAMLSequence(existing, "supported_agents", agentTargetsToStrings(effectiveAgents))
 			if err != nil {
 				return fmt.Errorf("updating %s: %w", configPath, err)
 			}
@@ -345,36 +384,153 @@ func resolveSkillScope(sddExisted bool, configPath string, flagScope model.Scope
 	return requested, true, nil
 }
 
-// resolveSupportedAgents picks the agent targets `sdd init` should render.
+// resolveSupportedAgents picks the agent targets `sdd init` should render,
+// reports the previously recorded list, and whether the chosen value must be
+// persisted to supported_agents via a sequence upsert.
 //
 //   - Fresh `.sdd/`: the caller-provided targets if any, else
-//     model.DefaultSupportedAgents. Persisted by the fresh-init config write.
-//   - Existing config with supported_agents recorded: the recorded value wins
-//     — the committed project decision is authoritative for every contributor.
-//   - Existing config missing the field (pre-multi-agent upgrade): the
-//     caller-provided targets if any, else the default. Not persisted here;
-//     the value is re-derived each run, matching the prior Claude-only
-//     behavior until the operator records a choice.
-func resolveSupportedAgents(sddExisted bool, configPath string, cmdTargets []model.AgentTarget) ([]model.AgentTarget, error) {
+//     model.DefaultSupportedAgents. Written by the fresh-init config write, so
+//     persist is false here (no upsert needed).
+//   - Existing tree, explicit --agents: the selection fully replaces the
+//     recorded list and is persisted (d-tac-jin). recorded is returned so the
+//     caller can prune the renders of any dropped agent.
+//   - Existing tree, no --agents, recorded value present: the recorded value
+//     wins, not re-persisted.
+//   - Existing tree, no --agents, no recorded value (pre-multi-agent upgrade):
+//     the default, re-derived each run rather than silently persisted.
+func resolveSupportedAgents(sddExisted bool, configPath string, cmdTargets []model.AgentTarget) (effective, recorded []model.AgentTarget, persist bool, err error) {
 	if sddExisted {
 		data, readErr := os.ReadFile(configPath)
 		if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
-			return nil, fmt.Errorf("reading %s: %w", configPath, readErr)
+			return nil, nil, false, fmt.Errorf("reading %s: %w", configPath, readErr)
 		}
 		if len(data) > 0 {
 			cfg, parseErr := model.ParseConfig(data)
 			if parseErr != nil {
-				return nil, fmt.Errorf("parsing %s: %w", configPath, parseErr)
+				return nil, nil, false, fmt.Errorf("parsing %s: %w", configPath, parseErr)
 			}
-			if cfg != nil && len(cfg.SupportedAgents) > 0 {
-				return cfg.SupportedAgents, nil
+			if cfg != nil {
+				recorded = cfg.SupportedAgents
 			}
 		}
+		// An explicit --agents selection replaces and persists the recorded
+		// list; a bare init leaves it as-is.
+		if len(cmdTargets) > 0 {
+			return cmdTargets, recorded, true, nil
+		}
+		if len(recorded) > 0 {
+			return recorded, recorded, false, nil
+		}
+		return model.DefaultSupportedAgents, recorded, false, nil
 	}
 	if len(cmdTargets) > 0 {
-		return cmdTargets, nil
+		return cmdTargets, nil, false, nil
 	}
-	return model.DefaultSupportedAgents, nil
+	return model.DefaultSupportedAgents, nil, false, nil
+}
+
+// agentTargetsToStrings converts agent targets to their string form for the
+// supported_agents sequence upsert.
+func agentTargetsToStrings(targets []model.AgentTarget) []string {
+	out := make([]string, len(targets))
+	for i, t := range targets {
+		out[i] = string(t)
+	}
+	return out
+}
+
+// agentsDiff returns the targets in a that are not in b (set difference) —
+// used to find which previously-recorded agents an explicit selection dropped.
+func agentsDiff(a, b []model.AgentTarget) []model.AgentTarget {
+	keep := make(map[model.AgentTarget]bool, len(b))
+	for _, t := range b {
+		keep[t] = true
+	}
+	var out []model.AgentTarget
+	for _, t := range a {
+		if !keep[t] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// pruneAgentSkills removes the sdd-rendered skill files of dropped agents,
+// symmetric with install's overwrite protection: only files sdd produced and
+// the user hasn't modified (Current or Pristine) are removed, while
+// user-modified files are preserved and reported, deleted only under --force.
+// Non-sdd files sharing the directory aren't bundle entries, so SkillStatus
+// never classifies them and they're left untouched. Skill subdirectories left
+// empty by the removals, and the now-empty parent skills dir, are cleaned up.
+// Removed paths are appended to touched so the commit records the deletions.
+func (h *Handler) pruneAgentSkills(ctx context.Context, dropped []model.AgentTarget, scope model.Scope, cmd *command.InitCmd, touched *[]string) error {
+	for _, target := range dropped {
+		status, err := h.reader.SkillStatus(ctx, query.SkillStatusQuery{
+			Target:   target,
+			Scope:    scope,
+			RepoRoot: cmd.RepoRoot,
+			UserHome: cmd.UserHome,
+		})
+		if err != nil {
+			return fmt.Errorf("classifying %s skills for prune: %w", target, err)
+		}
+
+		var removed, keptModified []string
+		skillDirs := map[string]bool{}
+		for _, e := range status.Entries {
+			if e.Status == model.SkillStatusMissing {
+				continue
+			}
+			if e.Status == model.SkillStatusModified && !cmd.Force {
+				keptModified = append(keptModified, e.AbsPath)
+				continue
+			}
+			// Current, Pristine, or (Modified under --force): sdd-owned.
+			if err := os.Remove(e.AbsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("removing %s: %w", e.AbsPath, err)
+			}
+			removed = append(removed, e.AbsPath)
+			skillDirs[filepath.Join(status.InstallDir, e.Skill)] = true
+		}
+
+		// Remove emptied skill subdirs (and their empty descendants), then the
+		// parent skills dir if nothing remains. A dir still holding a user's
+		// non-sdd skill is left in place.
+		for dir := range skillDirs {
+			pruneEmptyDirs(dir)
+		}
+		if entries, err := os.ReadDir(status.InstallDir); err == nil && len(entries) == 0 {
+			_ = os.Remove(status.InstallDir)
+		}
+
+		*touched = append(*touched, removed...)
+		if cmd.OnAgentSkillsPruned != nil && (len(removed) > 0 || len(keptModified) > 0) {
+			cmd.OnAgentSkillsPruned(command.AgentPruneResult{
+				Target:       target,
+				InstallDir:   status.InstallDir,
+				Removed:      removed,
+				KeptModified: keptModified,
+			})
+		}
+	}
+	return nil
+}
+
+// pruneEmptyDirs removes dir and its empty subdirectories bottom-up. A dir
+// that still holds files is left in place.
+func pruneEmptyDirs(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			pruneEmptyDirs(filepath.Join(dir, e.Name()))
+		}
+	}
+	if remaining, err := os.ReadDir(dir); err == nil && len(remaining) == 0 {
+		_ = os.Remove(dir)
+	}
 }
 
 // Instruction-bridge scaffold content. AGENTS.md is the cross-tool canonical

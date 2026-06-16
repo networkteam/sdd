@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,7 +14,22 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/query"
 )
+
+// pruneFailReader wraps a real Reader but errors SkillStatus for one target,
+// simulating a mid-prune failure so tests can assert the prune ordering.
+type pruneFailReader struct {
+	handlers.Reader
+	failFor model.AgentTarget
+}
+
+func (r pruneFailReader) SkillStatus(ctx context.Context, q query.SkillStatusQuery) (*query.SkillStatusResult, error) {
+	if q.Target == r.failFor {
+		return nil, fmt.Errorf("injected SkillStatus failure for %s", q.Target)
+	}
+	return r.Reader.SkillStatus(ctx, q)
+}
 
 // TestInit_FreshProjectEndToEnd exercises the full Init orchestration on an
 // empty directory: .sdd/ tree creation, config + meta files, embedded skill
@@ -811,5 +827,307 @@ func TestInit_BumpDevBuildErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cannot bump from a dev build") {
 		t.Errorf("error should match plan wording: %v", err)
+	}
+}
+
+// initExistingWithAgents runs a fresh init recording the given agents, so a
+// follow-up init exercises the existing-tree --agents path (d-tac-jin).
+func initExistingWithAgents(t *testing.T, tmp string, agents ...model.AgentTarget) *handlers.Handler {
+	t.Helper()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       agents,
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatalf("seed init: %v", err)
+	}
+	return h
+}
+
+// TestInit_ExplicitAgentsPersistOnExistingTree covers the upgrade-path core of
+// d-tac-jin: an explicit --agents on an already-initialized repo writes the
+// selection to supported_agents (it used to render but never stick).
+func TestInit_ExplicitAgentsPersistOnExistingTree(t *testing.T) {
+	tmp := t.TempDir()
+	h := initExistingWithAgents(t, tmp, model.AgentClaude)
+
+	// Adopt Codex post-init via an explicit selection.
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude, model.AgentCodex},
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := model.ParseConfig(readFile(t, filepath.Join(tmp, model.SDDDirName, "config.yaml")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.SupportedAgents; len(got) != 2 || got[0] != model.AgentClaude || got[1] != model.AgentCodex {
+		t.Errorf("supported_agents = %v, want [claude codex] persisted", got)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, ".agents/skills/sdd/SKILL.md")); err != nil {
+		t.Errorf("codex render missing after adoption: %v", err)
+	}
+}
+
+// TestInit_ExplicitAgentsReplaceDropsAndPrunes verifies the replace semantics:
+// a narrower --agents overwrites the recorded list and prunes the dropped
+// agent's pristine renders, firing the prune callback.
+func TestInit_ExplicitAgentsReplaceDropsAndPrunes(t *testing.T) {
+	tmp := t.TempDir()
+	h := initExistingWithAgents(t, tmp, model.AgentClaude, model.AgentCodex)
+
+	var pruned []command.AgentPruneResult
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:            tmp,
+		BinaryVersion:       "v0.2.0",
+		Targets:             []model.AgentTarget{model.AgentClaude},
+		Scope:               model.ScopeProject,
+		OnAgentSkillsPruned: func(r command.AgentPruneResult) { pruned = append(pruned, r) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := model.ParseConfig(readFile(t, filepath.Join(tmp, model.SDDDirName, "config.yaml")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.SupportedAgents; len(got) != 1 || got[0] != model.AgentClaude {
+		t.Errorf("supported_agents = %v, want [claude] after replace", got)
+	}
+	// Codex render fully pruned (the dir holds only sdd skills), Claude intact.
+	if _, err := os.Stat(filepath.Join(tmp, ".agents/skills")); !os.IsNotExist(err) {
+		t.Errorf(".agents/skills should be removed once empty, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, ".claude/skills/sdd/SKILL.md")); err != nil {
+		t.Errorf("claude render must survive the prune: %v", err)
+	}
+	if len(pruned) != 1 || pruned[0].Target != model.AgentCodex {
+		t.Fatalf("expected one prune callback for codex, got %+v", pruned)
+	}
+	if len(pruned[0].Removed) == 0 || len(pruned[0].KeptModified) != 0 {
+		t.Errorf("prune result: removed=%d keptModified=%d, want removed>0 kept=0", len(pruned[0].Removed), len(pruned[0].KeptModified))
+	}
+}
+
+// TestInit_PrunePreservesModifiedSkill verifies the symmetric protection: a
+// user-modified file in a dropped agent's render is preserved (and reported),
+// while its pristine siblings are removed — mirroring install's refusal to
+// overwrite a modified file without --force.
+func TestInit_PrunePreservesModifiedSkill(t *testing.T) {
+	tmp := t.TempDir()
+	h := initExistingWithAgents(t, tmp, model.AgentClaude, model.AgentCodex)
+
+	// User edits one codex skill file after install — its hash now diverges
+	// from the stored stamp, so it classifies as Modified.
+	modified := filepath.Join(tmp, ".agents/skills/sdd/SKILL.md")
+	appendToFile(t, modified, "\n<!-- local edit, must survive prune -->\n")
+
+	var pruned []command.AgentPruneResult
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:            tmp,
+		BinaryVersion:       "v0.2.0",
+		Targets:             []model.AgentTarget{model.AgentClaude},
+		Scope:               model.ScopeProject,
+		OnAgentSkillsPruned: func(r command.AgentPruneResult) { pruned = append(pruned, r) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(modified); err != nil {
+		t.Errorf("modified file must be preserved without --force: %v", err)
+	}
+	// A pristine sibling in another skill dir is gone.
+	if _, err := os.Stat(filepath.Join(tmp, ".agents/skills/sdd-catchup/SKILL.md")); !os.IsNotExist(err) {
+		t.Errorf("pristine codex skill should be pruned, stat err = %v", err)
+	}
+	// The parent dir survives because it still holds the modified file.
+	if _, err := os.Stat(filepath.Join(tmp, ".agents/skills")); err != nil {
+		t.Errorf(".agents/skills should remain (holds the modified file): %v", err)
+	}
+	if len(pruned) != 1 {
+		t.Fatalf("expected one prune callback, got %+v", pruned)
+	}
+	if !slices.Contains(pruned[0].KeptModified, modified) {
+		t.Errorf("KeptModified should name %s, got %v", modified, pruned[0].KeptModified)
+	}
+	if len(pruned[0].Removed) == 0 {
+		t.Error("pristine siblings should still be removed")
+	}
+}
+
+// TestInit_PruneForceRemovesModified verifies --force makes prune symmetric
+// with a forced overwrite: the modified file is removed too, and the emptied
+// directory is cleaned up.
+func TestInit_PruneForceRemovesModified(t *testing.T) {
+	tmp := t.TempDir()
+	h := initExistingWithAgents(t, tmp, model.AgentClaude, model.AgentCodex)
+
+	modified := filepath.Join(tmp, ".agents/skills/sdd/SKILL.md")
+	appendToFile(t, modified, "\n<!-- local edit -->\n")
+
+	var pruned []command.AgentPruneResult
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:            tmp,
+		BinaryVersion:       "v0.2.0",
+		Targets:             []model.AgentTarget{model.AgentClaude},
+		Scope:               model.ScopeProject,
+		Force:               true,
+		OnAgentSkillsPruned: func(r command.AgentPruneResult) { pruned = append(pruned, r) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(tmp, ".agents/skills")); !os.IsNotExist(err) {
+		t.Errorf("--force prune should remove the modified file and empty the dir, stat err = %v", err)
+	}
+	if len(pruned) != 1 || len(pruned[0].KeptModified) != 0 {
+		t.Errorf("under --force nothing should be kept, got %+v", pruned)
+	}
+	if !slices.Contains(pruned[0].Removed, modified) {
+		t.Errorf("Removed should include the forced modified file %s, got %v", modified, pruned[0].Removed)
+	}
+}
+
+// TestInit_BareInitLeavesRecordedAgents guards that a bare init (no --agents)
+// on an existing tree neither re-persists nor prunes — the recorded value and
+// every render stay put.
+func TestInit_BareInitLeavesRecordedAgents(t *testing.T) {
+	tmp := t.TempDir()
+	h := initExistingWithAgents(t, tmp, model.AgentClaude, model.AgentCodex)
+
+	configPath := filepath.Join(tmp, model.SDDDirName, "config.yaml")
+	before := readFile(t, configPath)
+
+	var pruned []command.AgentPruneResult
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:            tmp,
+		BinaryVersion:       "v0.2.0",
+		Scope:               model.ScopeProject,
+		OnAgentSkillsPruned: func(r command.AgentPruneResult) { pruned = append(pruned, r) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if string(before) != string(readFile(t, configPath)) {
+		t.Error("bare init rewrote config.yaml")
+	}
+	if len(pruned) != 0 {
+		t.Errorf("bare init should not prune, got %+v", pruned)
+	}
+	for _, rel := range []string{".claude/skills/sdd/SKILL.md", ".agents/skills/sdd/SKILL.md"} {
+		if _, err := os.Stat(filepath.Join(tmp, rel)); err != nil {
+			t.Errorf("render %s should survive a bare init: %v", rel, err)
+		}
+	}
+}
+
+// TestInit_FailedPruneDoesNotAdvanceConfig guards the prune ordering:
+// supported_agents must be persisted only AFTER the prune succeeds. If the
+// prune fails midway, the recorded set must stay intact so a re-run retries
+// the drop — otherwise config would claim an agent is gone while its files
+// (partially) remain, and a later bare init would never clean them up.
+func TestInit_FailedPruneDoesNotAdvanceConfig(t *testing.T) {
+	tmp := t.TempDir()
+	initExistingWithAgents(t, tmp, model.AgentClaude, model.AgentCodex)
+
+	// Reader that errors when classifying codex skills, so the prune fails.
+	failing := pruneFailReader{Reader: finders.New(finders.Options{}), failFor: model.AgentCodex}
+	h := handlers.New(handlers.Options{Reader: failing})
+
+	err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude},
+		Scope:         model.ScopeProject,
+	})
+	if err == nil {
+		t.Fatal("expected init to fail when the prune errors")
+	}
+
+	cfg, perr := model.ParseConfig(readFile(t, filepath.Join(tmp, model.SDDDirName, "config.yaml")))
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	if got := cfg.SupportedAgents; len(got) != 2 || got[0] != model.AgentClaude || got[1] != model.AgentCodex {
+		t.Errorf("failed prune advanced supported_agents to %v; the drop must not be committed until the prune succeeds", got)
+	}
+}
+
+// TestInit_UserScopeSkipsPrune guards the prune scope: under user (global)
+// scope the skill dirs are shared across every project on the machine, so
+// dropping an agent must update the recorded list but must NOT delete the
+// shared render — another project may rely on it. Prune is project-scope only
+// (d-tac-jin).
+func TestInit_UserScopeSkipsPrune(t *testing.T) {
+	tmp := t.TempDir()
+	home := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	// Seed under user scope with both agents — renders land in the shared home.
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude, model.AgentCodex},
+		Scope:         model.ScopeUser,
+		ScopeExplicit: true,
+		UserHome:      home,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	codexSkill := filepath.Join(home, ".agents/skills/sdd/SKILL.md")
+	if _, err := os.Stat(codexSkill); err != nil {
+		t.Fatalf("seed codex render missing: %v", err)
+	}
+
+	// Drop codex under user scope.
+	var pruned []command.AgentPruneResult
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:            tmp,
+		BinaryVersion:       "v0.2.0",
+		Targets:             []model.AgentTarget{model.AgentClaude},
+		Scope:               model.ScopeUser,
+		UserHome:            home,
+		OnAgentSkillsPruned: func(r command.AgentPruneResult) { pruned = append(pruned, r) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The recorded list still drops codex...
+	cfg, err := model.ParseConfig(readFile(t, filepath.Join(tmp, model.SDDDirName, "config.yaml")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.SupportedAgents; len(got) != 1 || got[0] != model.AgentClaude {
+		t.Errorf("supported_agents = %v, want [claude] persisted under user scope too", got)
+	}
+	// ...but the shared global render is left untouched, and no prune fires.
+	if _, err := os.Stat(codexSkill); err != nil {
+		t.Errorf("user-scope drop must not delete the shared codex render: %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Errorf("no prune callback should fire under user scope, got %+v", pruned)
+	}
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
+}
+
+func appendToFile(t *testing.T, path, suffix string) {
+	t.Helper()
+	data := readFile(t, path)
+	if err := os.WriteFile(path, append(data, []byte(suffix)...), 0o644); err != nil {
+		t.Fatalf("append to %s: %v", path, err)
 	}
 }

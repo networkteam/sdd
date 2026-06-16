@@ -38,3 +38,15 @@ func RenderInitSkills(w io.Writer, installDir string, result command.SkillInstal
 		fmt.Fprintf(w, "  up to date\n")
 	}
 }
+
+// RenderInitPrune summarises the skill files removed for an agent dropped from
+// supported_agents, and lists any user-modified files left untouched.
+func RenderInitPrune(w io.Writer, result command.AgentPruneResult) {
+	fmt.Fprintf(w, "pruned %s: %d file(s) removed from %s\n", result.Target, len(result.Removed), result.InstallDir)
+	if len(result.KeptModified) > 0 {
+		fmt.Fprintf(w, "  preserved: %d modified file(s) left untouched (pass --force to remove)\n", len(result.KeptModified))
+		for _, p := range result.KeptModified {
+			fmt.Fprintf(w, "    - %s\n", p)
+		}
+	}
+}
