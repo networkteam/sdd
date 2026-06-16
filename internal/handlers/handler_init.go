@@ -142,8 +142,25 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 
 		// Persist an explicit --agents selection to supported_agents and prune
 		// the renders of any agent it drops (d-tac-jin). A bare init (no
-		// --agents) leaves the recorded value and its renders untouched.
+		// --agents) leaves the recorded value and its renders untouched. Prune
+		// runs before the config write: a failed prune then leaves
+		// supported_agents still recording the dropped agent, so a re-run
+		// retries the drop rather than orphaning files under a config that
+		// already claims they're gone.
 		if persistAgents {
+			// Prune only under project scope, where renders are per-project and
+			// committed. Under user scope the skill dirs are shared across every
+			// project on the machine, so a per-project drop must not delete a
+			// render another project relies on — the recorded list still updates
+			// below, leaving the shared render in place.
+			if effectiveScope == model.ScopeProject {
+				if dropped := agentsDiff(recordedAgents, effectiveAgents); len(dropped) > 0 {
+					if err := h.pruneAgentSkills(ctx, dropped, effectiveScope, cmd, &touched); err != nil {
+						return err
+					}
+				}
+			}
+
 			existing, readErr := os.ReadFile(configPath)
 			if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
 				return fmt.Errorf("reading %s: %w", configPath, readErr)
@@ -157,12 +174,6 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 					return fmt.Errorf("writing %s: %w", configPath, err)
 				}
 				touched = append(touched, configPath)
-			}
-
-			if dropped := agentsDiff(recordedAgents, effectiveAgents); len(dropped) > 0 {
-				if err := h.pruneAgentSkills(ctx, dropped, effectiveScope, cmd, &touched); err != nil {
-					return err
-				}
 			}
 		}
 	}
