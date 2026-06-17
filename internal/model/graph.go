@@ -795,9 +795,9 @@ func validateIDRefs(e *Entry, g *Graph, field string, ids []string) {
 
 // validateCloses checks type constraints on closes references.
 // Valid: decision closes signal; done-kind signal closes decision or signal;
-// kind: directive decision closes a stable-kind decision (contract or
-// aspiration) as retirement.
-// Invalid: non-done signal closes anything; any decision-closes-decision
+// a fact or insight signal closes (dissolves) a question; kind: directive
+// decision closes a stable-kind decision (contract or aspiration) as retirement.
+// Invalid: any other non-done signal close; any decision-closes-decision
 // other than directive→{contract|aspiration}.
 func validateCloses(e *Entry, g *Graph) {
 	for _, id := range e.Closes {
@@ -807,11 +807,19 @@ func validateCloses(e *Entry, g *Graph) {
 		}
 
 		switch {
+		case e.Type == TypeSignal && (e.Kind == KindFact || e.Kind == KindInsight) &&
+			target.Type == TypeSignal && target.Kind == KindQuestion:
+			// Dissolution: a fact or insight answers a question into mootness —
+			// the only sanctioned signal-closes-signal path (see retirement
+			// primitives). Pre-flight's dissolution check then verifies dialogue
+			// context. Mirrors the directive→{contract,aspiration} retirement
+			// carve-out below.
+			continue
 		case e.Type == TypeSignal && e.Kind != KindDone:
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "closes",
 				Value:   id,
-				Message: fmt.Sprintf("only done-kind signals may close entries (got %s signal closing %s %s)", e.Kind, target.Type, id),
+				Message: fmt.Sprintf("only done-kind signals may close entries, or a fact/insight dissolving a question (got %s signal closing %s %s)", e.Kind, target.Type, id),
 			})
 		case e.Type == TypeDecision && target.Type == TypeDecision:
 			// Retirement exception: a kind: directive decision may close a

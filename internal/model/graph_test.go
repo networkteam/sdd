@@ -1047,6 +1047,31 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 			},
 			wantWarns: 0,
 		},
+		{
+			name: "valid: fact dissolves question",
+			entries: []*Entry{
+				entry("20260406-100000-s-tac-qqq", withKind(KindQuestion)),
+				entry("20260406-100100-s-tac-fff", withKind(KindFact), withCloses("20260406-100000-s-tac-qqq")),
+			},
+			wantWarns: 0,
+		},
+		{
+			name: "valid: insight dissolves question",
+			entries: []*Entry{
+				entry("20260406-100000-s-tac-qst", withKind(KindQuestion)),
+				entry("20260406-100100-s-tac-ins", withKind(KindInsight), withCloses("20260406-100000-s-tac-qst")),
+			},
+			wantWarns: 0,
+		},
+		{
+			name: "fact cannot close gap (not dissolution)",
+			entries: []*Entry{
+				entry("20260406-100000-s-tac-gap", withKind(KindGap)),
+				entry("20260406-100100-s-tac-fkg", withKind(KindFact), withCloses("20260406-100000-s-tac-gap")),
+			},
+			wantWarns: 1,
+			wantMsg:   "only done-kind signals may close entries",
+		},
 	}
 
 	for _, tt := range tests {
