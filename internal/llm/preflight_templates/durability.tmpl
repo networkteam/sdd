@@ -3,9 +3,20 @@
 
 This check applies **only** when the proposed entry is a `kind: done` signal recording completed work. For any other entry — decisions, non-done signals — emit no finding from this section.
 
-A done signal's referenced artifacts must be durable in the Git-tracked repository. Accept any of: a prior commit referenced by the entry, attachments on this entry (`--attach`), or attachments on a referenced upstream entry already in the graph.
+A done signal's claim must rest on a durable, checkable artifact appropriate to the act it records. Any of these is a durable artifact:
 
-- `high` — A `kind: done` signal claims work was done but references no durable artifact (no commit, no attachment, no upstream attachment). The description alone is not evidence of durability.
-- `low` — Durable artifacts exist but the entry doesn't explicitly name them (e.g. describes changes without citing the commit or attachment).
-- No finding — The proposed entry is not a `kind: done` signal; or it references a commit, carries an attachment, or references an upstream entry that has the relevant attachment.
+- a **commit** in the Git-tracked repository;
+- an **attachment on this entry** (`--attach`) — the durable form when the deliverable *is* the document (a research, synthesis, evaluation, or design write-up);
+- an **attachment on a referenced upstream entry** already in the graph;
+- a **URL** to work whose result lives outside this repo (a merged PR/MR, a CI run, a deployed page, an external document);
+- for an act that **changed nothing** — a manual or behavioral verification, e.g. "confirmed X still works in a fresh session" — a **human participant's attestation in the body** is itself the durable trace.
+
+Judge the act from the narrative, then cite the **most specific** artifact it produced. "Most specific" is guidance, not a rule: accept any durable artifact that genuinely corresponds to the act, and never flag a valid attachment, URL, or attestation merely because a more specific form could also exist.
+
+The single hard requirement is for **changes to the repository's code or source** — editing or adding code, templates, configs, or other tracked source. Such a change must cite the **commit** that landed it; the commit is the durable, in-band artifact, and a prose description or commentary notes do not replace it. This requirement does **not** extend to a done whose deliverable *is* an attached document (research/synthesis/evaluation/design): there the attachment is the artifact and no commit is expected.
+
+- `high` — A done that records a code/source change to the repository but cites no commit. The description alone is not evidence, and commentary notes attached to the entry do not substitute for the commit that landed the change.
+- `medium` — A done whose act produced a durable artifact living **outside** this repo (a deploy, a release, an external change) but cites none — no URL, no attachment. Surface the missing pointer; this is advisory, not a hard block.
+- `low` — A durable artifact exists but the entry doesn't name it explicitly, or a less-specific artifact is cited where a tighter one was readily available.
+- No finding — The entry cites a durable artifact appropriate to its act (a commit, an attachment on this entry or an upstream entry, or a URL); **or** the act changed nothing and a human participant attests the result in the body; or the proposed entry is not a `kind: done` signal.
 {{ end }}

@@ -300,11 +300,11 @@ func TestPreflightEval_ClosingAction_DeviationWithReasoning(t *testing.T) {
 	// clarified calibration: reasoning presence (not quality) is what
 	// matters — expected: no high finding.
 	//
-	// The done signal carries an attachment so the durability check (now in the
-	// universal system preamble per d-tac-fah) passes — a real completion records
-	// its artifact. This isolates the AC-reasoning behavior the case targets;
-	// without it, durability correctly fires high on the missing artifact and
-	// masks what we're testing.
+	// The done cites the commit that landed the code — the durable artifact a
+	// repo change requires per d-prc-kqx — so the durability check passes and the
+	// AC-reasoning behavior is isolated; without it, durability correctly fires
+	// high on the missing commit and masks what we're testing. (The attachment is
+	// supplementary implementation notes, not the durability artifact.)
 	plan := planWithACs("20260410-120000-d-tac-pln",
 		"Implementation plan with four items.",
 		"Create database schema for user accounts",
@@ -320,7 +320,7 @@ func TestPreflightEval_ClosingAction_DeviationWithReasoning(t *testing.T) {
 		Layer:       model.LayerTactical,
 		Closes:      []string{plan.ID},
 		Attachments: []string{"2026/04/10-130000-s-tac-def/implementation.md"},
-		Content:     "Implemented item 1 (database schema with users table and bcrypt passwords) and item 3 (full CRUD endpoints at /users); details in the attached implementation notes. Deviation: authentication middleware (item 2) deferred — dialogued that we'd adopt an existing Passport.js library in a follow-up rather than build from scratch. Deviation: integration tests (item 4) deferred to a follow-up action — agreed during implementation that the schema/endpoint work needed smoke testing first, with the full suite as a separate closure.",
+		Content:     "Implemented item 1 (database schema with users table and bcrypt passwords) and item 3 (full CRUD endpoints at /users); details in the attached implementation notes. Deviation: authentication middleware (item 2) deferred — dialogued that we'd adopt an existing Passport.js library in a follow-up rather than build from scratch. Deviation: integration tests (item 4) deferred to a follow-up action — agreed during implementation that the schema/endpoint work needed smoke testing first, with the full suite as a separate closure. Commit 9d3f1ac.",
 	}
 
 	result, raw := runEval(t, graph, proposed)
@@ -348,7 +348,7 @@ func TestPreflightEval_ClosingAction_FullCoverage(t *testing.T) {
 		Layer:       model.LayerTactical,
 		Closes:      []string{plan.ID},
 		Attachments: []string{"2026/04/10-130000-s-tac-xyz/implementation.md"},
-		Content:     "Built the complete user authentication feature: added users table with email/password columns (bcrypt hashed), wrote Express middleware that validates JWT tokens on protected routes, created REST endpoints for all CRUD operations (create user via signup, read user profile, update user settings, delete user account), and added a full integration test suite covering happy paths and error cases for every endpoint.",
+		Content:     "Built the complete user authentication feature: added users table with email/password columns (bcrypt hashed), wrote Express middleware that validates JWT tokens on protected routes, created REST endpoints for all CRUD operations (create user via signup, read user profile, update user settings, delete user account), and added a full integration test suite covering happy paths and error cases for every endpoint. Commit 4b8e2f1.",
 	}
 
 	result, raw := runEval(t, graph, proposed)
@@ -403,6 +403,7 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 	// new calibration: explicit acknowledgment is no finding or low; only a
 	// silent omission is high. This case walks the boundary — the
 	// acknowledgment counts as a deviation note, so no high finding expected.
+	// The done cites its commit so durability stays quiet (d-prc-kqx).
 	decision := &model.Entry{
 		ID:      "20260410-122858-d-tac-kfo",
 		Type:    model.TypeDecision,
@@ -419,7 +420,7 @@ func TestPreflightEval_RealGraphHistory_SilentScopeOut(t *testing.T) {
 		Layer:   model.LayerTactical,
 		Refs:    []model.Ref{{ID: decision.ID, Kind: model.RefKindAddresses}},
 		Closes:  []string{decision.ID},
-		Content: "Built sdd lint command with checks for dangling refs (non-existent entries), malformed IDs (short suffixes), type mismatches in closes (signal can't close, action can't be closed, decision can't close decision), and type mismatches in supersedes (must be same type). Warnings are populated during graph construction on the Entry struct so sdd show displays them inline. Running against the live graph found 4 issues in 3 entries. Does NOT yet cover broken or missing attachment references — that requirement from d-tac-kfo remains unimplemented.",
+		Content: "Built sdd lint command with checks for dangling refs (non-existent entries), malformed IDs (short suffixes), type mismatches in closes (signal can't close, action can't be closed, decision can't close decision), and type mismatches in supersedes (must be same type). Warnings are populated during graph construction on the Entry struct so sdd show displays them inline. Running against the live graph found 4 issues in 3 entries. Does NOT yet cover broken or missing attachment references — that requirement from d-tac-kfo remains unimplemented. Commit 2e7a9c4.",
 	}
 
 	result, raw := runEval(t, graph, proposed)
@@ -487,6 +488,103 @@ func TestPreflightEval_ActionClosesSignal_WithCommitRef(t *testing.T) {
 		t.Errorf("Expected no high findings (commit reference provides durability), got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Correctly passed with commit reference. Findings: %+v", result.Findings)
+	}
+}
+
+func TestPreflightEval_ActionVerification_HumanAttestation(t *testing.T) {
+	// New durability path (d-prc-kqx): an act that changed nothing — a manual,
+	// human-attested verification — needs no commit, URL, or attachment. The
+	// participant's attestation in the body is itself the durable trace, with the
+	// playback-and-confirm step as the safeguard. Expected: no high.
+	signal := &model.Entry{
+		ID:         "20260612-090000-s-tac-vrf",
+		Type:       model.TypeSignal,
+		Layer:      model.LayerTactical,
+		Confidence: "medium",
+		Content:    "Open question whether the @AGENTS.md import actually expands and the rendered skills load in a fresh agent session — never confirmed against a real session.",
+		Time:       time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{signal})
+
+	proposed := &model.Entry{
+		Type:         model.TypeSignal,
+		Kind:         model.KindDone,
+		Layer:        model.LayerTactical,
+		Participants: []string{"Christopher", "Claude"},
+		Closes:       []string{signal.ID},
+		Content:      "Confirmed in a fresh agent session that the @AGENTS.md import expands and the rendered skills load correctly. No code or files changed — this records a manual verification, attested by Christopher in the session. There is no commit or attachment because the act produced nothing beyond the confirmation itself.",
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if result.HasBlocking() {
+		t.Errorf("Expected no high finding (a human-attested verification that changed nothing needs no artifact, per d-prc-kqx), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly accepted human-attested verification. Findings: %+v", result.Findings)
+	}
+}
+
+func TestPreflightEval_ActionClosesSignal_WithExternalURL(t *testing.T) {
+	// New durability path (d-prc-kqx): work whose result lives outside this repo
+	// is durable via a URL (a deploy, a merged PR, a CI run), not only a local
+	// commit. The act changed nothing in this repo, so a URL is the honest
+	// artifact. Expected: no high.
+	signal := &model.Entry{
+		ID:         "20260612-093000-s-ops-dep",
+		Type:       model.TypeSignal,
+		Layer:      model.LayerOperational,
+		Confidence: "high",
+		Content:    "The staging environment needs to be stood up so the team can review the release candidate before the next tag.",
+		Time:       time.Date(2026, 6, 12, 9, 30, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{signal})
+
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Kind:    model.KindDone,
+		Layer:   model.LayerOperational,
+		Closes:  []string{signal.ID},
+		Content: "Deployed the release candidate to staging; it is live at https://staging.example.com and the deploy pipeline run is green at https://github.com/example/repo/actions/runs/991234. Nothing changed in this repository — the artifact is the deploy itself.",
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if result.HasBlocking() {
+		t.Errorf("Expected no high finding (external work is durable via a URL, per d-prc-kqx), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly accepted external URL as durable. Findings: %+v", result.Findings)
+	}
+}
+
+func TestPreflightEval_ActionResearch_AttachmentIsDeliverable(t *testing.T) {
+	// Durability calibration (d-prc-kqx, narrowed): a done whose deliverable IS an
+	// attached document — research / synthesis / evaluation — is durable via that
+	// attachment. No code or source changed, so no commit is required and none
+	// should be demanded. Guards against overshoot: the hard commit requirement is
+	// scoped to code/source changes, not to attachment-backed knowledge work.
+	// Expected: no high.
+	gap := &model.Entry{
+		ID:         "20260613-090000-s-cpt-rsr",
+		Type:       model.TypeSignal,
+		Layer:      model.LayerConceptual,
+		Confidence: "medium",
+		Content:    "We need a comparison of the candidate embedding providers before committing to one for the hosted index.",
+		Time:       time.Date(2026, 6, 13, 9, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{gap})
+
+	proposed := &model.Entry{
+		Type:        model.TypeSignal,
+		Kind:        model.KindDone,
+		Layer:       model.LayerConceptual,
+		Closes:      []string{gap.ID},
+		Attachments: []string{"2026/06/13-100000-s-cpt-cmp/comparison.md"},
+		Content:     "Completed the embedding-provider comparison across cost, latency, recall, and operational burden; the full analysis and recommendation are in the attached write-up. No code changed — the deliverable is the analysis itself.",
+	}
+
+	result, raw := runEval(t, graph, proposed)
+	if result.HasBlocking() {
+		t.Errorf("Expected no high finding (a research done's deliverable is its attachment; no code changed, so no commit is required, per d-prc-kqx), got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly accepted attachment-as-deliverable research done. Findings: %+v", result.Findings)
 	}
 }
 
