@@ -107,7 +107,7 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "kind", "layer", "since", "topic", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "kind", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
 
 // supportedNotInner lists the inner filter names accepted by `not(<inner>)`
 // in d-tac-e1s's first cut. Pure set-shaped filters with unambiguous
@@ -215,12 +215,15 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 
 	// Apply intent in canonical pipeline order: filter → rank → page →
 	// group → render. Within filter: GraphFilter (active, layer) → kind
-	// disjunction → since → topic. Order among post-Graph.Filter()
-	// narrowings doesn't affect the result; chosen here to keep cheaper
-	// structural checks before time/topic walks.
+	// disjunction → participant disjunction → since → topic. Order among
+	// post-Graph.Filter() narrowings doesn't affect the result; chosen
+	// here to keep cheaper structural checks before time/topic walks.
 	entries := g.Filter(spec.filter)
 	for _, kinds := range spec.kindFilters {
 		entries = filterByKinds(entries, kinds)
+	}
+	for _, names := range spec.participantFilters {
+		entries = filterByParticipants(entries, names)
 	}
 	if len(spec.excludeKinds) > 0 {
 		entries = excludeByKinds(entries, spec.excludeKinds)
@@ -399,6 +402,16 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 			return fmt.Errorf("topic: %w", err)
 		}
 		spec.topicPrefix = path
+
+	case fn.Name == "participant":
+		names, err := parseParticipantArgs(fn.Args)
+		if err != nil {
+			return fmt.Errorf("participant: %w", err)
+		}
+		// Each participant() call is a disjunction; storing them as
+		// separate sets lets the application stage intersect across
+		// calls, mirroring kind() (d-tac-uww §2).
+		spec.participantFilters = append(spec.participantFilters, names)
 
 	case fn.Name == "untagged":
 		if len(fn.Args) > 0 {
@@ -691,6 +704,26 @@ func filterBySince(entries []*model.Entry, cutoff time.Time) []*model.Entry {
 // Identifier and string args are interchangeable so users can write
 // either kind(plan) or kind("plan"). Returning multiple kinds models the
 // disjunction: kind(plan, directive) means "plan OR directive".
+// parseParticipantArgs reads the names in a participant(...) call. Each
+// arg is a canonical participant string — bare idents for single-word
+// names (participant(Christopher)) or quoted strings for names with
+// spaces (participant("Jonathan Philipp")). Mirrors parseKindArgs.
+func parseParticipantArgs(args []model.FunctionArg) ([]string, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("requires at least one participant argument (e.g. participant(Christopher) or participant(\"Jonathan Philipp\"))")
+	}
+	out := make([]string, 0, len(args))
+	for i, a := range args {
+		switch a.Kind {
+		case model.ArgKindIdent, model.ArgKindString:
+			out = append(out, a.String)
+		default:
+			return nil, fmt.Errorf("argument %d must be an identifier or string, got %s", i+1, a.Kind)
+		}
+	}
+	return out, nil
+}
+
 func parseKindArgs(args []model.FunctionArg) ([]model.Kind, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("requires at least one kind argument (e.g. kind(plan) or kind(plan,directive))")
@@ -760,6 +793,28 @@ func filterByKinds(entries []*model.Entry, kinds []model.Kind) []*model.Entry {
 	for _, e := range entries {
 		if _, ok := set[e.Kind]; ok {
 			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// filterByParticipants keeps entries listing at least one of names in their
+// participants (disjunction within a single participant() call). Matching is
+// exact against the canonical strings stored on the entry — the participants
+// field carries canonicals only (d-cpt-979), so a canonical identifies an
+// author unambiguously without alias resolution.
+func filterByParticipants(entries []*model.Entry, names []string) []*model.Entry {
+	want := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		want[n] = struct{}{}
+	}
+	var out []*model.Entry
+	for _, e := range entries {
+		for _, p := range e.Participants {
+			if _, ok := want[p]; ok {
+				out = append(out, e)
+				break
+			}
 		}
 	}
 	return out

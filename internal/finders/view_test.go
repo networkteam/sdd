@@ -338,6 +338,93 @@ func TestView_KindFilter_StringArg(t *testing.T) {
 	}
 }
 
+func TestView_ParticipantFilter_Single(t *testing.T) {
+	chris := entry("20260101-100000-d-tac-aaa", withParticipants("Christopher"))
+	jonathan := entry("20260101-110000-s-tac-bbb", withParticipants("Jonathan Philipp"))
+	both := entry("20260101-120000-s-tac-ccc", withParticipants("Christopher", "Claude"))
+	g := model.NewGraph([]*model.Entry{chris, jonathan, both})
+
+	layout := mustParseLayout(t, "participant(Christopher):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	want := []string{chris.ID, both.ID}
+	if got := idsOf(flat.Entries); !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_ParticipantFilter_QuotedMultiWordName(t *testing.T) {
+	// Names with spaces require the quoted-string arg form.
+	chris := entry("20260101-100000-d-tac-aaa", withParticipants("Christopher"))
+	jonathan := entry("20260101-110000-s-tac-bbb", withParticipants("Jonathan Philipp"))
+	g := model.NewGraph([]*model.Entry{chris, jonathan})
+
+	layout := mustParseLayout(t, `participant("Jonathan Philipp"):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if want := []string{jonathan.ID}; !equalIDs(idsOf(flat.Entries), want) {
+		t.Errorf("entries: got %v, want %v", idsOf(flat.Entries), want)
+	}
+}
+
+func TestView_ParticipantFilter_Disjunction(t *testing.T) {
+	chris := entry("20260101-100000-d-tac-aaa", withParticipants("Christopher"))
+	jonathan := entry("20260101-110000-s-tac-bbb", withParticipants("Jonathan Philipp"))
+	dana := entry("20260101-120000-s-tac-ccc", withParticipants("Dana"))
+	g := model.NewGraph([]*model.Entry{chris, jonathan, dana})
+
+	layout := mustParseLayout(t, `participant(Christopher,"Jonathan Philipp"):as-list`)
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if want := []string{chris.ID, jonathan.ID}; !equalIDs(idsOf(flat.Entries), want) {
+		t.Errorf("entries: got %v, want %v", idsOf(flat.Entries), want)
+	}
+}
+
+func TestView_ParticipantFilter_MultipleCallsIntersect(t *testing.T) {
+	// participant(A):participant(B) intersects — keeps only entries listing
+	// both, mirroring kind()'s multiple-calls-intersect semantic.
+	chris := entry("20260101-100000-d-tac-aaa", withParticipants("Christopher"))
+	both := entry("20260101-120000-s-tac-ccc", withParticipants("Christopher", "Claude"))
+	g := model.NewGraph([]*model.Entry{chris, both})
+
+	layout := mustParseLayout(t, "participant(Christopher):participant(Claude):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if want := []string{both.ID}; !equalIDs(idsOf(flat.Entries), want) {
+		t.Errorf("entries: got %v, want %v", idsOf(flat.Entries), want)
+	}
+}
+
+func TestView_ParticipantFilter_NoArgs(t *testing.T) {
+	g := model.NewGraph([]*model.Entry{entry("20260101-100000-d-tac-aaa", withParticipants("Christopher"))})
+	layout := mustParseLayout(t, "participant():as-list")
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err == nil {
+		t.Fatal("expected error for participant() with no args")
+	}
+	if !strings.Contains(err.Error(), "participant") {
+		t.Errorf("error %q does not mention participant", err.Error())
+	}
+}
+
 func TestView_NPagination(t *testing.T) {
 	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
 	b := entry("20260101-110000-d-tac-bbb", withKind(model.KindDirective))

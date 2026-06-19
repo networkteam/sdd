@@ -70,6 +70,33 @@ func TestGroupByType(t *testing.T) {
 	}
 }
 
+func TestGroupByParticipant_MultiValued(t *testing.T) {
+	// participant is multi-valued: a co-authored entry lands in each
+	// author's bucket, and an entry with no participants drops out.
+	solo := entry("20260101-100000-d-tac-aaa", withParticipants("Christopher"))
+	coauthored := entry("20260101-110000-s-tac-bbb", withParticipants("Christopher", "Claude"))
+	orphan := entry("20260101-120000-s-tac-ccc")
+
+	groups, err := groupBy([]*model.Entry{solo, coauthored, orphan}, "participant")
+	if err != nil {
+		t.Fatalf("groupBy: %v", err)
+	}
+
+	// Alphabetical bucket order; orphan contributes to no bucket.
+	if got, want := groupKeys(groups), []string{"Christopher", "Claude"}; !equalStrings(got, want) {
+		t.Errorf("group order: got %v, want %v", got, want)
+	}
+
+	chris := findGroup(groups, "Christopher")
+	if got, want := idsOf(chris.Entries), []string{solo.ID, coauthored.ID}; !equalIDs(got, want) {
+		t.Errorf("Christopher group: got %v, want %v", got, want)
+	}
+	claude := findGroup(groups, "Claude")
+	if got, want := idsOf(claude.Entries), []string{coauthored.ID}; !equalIDs(got, want) {
+		t.Errorf("Claude group: got %v, want %v", got, want)
+	}
+}
+
 func TestGroupByUnknownField(t *testing.T) {
 	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
 	_, err := groupBy([]*model.Entry{a}, "summary")

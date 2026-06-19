@@ -72,6 +72,11 @@ func withKind(k model.Kind) entryOpt {
 	return func(e *model.Entry) { e.Kind = k }
 }
 
+// withParticipants sets the entry's canonical participants list.
+func withParticipants(names ...string) entryOpt {
+	return func(e *model.Entry) { e.Participants = names }
+}
+
 func withContent(c string) entryOpt {
 	return func(e *model.Entry) { e.Content = c }
 }

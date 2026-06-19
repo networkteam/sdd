@@ -11,8 +11,10 @@ import (
 )
 
 // viewHelpText is shown when `sdd view` runs without `--layout`. It
-// documents only what is currently implemented; later slices expand the
-// vocabulary and bring this text up to the full d-tac-uww grammar.
+// enumerates the implemented pipeline vocabulary; keep it in sync with
+// the finder's knownFunctions and the cli-reference skill doc whenever a
+// primitive is added — this text has drifted from the implementation
+// before.
 const viewHelpText = `Usage: sdd view --layout=<spec>
 
 Compose a pipeline of primitives separated by colons; multiple sections
@@ -25,9 +27,14 @@ kind(plan,directive). Nested calls let algorithms carry decay:
 rank(heat(exp-14d)). Strings use quotes: topic("infrastructure/cli").
 No whitespace anywhere except inside quoted strings.
 
-Currently implemented vocabulary (more arrives in later slices):
+Implemented pipeline vocabulary:
 
-  Filters:
+  Sources:
+    source(graph)          All graph entries (default if omitted)
+    source(wip)            Active WIP markers. Disjoint vocabulary — only
+                           name() and as-wip-list compose with it.
+
+  Filters (intersect cumulatively):
     active                 Entries not closed and not superseded
     kind(K[, K2, ...])     Entries whose kind matches any of the listed kinds
     layer(L)               Entries at the given layer (stg, cpt, tac, ops, prc;
@@ -40,6 +47,16 @@ Currently implemented vocabulary (more arrives in later slices):
                            component-wise prefix (case-insensitive). Use
                            bare identifiers for simple labels (catch-up-scaling)
                            and quoted strings for paths ("infrastructure/cli").
+    participant(P[, ...])  Entries listing any of the named canonical
+                           participants. Bare idents for single-word names
+                           (Christopher); quoted strings for names with spaces
+                           ("Jonathan Philipp"). Multiple calls intersect.
+    untagged               Entries whose effective topic set is empty — the
+                           topic backfill worklist.
+    id(ID[, ID2, ...])     Keep only the listed entries. Short IDs bare
+                           (d-tac-6tz); full IDs quoted ("20260520-131326-d-tac-6tz").
+    not(<filter>)          Exclude entries matched by the inner filter.
+                           Inner filters: kind, layer, topic.
 
   Rank:
     rank(<algorithm>)      Sort by computed score, descending. Adds
@@ -63,32 +80,42 @@ Currently implemented vocabulary (more arrives in later slices):
     n(N)                   Take first N entries (after filtering and ranking)
 
   Aggregate:
-    group(by(<field>))     Bucket entries by a frontmatter field. Field is one
-                           of kind, layer, type. Buckets emit alphabetically.
-                           Mutually exclusive with rank() and n() in this slice.
+    group(by(<field>))     Bucket entries by a field — one of kind, layer,
+                           type, participant. Buckets emit alphabetically.
+                           participant is multi-valued: a co-authored entry
+                           lands in each author's bucket. Requires as-grouped;
+                           mutually exclusive with rank() and n().
 
   Transform:
-    expand(<field>)        Explode a list-valued frontmatter field into per-row
-                           sub-rows. Slice 7 recognizes only expand(involvement)
-                           — focus-block construction. Mutually exclusive with
-                           rank(), n(), and group().
+    expand(involvement)    Explode each focus's involvement triples into
+                           per-target sub-rows (as-focus-block only).
+    expand(refs)           Render each entry's outgoing refs as indented
+                           sub-lines (as-list only). expand(refs(inactive))
+                           narrows to refs whose target is now inactive.
 
   Output:
-    name(<string>)         Render '## <string>' as the section header. Last
-                           call wins. Without name(), the section emits no
-                           outer header.
+    name(<string>)         Final section header '## <string>'. Last call wins;
+                           suppresses the rank-derived auto-suffix. Without
+                           name()/name-prefix(), a bare section emits no header.
+    name-prefix(<string>)  Header prefix the auto-deriver extends with the rank
+                           suffix (e.g. "Top by heat (exp-14d)").
     stalled(<value>)       Configure the heat-score threshold below which a
                            focus target with assigned actors is classified
                            "stalled". Default 1.0; applies only to
                            as-focus-block sections.
 
-  Render:
-    as-list                One line per entry (terminator)
-    as-grouped             One ### header per group, then entry lines (terminator;
-                           requires a preceding group(by(<field>)))
+  Render (terminator — required):
+    as-list                One line per entry
+    as-grouped             One ### header per group, then entry lines
+                           (requires a preceding group(by(<field>)))
+    as-counts              Per-topic count + heat rows over the filtered set
+                           (no rank / n / group / expand)
     as-focus-block         Per-focus header + per-target lines with state
                            (pull-available / stalled / driving) and score
-                           (terminator; requires expand(involvement))
+                           (requires expand(involvement))
+    as-participants-block  Active actor heads + their bound active roles
+                           (requires kind(actor):active)
+    as-wip-list            WIP marker rows (requires source(wip))
 
   Macros (named pipelines, recognised at section start; user modifiers append):
     top(N)                 active:n(N):rank(heat(exp-14d)):as-list
@@ -101,6 +128,8 @@ Currently implemented vocabulary (more arrives in later slices):
     done                   kind(done):since("30d"):rank(by(date)):as-list
     aspirations            active:kind(aspiration):as-list
     contracts              active:kind(contract):as-list
+    participants           active:kind(actor):as-participants-block
+    wip                    source(wip):as-wip-list
 
 Examples:
 
@@ -132,6 +161,21 @@ Examples:
   sdd view --layout=topic("infrastructure/cli"):rank(by(date)):n(20):as-list
     Most recent 20 entries tagged anywhere under infrastructure/cli.
 
+  sdd view --layout=active:participant("Jonathan Philipp"):rank(by(date)):as-list
+    Everything Jonathan authored or co-authored, most recent first.
+
+  sdd view --layout=active:kind(gap,question):group(by(participant)):as-grouped
+    Open gaps and questions bucketed by who raised them.
+
+  sdd view --layout=top(20):not(kind(contract,aspiration))
+    Warmest active entries excluding standing structural anchors.
+
+  sdd view --layout=active:untagged:n(20):as-list
+    Active entries carrying no topic — the topic backfill worklist.
+
+  sdd view --layout=active:as-counts
+    Per-topic counts and heat across the active set.
+
   sdd view --layout=active:kind(plan,directive,activity,contract,aspiration):group(by(kind)):as-grouped
     Active decisions grouped by kind — close to the decisions section in the
     catch-up macros (slice 6 wraps this as the named macro).
@@ -153,8 +197,8 @@ Examples:
   sdd view --layout=top(15),decisions,insights
     Mixed macros: warm top-15, decisions block, last-30-days insights.
 
-See the d-tac-uww plan for the full grammar; primitives not yet implemented
-return a clear "unknown function" error listing what is available.
+Unknown primitives return a clear "unknown function" error listing the
+available vocabulary. See the cli-reference skill doc for the full grammar.
 `
 
 func viewCmd() *cli.Command {

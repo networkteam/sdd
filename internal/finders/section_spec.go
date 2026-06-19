@@ -28,14 +28,19 @@ type sectionSpec struct {
 	// Graph-side primitives.
 	filter      model.GraphFilter
 	kindFilters [][]model.Kind // each kind() call is a disjunction set; multiple calls intersect (d-tac-uww §2)
-	sinceCutoff *time.Time     // pointer so we can distinguish "no since()" from "since(0d)"
-	topicPrefix model.TopicPath
-	untagged    bool      // untagged: keep only entries whose effective topic set is empty
-	idFilter    []string  // id(<id>,...): keep only the listed entries (raw IDs, resolved at apply time)
-	rank        *rankSpec // last-write-wins per d-tac-uww §2
-	pageN       int       // -1 = no page limit
-	groupField  string    // empty = no group; non-empty = group(by(<field>))
-	expandField string    // empty = no expand; "involvement" (focus-block) or "refs" (per-row ref sub-lines on as-list)
+	// participantFilters mirrors kindFilters: each participant() call is a
+	// disjunction set (any listed canonical matches), and multiple calls
+	// intersect. Names are matched exactly against the entry's canonical
+	// participants per the canonical-only field contract (d-cpt-979).
+	participantFilters [][]string
+	sinceCutoff        *time.Time // pointer so we can distinguish "no since()" from "since(0d)"
+	topicPrefix        model.TopicPath
+	untagged           bool      // untagged: keep only entries whose effective topic set is empty
+	idFilter           []string  // id(<id>,...): keep only the listed entries (raw IDs, resolved at apply time)
+	rank               *rankSpec // last-write-wins per d-tac-uww §2
+	pageN              int       // -1 = no page limit
+	groupField         string    // empty = no group; non-empty = group(by(<field>))
+	expandField        string    // empty = no expand; "involvement" (focus-block) or "refs" (per-row ref sub-lines on as-list)
 
 	// expandRefsInactive is set by expand(refs(inactive)) — narrows the
 	// per-entry ref sub-lines to refs whose target is currently inactive
