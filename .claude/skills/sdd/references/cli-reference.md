@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: af8bd8387ee5d7e13cb16c222cd5a1018ffb0a96fe839c2ad6428f9cbc755105
+sdd-content-hash: ec7848c78f8825400179f8974dcf459b2f9a119f0e49403696ce511975cc12af
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -59,9 +59,11 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 |---|---|
 | `active` | Entries not closed and not superseded |
 | `kind(K[, K2, ...])` | Disjunction within one filter; multiple `kind()` calls intersect |
+| `type(T)` | Entries of type T (`d`/`s` or `decision`/`signal`) |
 | `layer(L)` | Entries at layer L (`stg`, `cpt`, `tac`, `ops`, `prc`; full names also accepted) |
 | `since(spec)` | ISO date `YYYY-MM-DD` or duration `Nd|Nw|Nm|Ny`. Quoted string. m/y use calendar arithmetic; d/w use 24h offsets |
 | `topic(L)` | Entries whose effective topic set has L as a component-wise prefix (case-insensitive) |
+| `participant(P[, P2, ...])` | Entries listing any of the named canonical participants. Bare idents for single-word names (`participant(Christopher)`); quoted strings for names with spaces (`participant("Jonathan Philipp")`). Multiple `participant()` calls intersect |
 | `untagged` | Entries whose effective topic set is empty — the inverse of having any topic. Counts annotation membership, not just inline `topics:`. The grooming/backfill entry point |
 | `id(ID[, ID2, ...])` | Keep only the listed entries (intersects like other filters). Short IDs work bare (`id(d-tac-6tz)`); full IDs start with digits so they must be quoted (`id("20260520-131326-d-tac-6tz")`). Resolves short→full, surfaces ambiguity; an ID that matches nothing drops out silently |
 | `not(<filter>)` | Excludes entries matched by the inner filter. Supported inner: `kind`, `layer`, `topic` |
@@ -76,7 +78,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `name-prefix(<string>)` | Prefix the auto-derive composer extends with the rank suffix. Macros bake this so `top(N)` reads "Top by heat (exp-14d)" by default and "Top by in-degree" after `:rank(in-degree)` — the prefix stays, the suffix tracks rank |
 | `expand(involvement)` | Per row, explode involvement triples into focus-block sub-rows (focus-block only) |
 | `expand(refs)` | Per row, render each entry's outgoing refs as indented sub-lines (as-list only). Optional nested `expand(refs(inactive))` narrows to refs whose target is currently inactive. Composes with filters, `rank`, and `n` |
-| `group(by(<field>))` | Bucket entries by field; produces grouped shape (consume with `as-grouped`) |
+| `group(by(<field>))` | Bucket entries by field — one of `kind`, `layer`, `type`, `participant` — producing a grouped shape (consume with `as-grouped`). `participant` is multi-valued: a co-authored entry buckets under each author |
 | `stalled(<value>)` | Threshold below which a focus target with assigned actors is "stalled" (default 1.0) |
 
 **`expand(refs)` sub-line shape.** Each ref renders as `→ <verb> <full-id> {status: …}` with an optional `: "<desc>"` clause when the ref carries a description. The verb is the per-ref kind (`grounded-in`, `builds-on`, `refines`, `addresses`, `surfaces`, `surfaced-by`, `depends-on`, `required-by`, `related`); legacy bare-string refs (kind `unknown`) render with the generic verb `refs`, and legacy on-disk `grounds`/`evidence` render as `grounded-in` (resolved at parse). Status surfaces the referenced entry's *current* derived state, so stale summary prose can't mislead a reader into treating a closed dependency as still open. Done-signal targets carry no status segment (they are terminal). Three shapes:
