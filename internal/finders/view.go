@@ -107,7 +107,7 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "kind", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "kind", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
 
 // supportedNotInner lists the inner filter names accepted by `not(<inner>)`
 // in d-tac-e1s's first cut. Pure set-shaped filters with unambiguous
@@ -214,8 +214,8 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	}
 
 	// Apply intent in canonical pipeline order: filter → rank → page →
-	// group → render. Within filter: GraphFilter (active, layer) → kind
-	// disjunction → participant disjunction → since → topic. Order among
+	// group → render. Within filter: GraphFilter (active, layer, type) →
+	// kind disjunction → participant disjunction → since → topic. Order among
 	// post-Graph.Filter() narrowings doesn't affect the result; chosen
 	// here to keep cheaper structural checks before time/topic walks.
 	entries := g.Filter(spec.filter)
@@ -373,6 +373,24 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 			spec.filter.Layer = abbrev
 		} else {
 			spec.filter.Layer = model.Layer(s)
+		}
+
+	case fn.Name == "type":
+		if len(fn.Args) != 1 {
+			return fmt.Errorf("type: requires exactly one argument (e.g. type(d) or type(signal))")
+		}
+		s, err := argString(fn.Args[0])
+		if err != nil {
+			return fmt.Errorf("type: %w", err)
+		}
+		// Resolve the abbrev form (d/s) to the canonical EntryType; full
+		// names (decision/signal) pass through. g.Filter applies the
+		// resulting spec.filter.Type, so no apply-stage wiring is needed —
+		// this mirrors layer() onto the shared GraphFilter.
+		if abbrev, ok := model.TypeFromAbbrev[s]; ok {
+			spec.filter.Type = abbrev
+		} else {
+			spec.filter.Type = model.EntryType(s)
 		}
 
 	case fn.Name == "since":

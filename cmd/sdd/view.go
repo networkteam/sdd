@@ -37,6 +37,7 @@ Implemented pipeline vocabulary:
   Filters (intersect cumulatively):
     active                 Entries not closed and not superseded
     kind(K[, K2, ...])     Entries whose kind matches any of the listed kinds
+    type(T)                Entries of the given type — d/s or decision/signal
     layer(L)               Entries at the given layer (stg, cpt, tac, ops, prc;
                            full names also accepted)
     since(spec)            Entries on/after a cutoff. Spec is ISO date

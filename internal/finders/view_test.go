@@ -928,6 +928,69 @@ func TestView_LayerFilterAbbrev(t *testing.T) {
 	}
 }
 
+func TestView_TypeFilterAbbrev(t *testing.T) {
+	dec := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	sig := entry("20260101-110000-s-tac-bbb", withKind(model.KindGap))
+	g := model.NewGraph([]*model.Entry{dec, sig})
+
+	layout := mustParseLayout(t, "type(d):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if want := []string{dec.ID}; !equalIDs(idsOf(flat.Entries), want) {
+		t.Errorf("type(d): got %v, want %v", idsOf(flat.Entries), want)
+	}
+}
+
+func TestView_TypeFilterFullName(t *testing.T) {
+	// type(signal) resolves to the same set as type(s).
+	dec := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	sig := entry("20260101-110000-s-tac-bbb", withKind(model.KindGap))
+	g := model.NewGraph([]*model.Entry{dec, sig})
+
+	layout := mustParseLayout(t, "type(signal):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if want := []string{sig.ID}; !equalIDs(idsOf(flat.Entries), want) {
+		t.Errorf("type(signal): got %v, want %v", idsOf(flat.Entries), want)
+	}
+}
+
+func TestView_TypeFilterComposesWithKind(t *testing.T) {
+	// type(d):kind(gap) intersects to empty — gap is a signal kind, so no
+	// decision matches. Confirms type() narrows alongside other filters.
+	dec := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	sig := entry("20260101-110000-s-tac-bbb", withKind(model.KindGap))
+	g := model.NewGraph([]*model.Entry{dec, sig})
+
+	layout := mustParseLayout(t, "type(d):kind(gap):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if len(flat.Entries) != 0 {
+		t.Errorf("type(d):kind(gap): got %v, want []", idsOf(flat.Entries))
+	}
+}
+
+func TestView_TypeFilterRequiresOneArg(t *testing.T) {
+	g := model.NewGraph([]*model.Entry{entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))})
+	layout := mustParseLayout(t, "type():as-list")
+	f := New(Options{})
+	if _, err := f.View(query.ViewQuery{Graph: g, Layout: layout}); err == nil {
+		t.Fatal("expected error for type() with no args")
+	}
+}
+
 func TestView_LayerFilterFullName(t *testing.T) {
 	// layer(tactical) should resolve to the same set as layer(tac).
 	stg := entry("20260101-100000-d-stg-aaa", withKind(model.KindAspiration))
