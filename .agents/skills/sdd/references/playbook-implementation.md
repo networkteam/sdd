@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: 038a10fd50e0720abebed794313f02a1e35b4cea5cb272a753b876d33f1f689e
+    sdd-content-hash: 9a4da719f904620040cd010e586a6bfdc8b271d93746afb5b883fe68189b8ec5
     sdd-version: dev
 ---
 # Transition to implementation
@@ -55,6 +55,8 @@ Isolated directory; the harness moves the session, git does the plumbing, `sdd w
 **Prerequisites** (once per repo): a `.worktreeinclude` listing gitignored state to carry (`.sdd/config.local.yaml`, `.sdd/index/`), `.claude/worktrees/` in `.gitignore`, and `worktree.baseRef: "head"` in `.claude/settings.json`.
 
 **Start:** create the marker on the base first, so it is visible there — `sdd wip start <entry-id> --exclusive --participant <name> "<description>"` — then `EnterWorktree(name: "<entry-suffix>")`. The harness creates the worktree under `.claude/worktrees/` and switches the session in; branching from the base (`baseRef: head`) carries the marker along, and `.worktreeinclude` brings the gitignored local state (config + index).
+
+**Re-anchor after entering.** `EnterWorktree` moves the session's working directory and git context into the worktree, but the file tools (Read/Edit/Write) take **absolute paths** and don't follow — any path you read *before* entering still points at the base checkout on `main`, and edits to it land there silently (no error, since the base file is real). So: keep pre-entry grounding graph-only (`sdd show`/`sdd search`), read no source you intend to edit until after entering, and re-Read each file at its worktree path before editing — the worktree path is the only valid edit target. The general "prefer absolute paths" habit works against you here: the absolute paths held from before the switch are base paths. For already-decided work, nothing needs reading before entry.
 
 **Work** inside the worktree — commit and capture the closing done signal here, on the branch. You don't need the user's approval step by step; the next time you involve them is the merge confirmation below, unless you hit a design choice no decision covers (stop rule above).
 
