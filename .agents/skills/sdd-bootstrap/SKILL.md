@@ -3,7 +3,7 @@ allowed-tools: Read Grep Bash
 compatibility: Designed for OpenAI Codex
 description: Set up an SDD graph on a fresh or sparse project — walk through a readiness sweep, brownfield context gather, actor capture, and Golden Circle strategic seeding, then hand back to /sdd via catch-up. Invoke when the graph lacks actors or aspirations.
 metadata:
-    sdd-content-hash: aa738a9374935a14093564278041a359e0cefc105cd7a9434c60633a4198558a
+    sdd-content-hash: fe4f3344680d9b1f7230d513b2243ceec0a1013197b54cf2dd589cd06a6e2b45
     sdd-version: dev
 name: sdd-bootstrap
 ---
@@ -211,10 +211,10 @@ When Move 2 ran, ground the opener in the evidence: *"the README highlights [X] 
 
 Capture each as:
 ```bash
-sdd new d cpt --confidence medium "<description>"
+sdd new d cpt --intent guiding --confidence medium "<description>"
 ```
 
-(Default kind is directive; no `--kind` flag needed.)
+(Default kind is directive; no `--kind` flag needed. Directives require an explicit `--intent`: use `guiding` here — these describe the settled shape, standing context for later decisions rather than fresh work to do. Use `pending` only when the directive demands follow-up action.)
 
 #### HOW pass
 
@@ -225,8 +225,10 @@ sdd new d cpt --confidence medium "<description>"
 
 Capture:
 ```bash
-sdd new d stg --confidence medium "<description>"
+sdd new d stg --intent guiding --confidence medium "<description>"
 ```
+
+(`guiding` again: a chosen direction for an existing project is standing context. Pick `pending` if the direction still implies work to carry out.)
 
 #### WHY pass
 

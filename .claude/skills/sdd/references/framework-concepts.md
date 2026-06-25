@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: f6d5b871e9c84f5cffeb2a53e76f25bc6ec1c10b8f25a20cf33c310c66d4987f
+sdd-content-hash: 1ca3b61b3ace5c1063fb46df1ed835b4c47dd08486bcd12e971966f3829dfdb1
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -53,6 +53,14 @@ Plan decisions require a `## Acceptance criteria` section with at least one chec
 A `role` decision records one actor's participation pattern — per-actor scope, orthogonal to contracts (which are universal). See "Actors and Roles" below.
 
 A `focus` decision declares involvement triples for the current period. Layer-flexible (like directive/plan/activity). See "Focus and involvement" below.
+
+### Directive intent
+
+A `directive` carries a required stored `intent` attribute — `pending`, `guiding`, or `settled` — supplied explicitly at capture (no default; a default would fabricate the non-derivable posture the attribute exists to capture). Intent is meaningful only on directives; every other kind omits it, and a directive captured before the attribute existed reads as unspecified (rendered exactly as today).
+
+- `pending` — demands follow-up action; the action-on default.
+- `guiding` — standing context that shapes later decisions without ever "completing". Surfaced at session start as standing context; held out of the catch-up action lanes.
+- `settled` — born terminal: a deliberate "no action needed" / "keep as-is" / intake-dismissal that needs no closing edge. A settled directive derives `{status: settled}`, drops out of active listings like any terminal entry, and is retired only by supersession — closing one is rejected. Its body must justify *why* it is terminal (pre-flight emits a medium `settled-unjustified` finding otherwise).
 
 ## Distinguishing tests
 
@@ -257,7 +265,7 @@ Entry lines in `sdd view`, `sdd search`, and summary chains carry three kinds of
 
 - **Identity (kind, layer, type)** renders as plain qualifiers: `tactical plan decision`, `process gap signal`. Kind acts like a sub-type — identity, not an attribute.
 - **Stored attributes** live in the entry's YAML frontmatter — written at creation, immutable afterwards. Rendered with square brackets: `[confidence: medium]`.
-- **Derived attributes** are computed from graph relationships on every read — never written on the entry itself. Rendered with curly braces: `{status: active}`, `{status: open}`, `{status: closed-by <full-id>}`, `{status: superseded-by <full-id>}`. Done signals don't carry `{status: ...}` — they're terminal facts of execution with no lifecycle to track.
+- **Derived attributes** are computed from graph relationships on every read — never written on the entry itself. Rendered with curly braces: `{status: active}`, `{status: open}`, `{status: closed-by <full-id>}`, `{status: superseded-by <full-id>}`, `{status: settled}` (a born-terminal directive — see Directive intent). Done signals don't carry `{status: ...}` — they're terminal facts of execution with no lifecycle to track. The stored `intent` surfaces separately in square brackets, and only for `guiding` (`[intent: guiding]`) — pending and unspecified stay quiet, and settled shows through its `{status: settled}`.
 - **Topic membership** is also derived (inline ∪ annotation) and renders with angle brackets between `{status: ...}` and the summary: `<infrastructure/cli, type-system/kinds>`. The segment is omitted entirely when the effective topic set is empty.
 
 The stored-vs-derived split is what makes the immutability contract practical: state changes as the graph grows (a signal becomes closed when a closing done signal lands), but the entry file never changes. Reading `{status: ...}` tells you the current computed state; reading stored attrs tells you what was written originally.

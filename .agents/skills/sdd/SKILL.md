@@ -3,7 +3,7 @@ allowed-tools: Read Grep Bash(sdd *)
 compatibility: Designed for OpenAI Codex
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 metadata:
-    sdd-content-hash: 5d14df8e3d0363bb533c3dd269cc3ae2e9ce3750ccf7e01c6ca880a39f0c813a
+    sdd-content-hash: 1870280cb5840da0e6dfd3a71ed7b20a1396f2b352c5630b4dfc76e95bbc875d
     sdd-version: dev
 name: sdd
 ---
@@ -12,7 +12,7 @@ You are an SDD (Signal → Dialogue → Decision) partner. You help the user wor
 
 ## Project framing
 
-The blocks below are injected fresh each time `/sdd` is invoked. Use them as strategic context for threading judgment — what the project is pulling toward (aspirations), what we're attending to right now (focus), who participates and in what role (participants), plus the session basics. Don't restate these to the user as content; let them shape which threads you lead with and how you frame moves.
+The blocks below are injected fresh each time `/sdd` is invoked. Use them as strategic context for threading judgment — what the project is pulling toward (aspirations), the standing directives that shape decisions without ever "completing" (guiding directives), what we're attending to right now (focus), who participates and in what role (participants), plus the session basics. Don't restate these to the user as content; let them shape which threads you lead with and how you frame moves.
 
 ### Session info
 
@@ -21,6 +21,12 @@ Run `sdd info` and use its output as context.
 ### Aspirations
 
 Run `sdd view --layout='aspirations'` and use its output as context.
+
+### Guiding directives
+
+Run `sdd view --layout='intent(guiding):active:name("Guiding directives"):as-list'` and use its output as context.
+
+These are active directives marked `intent: guiding` — standing context that shapes later decisions rather than demanding follow-up. Hold them as constraints when threading and proposing, the way you hold aspirations; don't surface them as action items (the catch-up lanes deliberately exclude them).
 
 ### Active focus
 
@@ -74,7 +80,7 @@ Different surfaces carry different register expectations because the user is doi
 
 **Stays out of all three surfaces:**
 
-- CLI command shape: `sdd new d prc --kind directive --confidence ...`
+- CLI command shape: `sdd new d prc --kind directive --intent pending --confidence ...`
 - Flag names: `--closes`, `--participants`, `--refs`, `--supersedes`
 - Validator template names, lint pass names
 - Internal mechanics: "write-once invariant", "actor-identity chain", supersedure tests by name
@@ -179,6 +185,7 @@ See [CLI reference](references/cli-reference.md) for full command syntax and fla
 - **Confidence is honest**: High = strong conviction. Medium = reasonable but unvalidated. Low = hypothesis/experiment.
 - **One idea per entry**: Keep entries digestible. If it needs more detail, split into multiple entries or reference an external file.
 - **Kind for decisions**: Default is directive. Use `--kind activity` for concrete next work whose shape is known from context. Use `--kind plan` when the scope needs decomposition and the description carries `## Acceptance criteria`. Use `--kind contract` for standing constraints. Use `--kind aspiration` for perpetual direction with no completion criterion. Use `--kind role` for an actor's participation pattern within this project — what contribution shape they take here (review, authorship, domain weight); orthogonal to contracts: role scopes one actor, contract applies to all. A directive that hardens into a permanent rule can be reclassified later via supersedes + kind: contract.
+- **Intent for directives** (`kind: directive` only): every directive capture **must** carry `--intent` — there is no default, because the value isn't derivable and a default would fabricate it. Pick in the play-back from what the directive *is*: `pending` when it demands follow-up action (the action-on default); `guiding` when it's standing context that shapes later decisions without ever "completing" (surfaced at session start, kept out of the catch-up action lanes); `settled` when it's born-terminal — a deliberate "no action needed" / "keep X as-is" / intake-dismissal that needs no closing edge. A settled directive's body must justify *why* it's terminal (pre-flight emits a medium finding otherwise), and it drops out of active listings like any closed entry — supersede to retire it, never close. Non-directive decision kinds take no intent.
 - **Kind for signals**: Default is gap. Use `--kind done` for completion records (must carry `closes` or `refs`). Use `--kind fact`, `question`, or `insight` when the narrative is unambiguously observational, an open question, or a synthesis. Use `--kind actor` for a first-class participant identity — canonical name in frontmatter, prose covers stable identity facts (affiliation, background, domain expertise) that hold independent of any project frame.
 - **Acceptance criteria for plan decisions**: `--kind plan` decisions must include an `## Acceptance criteria` section in the description (not the attachment) with `- [ ]` checklist items. Each AC is a single verifiable outcome — not an implementation detail. ACs are the contract between plan author, implementing agent, and pre-flight validator. Pre-flight flags a missing AC section on a plan decision as high.
 

@@ -3,7 +3,7 @@ allowed-tools: Bash(sdd *)
 compatibility: Designed for OpenAI Codex
 description: Produce a colleague-style catch-up briefing on the SDD project. Threads recent activity, active work, and warm gaps into 2–4 story-arc clusters with action-tight numbered items. Use as the check-in mode when starting a session or whenever a fresh briefing is wanted.
 metadata:
-    sdd-content-hash: 3ba99876f360d44ef39e117c9ec82070e65c834c74e3c34214ec7309de12eb9d
+    sdd-content-hash: c2ccd48f6dd289c141fe14e5fb09550b4e8ecad3a867539d0b6664e137177a34
     sdd-version: dev
 name: sdd-catchup
 ---
@@ -173,11 +173,11 @@ The five blocks below are injected fresh each invocation. Read them as your sole
 
 Run `sdd view --layout='kind(done):rank(by(date)):n(10):name("Recent done"):as-list'` and use its output as context.
 
-Run `sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(refs(inactive)):name("Active and hot"):as-list'` and use its output as context.
+Run `sdd view --layout='kind(plan,activity,directive):active:not(intent(guiding)):rank(heat(exp-7d)):n(8):expand(refs(inactive)):name("Active and hot"):as-list'` and use its output as context.
 
-Each active plan/activity may carry indented `→ <verb> <id> {status: …}` sub-lines for references whose target is currently inactive (closed or superseded). The sub-line shows the referenced entry's present state only — no timestamp, and no relationship beyond the verb (which is the generic `refs` for older entries). Don't render the sub-lines verbatim.
+Each active entry may carry indented `→ <verb> <id> {status: …}` sub-lines for references whose target is currently inactive (closed or superseded). The sub-line shows the referenced entry's present state only — no timestamp, and no relationship beyond the verb (which is the generic `refs` for older entries). Don't render the sub-lines verbatim. This lane carries pending and unspecified directives but not guiding ones — guiding directives are standing context, surfaced separately at session start, not action items.
 
-Run `sdd view --layout='kind(plan,activity,directive,gap,question):active:rank(coldness(exp-30d)):n(8):expand(refs):name("Open loops"):as-list'` and use its output as context.
+Run `sdd view --layout='kind(plan,activity,directive,gap,question):active:not(intent(guiding)):rank(coldness(exp-30d)):n(8):expand(refs):name("Open loops"):as-list'` and use its output as context.
 
 This is the **open-loops** lane — heat's inverse. It surfaces the coldest active commitments (plans, activities, directives, gaps, questions): fresh, un-acted-on entries rank highest, because heat is blind to a just-captured entry that nothing refs yet. Each entry carries **all** its outgoing refs as indented `→ <verb> <id> {status: …}` sub-lines — its upstream, the thread it belongs to. Use these to weave it in (see "Open loops — weave into threads, don't list" above). Don't render this as its own block.
 

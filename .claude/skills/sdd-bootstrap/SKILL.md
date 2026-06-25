@@ -2,7 +2,7 @@
 allowed-tools: Read Grep Bash
 description: Set up an SDD graph on a fresh or sparse project — walk through a readiness sweep, brownfield context gather, actor capture, and Golden Circle strategic seeding, then hand back to /sdd via catch-up. Invoke when the graph lacks actors or aspirations.
 name: sdd-bootstrap
-sdd-content-hash: 28e989ac2495b3a467e0f31bc199c87f96e4c36856d6f240e963c88b75e68f05
+sdd-content-hash: 866cd33e64d303f86477b673ca6ea5c34406157ede189b4b6ebed57c45ca2318
 sdd-version: dev
 ---
 
@@ -209,10 +209,10 @@ When Move 2 ran, ground the opener in the evidence: *"the README highlights [X] 
 
 Capture each as:
 ```bash
-sdd new d cpt --confidence medium "<description>"
+sdd new d cpt --intent guiding --confidence medium "<description>"
 ```
 
-(Default kind is directive; no `--kind` flag needed.)
+(Default kind is directive; no `--kind` flag needed. Directives require an explicit `--intent`: use `guiding` here — these describe the settled shape, standing context for later decisions rather than fresh work to do. Use `pending` only when the directive demands follow-up action.)
 
 #### HOW pass
 
@@ -223,8 +223,10 @@ sdd new d cpt --confidence medium "<description>"
 
 Capture:
 ```bash
-sdd new d stg --confidence medium "<description>"
+sdd new d stg --intent guiding --confidence medium "<description>"
 ```
+
+(`guiding` again: a chosen direction for an existing project is standing context. Pick `pending` if the direction still implies work to carry out.)
 
 #### WHY pass
 
