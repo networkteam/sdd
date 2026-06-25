@@ -107,13 +107,13 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "kind", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
 
 // supportedNotInner lists the inner filter names accepted by `not(<inner>)`
 // in d-tac-e1s's first cut. Pure set-shaped filters with unambiguous
 // inverse semantics. active and since are deferred (closed-vs-superseded
 // distinction, future-vs-past cutoff direction); nested not is rejected.
-var supportedNotInner = []string{"kind", "layer", "topic"}
+var supportedNotInner = []string{"kind", "intent", "layer", "topic"}
 
 // knownSources is the user-facing list of valid `source(<name>)` arguments,
 // shown in the unknown-source error message. Mirrors the data-source
@@ -225,8 +225,14 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	for _, names := range spec.participantFilters {
 		entries = filterByParticipants(entries, names)
 	}
+	for _, intents := range spec.intentFilters {
+		entries = filterByIntents(entries, intents)
+	}
 	if len(spec.excludeKinds) > 0 {
 		entries = excludeByKinds(entries, spec.excludeKinds)
+	}
+	if len(spec.excludeIntents) > 0 {
+		entries = excludeByIntents(entries, spec.excludeIntents)
 	}
 	if spec.excludeLayer != "" {
 		entries = excludeByLayer(entries, spec.excludeLayer)
@@ -363,6 +369,15 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 		// sets lets the application stage intersect across calls per
 		// d-tac-uww §2.
 		spec.kindFilters = append(spec.kindFilters, kinds)
+
+	case fn.Name == "intent":
+		intents, err := parseIntentArgs(fn.Args)
+		if err != nil {
+			return fmt.Errorf("intent: %w", err)
+		}
+		// Mirrors kind(): each intent() call is a disjunction, multiple
+		// calls intersect at the apply stage.
+		spec.intentFilters = append(spec.intentFilters, intents)
 
 	case fn.Name == "layer":
 		if len(fn.Args) != 1 {
@@ -761,6 +776,31 @@ func parseKindArgs(args []model.FunctionArg) ([]model.Kind, error) {
 	return out, nil
 }
 
+// parseIntentArgs validates intent()'s args and returns the intent values.
+// Mirrors parseKindArgs: idents and strings interchange (intent(guiding) or
+// intent("guiding")) and multiple args model a disjunction. Each value is
+// checked against the closed set so a typo fails loudly rather than silently
+// matching nothing — intent has only three values, so a wrong one is almost
+// always a mistake, not a yet-unseen entry kind.
+func parseIntentArgs(args []model.FunctionArg) ([]model.Intent, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("requires at least one intent argument (e.g. intent(pending) or intent(pending,guiding))")
+	}
+	out := make([]model.Intent, 0, len(args))
+	for i, a := range args {
+		switch a.Kind {
+		case model.ArgKindIdent, model.ArgKindString:
+			if !model.IsValidIntent(a.String) {
+				return nil, fmt.Errorf("argument %d %q is not a valid intent (expected pending, guiding, or settled)", i+1, a.String)
+			}
+			out = append(out, model.Intent(a.String))
+		default:
+			return nil, fmt.Errorf("argument %d must be an identifier or string, got %s", i+1, a.Kind)
+		}
+	}
+	return out, nil
+}
+
 // parseIDArgs validates id()'s args and returns the raw ID strings.
 // Identifier and string args are interchangeable so users can write either
 // id(20260520-131326-d-tac-6tz) or id("d-tac-6tz"). Resolution to full IDs
@@ -880,6 +920,44 @@ func filterByIDs(g *model.Graph, entries []*model.Entry, rawIDs []string) ([]*mo
 }
 
 // excludeByKinds returns entries whose Kind is NOT in the exclusion set.
+// filterByIntents keeps entries whose Intent is in the disjunction set. Only
+// directives carry an intent, so a non-empty filter implicitly narrows to
+// directives — every other entry has an empty Intent and never matches a
+// listed value. Mirror of filterByKinds (d-tac-n9k).
+func filterByIntents(entries []*model.Entry, intents []model.Intent) []*model.Entry {
+	set := make(map[model.Intent]struct{}, len(intents))
+	for _, in := range intents {
+		set[in] = struct{}{}
+	}
+	var out []*model.Entry
+	for _, e := range entries {
+		if _, ok := set[e.Intent]; ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// excludeByIntents drops entries whose Intent is in the set — the not(intent())
+// negation. Entries without an intent (every non-directive, plus unspecified
+// directives) are kept, since their empty Intent is never in the set.
+func excludeByIntents(entries []*model.Entry, intents []model.Intent) []*model.Entry {
+	if len(intents) == 0 {
+		return entries
+	}
+	set := make(map[model.Intent]struct{}, len(intents))
+	for _, in := range intents {
+		set[in] = struct{}{}
+	}
+	var out []*model.Entry
+	for _, e := range entries {
+		if _, ok := set[e.Intent]; !ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // Mirror of filterByKinds for the not(kind(...)) negation primitive.
 func excludeByKinds(entries []*model.Entry, kinds []model.Kind) []*model.Entry {
 	if len(kinds) == 0 {
@@ -942,6 +1020,12 @@ func parseNotArgs(spec *sectionSpec, args []model.FunctionArg) error {
 		// flat slice captures every kind to drop, regardless of how many
 		// not() calls contributed which kinds.
 		spec.excludeKinds = append(spec.excludeKinds, kinds...)
+	case "intent":
+		intents, err := parseIntentArgs(inner.Args)
+		if err != nil {
+			return fmt.Errorf("intent: %w", err)
+		}
+		spec.excludeIntents = append(spec.excludeIntents, intents...)
 	case "layer":
 		if len(inner.Args) != 1 {
 			return fmt.Errorf("layer: requires exactly one argument (e.g. not(layer(stg)))")

@@ -253,6 +253,75 @@ func TestView_KindFilter_Single(t *testing.T) {
 	}
 }
 
+func TestView_IntentFilter_Single(t *testing.T) {
+	pending := entry("20260101-100000-d-tac-pen", withKind(model.KindDirective), withIntent(model.IntentPending))
+	guiding := entry("20260101-110000-d-tac-gid", withKind(model.KindDirective), withIntent(model.IntentGuiding))
+	settled := entry("20260101-120000-d-tac-set", withKind(model.KindDirective), withIntent(model.IntentSettled))
+	plan := entry("20260101-130000-d-tac-pln", withKind(model.KindPlan))
+	g := model.NewGraph([]*model.Entry{pending, guiding, settled, plan})
+
+	layout := mustParseLayout(t, "intent(guiding):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if got, want := idsOf(flat.Entries), []string{guiding.ID}; !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_IntentFilter_NotExcludesGuiding(t *testing.T) {
+	// The catch-up "Active and hot" lane excludes guiding directives: it wants
+	// pending and unspecified, never standing context. not(intent(guiding))
+	// keeps everything but guiding — including unspecified directives, whose
+	// empty intent is not in the exclusion set.
+	pending := entry("20260101-100000-d-tac-pen", withKind(model.KindDirective), withIntent(model.IntentPending))
+	guiding := entry("20260101-110000-d-tac-gid", withKind(model.KindDirective), withIntent(model.IntentGuiding))
+	unspecified := entry("20260101-120000-d-tac-uns", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{pending, guiding, unspecified})
+
+	layout := mustParseLayout(t, "kind(directive):not(intent(guiding)):as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if got, want := idsOf(flat.Entries), []string{pending.ID, unspecified.ID}; !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_ActiveExcludesSettled(t *testing.T) {
+	// A settled directive is born terminal, so the active filter drops it from
+	// overview listings even though it carries no closing edge.
+	pending := entry("20260101-100000-d-tac-pen", withKind(model.KindDirective), withIntent(model.IntentPending))
+	settled := entry("20260101-110000-d-tac-set", withKind(model.KindDirective), withIntent(model.IntentSettled))
+	g := model.NewGraph([]*model.Entry{pending, settled})
+
+	layout := mustParseLayout(t, "kind(directive):active:as-list")
+	f := New(Options{})
+	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	if got, want := idsOf(flat.Entries), []string{pending.ID}; !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_IntentFilter_RejectsInvalidValue(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "intent(tentative):as-list")
+	f := New(Options{})
+	if _, err := f.View(query.ViewQuery{Graph: g, Layout: layout}); err == nil {
+		t.Error("View: expected error for invalid intent value, got nil")
+	}
+}
+
 func TestView_KindFilter_Disjunction(t *testing.T) {
 	plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan))
 	directive := entry("20260101-110000-d-tac-dir", withKind(model.KindDirective))

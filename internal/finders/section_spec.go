@@ -28,6 +28,11 @@ type sectionSpec struct {
 	// Graph-side primitives.
 	filter      model.GraphFilter
 	kindFilters [][]model.Kind // each kind() call is a disjunction set; multiple calls intersect (d-tac-uww §2)
+	// intentFilters mirrors kindFilters for the directive intent attribute:
+	// each intent() call is a disjunction set, multiple calls intersect. Only
+	// directives carry intent, so a non-empty filter implicitly narrows to
+	// directives with the listed posture (d-tac-n9k).
+	intentFilters [][]model.Intent
 	// participantFilters mirrors kindFilters: each participant() call is a
 	// disjunction set (any listed canonical matches), and multiple calls
 	// intersect. Names are matched exactly against the entry's canonical
@@ -58,6 +63,7 @@ type sectionSpec struct {
 	// Inner filters active and since are deferred (semantic edge cases);
 	// nested not(not(...)) is rejected at parse time.
 	excludeKinds       []model.Kind
+	excludeIntents     []model.Intent // not(intent(...)) — flat union, mirrors excludeKinds
 	excludeLayer       model.Layer
 	excludeTopicPrefix model.TopicPath
 
@@ -103,6 +109,8 @@ func (s *sectionSpec) rejectGraphPrimitivesForWip() error {
 		return fmt.Errorf("source(wip) does not support graph filters (active, layer); markers are not graph entries")
 	case len(s.kindFilters) > 0:
 		return fmt.Errorf("source(wip) does not support kind() filters; markers are not graph entries")
+	case len(s.intentFilters) > 0:
+		return fmt.Errorf("source(wip) does not support intent() filters; markers are not graph entries")
 	case s.sinceCutoff != nil:
 		return fmt.Errorf("source(wip) does not support since(); slice 8 surfaces every active marker")
 	case !s.topicPrefix.IsZero():
@@ -119,6 +127,8 @@ func (s *sectionSpec) rejectGraphPrimitivesForWip() error {
 		return fmt.Errorf("source(wip) does not support stalled(); the threshold applies only to focus-block sections")
 	case len(s.excludeKinds) > 0:
 		return fmt.Errorf("source(wip) does not support not(kind(...)); markers are not graph entries")
+	case len(s.excludeIntents) > 0:
+		return fmt.Errorf("source(wip) does not support not(intent(...)); markers are not graph entries")
 	case s.excludeLayer != "":
 		return fmt.Errorf("source(wip) does not support not(layer(...)); markers are not graph entries")
 	case !s.excludeTopicPrefix.IsZero():

@@ -73,7 +73,9 @@ func (g *Graph) Directives() []*Entry {
 		if e.Type != TypeDecision || e.Kind != KindDirective {
 			continue
 		}
-		if !closed[e.ID] && !superseded[e.ID] {
+		// Settled directives are born terminal — excluded from the active
+		// set alongside closed/superseded, consistent with Graph.Filter.
+		if !closed[e.ID] && !superseded[e.ID] && !e.IsSettled() {
 			directives = append(directives, e)
 		}
 	}
@@ -299,6 +301,12 @@ func (g *Graph) Filter(f GraphFilter) []*Entry {
 			switch e.Type {
 			case TypeSignal, TypeDecision:
 				if closed[e.ID] || superseded[e.ID] {
+					continue
+				}
+				// A settled directive is born terminal — drop it from active
+				// listings the same way closed/superseded entries are dropped,
+				// even though it carries no closing edge.
+				if e.IsSettled() {
 					continue
 				}
 				// Role cascade: a role whose bound actor chain is closed

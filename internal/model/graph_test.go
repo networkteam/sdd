@@ -583,6 +583,7 @@ func TestDirectivesExcludeClosedAndSuperseded(t *testing.T) {
 		entry("20260406-100200-s-tac-done", withKind(KindDone), withCloses("20260406-100100-d-tac-closed")),
 		entry("20260406-100300-d-tac-sup1", withKind(KindDirective)),
 		entry("20260406-100400-d-tac-sup2", withKind(KindDirective), withSupersedes("20260406-100300-d-tac-sup1")),
+		entry("20260406-100500-d-tac-set", withKind(KindDirective), withIntent(IntentSettled)),
 	})
 
 	directives := g.Directives()
@@ -594,6 +595,7 @@ func TestDirectivesExcludeClosedAndSuperseded(t *testing.T) {
 	assertContains(t, ids, "20260406-100400-d-tac-sup2", "superseding")
 	assertNotContains(t, ids, "20260406-100100-d-tac-closed", "closed")
 	assertNotContains(t, ids, "20260406-100300-d-tac-sup1", "superseded")
+	assertNotContains(t, ids, "20260406-100500-d-tac-set", "settled (born terminal)")
 }
 
 func TestContracts(t *testing.T) {
