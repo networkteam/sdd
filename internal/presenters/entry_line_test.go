@@ -41,6 +41,52 @@ func TestEntryLine_DecisionDirectiveDefault(t *testing.T) {
 	}
 }
 
+func TestEntryLine_GuidingDirectiveShowsIntent(t *testing.T) {
+	// guiding is the one posture a reader cannot infer from status, so it
+	// renders an explicit [intent: guiding] bracket; status stays active.
+	e := entry("20260416-151058-d-stg-gid",
+		withConfidence("medium"),
+		withIntent(model.IntentGuiding),
+		withParticipants("Christopher", "Claude"),
+		withSummary("A standing directive"))
+	g := model.NewGraph([]*model.Entry{e})
+	got := renderEntryLine(e, g)
+	want := "  20260416-151058-d-stg-gid strategic directive decision [confidence: medium] [intent: guiding] (Christopher, Claude) {status: active} A standing directive\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestEntryLine_PendingDirectiveStaysQuiet(t *testing.T) {
+	// pending is the action-on default — no bracket, status active.
+	e := entry("20260416-151058-d-tac-pen",
+		withConfidence("high"),
+		withIntent(model.IntentPending),
+		withParticipants("Christopher"),
+		withSummary("Work to do"))
+	g := model.NewGraph([]*model.Entry{e})
+	got := renderEntryLine(e, g)
+	want := "  20260416-151058-d-tac-pen tactical directive decision [confidence: high] (Christopher) {status: active} Work to do\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestEntryLine_SettledDirectiveShowsViaStatus(t *testing.T) {
+	// settled carries no bracket — it surfaces through {status: settled}.
+	e := entry("20260416-151058-d-tac-set",
+		withConfidence("high"),
+		withIntent(model.IntentSettled),
+		withParticipants("Christopher"),
+		withSummary("Born terminal"))
+	g := model.NewGraph([]*model.Entry{e})
+	got := renderEntryLine(e, g)
+	want := "  20260416-151058-d-tac-set tactical directive decision [confidence: high] (Christopher) {status: settled} Born terminal\n"
+	if got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
 func TestEntryLine_SignalGapDefault(t *testing.T) {
 	// entry() helper defaults signals to KindGap.
 	e := entry("20260416-190732-s-prc-omw",

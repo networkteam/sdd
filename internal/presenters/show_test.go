@@ -253,6 +253,27 @@ func TestRenderShow_SupersededPrimaryTrail(t *testing.T) {
 	}
 }
 
+func TestRenderShow_EnvelopeIntent(t *testing.T) {
+	// A directive's stored intent mirrors into the envelope; a settled
+	// directive additionally derives status: settled.
+	guiding := entry("20260410-100000-d-stg-gid", withKind(model.KindDirective), withIntent(model.IntentGuiding), withContent("Standing context"))
+	settled := entry("20260410-100100-d-tac-set", withKind(model.KindDirective), withIntent(model.IntentSettled), withContent("Born terminal"))
+	g := model.NewGraph([]*model.Entry{guiding, settled})
+
+	gOut := renderShow(t, g, []string{guiding.ID})
+	if !contains(gOut, "intent: guiding") {
+		t.Errorf("guiding directive envelope should mirror stored intent:\n%s", gOut)
+	}
+
+	sOut := renderShow(t, g, []string{settled.ID})
+	if !contains(sOut, "intent: settled") {
+		t.Errorf("settled directive envelope should mirror stored intent:\n%s", sOut)
+	}
+	if !contains(sOut, "status: settled") {
+		t.Errorf("settled directive envelope should derive status settled:\n%s", sOut)
+	}
+}
+
 func TestRenderShow_SummaryShownWithFlag(t *testing.T) {
 	e := entry("20260410-100000-d-tac-aaa",
 		withKind(model.KindPlan),

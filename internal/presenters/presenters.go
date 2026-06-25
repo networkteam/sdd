@@ -19,10 +19,12 @@ import (
 // EntryLine writes a single entry summary line — used by status, list, and
 // other surfaces that show entries in a flat list.
 //
-// Format: `<id> <layer> <kind>? <type> [confidence: <conf>]? (<participants>) {status: <status>}? {score: <score>}? <topics>? <summary>`
+// Format: `<id> <layer> <kind>? <type> [confidence: <conf>]? [intent: guiding]? (<participants>) {status: <status>}? {score: <score>}? <topics>? <summary>`
 // Kind renders as a qualifier alongside layer/type — it's identity, not an
 // attribute (d-cpt-omm's two-type redesign makes every entry carry a kind).
-// Square brackets denote stored attributes (today: confidence); curly braces
+// Square brackets denote stored attributes (confidence; intent, but only its
+// guiding value — pending/unspecified stay quiet and settled shows via status);
+// curly braces
 // denote derived attributes computed from graph relationships (d-tac-3yi);
 // angle brackets denote topic membership (also derived — inline topics merged
 // with annotation declarations). Participants are always present — empty is
@@ -55,6 +57,10 @@ func entryLineCore(w io.Writer, e *model.Entry, g *model.Graph, score float64) {
 	if e.Confidence != "" {
 		sb.WriteString(" ")
 		sb.WriteString(FormatConfidence(e.Confidence))
+	}
+	if in := FormatIntent(e.Intent); in != "" {
+		sb.WriteString(" ")
+		sb.WriteString(in)
 	}
 	sb.WriteString(" (")
 	sb.WriteString(strings.Join(e.Participants, ", "))
@@ -107,6 +113,18 @@ func FormatTopics(paths []model.TopicPath) string {
 // FormatConfidence renders a stored confidence attribute in square-bracket notation.
 func FormatConfidence(c string) string {
 	return "[confidence: " + c + "]"
+}
+
+// FormatIntent renders the stored directive intent as a square-bracket
+// attribute — but only for guiding, the one posture a reader cannot read off
+// the derived status. Pending and unspecified stay quiet (the action-on
+// default), and settled surfaces through its derived {status: settled}.
+// Returns "" when no bracket should render.
+func FormatIntent(in model.Intent) string {
+	if in == model.IntentGuiding {
+		return "[intent: guiding]"
+	}
+	return ""
 }
 
 // FormatStatus renders a derived status in curly-brace notation. Returns the

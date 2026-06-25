@@ -81,6 +81,7 @@ type showEnvelope struct {
 	Kind         string      `yaml:"kind,omitempty"`
 	Layer        string      `yaml:"layer"`
 	Confidence   string      `yaml:"confidence,omitempty"`
+	Intent       string      `yaml:"intent,omitempty"`
 	Participants []string    `yaml:"participants,omitempty"`
 	Canonical    string      `yaml:"canonical,omitempty"`
 	Aliases      []string    `yaml:"aliases,omitempty"`
@@ -103,6 +104,7 @@ func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		Layer:        e.LayerLabel(),
 		Kind:         string(e.Kind),
 		Confidence:   e.Confidence,
+		Intent:       string(e.Intent),
 		Participants: e.Participants,
 		Canonical:    e.Canonical,
 		Aliases:      e.Aliases,

@@ -75,6 +75,10 @@ func withConfidence(c string) entryOpt {
 	return func(e *model.Entry) { e.Confidence = c }
 }
 
+func withIntent(in model.Intent) entryOpt {
+	return func(e *model.Entry) { e.Intent = in }
+}
+
 func withParticipants(p ...string) entryOpt {
 	return func(e *model.Entry) { e.Participants = p }
 }
