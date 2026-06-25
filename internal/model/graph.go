@@ -802,6 +802,18 @@ func validateCloses(e *Entry, g *Graph) {
 			continue // already reported by validateIDRefs
 		}
 
+		// A settled directive is born terminal and carries no closing edge.
+		// Reject any attempt to close one regardless of the closer's type —
+		// supersession is the only way to retire it (see DerivedStatus).
+		if target.IsSettled() {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "closes",
+				Value:   id,
+				Message: fmt.Sprintf("cannot close settled directive %s — it is born terminal; supersede it instead", id),
+			})
+			continue
+		}
+
 		switch {
 		case e.Type == TypeSignal && (e.Kind == KindFact || e.Kind == KindInsight) &&
 			target.Type == TypeSignal && target.Kind == KindQuestion:

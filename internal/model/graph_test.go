@@ -64,6 +64,10 @@ func withKind(k Kind) entryOpt {
 	return func(e *Entry) { e.Kind = k }
 }
 
+func withIntent(in Intent) entryOpt {
+	return func(e *Entry) { e.Intent = in }
+}
+
 func withContent(c string) entryOpt {
 	return func(e *Entry) { e.Content = c }
 }
@@ -992,6 +996,15 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 			},
 			wantWarns: 1,
 			wantMsg:   "decision cannot close another decision",
+		},
+		{
+			name: "settled directive cannot be closed",
+			entries: []*Entry{
+				entry("20260406-100000-d-tac-set", withKind(KindDirective), withIntent(IntentSettled)),
+				entry("20260406-100100-s-tac-don", withKind(KindDone), withCloses("20260406-100000-d-tac-set")),
+			},
+			wantWarns: 1,
+			wantMsg:   "cannot close settled directive",
 		},
 		{
 			name: "valid: directive closes contract (retirement)",

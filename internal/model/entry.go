@@ -261,6 +261,14 @@ func (e *Entry) IsRole() bool {
 	return e.Type == TypeDecision && e.Kind == KindRole
 }
 
+// IsSettled returns true if this is a directive born terminal via
+// intent: settled — a decision that needs no follow-up and carries no closing
+// edge. Intent is only meaningful on directives, so the kind guard keeps a
+// stray intent on another kind from being read as terminal.
+func (e *Entry) IsSettled() bool {
+	return e.Type == TypeDecision && e.Kind == KindDirective && e.Intent == IntentSettled
+}
+
 // frontmatter is the YAML structure in the file header.
 //
 // Per-kind fields (Canonical/Aliases on actor; Actor on role; Topics on

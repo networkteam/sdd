@@ -6,6 +6,7 @@ type StatusKind string
 const (
 	StatusNone            StatusKind = ""               // done signals — terminal facts with no lifecycle state
 	StatusActive          StatusKind = "active"         // decision (directive, plan, contract) not closed or superseded
+	StatusSettled         StatusKind = "settled"        // directive born terminal via intent: settled — no closing edge
 	StatusOpen            StatusKind = "open"           // signal not closed or superseded
 	StatusClosedBy        StatusKind = "closed-by"      // closed by another entry (By carries the full ID)
 	StatusSupersededBy    StatusKind = "superseded-by"  // superseded by another entry
@@ -40,6 +41,15 @@ type Status struct {
 func (g *Graph) DerivedStatus(e *Entry) Status {
 	if ids := g.SupersededBy[e.ID]; len(ids) > 0 {
 		return Status{Kind: StatusSupersededBy, By: g.ResolveRef(ids[0]).Head()}
+	}
+	// A settled directive is born terminal — no closing edge. Supersession
+	// (checked above) still wins, so a settled directive replaced by a successor
+	// reads as superseded. Settled is checked before ClosedBy because closing a
+	// settled directive is rejected at capture (validateCloses), so a closing
+	// edge on one is an anomaly that should still surface as terminal-settled
+	// rather than masking the intent.
+	if e.IsSettled() {
+		return Status{Kind: StatusSettled}
 	}
 	if ids := g.ClosedBy[e.ID]; len(ids) > 0 {
 		return Status{Kind: StatusClosedBy, By: g.ResolveRef(ids[0]).Head()}
