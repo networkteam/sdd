@@ -284,6 +284,7 @@ func TestNewEntry_ResolvesShortRefs(t *testing.T) {
 		Type:          model.TypeDecision,
 		Layer:         model.LayerTactical,
 		Kind:          model.KindDirective,
+		Intent:        "guiding",
 		Description:   "new decision referencing short-form ID",
 		Refs:          []model.Ref{{ID: "s-stg-aaa", Kind: model.RefKindUnknown}},
 		SkipPreflight: true,
@@ -325,6 +326,7 @@ func TestNewEntry_AmbiguousShortRefErrors(t *testing.T) {
 		Type:          model.TypeDecision,
 		Layer:         model.LayerTactical,
 		Kind:          model.KindDirective,
+		Intent:        "guiding",
 		Description:   "decision with ambiguous short ref",
 		Refs:          []model.Ref{{ID: "s-stg-xyz", Kind: model.RefKindUnknown}},
 		SkipPreflight: true,
@@ -461,10 +463,13 @@ func TestNewEntry_WritesEntryByKind(t *testing.T) {
 			name: "decision directive",
 			cmd: command.NewEntryCmd{
 				Type: model.TypeDecision, Layer: model.LayerConceptual, Kind: model.KindDirective,
-				Description: "Go in direction X.", Confidence: "high",
+				Description: "Go in direction X.", Confidence: "high", Intent: "guiding",
 			},
 			asserts: func(t *testing.T, e *model.Entry) {
 				assertKindAndNoKindSpecificFields(t, e, model.KindDirective)
+				if e.Intent != model.IntentGuiding {
+					t.Errorf("intent = %q, want %q (directive intent must round-trip through the writer)", e.Intent, model.IntentGuiding)
+				}
 			},
 		},
 		{

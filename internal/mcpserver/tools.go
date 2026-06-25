@@ -66,6 +66,7 @@ type CaptureArgs struct {
 	Supersedes   []string `json:"supersedes,omitempty" jsonschema:"entry IDs this entry replaces"`
 	Topics       []string `json:"topics,omitempty" jsonschema:"topic labels; reuse labels from sdd_ground's topics_in_use when one fits"`
 	Confidence   string   `json:"confidence,omitempty" jsonschema:"high (strong conviction), medium (reasonable but unvalidated), or low (hypothesis)"`
+	Intent       string   `json:"intent,omitempty" jsonschema:"directive lifecycle posture: pending (demands follow-up), guiding (standing context), or settled (born terminal); required on directives, rejected on other kinds"`
 	Participants []string `json:"participants,omitempty" jsonschema:"canonical participant names; omit to default to the configured local participant"`
 	// SkipPreflight bypasses the validation gate. The instructions tell the
 	// agent to only set it on explicit human direction; exposing it at all is
@@ -257,6 +258,7 @@ func (s *Server) capture(ctx context.Context, _ *mcp.CallToolRequest, args Captu
 		Type:             entryType,
 		Layer:            layer,
 		Kind:             model.Kind(args.Kind),
+		Intent:           args.Intent,
 		Description:      args.Description,
 		Refs:             refs,
 		Closes:           args.Closes,

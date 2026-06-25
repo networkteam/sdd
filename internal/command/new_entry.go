@@ -38,7 +38,13 @@ type NewEntryCmd struct {
 	Closes       []string
 	Participants []string
 	Confidence   string
-	Attachments  []Attachment
+
+	// Intent is the directive lifecycle posture (pending|guiding|settled).
+	// Required on new directive captures, rejected on any other kind. Validated
+	// in Validate so every write path (CLI and the MCP server) enforces it.
+	Intent string
+
+	Attachments []Attachment
 
 	// Canonical and Aliases are only meaningful for kind: actor signals —
 	// copied into the written frontmatter so downstream readers can
@@ -115,6 +121,24 @@ func (c *NewEntryCmd) Validate() error {
 	if c.Kind != "" && !model.IsValidKindForType(c.Type, c.Kind) {
 		return fmt.Errorf("invalid kind %q for type %s", c.Kind, c.Type)
 	}
+
+	// Intent is directive-only, drawn from a closed value set, and required on
+	// every new directive capture — no default, because a default would
+	// fabricate the non-derivable posture the attribute exists to capture
+	// honestly. The effective kind accounts for the type default applied in
+	// BuildEntry (an empty kind on a decision becomes directive).
+	effectiveKind := c.Kind
+	if effectiveKind == "" {
+		effectiveKind = model.DefaultKindForType(c.Type)
+	}
+	switch {
+	case c.Intent != "" && !model.IsValidIntent(c.Intent):
+		return fmt.Errorf("invalid intent %q (expected pending, guiding, or settled)", c.Intent)
+	case c.Intent != "" && effectiveKind != model.KindDirective:
+		return fmt.Errorf("intent is only valid on directive decisions (got %s)", effectiveKind)
+	case c.Intent == "" && effectiveKind == model.KindDirective:
+		return fmt.Errorf("directives require an explicit --intent (pending, guiding, or settled)")
+	}
 	return nil
 }
 
@@ -132,6 +156,7 @@ func (c *NewEntryCmd) BuildEntry(id string) (*model.Entry, error) {
 		Closes:       c.Closes,
 		Participants: c.Participants,
 		Confidence:   c.Confidence,
+		Intent:       model.Intent(c.Intent),
 		Canonical:    c.Canonical,
 		Aliases:      c.Aliases,
 		Actor:        c.Actor,

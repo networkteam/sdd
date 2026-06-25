@@ -139,6 +139,38 @@ func DefaultKindForType(t EntryType) Kind {
 	}
 }
 
+// Intent classifies a directive's lifecycle posture. It is stored frontmatter,
+// supplied explicitly at capture, and meaningful only on kind: directive
+// decisions:
+//
+//   - pending — demands follow-up; the action-on default
+//   - guiding — standing context that shapes later decisions, never "completed"
+//   - settled — born terminal; needs no follow-up and carries no closing edge
+//
+// A directive with no intent reads as unspecified (legacy / pre-attribute) and
+// renders exactly as before. The model stays permissive on read; capture-time
+// validation (command.NewEntryCmd.Validate) requires a value on new directives,
+// because a default would fabricate the non-derivable value the attribute
+// exists to capture honestly.
+type Intent string
+
+const (
+	IntentPending Intent = "pending"
+	IntentGuiding Intent = "guiding"
+	IntentSettled Intent = "settled"
+)
+
+var validIntents = map[Intent]bool{
+	IntentPending: true,
+	IntentGuiding: true,
+	IntentSettled: true,
+}
+
+// IsValidIntent reports whether s is one of the three intent values.
+func IsValidIntent(s string) bool {
+	return validIntents[Intent(s)]
+}
+
 // Warning represents a validation issue found on a graph entry.
 type Warning struct {
 	Field   string // "refs", "closes", "supersedes"
@@ -156,8 +188,13 @@ type Entry struct {
 	Closes       []string
 	Participants []string
 	Confidence   string
-	Content      string
-	Time         time.Time
+	// Intent is the lifecycle posture of a directive (pending|guiding|settled).
+	// Stored frontmatter, meaningful only on kind: directive decisions; empty on
+	// every other entry and on legacy directives captured before the attribute
+	// existed. See the Intent type.
+	Intent  Intent
+	Content string
+	Time    time.Time
 	// Canonical and Aliases are only meaningful on kind: actor signals.
 	// Canonical is the write-once identity string used in participants fields;
 	// Aliases are read-side conveniences for mining and dialogue comprehension.
@@ -241,6 +278,7 @@ type frontmatter struct {
 	Closes       idOnlyList        `yaml:"closes,omitempty"`
 	Participants []string          `yaml:"participants,omitempty"`
 	Confidence   string            `yaml:"confidence,omitempty"`
+	Intent       string            `yaml:"intent,omitempty"`
 	Canonical    string            `yaml:"canonical,omitempty"`
 	Aliases      []string          `yaml:"aliases,omitempty"`
 	Actor        string            `yaml:"actor,omitempty"`
@@ -298,6 +336,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Closes:       []string(fm.Closes),
 		Participants: fm.Participants,
 		Confidence:   fm.Confidence,
+		Intent:       Intent(fm.Intent),
 		Canonical:    fm.Canonical,
 		Aliases:      fm.Aliases,
 		Actor:        fm.Actor,
@@ -496,6 +535,7 @@ func FormatFrontmatter(e *Entry) string {
 		Closes:       idOnlyList(e.Closes),
 		Participants: e.Participants,
 		Confidence:   e.Confidence,
+		Intent:       string(e.Intent),
 		Canonical:    e.Canonical,
 		Aliases:      e.Aliases,
 		Actor:        e.Actor,

@@ -497,6 +497,10 @@ func newCmd() *cli.Command {
 				Required: true,
 			},
 			&cli.StringFlag{
+				Name:  "intent",
+				Usage: "Directive lifecycle posture (pending, guiding, settled) — required on directives, rejected on other kinds",
+			},
+			&cli.StringFlag{
 				Name:  "kind",
 				Usage: "Entry kind: signals — gap (default), fact, question, insight, done, actor, annotation; decisions — directive (default), activity, plan, contract, aspiration, role, focus",
 			},
@@ -667,6 +671,7 @@ func newCmd() *cli.Command {
 				Type:             typ,
 				Layer:            layer,
 				Kind:             kind,
+				Intent:           strings.TrimSpace(cmd.String("intent")),
 				Description:      description,
 				Participants:     participants,
 				Refs:             refs,
