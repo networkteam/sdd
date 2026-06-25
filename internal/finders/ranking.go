@@ -14,14 +14,14 @@ import (
 // sorts entries by creation time without computing meaningful scores,
 // signalled by Algorithm == "by" + ByField == "date".
 type rankSpec struct {
-	Algorithm string // "heat", "in-degree", "mult", "add", "log", "by"
+	Algorithm string // "heat", "in-degree", "mult", "add", "log", "coldness", "by"
 	Decay     string // "" when not applicable (in-degree, by)
 	ByField   string // "date" for by(date); "" otherwise
 }
 
 // knownAlgorithms is the user-facing list shown in unknown-algorithm
 // errors so users see what's available without consulting docs.
-var knownAlgorithms = []string{"heat", "in-degree", "mult", "add", "log", "by(date)"}
+var knownAlgorithms = []string{"heat", "in-degree", "mult", "add", "log", "coldness", "by(date)"}
 
 // parseRankArg validates rank()'s single argument and resolves it to a
 // rankSpec. Accepts both bare identifier form (rank(heat) — shorthand
@@ -63,6 +63,26 @@ func parseAlgorithm(fn model.Function) (*rankSpec, error) {
 		switch len(fn.Args) {
 		case 0:
 			spec.Decay = model.DefaultDecayName
+		case 1:
+			name, err := argString(fn.Args[0])
+			if err != nil {
+				return nil, fmt.Errorf("rank %s: %w", fn.Name, err)
+			}
+			if _, err := model.DecayByName(name); err != nil {
+				return nil, fmt.Errorf("rank %s: %w", fn.Name, err)
+			}
+			spec.Decay = name
+		default:
+			return nil, fmt.Errorf("rank %s: takes at most one decay argument, got %d", fn.Name, len(fn.Args))
+		}
+
+	case "coldness":
+		// Same decay-arg grammar as heat, but bare `coldness` defaults to
+		// the slower coldness-specific half-life rather than the shared
+		// DefaultDecayName — undone work should fade over months, not weeks.
+		switch len(fn.Args) {
+		case 0:
+			spec.Decay = model.DefaultColdnessDecayName
 		case 1:
 			name, err := argString(fn.Args[0])
 			if err != nil {
@@ -128,7 +148,7 @@ func (s *rankSpec) suffix() string {
 		return "by " + s.ByField
 	case "in-degree":
 		return "by in-degree"
-	case "heat", "mult", "add", "log":
+	case "heat", "mult", "add", "log", "coldness":
 		if s.Decay != "" {
 			return fmt.Sprintf("by %s (%s)", s.Algorithm, s.Decay)
 		}
@@ -183,6 +203,8 @@ func applyRanking(g *model.Graph, entries []*model.Entry, spec *rankSpec, now ti
 			scores[i] = model.AddScore(g, e, decay, now)
 		case "log":
 			scores[i] = model.LogScore(g, e, decay, now)
+		case "coldness":
+			scores[i] = model.ColdnessScore(g, e, decay, now)
 		}
 	}
 
