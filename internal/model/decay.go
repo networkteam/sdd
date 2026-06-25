@@ -48,6 +48,14 @@ func DecayByName(name string) (DecayFunc, error) {
 // an explicit decay arg (e.g. `rank(heat)` resolves to heat(exp-14d)).
 const DefaultDecayName = "exp-14d"
 
+// DefaultColdnessDecayName is the decay coldness uses when invoked without
+// an explicit decay arg. It is slower than DefaultDecayName on purpose:
+// heat asks "what is the project converging on lately" — a recent-weeks
+// question — while coldness asks "what have I committed to but not yet
+// acted on", and undone work should fade slowly rather than drop off a
+// two-week cliff.
+const DefaultColdnessDecayName = "exp-30d"
+
 func decayExp(halfLife float64) DecayFunc {
 	return func(d float64) float64 {
 		if d < 0 {
