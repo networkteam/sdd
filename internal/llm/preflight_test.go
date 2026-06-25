@@ -635,6 +635,53 @@ func Test_RenderSummaryPrompt_OmitsDerivedStatus(t *testing.T) {
 	}
 }
 
+func Test_assembleContext_ProposedEntryShowsIntent(t *testing.T) {
+	graph := model.NewGraph(nil)
+	proposed := &model.Entry{
+		Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective,
+		Intent: model.IntentSettled, Content: "Keep X as-is; no follow-up needed.",
+	}
+	pctx := assembleContext(proposed, graph, checkDecisionRefs, "")
+	if !strings.Contains(pctx.ProposedEntry, "Intent: settled") {
+		t.Errorf("ProposedEntry should surface the directive intent for the settled rubric:\n%s", pctx.ProposedEntry)
+	}
+}
+
+func Test_renderPreflightPrompt_CarriesSettledRubric(t *testing.T) {
+	// The settled-justification rubric lives unconditionally in the universal
+	// system preamble (cache-stable); the LLM applies it via its prose guard.
+	graph := model.NewGraph(nil)
+	proposed := &model.Entry{
+		Type: model.TypeDecision, Layer: model.LayerTactical, Kind: model.KindDirective,
+		Intent: model.IntentSettled, Content: "Keep X as-is.",
+	}
+	pctx := assembleContext(proposed, graph, checkDecisionRefs, "")
+	req, err := renderPreflightPrompt(checkDecisionRefs, pctx)
+	if err != nil {
+		t.Fatalf("renderPreflightPrompt: %v", err)
+	}
+	if !strings.Contains(req.SystemPrompt, "Settled-directive justification") {
+		t.Errorf("system prompt should carry the settled-justification rubric:\n%s", req.SystemPrompt)
+	}
+}
+
+func Test_RenderSummaryPrompt_OmitsIntent(t *testing.T) {
+	// Intent is a pre-flight-only addition; the summary prompt must not carry
+	// it, or every directive's summary hash would shift and restamp.
+	dec := &model.Entry{
+		ID: "20260410-130000-d-tac-bbb", Type: model.TypeDecision, Layer: model.LayerTactical,
+		Kind: model.KindDirective, Intent: model.IntentSettled, Content: "decision content",
+	}
+	graph := model.NewGraph([]*model.Entry{dec})
+	req, err := RenderSummaryPrompt(dec, graph)
+	if err != nil {
+		t.Fatalf("RenderSummaryPrompt: %v", err)
+	}
+	if strings.Contains(req.Combined(), "Intent: settled") {
+		t.Errorf("summary prompt must not include intent (pre-flight only)\n%s", req.Combined())
+	}
+}
+
 func Test_assembleContext_WithCloses(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("signal to close"))
 	graph := model.NewGraph([]*model.Entry{sig})

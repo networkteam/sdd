@@ -254,7 +254,7 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 // configuredLanguage flows through unchanged.
 func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, configuredLanguage string) *preflightContext {
 	pctx := &preflightContext{
-		ProposedEntry:      FormatEntryForPrompt(entry),
+		ProposedEntry:      formatProposedEntryForPreflight(entry),
 		ConfiguredLanguage: configuredLanguage,
 		RefKindVocabulary:  refKindVocabulary(),
 	}
@@ -353,6 +353,19 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 	}
 
 	return pctx
+}
+
+// formatProposedEntryForPreflight renders the proposed entry plus its stored
+// intent. Intent is appended here — pre-flight only — rather than in the
+// shared FormatEntryForPrompt so the summary prompt (and its skip-hash) stays
+// unchanged and existing summaries don't restamp. The settled-justification
+// rubric reads this line to decide whether its guard matches.
+func formatProposedEntryForPreflight(e *model.Entry) string {
+	s := FormatEntryForPrompt(e)
+	if e.Intent != "" {
+		s += "\nIntent: " + string(e.Intent)
+	}
+	return s
 }
 
 // formatReferencedEntry renders a ref target for the pre-flight prompt: the

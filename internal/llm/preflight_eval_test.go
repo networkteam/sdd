@@ -1417,3 +1417,50 @@ Role-status derivation stays in a role-status finder (pure read), conforming to 
 
 	runEvalPassRate(t, graph, proposed, blockingTier, noBlocking)
 }
+
+// mentionsSettled matches the settled-justification rubric's finding category.
+func mentionsSettled(f llm.Finding) bool {
+	return strings.Contains(strings.ToLower(f.Category), "settled")
+}
+
+// TestPreflightEval_Settled_Unjustified_Medium: a settled directive that states
+// a choice but gives no reason it needs no follow-up should draw a medium
+// settled-unjustified finding.
+func TestPreflightEval_Settled_Unjustified_Medium(t *testing.T) {
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindDirective,
+		Intent:  model.IntentSettled,
+		Content: "Use the existing JSON encoder for the export path.",
+		Time:    time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph(nil)
+	result, raw := runEval(t, graph, proposed)
+	if !hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsSettled) {
+		t.Errorf("Expected a medium settled-unjustified finding, got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly flagged unjustified settled directive. Findings: %+v", result.Findings)
+	}
+}
+
+// TestPreflightEval_Settled_Justified_NoFinding: a settled directive whose body
+// explains why no follow-up is needed should draw no settled finding.
+func TestPreflightEval_Settled_Justified_NoFinding(t *testing.T) {
+	proposed := &model.Entry{
+		Type:    model.TypeDecision,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindDirective,
+		Intent:  model.IntentSettled,
+		Content: "Keep the existing JSON encoder for the export path as-is. We weighed swapping to a streaming encoder and concluded the export corpora never approach the memory ceiling, so there is nothing to build — this records the deliberate no-change decision so it stops resurfacing in grooming.",
+		Time:    time.Date(2026, 6, 20, 10, 5, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph(nil)
+	result, raw := runEval(t, graph, proposed)
+	if hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsSettled) ||
+		hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsSettled) {
+		t.Errorf("Expected no settled finding for a justified settled directive, got: %+v\nRaw output:\n%s", result.Findings, raw)
+	} else {
+		t.Logf("Correctly accepted justified settled directive. Findings: %+v", result.Findings)
+	}
+}

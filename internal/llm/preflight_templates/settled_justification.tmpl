@@ -1,0 +1,14 @@
+{{ define "settled_justification" }}
+## Settled-directive justification (apply only to a directive with intent: settled)
+
+This check applies **only** when the proposed entry is a `kind: directive` decision carrying `Intent: settled` (shown beneath the proposed decision). If the proposed entry is any other type, any other decision kind, or a directive whose intent is `pending`, `guiding`, or unspecified, skip this section entirely and emit nothing for it.
+
+A `settled` directive is **born terminal**: it commits to something that needs no follow-up and carries no closing edge — it never enters the normal "open until a done signal closes it" lifecycle. Because of that, the body must say *why* it is complete on capture: what was decided and why no further action follows (e.g. "keep X as-is", "no action needed because Y", an intake item dismissed with its reason). Without that justification a reader cannot tell a deliberate born-terminal decision from one that simply dropped its follow-up.
+
+### Rubric
+
+- `medium` `settled-unjustified` — The directive is `intent: settled` but its body does not justify the terminality: it states no reason the decision needs no follow-up. Name what's missing.
+- No finding — The body makes the terminality self-evident: it states the decision and why nothing further is required (a question put to rest, a deliberate "keep as-is", an intake dismissal with rationale).
+
+Severity is at most `medium` — an unjustified settled directive is worth surfacing for dialogue, not blocking. Emit at most one `settled-unjustified` finding.
+{{ end }}
