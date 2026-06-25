@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -170,6 +171,47 @@ func TestLogScore(t *testing.T) {
 	want := math.Log(2)
 	if math.Abs(got-want) > epsilon {
 		t.Errorf("log: got %v, want %v (heat=1 × log(2))", got, want)
+	}
+}
+
+func TestColdnessScore(t *testing.T) {
+	// Coldness = decay(entry's own age) / (1 + in-degree). Built on a
+	// fixed clock so every value is exact. exp-30d is coldness's own
+	// half-life (DefaultColdnessDecayName), so age 30d halves the score
+	// and age 120d is four half-lives (1/16).
+	decay30, _ := DecayByName("exp-30d")
+
+	cases := []struct {
+		name     string
+		ageDays  float64
+		inDegree int
+		decay    DecayFunc
+		want     float64
+	}{
+		{"fresh, unacted", 0, 0, decay30, 1.0},
+		{"acted once (gradual hand-off)", 0, 1, decay30, 0.5},
+		{"acted twice", 0, 2, decay30, 1.0 / 3.0},
+		{"aged, unacted (one half-life)", 30, 0, decay30, 0.5},
+		{"ancient, unacted", 120, 0, decay30, 0.0625},
+		{"nil decay guard", 0, 0, nil, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := minimalEntry("20260501-120000-d-tac-trg", daysAgo(tc.ageDays))
+			entries := []*Entry{target}
+			for i := 0; i < tc.inDegree; i++ {
+				ref := minimalEntry(fmt.Sprintf("20260501-1200%02d-d-tac-rf%d", i, i), fixedNow)
+				ref.Refs = refsOf(target.ID)
+				entries = append(entries, ref)
+			}
+			g := NewGraph(entries)
+
+			got := ColdnessScore(g, target, tc.decay, fixedNow)
+			if math.Abs(got-tc.want) > epsilon {
+				t.Errorf("coldness(age=%vd, in-degree=%d): got %v, want %v", tc.ageDays, tc.inDegree, got, tc.want)
+			}
+		})
 	}
 }
 

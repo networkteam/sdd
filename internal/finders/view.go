@@ -265,7 +265,10 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 
 	var scores []float64
 	if spec.rank != nil {
-		entries, scores = applyRanking(g, entries, spec.rank, time.Now())
+		// Use the section's injected clock, not a fresh time.Now(): coldness
+		// scores the entry's own age, so ranking and the focus-block scorer
+		// below must share one instant within a single View call.
+		entries, scores = applyRanking(g, entries, spec.rank, now)
 	}
 	if spec.pageN >= 0 && len(entries) > spec.pageN {
 		entries = entries[:spec.pageN]

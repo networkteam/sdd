@@ -70,6 +70,10 @@ Implemented pipeline vocabulary:
       mult(decay)          heat(decay) × in-degree
       add(decay)           heat(decay) + in-degree (raw sum, slice 3)
       log(decay)           heat(decay) × log(1 + in-degree)
+      coldness(decay)      decay(entry age) / (1 + in-degree) — heat's
+                           inverse: fresh, un-referenced entries rank
+                           highest, surfacing unacted-on commitments.
+                           Default decay: exp-30d (slower than heat).
       by(date)             Sort by entry creation timestamp; no scores.
 
     Decay names (used inside algorithm calls):

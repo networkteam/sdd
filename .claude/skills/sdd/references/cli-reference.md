@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: ec7848c78f8825400179f8974dcf459b2f9a119f0e49403696ce511975cc12af
+sdd-content-hash: a25431b46802d11c67585c956a01764c02ca26104e66adbdc0c4da1a952c6c10
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -107,6 +107,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `mult(decay)` | `heat(decay) × in-degree` |
 | `add(decay)` | `heat(decay) + in-degree` |
 | `log(decay)` | `heat(decay) × log(1 + in-degree)` |
+| `coldness(decay)` | `decay(entry age) / (1 + in-degree)` — heat's inverse: fresh, un-referenced entries rank highest (surfacing unacted-on commitments). Decay applies to the entry's own age, not ref ages. Default decay: `exp-30d` (slower than heat's `exp-14d`, so undone work fades over months) |
 | `by(date)` | Sort by entry creation timestamp (no scores) |
 
 ### Decay names (used inside algorithm calls)
@@ -185,6 +186,12 @@ sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(ref
 # Top-8 active plans/activities by recent heat, each showing only the refs
 # whose target is now inactive (closed, superseded, or a retired role) — the
 # lean catch-up view that flags dependencies no longer live
+
+sdd view --layout='kind(plan,activity,directive,gap,question):active:rank(coldness(exp-30d)):n(8):expand(refs):name("Open loops"):as-list'
+# The catch-up "open loops" lane — heat's inverse. Surfaces the coldest
+# active commitments (fresh, un-acted-on entries rank highest), each carrying
+# its full upstream via expand(refs) so a briefing can thread it. Catches
+# what heat is blind to: a just-captured plan with no incoming refs yet.
 
 sdd view --layout='active:as-counts'
 # What topics exist across active entries and how many entries each carries —

@@ -3,7 +3,7 @@ allowed-tools: Bash(sdd *)
 compatibility: Designed for OpenAI Codex
 description: Produce a colleague-style catch-up briefing on the SDD project. Threads recent activity, active work, and warm gaps into 2–4 story-arc clusters with action-tight numbered items. Use as the check-in mode when starting a session or whenever a fresh briefing is wanted.
 metadata:
-    sdd-content-hash: d66cf250d3e7564cf3ffb570d6ebc126f65ac454193f14cad682a8139478418d
+    sdd-content-hash: 3ba99876f360d44ef39e117c9ec82070e65c834c74e3c34214ec7309de12eb9d
     sdd-version: dev
 name: sdd-catchup
 ---
@@ -159,15 +159,27 @@ The main `/sdd` skill injects active aspirations, active focus, and participants
 
 For focus: render a single italic summary line at the top, in plain language: "Current focus: <one-sentence plain summary>." Skip the line entirely if there are no active focuses. Do not enumerate involvement triples or repeat focus-entry text.
 
+## Open loops — weave into threads, don't list
+
+One of the fetched blocks is the **open-loops** lane (below): the coldest active commitments — things committed to or raised but not yet acted on. Heat misses these, because a fresh entry that nothing refs yet scores near zero and drops off the list. Don't render them as a separate "Open loops" section — that would scatter one storyline across two lists and recreate the kind-grouping the briefing exists to avoid. Instead:
+
+- **Weave each open-loop entry into the thread its upstream belongs to.** Every entry carries its outgoing refs (the `→` sub-lines) — follow them to the story arc it builds on, and fold it in there, marked as not-yet-acted-on ("you captured this last week, still open").
+- **A genuinely disconnected entry is its own beat.** If an open-loop entry has no upstream, or none that shows up in any other thread, it's a new line of work — give it a short "a new direction opened" beat. That's high-value to show.
+- **Thread once.** An entry already surfaced via "Active and hot" or "Open and warm" is threaded a single time — don't repeat it because it also appears here.
+
 # Fetched data
 
-The four blocks below are injected fresh each invocation. Read them as your sole input **for composing this briefing** — don't run extra lookups to assemble it.
+The five blocks below are injected fresh each invocation. Read them as your sole input **for composing this briefing** — don't run extra lookups to assemble it.
 
 Run `sdd view --layout='kind(done):rank(by(date)):n(10):name("Recent done"):as-list'` and use its output as context.
 
 Run `sdd view --layout='kind(plan,activity):active:rank(heat(exp-7d)):n(8):expand(refs(inactive)):name("Active and hot"):as-list'` and use its output as context.
 
 Each active plan/activity may carry indented `→ <verb> <id> {status: …}` sub-lines for references whose target is currently inactive (closed or superseded). The sub-line shows the referenced entry's present state only — no timestamp, and no relationship beyond the verb (which is the generic `refs` for older entries). Don't render the sub-lines verbatim.
+
+Run `sdd view --layout='kind(plan,activity,directive,gap,question):active:rank(coldness(exp-30d)):n(8):expand(refs):name("Open loops"):as-list'` and use its output as context.
+
+This is the **open-loops** lane — heat's inverse. It surfaces the coldest active commitments (plans, activities, directives, gaps, questions): fresh, un-acted-on entries rank highest, because heat is blind to a just-captured entry that nothing refs yet. Each entry carries **all** its outgoing refs as indented `→ <verb> <id> {status: …}` sub-lines — its upstream, the thread it belongs to. Use these to weave it in (see "Open loops — weave into threads, don't list" above). Don't render this as its own block.
 
 Run `sdd view --layout='kind(gap,question,insight):active:rank(heat(exp-14d)):n(15):name("Open and warm"):as-list'` and use its output as context.
 
@@ -227,6 +239,7 @@ Say *drill A* or *survey* for the full picture.
 - Print `sdd view` output verbatim.
 - Number every entry.
 - Re-cluster by kind or layer.
+- Render a standalone "Open loops" section — weave open loops into the story-arc threads instead.
 - Add per-entry status / lifecycle commentary.
 - Suggest a specific next step in the prompt.
 - Add a standalone preamble line with graph stats.

@@ -1,6 +1,8 @@
 package finders
 
 import (
+	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -791,6 +793,130 @@ func TestView_RankHeatNoneDecay(t *testing.T) {
 	if flat.Scores[0] != 2 {
 		t.Errorf("first score: got %v, want 2 (heat=in-degree under none decay)", flat.Scores[0])
 	}
+}
+
+// TestView_RankColdness exercises the coldness algorithm end to end through
+// the view pipeline: ordering (fresh-unacted ranks highest, each incoming
+// ref demotes), the coldness-specific default decay (exp-30d, not heat's
+// exp-14d), header derivation, decay-arg parsing, and the full catch-up
+// "Open loops" lane. Exact score math is pinned in model.TestColdnessScore;
+// here entry times are anchored to a captured now() and the value check uses
+// a tolerant epsilon because View reads the wall clock internally. Durations
+// use 24h multiples (not AddDate) so the age is exact regardless of DST.
+func TestView_RankColdness(t *testing.T) {
+	now := time.Now()
+	day := 24 * time.Hour
+
+	t.Run("fresh beats aged", func(t *testing.T) {
+		fresh := entry("20260101-100000-d-tac-frs", withKind(model.KindPlan))
+		fresh.Time = now
+		aged := entry("20260101-110000-d-tac-agd", withKind(model.KindPlan))
+		aged.Time = now.Add(-90 * day)
+		g := model.NewGraph([]*model.Entry{fresh, aged})
+
+		flat := flatOf(t, runView(t, g, "kind(plan):rank(coldness(exp-30d)):as-list"))
+		want := []string{fresh.ID, aged.ID}
+		if got := idsOf(flat.Entries); !equalIDs(got, want) {
+			t.Errorf("order:\n  got:  %v\n  want: %v", got, want)
+		}
+	})
+
+	t.Run("unacted beats acted", func(t *testing.T) {
+		unacted := entry("20260101-100000-d-tac-una", withKind(model.KindPlan))
+		unacted.Time = now
+		acted := entry("20260101-110000-d-tac-act", withKind(model.KindPlan))
+		acted.Time = now
+		referrer := entry("20260101-120000-s-tac-ref", withKind(model.KindGap), withRefs(acted.ID))
+		g := model.NewGraph([]*model.Entry{unacted, acted, referrer})
+
+		// kind(plan) drops the gap referrer; both plans share an age, so
+		// only in-degree separates them: unacted (0 → 1.0) over acted (1 → 0.5).
+		flat := flatOf(t, runView(t, g, "kind(plan):rank(coldness(exp-30d)):as-list"))
+		want := []string{unacted.ID, acted.ID}
+		if got := idsOf(flat.Entries); !equalIDs(got, want) {
+			t.Errorf("order:\n  got:  %v\n  want: %v", got, want)
+		}
+	})
+
+	t.Run("default decay is exp-30d, header derives", func(t *testing.T) {
+		// A 30-day-old, un-referenced entry scores decay(30)=0.5 under
+		// exp-30d. Bare rank(coldness) must pick exp-30d, not heat's
+		// exp-14d (which would give ≈0.226) — the value distinguishes them.
+		e := entry("20260101-100000-d-tac-def", withKind(model.KindPlan))
+		e.Time = now.Add(-30 * day)
+		g := model.NewGraph([]*model.Entry{e})
+
+		result := runView(t, g, "rank(coldness):as-list")
+		flat := flatOf(t, result)
+		if len(flat.Scores) != 1 {
+			t.Fatalf("scores: got %d, want 1", len(flat.Scores))
+		}
+		if math.Abs(flat.Scores[0]-0.5) > 1e-3 {
+			t.Errorf("default-decay coldness of 30d-old entry: got %v, want ≈0.5 (exp-30d not exp-14d)", flat.Scores[0])
+		}
+		if got, want := result.Sections[0].Name, "Top by coldness (exp-30d)"; got != want {
+			t.Errorf("section header: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("explicit decay parses", func(t *testing.T) {
+		e := entry("20260101-100000-d-tac-exp", withKind(model.KindPlan))
+		e.Time = now
+		g := model.NewGraph([]*model.Entry{e})
+		runView(t, g, "rank(coldness(exp-7d)):as-list") // fatals on error
+	})
+
+	t.Run("unknown decay errors", func(t *testing.T) {
+		g := model.NewGraph(nil)
+		layout := mustParseLayout(t, "rank(coldness(exp-99d)):as-list")
+		f := New(Options{})
+		_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+		if err == nil {
+			t.Fatalf("expected error for unknown decay, got nil")
+		}
+		if !strings.Contains(err.Error(), "exp-99d") {
+			t.Errorf("error %q does not mention 'exp-99d'", err.Error())
+		}
+	})
+
+	t.Run("catch-up open-loops lane composes end to end", func(t *testing.T) {
+		// The exact layout the catch-up template injects. Verifies the
+		// action-carrying kinds pass, an observational kind (insight) is
+		// dropped, and expand(refs) carries each entry's upstream.
+		plan := entry("20260101-100000-d-tac-pln", withKind(model.KindPlan),
+			withRefObjs(model.Ref{ID: "20260101-080000-d-cpt-bas", Kind: model.RefKindGroundedIn, Desc: "rests on"}))
+		plan.Time = now
+		activity := entry("20260101-110000-d-tac-acy", withKind(model.KindActivity))
+		activity.Time = now.Add(-5 * day)
+		directive := entry("20260101-120000-d-tac-dir", withKind(model.KindDirective))
+		directive.Time = now.Add(-10 * day)
+		gap := entry("20260101-130000-s-tac-gap", withKind(model.KindGap))
+		gap.Time = now.Add(-1 * day)
+		question := entry("20260101-140000-s-tac-qst", withKind(model.KindQuestion))
+		question.Time = now.Add(-2 * day)
+		basis := entry("20260101-080000-d-cpt-bas", withKind(model.KindContract))  // ref target, out of lane
+		insight := entry("20260101-150000-s-tac-ins", withKind(model.KindInsight)) // must NOT appear
+		g := model.NewGraph([]*model.Entry{plan, activity, directive, gap, question, basis, insight})
+
+		layout := `kind(plan,activity,directive,gap,question):active:rank(coldness(exp-30d)):n(8):expand(refs):name("Open loops"):as-list`
+		flat := flatOf(t, runView(t, g, layout))
+
+		got := idsOf(flat.Entries)
+		if slices.Contains(got, insight.ID) {
+			t.Errorf("insight leaked into open-loops lane: %v", got)
+		}
+		if len(got) != 5 {
+			t.Fatalf("lane entries: got %d %v, want 5 (plan, activity, directive, gap, question)", len(got), got)
+		}
+		// expand(refs) carries the plan's upstream so the agent can thread it.
+		if len(flat.RefExpansions) != len(flat.Entries) {
+			t.Fatalf("RefExpansions not aligned: %d vs %d entries", len(flat.RefExpansions), len(flat.Entries))
+		}
+		planIdx := slices.Index(got, plan.ID)
+		if planIdx < 0 || len(flat.RefExpansions[planIdx]) != 1 || flat.RefExpansions[planIdx][0].ID != basis.ID {
+			t.Errorf("plan upstream: want 1 row → %s, got %+v", basis.ID, flat.RefExpansions[planIdx])
+		}
+	})
 }
 
 // TestView_RankComposesWithFilterAndPage verifies the canonical

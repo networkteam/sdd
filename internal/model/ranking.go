@@ -61,3 +61,19 @@ func AddScore(g *Graph, e *Entry, decay DecayFunc, now time.Time) float64 {
 func LogScore(g *Graph, e *Entry, decay DecayFunc, now time.Time) float64 {
 	return HeatScore(g, e, decay, now) * math.Log(1+InDegreeScore(g, e))
 }
+
+// ColdnessScore is heat's inverse: it ranks unacted-on entries highest.
+// Where heat decays each incoming reference's age, coldness decays the
+// entry's own creation age and divides by in-degree, so a fresh entry
+// with no incoming refs scores 1 and every reference demotes it toward
+// the hot lane. The 1/(1+in_degree) form makes that hand-off gradual —
+// one ref halves the score, two thirds it — rather than a hard cutoff at
+// the first ref. Default decay is exp-30d (DefaultColdnessDecayName) when
+// callers don't override: undone work should fade slowly, not in weeks.
+func ColdnessScore(g *Graph, e *Entry, decay DecayFunc, now time.Time) float64 {
+	if decay == nil {
+		return 0
+	}
+	entryAgeDays := now.Sub(e.Time).Hours() / 24
+	return decay(entryAgeDays) / (1 + InDegreeScore(g, e))
+}
