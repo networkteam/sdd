@@ -1,7 +1,7 @@
 ---
 description: German vocabulary for SDD user-facing rendering. Read on demand when the configured graph language is `de`. Never translate YAML frontmatter, CLI tokens, or entry IDs — only the terms shown in user-facing narration.
 name: vocabulary-de
-sdd-content-hash: 62a213a5b5ece46fa56d2720f1e9dbf11ee63df14c922678e01d615d1eb1d6c4
+sdd-content-hash: 4ee26465f531e84be1996917976e45e2ce9372d5b23f30aab596346936f7933a
 sdd-version: dev
 ---
 
@@ -52,8 +52,11 @@ Diese Referenz übersetzt SDD-Begriffe ins Deutsche, wenn das Skill die Graph-In
 |---------------|----------------|
 | open          | offen          |
 | active        | aktiv          |
+| settled       | feststehend    |
 | closed-by     | geschlossen-durch |
 | superseded-by | abgelöst-durch |
+
+`settled` ist der abgeleitete Status einer Direktive mit `intent: settled` — von Geburt an terminal, ohne schließende Kante (siehe „Intent" unten). `{status: settled}` rendert als „feststehend".
 
 ## Referenz-Felder
 
@@ -70,6 +73,18 @@ Diese Referenz übersetzt SDD-Begriffe ins Deutsche, wenn das Skill die Graph-In
 | high     | hoch    | starke Überzeugung |
 | medium   | mittel  | plausibel, aber unvalidiert |
 | low      | niedrig | Hypothese / Experiment |
+
+## Intent (Direktiv-Lebenszyklus)
+
+Nur Direktiven tragen ein `intent`-Attribut. Die Werte sind CLI-Tokens und bleiben in Frontmatter und CLI-Aufrufen Englisch (`--intent pending`); die deutschen Begriffe erscheinen nur in der Erzählung.
+
+| Englisch (kanonisch) | Deutsch       | Bedeutung |
+|----------------------|---------------|-----------|
+| pending              | ausstehend    | verlangt Folgehandlung — der Standard fürs Handeln |
+| guiding              | leitend       | stehender Kontext, der spätere Entscheidungen prägt, ohne je „fertig" zu werden |
+| settled              | feststehend   | von Geburt an terminal — bewusstes „keine Aktion nötig" / „so belassen", ohne schließende Kante |
+
+Nur `guiding` rendert als eigenes Attribut auf Eintragszeilen (`[intent: guiding]` → „leitend"); `pending` und nicht-spezifizierte bleiben still, und `settled` zeigt sich über seinen Status „feststehend".
 
 ## Häufige Begriffe in der Erzählung
 
