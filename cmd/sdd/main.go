@@ -276,9 +276,7 @@ func main() {
 		Commands: []*cli.Command{
 			initCmd(),
 			infoCmd(),
-			statusCmd(),
 			showCmd(),
-			listCmd(),
 			viewCmd(),
 			newCmd(),
 			rewriteCmd(),
@@ -291,7 +289,7 @@ func main() {
 			syncCmd(),
 			statsCmd(),
 		},
-		DefaultCommand: "status",
+		DefaultCommand: "info",
 	}
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
@@ -401,30 +399,6 @@ func statsCmd() *cli.Command {
 	}
 }
 
-func statusCmd() *cli.Command {
-	return &cli.Command{
-		Name:  "status",
-		Usage: "Show current state of the decision graph",
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			g, err := loadGraph(cmd)
-			if err != nil {
-				return err
-			}
-
-			f, err := newReadFinder()
-			if err != nil {
-				return err
-			}
-			result, err := f.Status(query.StatusQuery{Graph: g})
-			if err != nil {
-				return err
-			}
-			presenters.RenderStatus(os.Stdout, result)
-			return nil
-		},
-	}
-}
-
 func showCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "show",
@@ -487,101 +461,6 @@ func showCmd() *cli.Command {
 				opts.Width = w
 			}
 			presenters.RenderShowStyled(os.Stdout, result, opts)
-			return nil
-		},
-	}
-}
-
-func listCmd() *cli.Command {
-	return &cli.Command{
-		Name:  "list",
-		Usage: "List entries with optional filters (open/active only by default)",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "type",
-				Aliases: []string{"t"},
-				Usage:   "Filter by type (d, s)",
-			},
-			&cli.StringFlag{
-				Name:    "layer",
-				Aliases: []string{"l"},
-				Usage:   "Filter by layer (stg, cpt, tac, ops, prc)",
-			},
-			&cli.StringFlag{
-				Name:    "kind",
-				Aliases: []string{"k"},
-				Usage:   "Filter by kind — signals: gap, fact, question, insight, done, actor, annotation; decisions: directive, activity, plan, contract, aspiration, role, focus",
-			},
-			&cli.StringFlag{
-				Name:  "topic",
-				Usage: "Filter by topic — case-insensitive prefix match on path components (e.g. 'UX' matches 'UX/CLI'). Reuses topic(L) filter primitive shared with sdd view.",
-			},
-			&cli.BoolFlag{
-				Name:  "missing-kind",
-				Usage: "Show only entries without an explicit kind field (migration helper)",
-			},
-			&cli.BoolFlag{
-				Name:  "all",
-				Usage: "Show all entries including addressed signals and superseded decisions",
-			},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			g, err := loadGraph(cmd)
-			if err != nil {
-				return err
-			}
-
-			var typ model.EntryType
-			if t := cmd.String("type"); t != "" {
-				if resolved, ok := model.TypeFromAbbrev[t]; ok {
-					typ = resolved
-				} else {
-					typ = model.EntryType(t)
-				}
-			}
-
-			var layer model.Layer
-			if l := cmd.String("layer"); l != "" {
-				if resolved, ok := model.LayerFromAbbrev[l]; ok {
-					layer = resolved
-				} else {
-					layer = model.Layer(l)
-				}
-			}
-
-			var kind model.Kind
-			if k := cmd.String("kind"); k != "" {
-				kind = model.Kind(k)
-			}
-
-			var topic model.TopicPath
-			if t := strings.TrimSpace(cmd.String("topic")); t != "" {
-				p, err := model.ParseTopicPath(t)
-				if err != nil {
-					return fmt.Errorf("--topic: %w", err)
-				}
-				topic = p
-			}
-
-			f, err := newReadFinder()
-			if err != nil {
-				return err
-			}
-			result, err := f.List(query.ListQuery{
-				Graph: g,
-				Filter: model.GraphFilter{
-					Type:        typ,
-					Layer:       layer,
-					Kind:        kind,
-					MissingKind: cmd.Bool("missing-kind"),
-					OpenOnly:    !cmd.Bool("all"),
-				},
-				Topic: topic,
-			})
-			if err != nil {
-				return err
-			}
-			presenters.RenderList(os.Stdout, result)
 			return nil
 		},
 	}

@@ -9,9 +9,8 @@ import (
 
 // renderAsParticipantsBlock writes one `### <canonical>` per active
 // actor head, with the actor's entry line followed by every derived-
-// active role bound to that chain. Mirrors the Participants section in
-// `sdd status` so view-side output reads consistently across surfaces —
-// users learning the catch-up surface get the same grouping shape.
+// active role bound to that chain — the Participants block surfaced by
+// `sdd view --layout='participants'`.
 //
 // Empty groups suppress output entirely. The CLI shell handles the
 // outer `## <name>` header (when name() is set), so this function

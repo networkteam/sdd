@@ -40,7 +40,8 @@ type SearchQuery struct {
 	// search. Empty disables vector mode.
 	Phrase string
 
-	// Filter is the type/layer/kind filter — same shape as ListQuery.
+	// Filter is the type/layer/kind filter (model.GraphFilter), the same
+	// filter shape the view pipeline composes.
 	Filter model.GraphFilter
 
 	// IncludeSuperseded includes entries whose derived status is

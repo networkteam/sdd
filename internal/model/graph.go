@@ -267,11 +267,10 @@ func (g *Graph) RefChain(id string) []*Entry {
 
 // GraphFilter specifies criteria for filtering graph entries.
 type GraphFilter struct {
-	Type        EntryType
-	Layer       Layer
-	Kind        Kind
-	MissingKind bool // when true, only include entries whose stored kind field is empty
-	OpenOnly    bool // when true, exclude closed/superseded signals and decisions
+	Type     EntryType
+	Layer    Layer
+	Kind     Kind
+	OpenOnly bool // when true, exclude closed/superseded signals and decisions
 }
 
 // Filter returns entries matching the given filter criteria. Zero-value
@@ -291,9 +290,6 @@ func (g *Graph) Filter(f GraphFilter) []*Entry {
 			continue
 		}
 		if f.Layer != "" && e.Layer != f.Layer {
-			continue
-		}
-		if f.MissingKind && e.Kind != "" {
 			continue
 		}
 		if f.Kind != "" && e.Kind != f.Kind {

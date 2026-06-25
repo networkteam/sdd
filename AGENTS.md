@@ -27,7 +27,7 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 - `go fmt ./...` — format code
 - `golangci-lint run ./...` — lint (must be clean; CI enforces)
 - `devbox run validate-skills` — validate the rendered Codex skills under `.agents/skills/` against the Agent Skills standard (`uvx skills-ref@0.1.1 agentskills validate`, managed via the devbox `uv` package). Requires a Codex render present (i.e. `codex` in `supported_agents`).
-- `sdd status` — smoke-test the binary against the graph at `.sdd/graph/`
+- `sdd view` — smoke-test the binary against the graph at `.sdd/graph/`
 - `goreleaser check` — validate `.goreleaser.yaml`
 - `devbox run gen-installer` — regenerate the curl installer (`install.sh`) from `.config/binstaller.yml`. Run this whenever `.goreleaser.yaml` changes its platform or asset surface, then commit the updated `install.sh`. Install binstaller separately (`go install github.com/binary-install/binstaller/cmd/binst@latest`) — it isn't in devbox's nixpkgs.
 
@@ -50,7 +50,7 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
   - **Handlers may use finders internally**; finders never use handlers.
   - **Pre-flight is a query** (pure read intent at the domain level) despite the LLM runner's side effect — lives in `query/` + `finders/`.
 
-- **Type-system plan capture surfaces presentation impact.** When drafting a plan that changes entry types, kinds, or frontmatter, raise downstream presentation surfaces (`sdd status`, `sdd list`, `sdd show`, catch-up narrative, skill rendering) in dialogue. The user decides whether to add ACs for each surface or explicitly carve them out as future work; the agent helps compose once the call is made. Raising this at plan time avoids rediscovery during unrelated execution.
+- **Type-system plan capture surfaces presentation impact.** When drafting a plan that changes entry types, kinds, or frontmatter, raise downstream presentation surfaces (`sdd view`, `sdd show`, catch-up narrative, skill rendering) in dialogue. The user decides whether to add ACs for each surface or explicitly carve them out as future work; the agent helps compose once the call is made. Raising this at plan time avoids rediscovery during unrelated execution.
 
 - **Push logic down**: Finders and handlers are orchestration — they wire dependencies and delegate. Graph traversal, tree building, filtering, and any pure computation belongs in `internal/model/`. Always question whether code in a finder/handler could live in a lower package.
 

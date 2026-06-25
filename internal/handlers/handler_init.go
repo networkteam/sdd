@@ -543,7 +543,7 @@ const agentsMDScaffold = "# AGENTS.md\n" +
 	"This project uses SDD (Signal → Dialogue → Decision): decisions and\n" +
 	"signals live in a graph under `.sdd/graph/`, managed by the `sdd` CLI.\n" +
 	"\n" +
-	"- Run `sdd status` for the current state.\n" +
+	"- Run `sdd view` for the current state.\n" +
 	"- Work with the graph through dialogue using the SDD skill — `/sdd` in\n" +
 	"  Claude Code, or the `sdd` skill in Codex.\n" +
 	"- Skills are rendered per agent and committed under `.claude/skills/`\n" +

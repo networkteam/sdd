@@ -51,7 +51,7 @@ func NewSearchFinder(opts SearchFinderOptions) *SearchFinder {
 // VectorAvailable reports whether the configured dependencies allow
 // vector or hybrid mode. Used by the CLI to render the
 // `Search: text` vs `Search: vector,text` capability line in
-// `sdd status`.
+// `sdd info`'s header.
 func (f *SearchFinder) VectorAvailable() bool {
 	return f.embedder != nil && f.indexStore != nil
 }

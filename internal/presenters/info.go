@@ -8,15 +8,13 @@ import (
 )
 
 // RenderInfo writes the session-framing header — participant, language
-// (when configured), and search capability. The same lines prefix
-// `sdd status` (via writeInfoHeader), so the two surfaces stay in
-// lockstep.
+// (when configured), and search capability. These lines are what skill
+// session-start injections read for framing.
 func RenderInfo(w io.Writer, result *query.InfoResult) {
 	writeInfoHeader(w, result.LocalParticipant, result.Language, result.Search)
 }
 
-// writeInfoHeader emits the canonical info lines. Shared between
-// RenderInfo and RenderStatus so the two surfaces never drift.
+// writeInfoHeader emits the canonical session-header lines.
 func writeInfoHeader(w io.Writer, localParticipant, language, search string) {
 	if localParticipant != "" {
 		fmt.Fprintf(w, "Local participant: %s\n", localParticipant)

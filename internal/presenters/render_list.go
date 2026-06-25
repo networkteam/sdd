@@ -9,8 +9,8 @@ import (
 )
 
 // renderAsList writes one entry-line per entry in the flat list. Reuses
-// the canonical EntryLine format shared with `sdd list` and the section
-// helpers in `sdd status` so output stays consistent across surfaces.
+// the canonical EntryLine format shared with `sdd search` so output stays
+// consistent across surfaces.
 // When the section is ranked (FlatList.Scores populated and aligned),
 // each line carries a `{score: X.XXX}` segment via EntryLineWithScore.
 // by(date) leaves Scores nil, falling back to plain EntryLine — sort

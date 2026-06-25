@@ -800,7 +800,7 @@ func parseIntegerArg(name string, args []model.FunctionArg) (int, error) {
 
 // filterByKinds returns entries whose Kind is in the given disjunction
 // set. Kept in the view executor rather than extending model.GraphFilter
-// to avoid churning a type used by sdd list, sdd status, and others —
+// to avoid churning a model type shared with sdd search and others —
 // kind disjunction is specific to view's pipeline composition.
 func filterByKinds(entries []*model.Entry, kinds []model.Kind) []*model.Entry {
 	set := make(map[model.Kind]struct{}, len(kinds))

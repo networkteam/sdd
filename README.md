@@ -285,7 +285,7 @@ Each graph has a single authoring language configured as `language: <locale>` in
 
 - **Captured entry descriptions are written in the configured language.** Dialogue with the agent can flow freely in any language, but the text that lands in the graph is canonicalized — the `/sdd` skill translates dialogue content before running `sdd new` so the graph stays coherent across sessions. Pre-flight enforces this: an entry whose description language doesn't match is flagged as drift and blocks capture.
 - **The `/sdd` skill renders translated SDD vocabulary** (types, kinds, layers, status labels) on demand, reading `references/vocabulary-<locale>.md`. Catch-up narration, playback, and grooming tables use translated terms.
-- **The technical surface stays English.** YAML frontmatter, CLI tokens, entry IDs, and section headers like `## Acceptance criteria` are canonical identifiers. CLI output (`sdd status`, `sdd list`, `sdd show`) also stays English — translation is a skill concern, not a CLI concern.
+- **The technical surface stays English.** YAML frontmatter, CLI tokens, entry IDs, and section headers like `## Acceptance criteria` are canonical identifiers. CLI output (`sdd info`, `sdd view`, `sdd show`) also stays English — translation is a skill concern, not a CLI concern.
 
 German (`de`) is the only bundled locale today.
 
@@ -323,7 +323,7 @@ Claude Code is the primary, most-exercised harness; Codex support is recent and 
 
 ### LLM provider (summaries + pre-flight)
 
-SDD calls an LLM in two places — summarizing each captured entry (the short text rendered in `sdd status`) and running pre-flight validation on every draft before it lands. Four providers supported: `anthropic` (cloud API), `openai` (cloud API), `ollama` (local), and `claude-cli` (your local Claude Code CLI authentication).
+SDD calls an LLM in two places — summarizing each captured entry (the short text rendered in `sdd view` and catch-up) and running pre-flight validation on every draft before it lands. Four providers supported: `anthropic` (cloud API), `openai` (cloud API), `ollama` (local), and `claude-cli` (your local Claude Code CLI authentication).
 
 ```yaml
 # Anthropic API
@@ -390,7 +390,7 @@ embedding:
   # Qwen3 documents take no prefix — leave document_template empty
 ```
 
-After configuring an embedding provider, run `sdd index` once to embed the existing graph. `sdd search` lazy-fills new entries as they're captured. `sdd status` shows `Search: vector,text` when an embedding provider is configured, `Search: text` when not.
+After configuring an embedding provider, run `sdd index` once to embed the existing graph. `sdd search` lazy-fills new entries as they're captured. `sdd info` shows `Search: vector,text` when an embedding provider is configured, `Search: text` when not.
 
 ## Browsing the graph yourself
 

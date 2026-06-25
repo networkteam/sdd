@@ -9,8 +9,8 @@ import (
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// RenderSearch writes one section per ranked entry: a header line that
-// matches `sdd list` shape, then one citation line per entry-citation
+// RenderSearch writes one section per ranked entry: a header line in the
+// shared EntryLine shape, then one citation line per entry-citation
 // (capped by SearchQuery.MaxCitationsPerEntry on the finder side).
 //
 // Render format (single-citation case):
@@ -52,9 +52,9 @@ func RenderSearch(w io.Writer, result *query.SearchResult, g *model.Graph) {
 }
 
 // FormatSearchCapability renders the capability suffix shown in
-// `sdd status`'s header: `text` when only text mode is available;
+// `sdd info`'s header: `text` when only text mode is available;
 // `vector,text` when a vector embedder is configured. Used by callers
-// that want to surface the search surface alongside other status fields.
+// that want to surface the search capability alongside other header fields.
 func FormatSearchCapability(vectorAvailable bool) string {
 	if vectorAvailable {
 		return "vector,text"
