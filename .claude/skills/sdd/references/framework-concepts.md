@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: c12d3f21c9756af9dfa02816df697de5b225b3f46fd63a7f365169440c492310
+sdd-content-hash: f6d5b871e9c84f5cffeb2a53e76f25bc6ec1c10b8f25a20cf33c310c66d4987f
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -212,9 +212,9 @@ Capture-time and derivation-time are complementary:
 
 Roles that reference a canonical matching no chain are **orphan** — flagged by the `sdd lint` orphan-role check. Orphans indicate abnormal state (direct file edits, corruption, validator bypass), distinct from the normal-case cascade where retirement derives-closes automatically.
 
-### Surfacing in status
+### Surfacing participants
 
-`sdd status` renders a **Participants block** after the main sections, grouped by active-actor canonical. Each group header is the canonical; entries listed underneath are the active actor signal plus every derived-active role bound to that chain. The block is suppressed during grace (zero active actors) so fresh graphs stay quiet. For filtered views, `sdd list --kind actor` and `sdd list --kind role` expose the underlying entries directly.
+`sdd view --layout='participants'` renders a **Participants block** grouped by active-actor canonical. Each group header is the canonical; entries listed underneath are the active actor signal plus every derived-active role bound to that chain. The block is suppressed during grace (zero active actors) so fresh graphs stay quiet. For filtered views, `sdd view --layout='kind(actor):as-list'` and `kind(role):as-list` expose the underlying entries directly.
 
 ## Topics and annotations
 
@@ -229,7 +229,7 @@ Either path produces "membership" — the entry is in the topic. The graph compu
 
 - Components match `[\p{L}\p{N}\-]+` (Unicode letter/digit plus hyphen). Empty components rejected.
 - Comparison is case-insensitive on each component; first-seen casing wins for display.
-- Filter via `sdd list --topic <label>` does component-wise prefix match (case-insensitive). `--topic UX` matches `UX`, `UX/CLI`, `UX/CLI/Status` — but does not match `UXTesting` (because matching is component-wise, not raw-string).
+- Filter via `sdd view --layout='topic(<label>):as-list'` does component-wise prefix match (case-insensitive). `topic(UX)` matches `UX`, `UX/CLI`, `UX/CLI/Status` — but does not match `UXTesting` (because matching is component-wise, not raw-string).
 
 **Label stability.** Topic labels are stable identifiers, the same principle as canonical participant names: a label means the same cluster everywhere it appears, so the graph stays coherent only if labels are reused rather than reinvented. Before tagging, check what labels are already in use and reuse one that fits the cluster; create a new label only when no existing one does. Prefer hierarchical paths (`foo/bar`) when a label belongs to a family — `type-system/topics` and `type-system/kinds` cluster together under `type-system` without colliding. This stability is what the capture-time topic procedure in `/sdd` enforces by researching existing labels before proposing one.
 
@@ -253,7 +253,7 @@ A `kind: focus` decision declares "what we're attending to in this period, and w
 
 ## Rendering Conventions
 
-Entry lines in `sdd status`, `sdd list`, and summary chains carry three kinds of information, visually distinguished by notation:
+Entry lines in `sdd view`, `sdd search`, and summary chains carry three kinds of information, visually distinguished by notation:
 
 - **Identity (kind, layer, type)** renders as plain qualifiers: `tactical plan decision`, `process gap signal`. Kind acts like a sub-type — identity, not an attribute.
 - **Stored attributes** live in the entry's YAML frontmatter — written at creation, immutable afterwards. Rendered with square brackets: `[confidence: medium]`.

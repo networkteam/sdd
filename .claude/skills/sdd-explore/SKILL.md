@@ -4,7 +4,7 @@ context: fork
 description: Compress a goal-tagged research mission around a graph entry — chain plus search-surfaced neighbors, filtered against a stated goal. Returns a compressed brief for the outer skill to dialogue with.
 model: sonnet
 name: sdd-explore
-sdd-content-hash: 046201065f0f0d7858fff77d96ef0429f9b623f9d9ab570a00da29fa489e49ac
+sdd-content-hash: f9961619b612d3cb459729846522bce3bbdaf2158b2aaad7e2f3e36fdba17b2e
 sdd-version: dev
 user-invocable: false
 ---
@@ -55,7 +55,7 @@ Status sets the frame for which neighbors matter to the goal.
 
 ## Step 4 — Widen: surface semantically-related neighbors
 
-This is the **Widen** move: search broadly so you find the entries the chain didn't already name. **Do not** dump `sdd list` and read everything — that pattern is retired. Search from several *different angles* — a concept phrase from the target's summary, the goal phrase, a key concept from the chain, and any known identifier or canonical — running two or three searches when the goal has multiple axes (e.g. "compliance check against d-cpt-ah1" suggests a query on the contract's subject plus a term on the contract ID). Mode selection (`--query` / `--term` / hybrid) lives in [search reference](../sdd/references/search.md).
+This is the **Widen** move: search broadly so you find the entries the chain didn't already name. **Do not** bulk-dump the graph and read everything — that pattern is retired. Search from several *different angles* — a concept phrase from the target's summary, the goal phrase, a key concept from the chain, and any known identifier or canonical — running two or three searches when the goal has multiple axes (e.g. "compliance check against d-cpt-ah1" suggests a query on the contract's subject plus a term on the contract ID). Mode selection (`--query` / `--term` / hybrid) lives in [search reference](../sdd/references/search.md).
 
 Then **Inspect** the promising candidates: for any result line that could matter to the goal, pull its full body before judging relevance.
 

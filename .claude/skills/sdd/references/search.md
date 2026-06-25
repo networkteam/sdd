@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 46ef46442cb62b2923b09f8a1ea8ab4584d8951e6dcf58aa6af1efaffdb7a746
+sdd-content-hash: d1b377a84f9855ea2f041c5d19ff17942967db7e0b370f64545164ebe79565d8
 sdd-version: dev
 ---
 # sdd search
@@ -14,7 +14,7 @@ Three retrieval modes, one CLI command. Use search to **surface candidates** dur
   - Filtering by a known token someone just mentioned in dialogue
   - Repeatable: `--term apple --term harvest` requires both terms in the entry (AND); use `--term "(apple|orange)"` for OR via regex alternation.
 
-- **`--query <phrase>`** — semantic / conceptual lookup. Requires `Search: vector,text` in the `sdd status` header (an embedding provider is configured). Use for:
+- **`--query <phrase>`** — semantic / conceptual lookup. Requires `Search: vector,text` in the `sdd info` header (an embedding provider is configured). Use for:
   - Surfacing entries that talk about the same concept with different wording
   - Finding "anything related to X" when you don't know the exact terminology
   - Bridging across language differences in an evolving graph
@@ -25,7 +25,7 @@ Three retrieval modes, one CLI command. Use search to **surface candidates** dur
 
 ## Reading citations
 
-Each result row is the entry header line (matching `sdd list` shape) plus an indented citation:
+Each result row is the entry header line (the shared entry-line shape, same as `sdd view`) plus an indented citation:
 
 ```
 20260504-235258-d-tac-lqr tactical plan decision [confidence: medium] (Christopher, Claude) {status: active} <summary>
@@ -38,7 +38,7 @@ The citation tells you **where in the entry** the match landed. Don't treat the 
 
 ## Filters
 
-Same as `sdd list`: `--type`, `--layer`, `--kind`. Compose freely with `--term` / `--query`. Default behavior excludes `{status: superseded-by}` entries from results because superseded near-duplicates pollute clusters; `--include-superseded` overrides when you specifically want history.
+The `--type`, `--layer`, `--kind` filters (the same filter shape `sdd view` composes). Compose freely with `--term` / `--query`. Default behavior excludes `{status: superseded-by}` entries from results because superseded near-duplicates pollute clusters; `--include-superseded` overrides when you specifically want history.
 
 `--limit N` caps the result count (default 10).
 

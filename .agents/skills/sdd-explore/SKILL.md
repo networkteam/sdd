@@ -3,7 +3,7 @@ allowed-tools: Bash Read Grep Glob
 compatibility: Designed for OpenAI Codex
 description: Compress a goal-tagged research mission around a graph entry — chain plus search-surfaced neighbors, filtered against a stated goal. Returns a compressed brief for the outer skill to dialogue with.
 metadata:
-    sdd-content-hash: 61da85ad6e5aa35089e1ed4a059b961333101dcb7a1443647813d31bafae1e3d
+    sdd-content-hash: 6af91cc6e2969c5b4c16ae6b9b6d70eb6b9ba9f108c86819c2df3adcaee489c4
     sdd-version: dev
 name: sdd-explore
 ---
@@ -54,7 +54,7 @@ Status sets the frame for which neighbors matter to the goal.
 
 ## Step 4 — Widen: surface semantically-related neighbors
 
-This is the **Widen** move: search broadly so you find the entries the chain didn't already name. **Do not** dump `sdd list` and read everything — that pattern is retired. Search from several *different angles* — a concept phrase from the target's summary, the goal phrase, a key concept from the chain, and any known identifier or canonical — running two or three searches when the goal has multiple axes (e.g. "compliance check against d-cpt-ah1" suggests a query on the contract's subject plus a term on the contract ID). Mode selection (`--query` / `--term` / hybrid) lives in [search reference](../sdd/references/search.md).
+This is the **Widen** move: search broadly so you find the entries the chain didn't already name. **Do not** bulk-dump the graph and read everything — that pattern is retired. Search from several *different angles* — a concept phrase from the target's summary, the goal phrase, a key concept from the chain, and any known identifier or canonical — running two or three searches when the goal has multiple axes (e.g. "compliance check against d-cpt-ah1" suggests a query on the contract's subject plus a term on the contract ID). Mode selection (`--query` / `--term` / hybrid) lives in [search reference](../sdd/references/search.md).
 
 Then **Inspect** the promising candidates: for any result line that could matter to the goal, pull its full body before judging relevance.
 

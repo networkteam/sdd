@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: 6712103517341c4485fccb6e56d29850ade4fa394b8e66a08fa666065117a608
+    sdd-content-hash: e667e2c48fa4ddae662eb8aea38e5f32974ab8e4a7fd1c084a225524cc484056
     sdd-version: dev
 ---
 # Grooming Playbook
@@ -9,7 +9,7 @@ When the user says "let's groom" or you proactively suggest it, invoke `/sdd-gro
 
 ## Presenting results
 
-Build a summary table from the sub-skill's structured data with these columns: #, Entry, Layer, Age, Pattern, Status, Evidence (a short summarizing note), Suggested resolution. Render the Status column using the derived-status notation — `{status: open}`, `{status: active}`, `{status: closed-by <id>}`, `{status: superseded-by <id>}` — matching what `sdd status` / `sdd list` surface. The table is the scanning surface — it should be enough for the user to make quick calls on straightforward candidates. When mentioning entry IDs in the evidence column or in dialogue, always follow each ID with a short title in quotes (e.g. `d-cpt-axa` "evaluate explore mode"). The full evidence from the sub-skill stays in your context so you can answer follow-up questions about any candidate without additional lookups.
+Build a summary table from the sub-skill's structured data with these columns: #, Entry, Layer, Age, Pattern, Status, Evidence (a short summarizing note), Suggested resolution. Render the Status column using the derived-status notation — `{status: open}`, `{status: active}`, `{status: closed-by <id>}`, `{status: superseded-by <id>}` — matching what `sdd view` / `sdd show` surface. The table is the scanning surface — it should be enough for the user to make quick calls on straightforward candidates. When mentioning entry IDs in the evidence column or in dialogue, always follow each ID with a short title in quotes (e.g. `d-cpt-axa` "evaluate explore mode"). The full evidence from the sub-skill stays in your context so you can answer follow-up questions about any candidate without additional lookups.
 
 Then: "Let's walk through these. Starting with #1, or pick a number."
 

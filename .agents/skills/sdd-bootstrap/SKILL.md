@@ -3,7 +3,7 @@ allowed-tools: Read Grep Bash
 compatibility: Designed for OpenAI Codex
 description: Set up an SDD graph on a fresh or sparse project — walk through a readiness sweep, brownfield context gather, actor capture, and Golden Circle strategic seeding, then hand back to /sdd via catch-up. Invoke when the graph lacks actors or aspirations.
 metadata:
-    sdd-content-hash: 43d91d93a7f0cbc2975ce80ab2d283c0322b77a43dd51f079a6a220beff42a94
+    sdd-content-hash: aa738a9374935a14093564278041a359e0cefc105cd7a9434c60633a4198558a
     sdd-version: dev
 name: sdd-bootstrap
 ---
@@ -141,7 +141,7 @@ Five moves: readiness sweep, brownfield context gather, Golden Circle strategic 
 
 **Goal**: read the graph state and decide which moves to run.
 
-1. Run `sdd status` and `sdd lint`.
+1. Run `sdd view` and `sdd lint`.
 2. **Detect empty graph**: zero entries, or entries exist but no active actors and no active strategic entries (aspirations, strategic directives).
 3. **Detect brownfield vs. greenfield**: brownfield = repo has `README.md`, `docs/`, `AGENTS.md` / `CLAUDE.md`, or non-trivial git log. Greenfield = none of the above.
 
@@ -152,7 +152,7 @@ Five moves: readiness sweep, brownfield context gather, Golden Circle strategic 
 - **Non-empty graph** → read what's captured. Skip moves that cover material already in the graph. Use `sdd lint` findings to identify what's missing (e.g. participant-coverage → run Move 4 for the missing actors; no aspirations → run Move 3 WHY pass).
 - **Fully bootstrapped** (on-demand invocation, graph has actors + aspirations already) → short-circuit: tell the user the graph looks set, run Move 5 handoff directly.
 
-The skill adapts rather than forcing a rigid classification. Use good judgment from what `sdd status` and `sdd lint` show.
+The skill adapts rather than forcing a rigid classification. Use good judgment from what `sdd view` and `sdd lint` show.
 
 ### Move 2 — Brownfield context gather
 

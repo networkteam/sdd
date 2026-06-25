@@ -1,7 +1,7 @@
 ---
 description: German vocabulary for SDD user-facing rendering. Read on demand when the configured graph language is `de`. Never translate YAML frontmatter, CLI tokens, or entry IDs — only the terms shown in user-facing narration.
 name: vocabulary-de
-sdd-content-hash: 5933bb1578986c00d65442185d3cea68df41fe8d73bc36865921f89b317c802e
+sdd-content-hash: 62a213a5b5ece46fa56d2720f1e9dbf11ee63df14c922678e01d615d1eb1d6c4
 sdd-version: dev
 ---
 
@@ -101,11 +101,11 @@ Diese Referenz übersetzt SDD-Begriffe ins Deutsche, wenn das Skill die Graph-In
 - **CLI-Token:** `sdd new d cpt --kind plan --confidence medium` — alle Argumente, Flags und Werte bleiben Englisch.
 - **Eintrags-IDs:** `20260422-235706-d-cpt-x38` — bleibt wie gespeichert, keine Übersetzung der Typ-/Layer-Suffixe.
 - **Abschnittsüberschriften in Einträgen** wie `## Acceptance criteria` — bleiben Englisch, damit Pre-Flight sie maschinell findet.
-- **Status-Notation** in Rohausgaben wie `sdd status`, `sdd list`, `sdd show` — die CLI selbst bleibt Englisch. Nur wenn das Skill in der Erzählung rendert, werden Begriffe übersetzt.
+- **Status-Notation** in Rohausgaben wie `sdd view`, `sdd show` — die CLI selbst bleibt Englisch. Nur wenn das Skill in der Erzählung rendert, werden Begriffe übersetzt.
 
 ## Beispiele — Rendering
 
-**Englisch (Rohausgabe von `sdd status`):**
+**Englisch (Rohausgabe von `sdd view`):**
 ```
   20260422-235706-d-cpt-x38 conceptual plan decision [confidence: medium] (Christopher, Claude) {status: active} Multilingual SDD uses a per-graph configured language...
 ```

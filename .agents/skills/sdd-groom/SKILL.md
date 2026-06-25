@@ -3,7 +3,7 @@ allowed-tools: Bash Read Grep Glob
 compatibility: Designed for OpenAI Codex
 description: Scan for grooming candidates — open entries that may already be resolved (by graph activity or Git commits) but lack proper closure. Returns a numbered table for the outer skill to walk through with the user.
 metadata:
-    sdd-content-hash: 533d131f0faf0d806e5a383a1d9953967a0aa4e504694f6c07e749e6c0b64ef8
+    sdd-content-hash: a3f3a0ef714279a07c8772e9e528143db28e0398249469f6857f79b45c670e67
     sdd-version: dev
 name: sdd-groom
 ---
@@ -19,10 +19,10 @@ Read the framework reference files to understand entry types, layers, and closur
 ## Step 2 — Gather all open entries
 
 ```bash
-sdd status
+sdd view --layout='decisions,signals'
 ```
 
-This shows the current graph grouped by section (Aspirations, Contracts, Plans, Activities, Directives, Gaps and Questions, Recent Insights, Recent Done Signals). For grooming, collect the IDs of entries that can still be closed or superseded — Plans, Activities, Directives, and Gaps and Questions. Aspirations and Contracts are durable (retired by directive close, not resolved), so they're groom candidates only when explicitly stale. Recent Insights and Recent Done Signals aren't groom candidates — insights are stable observations, done signals are terminal facts.
+This shows active decisions grouped by kind (Aspirations, Contracts, Plans, Activities, Directives) and the open signals (Gaps and Questions) — exactly the groom candidates. Collect the IDs of entries that can still be closed or superseded — Plans, Activities, Directives, and Gaps and Questions. Aspirations and Contracts are durable (retired by directive close, not resolved), so they're groom candidates only when explicitly stale. (Insights and done signals aren't groom candidates — insights are stable observations, done signals are terminal facts — so they're left out of this layout.)
 
 ## Step 3 — Check each entry for downstream activity
 
@@ -89,7 +89,7 @@ Structure your output as one numbered block per candidate. No summary table — 
 
 **1. [short description]** (ID: [full-id])
 - Layer: [layer] | Age: [days old] | Pattern: [A/B/C]
-- Status: `{status: open}` or `{status: active}` — use the derived status notation rendered inline by `sdd status` / `sdd show`
+- Status: `{status: open}` or `{status: active}` — use the derived status notation rendered inline by `sdd view` / `sdd show`
 - Evidence: [summarizing note — a short explanation of why this candidate is flagged, written for a human to understand the situation at a glance]
   - [For Pattern A/B: full description text of each downstream entry that suggests resolution, prefixed with its ID]
   - [For Pattern C with Git evidence: commit hash + full commit message + file stats]
