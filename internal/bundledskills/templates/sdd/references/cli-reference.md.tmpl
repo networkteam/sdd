@@ -53,6 +53,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 |---|---|
 | `active` | Entries not closed and not superseded |
 | `kind(K[, K2, ...])` | Disjunction within one filter; multiple `kind()` calls intersect |
+| `intent(I[, I2, ...])` | Directives whose intent is in the set (`pending`, `guiding`, `settled`). Mirrors `kind()`: disjunction within a call, intersection across calls. Only directives carry intent, so this implicitly narrows to directives. Invalid values are rejected |
 | `type(T)` | Entries of type T (`d`/`s` or `decision`/`signal`) |
 | `layer(L)` | Entries at layer L (`stg`, `cpt`, `tac`, `ops`, `prc`; full names also accepted) |
 | `since(spec)` | ISO date `YYYY-MM-DD` or duration `Nd|Nw|Nm|Ny`. Quoted string. m/y use calendar arithmetic; d/w use 24h offsets |
@@ -60,7 +61,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `participant(P[, P2, ...])` | Entries listing any of the named canonical participants. Bare idents for single-word names (`participant(Christopher)`); quoted strings for names with spaces (`participant("Jonathan Philipp")`). Multiple `participant()` calls intersect |
 | `untagged` | Entries whose effective topic set is empty — the inverse of having any topic. Counts annotation membership, not just inline `topics:`. The grooming/backfill entry point |
 | `id(ID[, ID2, ...])` | Keep only the listed entries (intersects like other filters). Short IDs work bare (`id(d-tac-6tz)`); full IDs start with digits so they must be quoted (`id("20260520-131326-d-tac-6tz")`). Resolves short→full, surfaces ambiguity; an ID that matches nothing drops out silently |
-| `not(<filter>)` | Excludes entries matched by the inner filter. Supported inner: `kind`, `layer`, `topic` |
+| `not(<filter>)` | Excludes entries matched by the inner filter. Supported inner: `kind`, `intent`, `layer`, `topic` |
 
 ### Rank, page, output, transforms
 
@@ -216,6 +217,7 @@ Depth is controlled per direction by `--up` / `--down` (see the `sdd show` entry
 - `--closes id1,id2` — entry IDs this resolves/fulfills
 - `--participants p1,p2` — participant names
 - `--confidence high|medium|low` — confidence level
+- `--intent pending|guiding|settled` — directive lifecycle posture (kind: directive only). **Required on every directive capture** — no default; rejected on any other kind. `pending` demands follow-up, `guiding` is standing context that shapes later decisions, `settled` is born-terminal (needs no closing edge; a medium pre-flight finding fires if the body doesn't justify the terminality).
 - `--kind <kind>` — signals: gap (default), fact, question, insight, done, actor, annotation; decisions: directive (default), activity, plan, contract, aspiration, role, focus
 - `--canonical name` — frontmatter `canonical` (kind: actor only)
 - `--aliases a,b` — frontmatter `aliases` (kind: actor only)
@@ -290,7 +292,7 @@ The `--attach` flag is repeatable and supports filename mapping:
 Use `{{"{{attachments}}"}}/filename` in the entry description to link to attachments. The CLI resolves these to relative paths. Example:
 
 ```
-sdd new d tac --attach /tmp/design.md:plan.md "See [plan]({{"{{attachments}}"}}/plan.md) for details."
+sdd new d tac --intent pending --attach /tmp/design.md:plan.md "See [plan]({{"{{attachments}}"}}/plan.md) for details."
 ```
 
 ## Long descriptions

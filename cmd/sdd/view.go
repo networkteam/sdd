@@ -37,6 +37,8 @@ Implemented pipeline vocabulary:
   Filters (intersect cumulatively):
     active                 Entries not closed and not superseded
     kind(K[, K2, ...])     Entries whose kind matches any of the listed kinds
+    intent(I[, I2, ...])   Directives whose intent matches any listed value
+                           (pending, guiding, settled). Directive-only.
     type(T)                Entries of the given type — d/s or decision/signal
     layer(L)               Entries at the given layer (stg, cpt, tac, ops, prc;
                            full names also accepted)
@@ -57,7 +59,7 @@ Implemented pipeline vocabulary:
     id(ID[, ID2, ...])     Keep only the listed entries. Short IDs bare
                            (d-tac-6tz); full IDs quoted ("20260520-131326-d-tac-6tz").
     not(<filter>)          Exclude entries matched by the inner filter.
-                           Inner filters: kind, layer, topic.
+                           Inner filters: kind, intent, layer, topic.
 
   Rank:
     rank(<algorithm>)      Sort by computed score, descending. Adds
