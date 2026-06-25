@@ -289,7 +289,6 @@ func main() {
 			syncCmd(),
 			statsCmd(),
 		},
-		DefaultCommand: "info",
 	}
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
