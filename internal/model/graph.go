@@ -61,99 +61,41 @@ func (g *Graph) SetGraphDir(dir string) {
 	g.graphDir = dir
 }
 
-// Directives returns active directive decisions (not closed, not superseded).
-// Allow-list shape keeps future decision kinds from silently flooding this
-// set — each kind gets surfaced deliberately with its own accessor.
+// The five per-kind active-decision accessors are thin wrappers over Filter
+// with OpenOnly set, so the active-set definition (closed, superseded, settled,
+// role-cascade) lives in one place. Named accessors are kept over a generic
+// ActiveDecisions(kind) so call sites read clearly (e.g. graph.Contracts()).
+
+// Directives returns active directive decisions. Filter's OpenOnly excludes
+// closed and superseded directives, and also settled ones — they are born
+// terminal, dropped from the active set even without a closing edge.
 func (g *Graph) Directives() []*Entry {
-	closed := g.closedSet()
-	superseded := g.supersededSet()
-
-	var directives []*Entry
-	for _, e := range g.Entries {
-		if e.Type != TypeDecision || e.Kind != KindDirective {
-			continue
-		}
-		// Settled directives are born terminal — excluded from the active
-		// set alongside closed/superseded, consistent with Graph.Filter.
-		if !closed[e.ID] && !superseded[e.ID] && !e.IsSettled() {
-			directives = append(directives, e)
-		}
-	}
-	return directives
+	return g.Filter(GraphFilter{Type: TypeDecision, Kind: KindDirective, OpenOnly: true})
 }
 
-// Activities returns active activity decisions (not closed, not superseded).
-// Activities are THAT-shaped commitments — capturing that specific work
-// happens, independent of the directive-style choice of *what* to do.
+// Activities returns active activity decisions. Activities are THAT-shaped
+// commitments — capturing that specific work happens, independent of the
+// directive-style choice of *what* to do.
 func (g *Graph) Activities() []*Entry {
-	closed := g.closedSet()
-	superseded := g.supersededSet()
-
-	var activities []*Entry
-	for _, e := range g.Entries {
-		if e.Type != TypeDecision || e.Kind != KindActivity {
-			continue
-		}
-		if !closed[e.ID] && !superseded[e.ID] {
-			activities = append(activities, e)
-		}
-	}
-	return activities
+	return g.Filter(GraphFilter{Type: TypeDecision, Kind: KindActivity, OpenOnly: true})
 }
 
-// Plans returns active plan decisions (not closed, not superseded).
+// Plans returns active plan decisions.
 func (g *Graph) Plans() []*Entry {
-	closed := g.closedSet()
-	superseded := g.supersededSet()
-
-	var plans []*Entry
-	for _, e := range g.Entries {
-		if e.Type != TypeDecision || !e.IsPlan() {
-			continue
-		}
-		if !closed[e.ID] && !superseded[e.ID] {
-			plans = append(plans, e)
-		}
-	}
-	return plans
+	return g.Filter(GraphFilter{Type: TypeDecision, Kind: KindPlan, OpenOnly: true})
 }
 
-// Contracts returns active contract decisions (not superseded, not closed).
-// Contracts retire via a same-kind supersede or a directive-kind decision
-// closing them with rationale (universal retirement rule).
+// Contracts returns active contract decisions. Contracts retire via a same-kind
+// supersede or a directive-kind decision closing them with rationale (universal
+// retirement rule).
 func (g *Graph) Contracts() []*Entry {
-	closed := g.closedSet()
-	superseded := g.supersededSet()
-
-	var contracts []*Entry
-	for _, e := range g.Entries {
-		if e.Type != TypeDecision || !e.IsContract() {
-			continue
-		}
-		if !closed[e.ID] && !superseded[e.ID] {
-			contracts = append(contracts, e)
-		}
-	}
-	return contracts
+	return g.Filter(GraphFilter{Type: TypeDecision, Kind: KindContract, OpenOnly: true})
 }
 
-// Aspirations returns active aspiration decisions (not superseded, not closed).
-// Like contracts, aspirations are durable — they retire via supersede or
-// close-by-directive with rationale (see dissolution/retirement calibration).
+// Aspirations returns active aspiration decisions. Like contracts, aspirations
+// are durable — they retire via supersede or close-by-directive with rationale.
 func (g *Graph) Aspirations() []*Entry {
-	closed := g.closedSet()
-	superseded := g.supersededSet()
-
-	var aspirations []*Entry
-	for _, e := range g.Entries {
-		if e.Type != TypeDecision || !e.IsAspiration() {
-			continue
-		}
-		if !closed[e.ID] && !superseded[e.ID] {
-			aspirations = append(aspirations, e)
-		}
-	}
-	return aspirations
+	return g.Filter(GraphFilter{Type: TypeDecision, Kind: KindAspiration, OpenOnly: true})
 }
 
 // OpenSignals returns signals that are closure-gated attention items — gaps
