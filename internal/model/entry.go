@@ -210,6 +210,13 @@ type Entry struct {
 	// of the actor-identity chain the role binds to. Role status derives from
 	// the actor chain's canonical history (see Graph.RoleStatus).
 	Actor string
+	// ProcedureSpec is only meaningful on kind: procedure decisions. It
+	// retains the machine part of the frontmatter — params, state, steps — as
+	// raw YAML nodes so procedure entries round-trip losslessly. The model
+	// stays permissive here by design: the type-system revision contract
+	// defers structural validation of the spec to engine load time, where the
+	// engine decodes these nodes strictly.
+	ProcedureSpec *ProcedureSpecRaw
 	// Topics carries inline topic labels — valid on any non-annotation entry.
 	// Empty for kind: annotation entries (those use AnnotationTopics, which
 	// supports the richer "label or {label, members}" form). Each path is
@@ -312,6 +319,9 @@ type frontmatter struct {
 	FocusActors  []string          `yaml:"actors,omitempty"`
 	FocusWhen    *FocusWhen        `yaml:"when,omitempty"`
 	Involvement  []involvementYAML `yaml:"involvement,omitempty"`
+	Params       yaml.Node         `yaml:"params,omitempty"`
+	State        yaml.Node         `yaml:"state,omitempty"`
+	Steps        yaml.Node         `yaml:"steps,omitempty"`
 	Preflight    string            `yaml:"preflight,omitempty"`
 	Summary      string            `yaml:"summary,omitempty"`
 	SummaryHash  string            `yaml:"summary_hash,omitempty"`
@@ -403,6 +413,17 @@ func ParseEntry(filename, content string) (*Entry, error) {
 			paths = append(paths, p)
 		}
 		e.Topics = paths
+	}
+
+	// Retain the machine part of a procedure's frontmatter as raw YAML.
+	// Routed by kind like the other per-kind fields; on any other kind the
+	// keys are ignored, matching how unknown frontmatter keys behave.
+	if e.IsProcedure() && (!fm.Params.IsZero() || !fm.State.IsZero() || !fm.Steps.IsZero()) {
+		e.ProcedureSpec = &ProcedureSpecRaw{
+			Params: fm.Params,
+			State:  fm.State,
+			Steps:  fm.Steps,
+		}
 	}
 
 	// Lift involvement triples into Entry.Involvement, preserving the
@@ -599,6 +620,12 @@ func FormatFrontmatter(e *Entry) string {
 			}
 			fm.Involvement = append(fm.Involvement, out)
 		}
+	}
+
+	if e.ProcedureSpec != nil {
+		fm.Params = e.ProcedureSpec.Params
+		fm.State = e.ProcedureSpec.State
+		fm.Steps = e.ProcedureSpec.Steps
 	}
 
 	data, _ := yaml.Marshal(&fm)

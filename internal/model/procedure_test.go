@@ -250,3 +250,81 @@ func hasWarning(e *Entry, field, substr string) bool {
 	}
 	return false
 }
+
+func TestProcedureSpecRoundTrip(t *testing.T) {
+	content := `---
+type: decision
+layer: prc
+kind: procedure
+canonical: capture
+params:
+    anchor: {type: entry-id, optional: true, desc: entry this capture is anchored on}
+state:
+    body: {type: text, desc: entry description}
+    refs: {type: list<ref>, desc: "each {id, kind, desc?}"}
+steps:
+    - id: assemble
+      collect: [body, refs]
+      transitions:
+        - when: hasBody and hasRefs
+          to: playback
+    - id: playback
+      chooser: user
+      options:
+        - {choice: confirm, call: confirmPlayback, to: end(completed)}
+---
+
+Procedure body.
+
+## unit: assemble
+
+Draft the entry.
+`
+	e, err := ParseEntry("20260702-120000-d-prc-rtp.md", content)
+	if err != nil {
+		t.Fatalf("ParseEntry: %v", err)
+	}
+	if e.ProcedureSpec == nil {
+		t.Fatal("ProcedureSpec not retained on procedure entry")
+	}
+	if e.ProcedureSpec.Params.IsZero() || e.ProcedureSpec.State.IsZero() || e.ProcedureSpec.Steps.IsZero() {
+		t.Fatal("expected params, state, and steps nodes to be retained")
+	}
+
+	// Round trip: format, re-parse, and check the machine part survives.
+	out := FormatFrontmatter(e) + "\n" + e.Content
+	e2, err := ParseEntry("20260702-120000-d-prc-rtp.md", out)
+	if err != nil {
+		t.Fatalf("ParseEntry (round trip): %v", err)
+	}
+	if e2.ProcedureSpec == nil {
+		t.Fatal("ProcedureSpec lost in round trip")
+	}
+	var steps []map[string]any
+	if err := e2.ProcedureSpec.Steps.Decode(&steps); err != nil {
+		t.Fatalf("decoding round-tripped steps: %v", err)
+	}
+	if len(steps) != 2 || steps[0]["id"] != "assemble" || steps[1]["id"] != "playback" {
+		t.Fatalf("round-tripped steps lost structure: %v", steps)
+	}
+}
+
+func TestProcedureSpecIgnoredOnNonProcedure(t *testing.T) {
+	content := `---
+type: decision
+layer: tac
+kind: plan
+steps:
+    - id: stray
+---
+
+A plan with a stray steps key.
+`
+	e, err := ParseEntry("20260702-120000-d-tac-npx.md", content)
+	if err != nil {
+		t.Fatalf("ParseEntry: %v", err)
+	}
+	if e.ProcedureSpec != nil {
+		t.Error("ProcedureSpec must only be routed for kind: procedure entries")
+	}
+}

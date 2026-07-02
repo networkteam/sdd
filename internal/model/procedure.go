@@ -1,6 +1,22 @@
 package model
 
-import "sort"
+import (
+	"sort"
+
+	"gopkg.in/yaml.v3"
+)
+
+// ProcedureSpecRaw retains the machine part of a procedure entry's
+// frontmatter — params, state, steps — as raw YAML nodes. The model does not
+// interpret them: the type-system revision contract places structural
+// validation at engine load time, so the engine decodes these nodes into its
+// typed spec and reports spec errors there. Keeping the raw nodes on the
+// entry lets FormatFrontmatter round-trip a procedure losslessly.
+type ProcedureSpecRaw struct {
+	Params yaml.Node
+	State  yaml.Node
+	Steps  yaml.Node
+}
 
 // ProcedureChain represents a supersession chain of kind: procedure
 // decisions — one playbook move's identity across revisions, base-shipped
