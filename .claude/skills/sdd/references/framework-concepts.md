@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 1ca3b61b3ace5c1063fb46df1ed835b4c47dd08486bcd12e971966f3829dfdb1
+sdd-content-hash: e9c18fd03ec42e0c95868e32a3d56f3488f2c880e2bc3161a4ccbd8595627566
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -36,7 +36,7 @@ An `actor` signal records a participant identity at the process layer. See the "
 
 An `annotation` signal carries structural metadata — today, topic membership — for the entries it refs. See "Topics and annotations" below.
 
-### Decision kinds (7)
+### Decision kinds (8)
 
 | Kind | Question it answers | Default? |
 |---|---|---|
@@ -47,12 +47,15 @@ An `annotation` signal carries structural metadata — today, topic membership �
 | `aspiration` | What are we pulling toward? | no |
 | `role` | How does an actor participate? | no |
 | `focus` | What are we attending to in this period, and who is engaged? | no |
+| `procedure` | How does a playbook move run? | no |
 
 Plan decisions require a `## Acceptance criteria` section with at least one checklist item. Each AC is a verifiable outcome — the contract between plan author, implementing agent, and the pre-flight validator that checks the closing done signal.
 
 A `role` decision records one actor's participation pattern — per-actor scope, orthogonal to contracts (which are universal). See "Actors and Roles" below.
 
 A `focus` decision declares involvement triples for the current period. Layer-flexible (like directive/plan/activity). See "Focus and involvement" below.
+
+A `procedure` decision defines a playbook move as an executable graph entry — frontmatter carries a required write-once `canonical` (the move's stable identity, e.g. `capture`) plus the move's state machine; the body carries per-step instruction units. Process layer, like actor and role. Base procedures ship embedded in the sdd binary; a project customizes by superseding a chain head, and when a shipped successor and a project override compete, the project head wins for execution while lint flags the fork for deliberate grooming. Procedures are engine-authored surface — everyday captures don't create them; see the workflow-engine line.
 
 ### Directive intent
 
@@ -173,6 +176,7 @@ Per-kind retirement paths:
 | plan | restructured plan | done signal (via ACs); directive retiring it |
 | aspiration | evolved aspiration | directive retiring it |
 | focus | replacement focus (priorities shift mid-cycle) | done signal (cycle ended naturally); directive retiring it |
+| procedure | revised procedure (project customization or shipped successor) | directive retiring the move without replacement |
 
 **Retirement rationale is required** when closing a stable-kind entry (fact, insight, contract, aspiration). Pre-flight checks that the narrative states *why* — not whether the why is correct.
 
