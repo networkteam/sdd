@@ -53,11 +53,20 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			if !ok {
 				return fmt.Errorf("entry not found: %s", id)
 			}
+			if e.Embedded {
+				return fmt.Errorf("%s is an embedded base entry — its summary ships with the binary and cannot be regenerated here", id)
+			}
 			entries = append(entries, e)
 		}
 	} else {
-		// --all: process in topological order.
-		entries = graph.TopologicalOrder()
+		// --all: process in topological order. Embedded base entries have no
+		// file to write a summary into — their summaries ship with the binary.
+		for _, e := range graph.TopologicalOrder() {
+			if e.Embedded {
+				continue
+			}
+			entries = append(entries, e)
+		}
 	}
 
 	timeout := cmd.Timeout
@@ -175,6 +184,9 @@ func (h *Handler) summarizeExplicit(graph *model.Graph, idArg, text string, onSu
 	entry, ok := graph.ByID[id]
 	if !ok {
 		return fmt.Errorf("entry not found: %s", id)
+	}
+	if entry.Embedded {
+		return fmt.Errorf("%s is an embedded base entry — its summary ships with the binary and cannot be replaced here", id)
 	}
 
 	summary := strings.TrimSpace(text)

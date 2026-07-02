@@ -494,6 +494,8 @@ func (g *Graph) validate() {
 	validateParticipantCoverage(g)
 	validateAliasAmbiguity(g)
 	validateSupersedeForks(g)
+	validateProcedureInvariant(g)
+	validateProcedureForks(g)
 }
 
 // validateSupersedeForks flags a live fork — an entry whose supersession
@@ -511,6 +513,12 @@ func validateSupersedeForks(g *Graph) {
 	closed := g.closedSet()
 	for id, supers := range g.SupersededBy {
 		if len(supers) < 2 {
+			continue
+		}
+		// Procedure forks are owned by validateProcedureForks: for a
+		// procedure the fork is resolved (project head wins for execution),
+		// so the generic "resolution is ambiguous" message would mislead.
+		if e, ok := g.ByID[id]; ok && e.IsProcedure() {
 			continue
 		}
 		liveHeads := make(map[string]bool)
@@ -642,6 +650,12 @@ func validateParticipantCoverage(g *Graph) {
 		}
 	}
 	for _, e := range g.Entries {
+		// Embedded base entries ship with the binary and must stay valid in
+		// any project graph; actor canonicals are a project-local namespace,
+		// so coverage doesn't apply to them.
+		if e.Embedded {
+			continue
+		}
 		for _, p := range e.Participants {
 			if p == "" {
 				continue
@@ -710,6 +724,7 @@ func ValidateEntry(e *Entry, g *Graph) {
 	validateKind(e)
 	validateActorFrontmatter(e)
 	validateRoleFrontmatter(e)
+	validateProcedureFrontmatter(e)
 	validateAnnotationFrontmatter(e)
 	validateFocusFrontmatter(e, g)
 	validateInlineTopics(e)
@@ -781,9 +796,11 @@ func validateCloses(e *Entry, g *Graph) {
 			})
 		case e.Type == TypeDecision && target.Type == TypeDecision:
 			// Retirement exception: a kind: directive decision may close a
-			// kind: contract or kind: aspiration decision with rationale.
-			// Every other decision-closes-decision pattern uses supersedes.
-			if e.Kind == KindDirective && (target.Kind == KindContract || target.Kind == KindAspiration) {
+			// kind: contract, aspiration, or procedure decision with
+			// rationale — the retire-without-replacement path for standing
+			// kinds. Every other decision-closes-decision pattern uses
+			// supersedes.
+			if e.Kind == KindDirective && (target.Kind == KindContract || target.Kind == KindAspiration || target.Kind == KindProcedure) {
 				continue
 			}
 			e.Warnings = append(e.Warnings, Warning{
@@ -817,7 +834,7 @@ func validateSupersedes(e *Entry, g *Graph) {
 // their type.
 func validateKind(e *Entry) {
 	const signalKindList = "gap, fact, question, insight, done, actor, or annotation"
-	const decisionKindList = "directive, activity, plan, contract, aspiration, role, or focus"
+	const decisionKindList = "directive, activity, plan, contract, aspiration, role, focus, or procedure"
 	switch e.Type {
 	case TypeSignal:
 		if e.Kind == "" {
@@ -893,6 +910,94 @@ func validateRoleFrontmatter(e *Entry) {
 			Value:   string(e.Layer),
 			Message: fmt.Sprintf("role decision should live at process layer (got %s)", e.Layer),
 		})
+	}
+}
+
+// validateProcedureFrontmatter checks that kind: procedure decisions have the
+// required canonical field. Procedures are pinned to the process layer like
+// actor and role — a procedure defines how we work.
+func validateProcedureFrontmatter(e *Entry) {
+	if !e.IsProcedure() {
+		return
+	}
+	if strings.TrimSpace(e.Canonical) == "" {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "canonical",
+			Message: "procedure decision missing required canonical field",
+		})
+	}
+	if e.Layer != LayerProcess {
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "layer",
+			Value:   string(e.Layer),
+			Message: fmt.Sprintf("procedure decision should live at process layer (got %s)", e.Layer),
+		})
+	}
+}
+
+// validateProcedureInvariant enforces write-once-across-chains for procedure
+// canonicals, mirroring validateActorInvariant: a canonical may appear in at
+// most one procedure chain's history. Procedure canonicals are their own
+// namespace — actor canonicals are checked separately. Defense-in-depth; the
+// pre-flight mechanical check is the first line.
+func validateProcedureInvariant(g *Graph) {
+	chains := g.ProcedureChains()
+	ownerChains := make(map[string]int)
+	for _, c := range chains {
+		for _, canonical := range c.CanonicalHistory {
+			ownerChains[canonical]++
+		}
+	}
+	for canonical, count := range ownerChains {
+		if count < 2 {
+			continue
+		}
+		for _, c := range chains {
+			if !c.HasCanonical(canonical) {
+				continue
+			}
+			for _, e := range c.Entries {
+				if e.Canonical != canonical {
+					continue
+				}
+				e.Warnings = append(e.Warnings, Warning{
+					Field:   "canonical",
+					Value:   canonical,
+					Message: fmt.Sprintf("canonical %q appears in %d procedure chains (write-once invariant violated)", canonical, count),
+				})
+			}
+		}
+	}
+}
+
+// validateProcedureForks flags procedure chains with more than one live head
+// — a shipped base successor and a project override (or two overrides)
+// competing. Unlike the generic supersede-fork warning, resolution is not
+// ambiguous: the project head wins for execution (see ProcedureChain.Head).
+// The fork is still flagged on every live head as a grooming candidate,
+// because reconciling the branches is a deliberate, merge-style step —
+// never automatic.
+func validateProcedureForks(g *Graph) {
+	for _, chain := range g.ProcedureChains() {
+		if !chain.Forked() {
+			continue
+		}
+		headIDs := make([]string, 0, len(chain.LiveHeads))
+		for _, h := range chain.LiveHeads {
+			headIDs = append(headIDs, h.ID)
+		}
+		sort.Strings(headIDs)
+		winner := "<unresolved>"
+		if chain.Head != nil {
+			winner = chain.Head.ID
+		}
+		for _, h := range chain.LiveHeads {
+			h.Warnings = append(h.Warnings, Warning{
+				Field:   "canonical",
+				Value:   h.Canonical,
+				Message: fmt.Sprintf("procedure chain is forked: %d live heads (%s); %s wins for execution (project head over base) — groom to resolve the fork deliberately", len(headIDs), strings.Join(headIDs, ", "), winner),
+			})
+		}
 	}
 }
 

@@ -22,6 +22,11 @@ func (h *Handler) LintFix(ctx context.Context, cmd *command.LintFixCmd) error {
 	fixCount := 0
 
 	for _, e := range graph.Entries {
+		// Embedded base entries have no file to patch — fixes to them ship
+		// as new binary releases.
+		if e.Embedded {
+			continue
+		}
 		fixes := applyFixes(e)
 		if len(fixes) == 0 {
 			continue

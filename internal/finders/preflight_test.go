@@ -633,6 +633,96 @@ func TestMechanical_RefKindApplicability_DanglingTargetSkipped(t *testing.T) {
 // actorEntry is a test helper that builds a kind: actor signal.
 //
 //nolint:unparam // canonical is intentionally parameterized for future test cases
+func TestMechanical_ProcedureWriteOnce_NewChainAllowed(t *testing.T) {
+	graph := model.NewGraph(nil)
+
+	proposed := &model.Entry{
+		Type:      model.TypeDecision,
+		Kind:      model.KindProcedure,
+		Layer:     model.LayerProcess,
+		Canonical: "capture",
+		Content:   "the capture move",
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	if len(got) != 0 {
+		t.Fatalf("expected no findings for fresh procedure canonical, got %+v", got)
+	}
+}
+
+func TestMechanical_ProcedureWriteOnce_ReuseBlocked(t *testing.T) {
+	existing := procedureEntry("20260702-120000-d-prc-cap", "capture")
+	graph := model.NewGraph([]*model.Entry{existing})
+
+	proposed := &model.Entry{
+		Type:      model.TypeDecision,
+		Kind:      model.KindProcedure,
+		Layer:     model.LayerProcess,
+		Canonical: "capture",
+		Content:   "a second, unrelated move claiming the same canonical",
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 finding for reused procedure canonical, got %+v", got)
+	}
+	if got[0].Category != "procedure-canonical-reused" || got[0].Severity != query.SeverityHigh {
+		t.Errorf("finding = %+v, want high procedure-canonical-reused", got[0])
+	}
+}
+
+func TestMechanical_ProcedureWriteOnce_SupersedeSameChainAllowed(t *testing.T) {
+	existing := procedureEntry("20260702-120000-d-prc-cap", "capture")
+	graph := model.NewGraph([]*model.Entry{existing})
+
+	proposed := &model.Entry{
+		Type:       model.TypeDecision,
+		Kind:       model.KindProcedure,
+		Layer:      model.LayerProcess,
+		Canonical:  "capture",
+		Supersedes: []string{existing.ID},
+		Content:    "project override of the capture move",
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	for _, f := range got {
+		if f.Category == "procedure-canonical-reused" {
+			t.Errorf("supersede within the chain must not trip write-once, got %+v", f)
+		}
+	}
+}
+
+func TestMechanical_ProcedureCanonical_ActorNamespaceSeparate(t *testing.T) {
+	// An actor already holds the canonical string — the procedure namespace
+	// is separate, so a procedure may use it without a finding.
+	actor := actorEntry("capture", nil)
+	graph := model.NewGraph([]*model.Entry{actor})
+
+	proposed := &model.Entry{
+		Type:      model.TypeDecision,
+		Kind:      model.KindProcedure,
+		Layer:     model.LayerProcess,
+		Canonical: "capture",
+		Content:   "the capture move",
+	}
+
+	got := mechanicalPreflight(proposed, graph)
+	for _, f := range got {
+		if f.Category == "procedure-canonical-reused" {
+			t.Errorf("actor canonical must not block procedure canonical, got %+v", f)
+		}
+	}
+}
+
+func procedureEntry(id, canonical string) *model.Entry {
+	e := entry(id, withContent("procedure: "+canonical))
+	e.Type = model.TypeDecision
+	e.Kind = model.KindProcedure
+	e.Layer = model.LayerProcess
+	e.Canonical = canonical
+	return e
+}
+
 func actorEntry(canonical string, aliases []string) *model.Entry {
 	const defaultActorID = "20260410-120000-s-prc-act"
 	e := entry(defaultActorID, withContent("actor: "+canonical))

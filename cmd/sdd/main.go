@@ -502,11 +502,11 @@ func newCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:  "kind",
-				Usage: "Entry kind: signals — gap (default), fact, question, insight, done, actor, annotation; decisions — directive (default), activity, plan, contract, aspiration, role, focus",
+				Usage: "Entry kind: signals — gap (default), fact, question, insight, done, actor, annotation; decisions — directive (default), activity, plan, contract, aspiration, role, focus, procedure",
 			},
 			&cli.StringFlag{
 				Name:  "canonical",
-				Usage: "Canonical identity name (kind: actor only) — written into frontmatter",
+				Usage: "Canonical identity name (kind: actor and kind: procedure) — written into frontmatter",
 			},
 			&cli.StringFlag{
 				Name:  "aliases",

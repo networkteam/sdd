@@ -7,15 +7,21 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 )
 
-// LoadGraph reads all .md files from dir (hierarchical YYYY/MM/ layout) and builds the graph.
+// LoadGraph reads all .md files from dir (hierarchical YYYY/MM/ layout),
+// joins the base procedure entries embedded in the binary, and builds the
+// graph. Base entries are always loaded — a project graph never contains
+// them on disk, but its entries may supersede them (procedure
+// customization). On the unlikely ID collision, the disk entry wins: a
+// project owns its graph directory.
 func (f *Finder) LoadGraph(dir string) (*model.Graph, error) {
 	var entries []*model.Entry
 
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -53,8 +59,24 @@ func (f *Finder) LoadGraph(dir string) (*model.Graph, error) {
 		entries = append(entries, entry)
 		return nil
 	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("walking graph dir: %w", walkErr)
+	}
+
+	// Join the base procedure entries shipped in the binary. The embedded
+	// set is compile-time constant, so a load error is a broken build.
+	base, err := baseprocedures.Entries()
 	if err != nil {
-		return nil, fmt.Errorf("walking graph dir: %w", err)
+		return nil, fmt.Errorf("loading base procedures: %w", err)
+	}
+	onDisk := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		onDisk[e.ID] = true
+	}
+	for _, be := range base {
+		if !onDisk[be.ID] {
+			entries = append(entries, be)
+		}
 	}
 
 	// Scan for attachment directories

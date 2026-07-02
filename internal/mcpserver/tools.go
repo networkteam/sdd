@@ -59,7 +59,7 @@ type CaptureArgs struct {
 	SessionToken string   `json:"session_token" jsonschema:"token from sdd_open_session"`
 	Type         string   `json:"type" jsonschema:"entry type: s (signal = something noticed) or d (decision = something committed to)"`
 	Layer        string   `json:"layer" jsonschema:"thinking depth: stg (why/direction), cpt (approach), tac (structure/trade-offs), ops (steps), prc (how we work)"`
-	Kind         string   `json:"kind,omitempty" jsonschema:"signal kinds: gap (default), fact, question, insight, done, actor, annotation; decision kinds: directive (default), activity, plan, contract, aspiration, role, focus"`
+	Kind         string   `json:"kind,omitempty" jsonschema:"signal kinds: gap (default), fact, question, insight, done, actor, annotation; decision kinds: directive (default), activity, plan, contract, aspiration, role, focus, procedure"`
 	Description  string   `json:"description" jsonschema:"the entry body; first sentence must work as a standalone summary; fold dialogue reasoning in"`
 	Refs         []RefArg `json:"refs,omitempty" jsonschema:"references connecting this entry's reasoning to existing entries"`
 	Closes       []string `json:"closes,omitempty" jsonschema:"entry IDs this entry resolves or fulfills"`
