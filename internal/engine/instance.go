@@ -78,6 +78,15 @@ type Serve struct {
 	// Instructions is the step's instruction unit rendered against the
 	// store, with stall diagnostics appended when a gate is held.
 	Instructions string
+	// Unit names the instruction unit rendered into Instructions (empty when
+	// the step has none). Shells key their served-instruction memory on it.
+	Unit string
+	// UnitText is the rendered unit alone, without diagnostics — what a
+	// shell replaces with a one-line reminder once the unit was served.
+	UnitText string
+	// Diagnostics are the stall messages appended to Instructions ("Gate
+	// held" lines), kept separate so shells can recompose around UnitText.
+	Diagnostics []string
 	// Missing names the current step's required collect fields not yet in
 	// the store.
 	Missing []string
@@ -332,10 +341,18 @@ func (s *Session) serve(inst *Instance) (*Serve, error) {
 	sv.ReportSchema = inst.Spec.ReportSchemaForStep(step)
 	sv.Missing = s.missingFields(inst, step)
 
+	unitName := step.ID
+	if step.Render != "" {
+		unitName = step.Render
+	}
+	if _, ok := inst.Spec.Units[unitName]; ok {
+		sv.Unit = unitName
+	}
 	instructions, err := s.renderUnit(inst, step)
 	if err != nil {
 		return nil, err
 	}
+	sv.UnitText = instructions
 
 	var diagnostics []string
 	switch step.Chooser {
@@ -382,16 +399,26 @@ func (s *Session) serve(inst *Instance) (*Serve, error) {
 		}
 	}
 
-	sv.Instructions = instructions
-	if len(diagnostics) > 0 {
-		if sv.Instructions != "" {
-			sv.Instructions += "\n\n"
-		}
-		sv.Instructions += "Gate held:\n- " + strings.Join(diagnostics, "\n- ")
-	}
+	sv.Diagnostics = diagnostics
+	sv.Instructions = ComposeInstructions(instructions, diagnostics)
 
 	s.appendEvent(inst.ID, EventServed, map[string]any{"step": step.ID})
 	return sv, nil
+}
+
+// ComposeInstructions joins a rendered unit (or a shell-substituted
+// reminder) with stall diagnostics — the one composition rule for the
+// Instructions field, shared by the engine's serve and shells recomposing
+// around served-instruction memory.
+func ComposeInstructions(unitText string, diagnostics []string) string {
+	out := unitText
+	if len(diagnostics) > 0 {
+		if out != "" {
+			out += "\n\n"
+		}
+		out += "Gate held:\n- " + strings.Join(diagnostics, "\n- ")
+	}
+	return out
 }
 
 // missingFields names the step's required collect fields not yet present —

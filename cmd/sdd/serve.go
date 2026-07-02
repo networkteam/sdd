@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/urfave/cli/v3"
@@ -78,6 +79,7 @@ func serveCmd() *cli.Command {
 				Searcher:     searcher,
 				VectorSearch: vector,
 				GraphDir:     dir,
+				SessionsDir:  filepath.Join(sddDir, "sessions"),
 				Version:      version,
 			})
 			if err != nil {

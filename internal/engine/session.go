@@ -20,6 +20,10 @@ const logVersion = 1
 type EventType string
 
 const (
+	// EventSessionMeta is the session-level header line (no instance):
+	// participant identity, so a log is self-describing for list_sessions
+	// descriptors without resolving any procedure spec.
+	EventSessionMeta   EventType = "session_meta"
 	EventStarted       EventType = "started"
 	EventReport        EventType = "report"
 	EventChooserAnswer EventType = "chooser_answer"
@@ -147,6 +151,11 @@ func (e *Engine) NewSession(id, participant string, sink EventSink, opts ...Sess
 	}
 	for _, o := range opts {
 		o(s)
+	}
+	if sink != nil {
+		s.appendEvent("", EventSessionMeta, map[string]any{
+			"participant": participant,
+		})
 	}
 	return s
 }
@@ -372,6 +381,19 @@ func (s *Session) Answer(instanceID, chooser, choice string, fields map[string]a
 	return s.serve(inst)
 }
 
+// Serve re-serves the instance's current position without advancing it —
+// shells use it to rehydrate an agent after resume_session.
+func (s *Session) Serve(instanceID string) (*Serve, error) {
+	if err := s.checkSink(); err != nil {
+		return nil, err
+	}
+	inst, ok := s.instances[instanceID]
+	if !ok {
+		return nil, fmt.Errorf("instance %q not found in session", instanceID)
+	}
+	return s.serve(inst)
+}
+
 // Abandon explicitly discards a running instance, logged as an abandonment
 // transition. It never cleans up implicitly — anything the instance holds
 // (a WIP marker, staged attachments) is left standing for resume or groom.
@@ -423,6 +445,11 @@ func (e *Engine) ReplaySession(id, participant string, events []Event, resolve S
 
 func (s *Session) applyEvent(ev Event, resolve SpecResolver) error {
 	switch ev.Event {
+	case EventSessionMeta:
+		if p, ok := ev.Data["participant"].(string); ok && p != "" {
+			s.Participant = p
+		}
+
 	case EventStarted:
 		canonical, _ := ev.Data["procedure"].(string)
 		entryID, _ := ev.Data["entry"].(string)

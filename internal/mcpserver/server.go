@@ -1,14 +1,20 @@
-// Package mcpserver hosts the stateful workflow MCP server: dialogue-loop
-// tools that return graph data plus just-in-time instructions, with a
-// per-session state machine gating writes (capture requires a prior
-// grounding call). The server is deliberately not an agent — the connecting
-// client supplies all LLM reasoning; this layer only serves the right data
-// and instructions at the right moment and enforces the write gate
-// (experiment directive 20260609-234656-d-cpt-afn).
+// Package mcpserver is the workflow engine's MCP shell (v1 plan
+// 20260702-220449-d-tac-ry0, slice 3): the loop tools (start_procedure,
+// next, abandon) drive procedure instances through the engine, sessions
+// persist as append-only JSONL logs under the sessions dir (list_sessions /
+// resume_session), stage_attachment fills the session scratch, and the read
+// tools (search, view, show, read_attachment, info, registry) are free and
+// never gated. Graph writes exist only as procedure transitions — there is
+// no direct write tool (enforcement scoped by surface ownership, s-cpt-1dz).
 //
-// CQRS conformance: tools are pure dispatch — queries go to the finder,
-// the capture command goes to the handler. The only state owned here is
-// the session map, which is protocol state, not domain state.
+// The server is deliberately not an agent — the connecting client supplies
+// all LLM reasoning; this layer serves instructions, validates reports and
+// chooser sequence through the engine, and owns the side-effect
+// dependencies the engine registry's shell functions need.
+//
+// CQRS conformance: reads go to finders, writes dispatch handler commands
+// from inside registry command closures. State owned here is protocol and
+// session-lifecycle state, not domain state.
 package mcpserver
 
 import (
@@ -23,6 +29,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/query"
@@ -37,17 +44,21 @@ type Searcher interface {
 
 // Options configures a workflow MCP server.
 type Options struct {
-	Handler  *handlers.Handler // write path: capture dispatches NewEntryCmd here
+	Handler  *handlers.Handler // write path: registry commands dispatch here
 	Finder   *finders.Finder   // read path: graph load, info, view, show
-	Searcher Searcher          // ground retrieval; nil degrades ground to topics-only
-	// VectorSearch selects phrase (vector/semantic) retrieval for ground
-	// calls. False falls back to text-term matching on the topic words.
+	Searcher Searcher          // search tool; nil disables the search tool's retrieval
+	// VectorSearch enables phrase (vector/semantic) retrieval on the search
+	// tool. False limits it to text-term matching.
 	VectorSearch bool
 	GraphDir     string
-	Version      string
+	// SessionsDir holds the per-participant append-only JSONL session logs
+	// and the per-session attachment staging scratch. Local, gitignored.
+	SessionsDir string
+	Version     string
 }
 
-// Server wires the MCP protocol surface to the SDD read and write layers.
+// Server wires the MCP protocol surface to the engine and the SDD read and
+// write layers.
 type Server struct {
 	mcp      *mcp.Server
 	handler  *handlers.Handler
@@ -55,10 +66,14 @@ type Server struct {
 	searcher Searcher
 	vector   bool
 	graphDir string
+	version  string
 	sessions *sessionStore
+	// docsRegistry answers the registry tool: function docs are identical
+	// across per-session registries, so one throwaway instance serves them.
+	docsRegistry *engine.Registry
 }
 
-// New constructs the server and registers the four dialogue-loop tools.
+// New constructs the server and registers the workflow tool surface.
 func New(opts Options) (*Server, error) {
 	if opts.Handler == nil || opts.Finder == nil {
 		return nil, errors.New("mcpserver: Handler and Finder are required")
@@ -66,14 +81,23 @@ func New(opts Options) (*Server, error) {
 	if opts.GraphDir == "" {
 		return nil, errors.New("mcpserver: GraphDir is required")
 	}
+	if opts.SessionsDir == "" {
+		return nil, errors.New("mcpserver: SessionsDir is required")
+	}
 	s := &Server{
 		handler:  opts.Handler,
 		finder:   opts.Finder,
 		searcher: opts.Searcher,
 		vector:   opts.VectorSearch,
 		graphDir: opts.GraphDir,
-		sessions: newSessionStore(),
+		version:  opts.Version,
+		sessions: newSessionStore(opts.SessionsDir),
 	}
+	docsRegistry, err := s.buildRegistry(&shellSession{id: "docs"})
+	if err != nil {
+		return nil, err
+	}
+	s.docsRegistry = docsRegistry
 	s.mcp = mcp.NewServer(&mcp.Implementation{
 		Name:    "sdd",
 		Version: opts.Version,

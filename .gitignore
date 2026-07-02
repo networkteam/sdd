@@ -7,5 +7,6 @@
 .sdd/config.local.yaml
 .sdd/index/
 .sdd/stats/
+.sdd/sessions/
 go.work
 go.work.sum
