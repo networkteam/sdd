@@ -154,10 +154,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the inline footer only — one line: spinner, label, and (when a
-// reporter is wired) a determinate bar with an absolute count. No alt-screen,
-// so bubble tea clears just this footer on quit while durable log lines and
-// the result remain.
+// View renders the inline footer only — one line: spinner, label, (when a
+// reporter is wired) a determinate bar with an absolute count, and an optional
+// note naming the work in flight. No alt-screen, so bubble tea clears just this
+// footer on quit while durable log lines and the result remain.
 func (m model) View() tea.View {
 	var b strings.Builder
 	b.WriteString(m.spinner.View())
@@ -170,6 +170,10 @@ func (m model) View() tea.View {
 			b.WriteString("  ")
 			b.WriteString(c)
 		}
+	}
+	if n := m.lastProg.Note; n != "" {
+		b.WriteString("  ")
+		b.WriteString(styleBody.Render(n))
 	}
 	return tea.NewView(b.String())
 }

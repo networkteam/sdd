@@ -46,6 +46,18 @@ func TestReporter_SetUnit(t *testing.T) {
 	}
 }
 
+func TestReporter_SetNote(t *testing.T) {
+	r := NewReporter()
+	r.SetNote("embedding 4 entries · 37 chunks")
+	p, ok := r.Recv()
+	if !ok {
+		t.Fatal("expected a snapshot")
+	}
+	if p.Note != "embedding 4 entries · 37 chunks" {
+		t.Errorf("note = %q, want the set note", p.Note)
+	}
+}
+
 func TestReporter_RecvAfterCloseReportsDone(t *testing.T) {
 	r := NewReporter()
 	r.SetTotal(3)

@@ -11,14 +11,24 @@ type BuildIndexCmd struct {
 	// an up-to-date row set.
 	Force bool
 
-	// OnBatchStart is called before each embedding round-trip with the entry
-	// IDs in that batch. Optional; intended for progress reporting — the
-	// determinate bar advances per batch as embedding begins, rather than in
-	// one jump at the end.
-	OnBatchStart func(entryIDs []string)
+	// OnPlanned is called once, after the skip pass decides what to embed and
+	// before the first round-trip, with the total chunk count across all
+	// entries to be embedded. Optional; the authoritative progress total —
+	// embedding time scales with chunks, and this count comes from the same
+	// skip logic that produces the work, so the bar's denominator matches what
+	// actually runs.
+	OnPlanned func(totalChunks int)
 
-	// OnEntryIndexed is called once per entry after its rows are upserted.
-	// Optional; intended for CLI progress output.
+	// OnBatchStart is called before each embedding round-trip with the entry
+	// IDs in that batch and their combined chunk count. Optional; names the
+	// work in flight for a live status note. It does not advance the bar — the
+	// bar advances only as entries complete (OnEntryIndexed), so it never reads
+	// done before the work is.
+	OnBatchStart func(entryIDs []string, chunkCount int)
+
+	// OnEntryIndexed is called once per entry after its rows are upserted, with
+	// the entry's chunk count. Optional; advances the progress bar by that many
+	// chunks as work completes.
 	OnEntryIndexed func(entryID string, chunkCount int)
 
 	// OnEntrySkipped is called for entries whose manifest record matches
@@ -36,11 +46,17 @@ type BuildIndexCmd struct {
 // search before the query so cold-start cost on a fresh clone or branch
 // switch is paid lazily rather than requiring an explicit warm-up.
 type LazyFillIndexCmd struct {
-	// OnBatchStart mirrors BuildIndexCmd's callback — fired before each
-	// embedding round-trip with the batch's entry IDs, for progress reporting.
-	OnBatchStart func(entryIDs []string)
+	// OnPlanned mirrors BuildIndexCmd's callback — fired once with the total
+	// chunk count to embed, the authoritative progress total.
+	OnPlanned func(totalChunks int)
 
-	// OnEntryIndexed mirrors BuildIndexCmd's callback.
+	// OnBatchStart mirrors BuildIndexCmd's callback — fired before each
+	// embedding round-trip with the batch's entry IDs and combined chunk count,
+	// naming the work in flight.
+	OnBatchStart func(entryIDs []string, chunkCount int)
+
+	// OnEntryIndexed mirrors BuildIndexCmd's callback — the per-entry chunk
+	// count that advances the bar as work completes.
 	OnEntryIndexed func(entryID string, chunkCount int)
 
 	// OnComplete is called once after lazy-fill finishes, with the count

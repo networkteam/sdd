@@ -205,14 +205,15 @@ func indexCmd() *cli.Command {
 
 			start := time.Now()
 			reporter := cliout.NewReporter()
-			reporter.SetUnit("entries")
-			reporter.SetTotal(total)
+			reporter.SetUnit("chunks")
 
 			var doneIndexed, doneSkipped int
 			var haveSummary bool
 			buildCmd := &command.BuildIndexCmd{
-				Force:        force,
-				OnBatchStart: func(batchIDs []string) { reporter.Add(len(batchIDs)) },
+				Force:          force,
+				OnPlanned:      func(totalChunks int) { reporter.SetTotal(totalChunks) },
+				OnBatchStart:   func(ids []string, chunks int) { reporter.SetNote(embedNote(ids, chunks)) },
+				OnEntryIndexed: func(_ string, chunks int) { reporter.Add(chunks) },
 				OnComplete: func(indexed, skipped int) {
 					doneIndexed, doneSkipped, haveSummary = indexed, skipped, true
 				},
@@ -240,6 +241,19 @@ func indexCmd() *cli.Command {
 			return nil
 		},
 	}
+}
+
+// embedNote renders the live footer note naming the batch currently being
+// embedded — the "what's in flight" the chunk count alone can't convey.
+func embedNote(entryIDs []string, chunks int) string {
+	entryWord, chunkWord := "entries", "chunks"
+	if len(entryIDs) == 1 {
+		entryWord = "entry"
+	}
+	if chunks == 1 {
+		chunkWord = "chunk"
+	}
+	return fmt.Sprintf("embedding %d %s · %d %s", len(entryIDs), entryWord, chunks, chunkWord)
 }
 
 func searchCmd() *cli.Command {
@@ -400,14 +414,15 @@ func searchCmd() *cli.Command {
 			var reporter *cliout.Reporter
 			if willFill {
 				reporter = cliout.NewReporter()
-				reporter.SetUnit("entries")
-				reporter.SetTotal(pending)
+				reporter.SetUnit("chunks")
 			}
 			work := func(ctx context.Context) (*query.SearchResult, error) {
 				if needsVector {
 					lazy := &command.LazyFillIndexCmd{}
 					if reporter != nil {
-						lazy.OnBatchStart = func(batchIDs []string) { reporter.Add(len(batchIDs)) }
+						lazy.OnPlanned = func(totalChunks int) { reporter.SetTotal(totalChunks) }
+						lazy.OnBatchStart = func(ids []string, chunks int) { reporter.SetNote(embedNote(ids, chunks)) }
+						lazy.OnEntryIndexed = func(_ string, chunks int) { reporter.Add(chunks) }
 					}
 					if err := ih.LazyFill(ctx, lazy); err != nil {
 						return nil, err

@@ -8,7 +8,8 @@ import "sync"
 type Progress struct {
 	Done  int
 	Total int
-	Unit  string // optional noun for rendering, e.g. "entries"
+	Unit  string // optional noun for rendering, e.g. "chunks"
+	Note  string // optional live status of the work in flight, e.g. "embedding 4 entries · 37 chunks"
 }
 
 // Ratio returns Done/Total clamped to [0,1], or 0 when Total is unknown.
@@ -36,6 +37,7 @@ type Reporter struct {
 	done  int
 	total int
 	unit  string
+	note  string
 
 	ch        chan Progress
 	closeCh   chan struct{}
@@ -58,10 +60,21 @@ func (r *Reporter) SetTotal(n int) {
 	r.publish()
 }
 
-// SetUnit sets the noun used when rendering the count (e.g. "entries").
+// SetUnit sets the noun used when rendering the count (e.g. "chunks").
 func (r *Reporter) SetUnit(unit string) {
 	r.mu.Lock()
 	r.unit = unit
+	r.mu.Unlock()
+	r.publish()
+}
+
+// SetNote sets a short live description of the work currently in flight
+// (e.g. "embedding 4 entries · 37 chunks") and publishes a snapshot. Pass ""
+// to clear it. Independent of the count so the view can name what's being
+// processed while the determinate bar tracks how much work remains.
+func (r *Reporter) SetNote(note string) {
+	r.mu.Lock()
+	r.note = note
 	r.mu.Unlock()
 	r.publish()
 }
@@ -78,7 +91,7 @@ func (r *Reporter) Add(n int) {
 // mailbox always holds the latest state (latest-wins) rather than a backlog.
 func (r *Reporter) publish() {
 	r.mu.Lock()
-	snap := Progress{Done: r.done, Total: r.total, Unit: r.unit}
+	snap := Progress{Done: r.done, Total: r.total, Unit: r.unit, Note: r.note}
 	r.mu.Unlock()
 
 	select {

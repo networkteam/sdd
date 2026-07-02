@@ -97,7 +97,7 @@ func TestModel_ViewIsInlineFooter(t *testing.T) {
 
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(model)
-	nm, _ = m.Update(progressMsg(cliout.Progress{Done: 3, Total: 10, Unit: "entries"}))
+	nm, _ = m.Update(progressMsg(cliout.Progress{Done: 3, Total: 10, Unit: "chunks", Note: "embedding 2 entries · 5 chunks"}))
 	m = nm.(model)
 
 	view := m.View()
@@ -107,8 +107,11 @@ func TestModel_ViewIsInlineFooter(t *testing.T) {
 	if !strings.Contains(view.Content, "indexing") {
 		t.Errorf("footer missing label; content=%q", view.Content)
 	}
-	if !strings.Contains(view.Content, "3/10 entries") {
+	if !strings.Contains(view.Content, "3/10 chunks") {
 		t.Errorf("footer missing count; content=%q", view.Content)
+	}
+	if !strings.Contains(view.Content, "embedding 2 entries · 5 chunks") {
+		t.Errorf("footer missing note; content=%q", view.Content)
 	}
 	// One footer line — no scrolling log region embedded in the managed view.
 	if strings.Count(view.Content, "\n") > 0 {

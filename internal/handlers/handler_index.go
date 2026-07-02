@@ -93,7 +93,7 @@ func (h *IndexHandler) Build(ctx context.Context, cmd *command.BuildIndexCmd) er
 	if cmd == nil {
 		return errors.New("BuildIndexCmd is required")
 	}
-	return h.indexEntries(ctx, cmd.Force, cmd.OnBatchStart, cmd.OnEntryIndexed, cmd.OnEntrySkipped, cmd.OnComplete)
+	return h.indexEntries(ctx, cmd.Force, cmd.OnPlanned, cmd.OnBatchStart, cmd.OnEntryIndexed, cmd.OnEntrySkipped, cmd.OnComplete)
 }
 
 // LazyFill is the sdd-search prelude — only entries missing from the
@@ -108,7 +108,7 @@ func (h *IndexHandler) LazyFill(ctx context.Context, cmd *command.LazyFillIndexC
 			cmd.OnComplete(indexed)
 		}
 	}
-	return h.indexEntries(ctx, false, cmd.OnBatchStart, cmd.OnEntryIndexed, nil, onComplete)
+	return h.indexEntries(ctx, false, cmd.OnPlanned, cmd.OnBatchStart, cmd.OnEntryIndexed, nil, onComplete)
 }
 
 // indexEntries is the shared core for Build and LazyFill. The
@@ -126,7 +126,7 @@ func (h *IndexHandler) LazyFill(ctx context.Context, cmd *command.LazyFillIndexC
 // The manifest is saved after every bucket so a crash mid-build leaves
 // a resumable state.
 func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
-	onBatchStart func([]string), onIndexed func(string, int), onSkipped func(string), onComplete func(int, int)) error {
+	onPlanned func(int), onBatchStart func([]string, int), onIndexed func(string, int), onSkipped func(string), onComplete func(int, int)) error {
 
 	logger := slogutils.FromContext(ctx)
 
@@ -172,6 +172,17 @@ func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 			return fmt.Errorf("deriving chunks for %s: %w", e.ID, err)
 		}
 		work = append(work, entryWithChunks{entry: e, hash: hash, chunks: chunks})
+	}
+
+	// The authoritative progress total: total chunks across the work set,
+	// from the same skip logic that produced it — so the bar's denominator
+	// can't drift from what actually embeds. Reported before any round-trip.
+	totalChunks := 0
+	for _, w := range work {
+		totalChunks += len(w.chunks)
+	}
+	if onPlanned != nil {
+		onPlanned(totalChunks)
 	}
 
 	if len(work) == 0 {
@@ -227,18 +238,23 @@ func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 // the manifest entry follows.
 func (h *IndexHandler) indexBucket(ctx context.Context, bucket []entryWithChunks,
 	manifest *index.Manifest, fingerprint string,
-	onBatchStart func([]string), onIndexed func(string, int)) error {
+	onBatchStart func([]string, int), onIndexed func(string, int)) error {
 
 	logger := slogutils.FromContext(ctx)
 
-	// Report the batch before the embedding round-trip so the progress bar
-	// advances as work begins, not only when it returns.
+	// Announce the batch (entry IDs + combined chunk count) before the
+	// embedding round-trip so the view can name what's in flight while the
+	// call runs. This does not advance the bar — that happens per entry as
+	// work completes (report → onIndexed), so the bar never reads done before
+	// the work is.
 	bucketIDs := make([]string, len(bucket))
+	bucketChunks := 0
 	for i, w := range bucket {
 		bucketIDs[i] = w.entry.ID
+		bucketChunks += len(w.chunks)
 	}
 	if onBatchStart != nil {
-		onBatchStart(bucketIDs)
+		onBatchStart(bucketIDs, bucketChunks)
 	}
 
 	// report logs the entry at Info (the operational record routed to the
