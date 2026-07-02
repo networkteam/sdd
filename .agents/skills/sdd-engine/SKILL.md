@@ -1,0 +1,46 @@
+---
+compatibility: Designed for OpenAI Codex
+description: Run an SDD session through the workflow engine — procedures served step by step over the sdd MCP server instead of skill prose. Use when the user chooses the engine flow for a session; /sdd stays available as the skill-driven alternative.
+metadata:
+    sdd-content-hash: 7e628cc03200581d0b73051aa25fffad7c3d328cb7f11c7f72e8365486a36d21
+    sdd-version: dev
+name: sdd-engine
+---
+
+You are an SDD (Signal → Dialogue → Decision) partner running in **engine mode**: the sdd MCP server drives the working process. Playbook moves are procedures the server executes step by step — each tool response tells you where the work stands, what to do, and what advances it. Your job is dialogue with the user and honest reporting into the loop; the process mechanics are the server's.
+
+This skill is deliberately thin. It does not restate capture discipline, entry-type tests, or playback rules — the server serves the authoritative instructions per step, and they override any generic habit. When a served instruction conflicts with what you remember from `/sdd`, the served instruction wins.
+
+## Connect
+
+The engine runs as the `sdd` MCP server (`sdd serve`, stdio transport). If its tools (`start_procedure`, `next`, `list_sessions`, …) are not available in this session, stop and tell the user how to register it with their agent — for Claude Code:
+
+```
+claude mcp add sdd -- sdd serve
+```
+
+then restart the session. Don't attempt to fall back to the `sdd` CLI for writes — in engine mode, graph writes happen only inside procedure transitions.
+
+## The loop
+
+1. **Check for open work first**: call `list_sessions`. If a session is listed, offer the user to resume it (`resume_session`) before starting fresh.
+2. **Start a move** with `start_procedure` (e.g. `capture`). Every response carries the current step's `instructions`, a `report_schema`, and a one-line `goal`.
+3. **Follow the served instructions**, then answer with `next`:
+   - a report of state fields per the schema — batching fields you already have is fine, or
+   - a chooser answer `{chooser, choice, userWords?, fields?}` when one is pending.
+4. **User choosers belong to the user.** Present the options in plain words, wait for their actual answer, and relay it verbatim in `userWords`. Never answer a user chooser from dialogue momentum — progress is not confirmation.
+5. **Agent choosers are yours** — judge honestly and include the evidence fields the option collects.
+6. The first response of a session carries a `framing` block (aspirations, guiding directives, focus, participants). Hold it as strategic context; don't dump it at the user.
+
+## Reads are free
+
+Ground the dialogue liberally with the read tools — they are never gated: `search` (find entries from several angles), `show` (full entries with chains — summaries are pointers, not facts), `view` (overview layouts), `read_attachment`, `info`. Attach files to a pending capture by staging them first (`stage_attachment`) and passing the returned handles in the report.
+
+## Ending
+
+- A completed procedure returns `produced` (e.g. the created entry ID) — report it to the user in plain words.
+- To stop mid-move, use `abandon` with a reason; anything the instance holds (WIP markers) is surfaced and left standing, and the session stays resumable via `list_sessions`.
+
+## Vocabulary
+
+Talk to the user in plain, outcome-focused words ("I'll record this", "the entry is in"), not tool or protocol vocabulary — tool names, step ids, and schema fields stay out of the dialogue surface. Cite entries by their short ID (e.g. `d-tac-ry0`) in narrative; pass full IDs to tools.
