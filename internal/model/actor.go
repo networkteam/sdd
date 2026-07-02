@@ -35,58 +35,26 @@ func (c *ActorChain) HasCanonical(name string) bool {
 // Pure computation — no I/O. Returned in deterministic order by head ID.
 func (g *Graph) ActorChains() []*ActorChain {
 	superseded := g.supersededSet()
-	byRoot := make(map[string]*ActorChain)
 
-	rootOf := func(e *Entry) *Entry {
-		current := e
-		for {
-			var parent *Entry
-			for _, id := range current.Supersedes {
-				p, ok := g.ByID[id]
-				if ok && p.IsActor() {
-					parent = p
-					break
-				}
+	result := make([]*ActorChain, 0)
+	for _, group := range g.chainGroups((*Entry).IsActor) {
+		chain := &ActorChain{
+			Entries:      group,
+			canonicalSet: make(map[string]bool),
+		}
+		for _, e := range group {
+			if e.Canonical != "" && !chain.canonicalSet[e.Canonical] {
+				chain.canonicalSet[e.Canonical] = true
+				chain.CanonicalHistory = append(chain.CanonicalHistory, e.Canonical)
 			}
-			if parent == nil {
-				return current
-			}
-			current = parent
 		}
-	}
-
-	for _, e := range g.Entries {
-		if !e.IsActor() {
-			continue
-		}
-		root := rootOf(e)
-		chain, ok := byRoot[root.ID]
-		if !ok {
-			chain = &ActorChain{canonicalSet: make(map[string]bool)}
-			byRoot[root.ID] = chain
-		}
-		chain.Entries = append(chain.Entries, e)
-		if e.Canonical != "" && !chain.canonicalSet[e.Canonical] {
-			chain.canonicalSet[e.Canonical] = true
-			chain.CanonicalHistory = append(chain.CanonicalHistory, e.Canonical)
-		}
-	}
-
-	for _, chain := range byRoot {
-		sort.SliceStable(chain.Entries, func(i, j int) bool {
-			return chain.Entries[i].Time.Before(chain.Entries[j].Time)
-		})
 		// Head = the one not superseded by any other entry.
-		for _, e := range chain.Entries {
+		for _, e := range group {
 			if !superseded[e.ID] {
 				chain.Head = e
 				break
 			}
 		}
-	}
-
-	result := make([]*ActorChain, 0, len(byRoot))
-	for _, chain := range byRoot {
 		result = append(result, chain)
 	}
 	sort.Slice(result, func(i, j int) bool {

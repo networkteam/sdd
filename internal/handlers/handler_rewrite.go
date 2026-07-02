@@ -43,6 +43,9 @@ func (h *Handler) RewriteEntry(ctx context.Context, cmd *command.RewriteEntryCmd
 	if !ok {
 		return fmt.Errorf("entry not found: %s", cmd.EntryID)
 	}
+	if target.Embedded {
+		return fmt.Errorf("%s is an embedded base entry — it ships with the binary and cannot be rewritten; supersede it through capture instead", resolvedID)
+	}
 
 	newID, err := model.RewriteID(resolvedID, cmd.NewType)
 	if err != nil {

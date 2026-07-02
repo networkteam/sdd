@@ -61,7 +61,7 @@ var LayerFromAbbrev = map[string]Layer{
 // values depend on the entry's Type:
 //
 //   - Signal kinds: gap (default), fact, question, insight, done, actor, annotation
-//   - Decision kinds: directive (default), activity, plan, contract, aspiration, role, focus
+//   - Decision kinds: directive (default), activity, plan, contract, aspiration, role, focus, procedure
 //
 // Empty Kind on a new entry is replaced by the type's default during capture.
 type Kind string
@@ -84,6 +84,7 @@ const (
 	KindAspiration Kind = "aspiration"
 	KindRole       Kind = "role"
 	KindFocus      Kind = "focus"
+	KindProcedure  Kind = "procedure"
 )
 
 // signalKinds is the set of kinds valid on type: signal entries.
@@ -106,6 +107,7 @@ var decisionKinds = map[Kind]bool{
 	KindAspiration: true,
 	KindRole:       true,
 	KindFocus:      true,
+	KindProcedure:  true,
 }
 
 // IsValidKindForType reports whether k is an allowed kind for the given type.
@@ -195,9 +197,13 @@ type Entry struct {
 	Intent  Intent
 	Content string
 	Time    time.Time
-	// Canonical and Aliases are only meaningful on kind: actor signals.
-	// Canonical is the write-once identity string used in participants fields;
-	// Aliases are read-side conveniences for mining and dialogue comprehension.
+	// Canonical is only meaningful on kind: actor signals and kind: procedure
+	// decisions. On an actor it is the write-once identity string used in
+	// participants fields; on a procedure it is the move's stable identity
+	// (capture, engage, …) everything binds to instead of the entry ID. Each
+	// kind's canonicals form their own namespace, but the write-once-across-
+	// chains rule is the same. Aliases are only meaningful on actors —
+	// read-side conveniences for mining and dialogue comprehension.
 	Canonical string
 	Aliases   []string
 	// Actor is only meaningful on kind: role decisions. It names the canonical
@@ -234,6 +240,11 @@ type Entry struct {
 	Summary     string    // LLM-generated summary: this entry + direct relationships
 	SummaryHash string    // hex-encoded hash of the rendered summary prompt inputs
 	Warnings    []Warning // validation issues found during graph construction
+	// Embedded marks a base entry compiled into the sdd binary (base
+	// procedures) rather than loaded from the graph directory. Set by the
+	// loader, never serialized. Write-side surfaces (summary regeneration,
+	// summary-hash lint) skip embedded entries — there is no file to write.
+	Embedded bool
 }
 
 // IsContract returns true if this decision is a standing constraint.
@@ -259,6 +270,13 @@ func (e *Entry) IsActor() bool {
 // IsRole returns true if this decision commits a participation pattern.
 func (e *Entry) IsRole() bool {
 	return e.Type == TypeDecision && e.Kind == KindRole
+}
+
+// IsProcedure returns true if this decision defines a playbook move — a
+// canonical-named, process-pinned state machine executed by the workflow
+// engine.
+func (e *Entry) IsProcedure() bool {
+	return e.Type == TypeDecision && e.Kind == KindProcedure
 }
 
 // IsSettled returns true if this is a directive born terminal via

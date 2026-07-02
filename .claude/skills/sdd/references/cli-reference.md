@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 074ccce91775b9607f18d8060507c66a11d846468ccf7bf2824672d256a78987
+sdd-content-hash: b364c38c5605110795e3feada5552a2add7b1ab6f9970ee07a8e54f765f923a5
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -222,8 +222,8 @@ Depth is controlled per direction by `--up` / `--down` (see the `sdd show` entry
 - `--participants p1,p2` — participant names
 - `--confidence high|medium|low` — confidence level
 - `--intent pending|guiding|settled` — directive lifecycle posture (kind: directive only). **Required on every directive capture** — no default; rejected on any other kind. `pending` demands follow-up, `guiding` is standing context that shapes later decisions, `settled` is born-terminal (needs no closing edge; a medium pre-flight finding fires if the body doesn't justify the terminality).
-- `--kind <kind>` — signals: gap (default), fact, question, insight, done, actor, annotation; decisions: directive (default), activity, plan, contract, aspiration, role, focus
-- `--canonical name` — frontmatter `canonical` (kind: actor only)
+- `--kind <kind>` — signals: gap (default), fact, question, insight, done, actor, annotation; decisions: directive (default), activity, plan, contract, aspiration, role, focus, procedure
+- `--canonical name` — frontmatter `canonical` (kind: actor and kind: procedure — actor identity or playbook-move identity)
 - `--aliases a,b` — frontmatter `aliases` (kind: actor only)
 - `--actor canonical` — frontmatter `actor` (kind: role only)
 - `--topics LABEL[,LABEL...]` — inline `topics:` labels (any kind). CSV form. Each label is a topic-path string (`/`-joined components, e.g. `infrastructure/cli`).

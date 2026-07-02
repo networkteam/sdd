@@ -24,6 +24,10 @@ import (
 //     kind: role decision, the Actor value must match the current head
 //     canonical of an active chain AND Refs must include that head entry's
 //     ID.
+//   - procedure-canonical-reused: for a new kind: procedure decision, the
+//     canonical must not appear in any procedure chain other than the chain
+//     the new entry extends — the actor write-once rule applied to the
+//     procedure canonical namespace.
 //   - ref-kind-missing + ref-kind-invalid (d-tac-cs0 AC 8): every ref on a
 //     new entry must carry a kind from the closed set, rejecting the legacy
 //     `unknown` sentinel which is reserved for read-side bare-string round-
@@ -55,6 +59,9 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph) []query.Finding
 	}
 	if entry.IsRole() {
 		findings = append(findings, roleMechanicalFindings(entry, graph)...)
+	}
+	if entry.IsProcedure() {
+		findings = append(findings, procedureWriteOnceFindings(entry, graph)...)
 	}
 
 	return findings
@@ -279,6 +286,72 @@ func roleMechanicalFindings(entry *model.Entry, graph *model.Graph) []query.Find
 		})
 	}
 	return findings
+}
+
+// procedureWriteOnceFindings enforces write-once for procedure canonicals: a
+// new procedure decision's canonical must not appear in any procedure chain
+// other than the chain the new entry extends via its supersedes links.
+// Within-chain reuse is fine; closed chains do not free their canonicals.
+// Procedure canonicals are their own namespace — actor canonicals are not
+// consulted.
+func procedureWriteOnceFindings(entry *model.Entry, graph *model.Graph) []query.Finding {
+	canonical := strings.TrimSpace(entry.Canonical)
+	if canonical == "" {
+		return nil // missing canonical reported by frontmatter validator
+	}
+
+	parentChain := parentProcedureChain(entry, graph)
+
+	for _, chain := range graph.ProcedureChains() {
+		if !chain.HasCanonical(canonical) {
+			continue
+		}
+		if parentChain != nil && sameProcedureChain(chain, parentChain) {
+			continue
+		}
+		headID := "<unknown>"
+		if chain.Head != nil {
+			headID = chain.Head.ID
+		}
+		return []query.Finding{{
+			Severity:    query.SeverityHigh,
+			Category:    "procedure-canonical-reused",
+			Observation: fmt.Sprintf("canonical %q is already used by the procedure chain with head %s (write-once across chains) — supersede that chain's head to revise the move instead", canonical, headID),
+		}}
+	}
+	return nil
+}
+
+// parentProcedureChain returns the procedure chain a new procedure entry
+// extends via its Supersedes links. Returns nil when the entry does not
+// supersede any existing procedure (starts a new chain).
+func parentProcedureChain(entry *model.Entry, graph *model.Graph) *model.ProcedureChain {
+	for _, sid := range entry.Supersedes {
+		parent, ok := graph.ByID[sid]
+		if !ok || !parent.IsProcedure() {
+			continue
+		}
+		for _, chain := range graph.ProcedureChains() {
+			for _, e := range chain.Entries {
+				if e.ID == parent.ID {
+					return chain
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// sameProcedureChain reports whether two chain pointers refer to the same
+// procedure chain, resolved via head ID like sameChain for actors.
+func sameProcedureChain(a, b *model.ProcedureChain) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Head == nil || b.Head == nil {
+		return false
+	}
+	return a.Head.ID == b.Head.ID
 }
 
 // parentActorChain returns the actor chain a new actor entry extends via

@@ -32,6 +32,11 @@ func (f *Finder) Lint(q query.LintQuery) (*query.LintResult, error) {
 // and adds warnings to entries where the hash doesn't match.
 func validateSummaryHashes(graph *model.Graph) {
 	for _, entry := range graph.Entries {
+		// Embedded base entries ship their summary with the binary — there
+		// is no file to regenerate, so staleness doesn't apply.
+		if entry.Embedded {
+			continue
+		}
 		if entry.Summary == "" && entry.SummaryHash == "" {
 			entry.Warnings = append(entry.Warnings, model.Warning{
 				Field:   "summary",
