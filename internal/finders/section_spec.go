@@ -82,6 +82,13 @@ type sectionSpec struct {
 	prefixSet   bool
 	prefixValue string
 
+	// brief switches entry-line rendering to the compact form: identity
+	// qualifiers plus the first summary sentence, no attribute segments.
+	// Composes with the entry-line renders (as-list, as-grouped,
+	// as-focus-block, as-participants-block); rejected for as-counts,
+	// whose rows carry no summaries.
+	brief bool
+
 	// Render terminator — required.
 	render string
 }
@@ -133,6 +140,8 @@ func (s *sectionSpec) rejectGraphPrimitivesForWip() error {
 		return fmt.Errorf("source(wip) does not support not(layer(...)); markers are not graph entries")
 	case !s.excludeTopicPrefix.IsZero():
 		return fmt.Errorf("source(wip) does not support not(topic(...)); markers do not carry topics")
+	case s.brief:
+		return fmt.Errorf("source(wip) does not support brief; marker rows have no summary to shorten")
 	}
 	return nil
 }
@@ -154,6 +163,8 @@ func (s *sectionSpec) validateMutualExclusion() error {
 		return fmt.Errorf("as-counts is mutually exclusive with expand; it produces per-topic count rows, not entry rows")
 	case s.render == "as-counts" && s.rank != nil:
 		return fmt.Errorf("as-counts is mutually exclusive with rank; topic-count rows carry their own ordering (count, then heat)")
+	case s.render == "as-counts" && s.brief:
+		return fmt.Errorf("as-counts is mutually exclusive with brief; topic-count rows carry no summary to shorten")
 	case s.render == "as-counts" && s.pageN >= 0:
 		return fmt.Errorf("as-counts is mutually exclusive with n; n truncates entries before aggregation, producing wrong counts — narrow the entry set with filters instead")
 	case s.groupField != "" && s.rank != nil:

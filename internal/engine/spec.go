@@ -22,6 +22,9 @@ type Spec struct {
 	EntryID string
 	// Canonical is the procedure's stable identity (capture, engage, …).
 	Canonical string
+	// Class is the procedure's execution role: a move is started through the
+	// loop, a shell is a session base auto-started by the session door.
+	Class model.ProcedureClass
 	// Params are the typed inputs accepted at start_procedure.
 	Params map[string]VarDecl
 	// State is the report-writable variable store declaration. Engine-
@@ -100,6 +103,11 @@ type Step struct {
 	Guard       *GuardExpr
 	Op          string
 	Transitions []Transition
+	// Goal overrides the serve's generic per-chooser goal line for this
+	// step. Built for resident steps whose standing posture the generic
+	// wording would misstate (a session shell's junction is "dialogue
+	// freely", not "put the choice to the user").
+	Goal string
 }
 
 // Terminal transition targets. A procedure ends by transitioning to one of
@@ -151,6 +159,7 @@ type stepYAML struct {
 	Guard       string           `yaml:"guard"`
 	Op          string           `yaml:"op"`
 	Transitions []transitionYAML `yaml:"transitions"`
+	Goal        string           `yaml:"goal"`
 }
 
 // decodeStrict re-encodes a retained YAML node and decodes it with unknown
@@ -184,6 +193,7 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 	spec := &Spec{
 		EntryID:   entry.ID,
 		Canonical: entry.Canonical,
+		Class:     model.ProcedureClassMove,
 		Params:    map[string]VarDecl{},
 		State:     map[string]VarDecl{},
 		StepByID:  map[string]*Step{},
@@ -193,6 +203,14 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 	var problems []string
 	addProblem := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
+	}
+
+	switch entry.Class {
+	case "", model.ProcedureClassMove:
+	case model.ProcedureClassShell:
+		spec.Class = model.ProcedureClassShell
+	default:
+		addProblem("class: unknown class %q (move or shell)", entry.Class)
 	}
 
 	raw := entry.ProcedureSpec
@@ -314,6 +332,7 @@ func parseStep(sy stepYAML, index int) (*Step, []string) {
 		Render:  sy.Render,
 		Op:      sy.Op,
 		Chooser: ChooserGate,
+		Goal:    sy.Goal,
 	}
 
 	switch sy.Chooser {

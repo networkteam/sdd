@@ -509,6 +509,10 @@ func newCmd() *cli.Command {
 				Usage: "Canonical identity name (kind: actor and kind: procedure) — written into frontmatter",
 			},
 			&cli.StringFlag{
+				Name:  "class",
+				Usage: "Procedure execution role (kind: procedure only): move (default) or shell — shells are session bases auto-started by the session door",
+			},
+			&cli.StringFlag{
 				Name:  "aliases",
 				Usage: "Comma-separated aliases (kind: actor only) — read-side convenience for mining and comprehension",
 			},
@@ -680,6 +684,7 @@ func newCmd() *cli.Command {
 				Confidence:       confidence,
 				Canonical:        strings.TrimSpace(cmd.String("canonical")),
 				Aliases:          splitCSV(cmd.String("aliases")),
+				Class:            strings.TrimSpace(cmd.String("class")),
 				Actor:            strings.TrimSpace(cmd.String("actor")),
 				TopicLabels:      splitCSV(cmd.String("topics")),
 				AnnotationTopics: annotationTopics,

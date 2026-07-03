@@ -42,6 +42,35 @@ func EntryLineWithScore(w io.Writer, e *model.Entry, g *model.Graph, score float
 	entryLineCore(w, e, g, score)
 }
 
+// EntryLineBrief writes the compact entry line the `brief` layout modifier
+// selects: identity qualifiers plus the first summary sentence, with every
+// attribute segment (confidence, intent, participants, status, score,
+// topics) dropped. Built for injection surfaces where full lines cost
+// context without informing the decision at hand.
+//
+// Format: `<id> <layer> <kind>? <type> <first summary sentence>`
+func EntryLineBrief(w io.Writer, e *model.Entry, g *model.Graph) {
+	var sb strings.Builder
+	sb.WriteString("  ")
+	sb.WriteString(e.ID)
+	sb.WriteString(" ")
+	sb.WriteString(e.LayerLabel())
+	if e.Kind != "" {
+		sb.WriteString(" ")
+		sb.WriteString(string(e.Kind))
+	}
+	sb.WriteString(" ")
+	sb.WriteString(e.TypeLabel())
+	sb.WriteString(" ")
+	desc := e.Summary
+	if desc == "" {
+		desc = e.ShortContent(200)
+	}
+	sb.WriteString(firstSentence(desc))
+	sb.WriteString("\n")
+	fmt.Fprint(w, sb.String())
+}
+
 func entryLineCore(w io.Writer, e *model.Entry, g *model.Graph, score float64) {
 	var sb strings.Builder
 	sb.WriteString("  ")

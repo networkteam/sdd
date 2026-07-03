@@ -206,6 +206,11 @@ type Entry struct {
 	// read-side conveniences for mining and dialogue comprehension.
 	Canonical string
 	Aliases   []string
+	// Class is only meaningful on kind: procedure decisions. It classifies
+	// the procedure's execution role: a move (the default when empty) is a
+	// playbook step started through the engine loop; a shell is a session
+	// base auto-started by the session door and refused by start_procedure.
+	Class ProcedureClass
 	// Actor is only meaningful on kind: role decisions. It names the canonical
 	// of the actor-identity chain the role binds to. Role status derives from
 	// the actor chain's canonical history (see Graph.RoleStatus).
@@ -286,6 +291,20 @@ func (e *Entry) IsProcedure() bool {
 	return e.Type == TypeDecision && e.Kind == KindProcedure
 }
 
+// ProcedureClass classifies a procedure's execution role. See Entry.Class.
+type ProcedureClass string
+
+const (
+	ProcedureClassMove  ProcedureClass = "move"
+	ProcedureClassShell ProcedureClass = "shell"
+)
+
+// IsShellProcedure returns true if this procedure is a session shell —
+// auto-started by the session door rather than startable as a move.
+func (e *Entry) IsShellProcedure() bool {
+	return e.IsProcedure() && e.Class == ProcedureClassShell
+}
+
 // IsSettled returns true if this is a directive born terminal via
 // intent: settled — a decision that needs no follow-up and carries no closing
 // edge. Intent is only meaningful on directives, so the kind guard keeps a
@@ -314,6 +333,7 @@ type frontmatter struct {
 	Intent       string            `yaml:"intent,omitempty"`
 	Canonical    string            `yaml:"canonical,omitempty"`
 	Aliases      []string          `yaml:"aliases,omitempty"`
+	Class        string            `yaml:"class,omitempty"`
 	Actor        string            `yaml:"actor,omitempty"`
 	Topics       []AnnotationTopic `yaml:"topics,omitempty"`
 	FocusActors  []string          `yaml:"actors,omitempty"`
@@ -375,6 +395,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Intent:       Intent(fm.Intent),
 		Canonical:    fm.Canonical,
 		Aliases:      fm.Aliases,
+		Class:        ProcedureClass(fm.Class),
 		Actor:        fm.Actor,
 		FocusActors:  fm.FocusActors,
 		FocusWhen:    fm.FocusWhen,
@@ -585,6 +606,7 @@ func FormatFrontmatter(e *Entry) string {
 		Intent:       string(e.Intent),
 		Canonical:    e.Canonical,
 		Aliases:      e.Aliases,
+		Class:        string(e.Class),
 		Actor:        e.Actor,
 		FocusActors:  e.FocusActors,
 		FocusWhen:    e.FocusWhen,

@@ -7,11 +7,11 @@ import (
 	"github.com/networkteam/sdd/internal/engine"
 )
 
-// Open-threads blocks surface parked work at junction points only — procedure
-// completion (terminal serves), session entry, resume, and abandon — never on
-// mid-procedure serves. The property that a user is not reminded of other
-// work after every interview answer holds by construction: no code path
-// attaches the block to a running serve inside a procedure.
+// Open-threads blocks ride base (session shell) serves only — the junction
+// the dialogue stands on before, between, and after moves. Mid-procedure
+// serves never carry one, so a user is not reminded of other work after
+// every interview answer; that property holds by construction because the
+// only attach point is the shell instance's serve.
 
 // openThreadsIntro is the base instruction served the first time a block
 // appears to the bound agent consumer; later blocks carry the one-line
@@ -31,7 +31,7 @@ func (s *Server) openThreadsBlock(ss *shellSession, includeOwnThreads bool) stri
 
 	if includeOwnThreads && ss.sess != nil {
 		for _, inst := range ss.sess.Instances() {
-			if inst.Status != engine.StatusRunning {
+			if inst.Status != engine.StatusRunning || inst.ID == ss.shellInstance {
 				continue
 			}
 			lines = append(lines, fmt.Sprintf("- (this dialogue) %s: %s at %s", inst.ID, inst.Spec.Canonical, inst.Step))

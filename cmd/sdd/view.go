@@ -110,6 +110,10 @@ Implemented pipeline vocabulary:
                            focus target with assigned actors is classified
                            "stalled". Default 1.0; applies only to
                            as-focus-block sections.
+    brief                  Compact entry lines: identity plus the first
+                           summary sentence, no attribute segments. Composes
+                           with the entry-line renders; rejected for
+                           as-counts.
 
   Render (terminator — required):
     as-list                One line per entry

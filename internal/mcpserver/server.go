@@ -115,9 +115,72 @@ func New(opts Options) (*Server, error) {
 }
 
 // RunStdio serves a single local connection over stdin/stdout until the
-// transport closes or ctx is cancelled.
+// transport closes or ctx is cancelled. The post-run sweep applies the
+// leave rule synchronously — the per-connection watcher goroutine would
+// race process exit on stdio.
 func (s *Server) RunStdio(ctx context.Context) error {
-	return s.mcp.Run(ctx, &mcp.StdioTransport{})
+	err := s.mcp.Run(ctx, &mcp.StdioTransport{})
+	for _, ms := range s.sessions.connections() {
+		s.handleDisconnect(ms)
+	}
+	return err
+}
+
+// watchDisconnect spawns (once per connection) a goroutine applying the
+// leave rule when the client goes away: a quiescent session auto-ends — a
+// closed tab leaves no corpse — while open moves park for resume.
+func (s *Server) watchDisconnect(ms *mcp.ServerSession) {
+	if !s.sessions.markWatched(ms) {
+		return
+	}
+	go func() {
+		_ = ms.Wait()
+		s.handleDisconnect(ms)
+	}()
+}
+
+// handleDisconnect unbinds the connection and applies the leave rule to
+// whatever session it held. Idempotent — the watcher and the stdio sweep
+// may both fire.
+func (s *Server) handleDisconnect(ms *mcp.ServerSession) {
+	s.leaveSession(s.sessions.unbind(ms))
+}
+
+// leaveSession applies the leave rule to a session a connection stepped
+// away from (disconnect or resume-switch): still bound elsewhere → live,
+// untouched; open moves → parked, resumable; quiescent (shell only) →
+// auto-ended, since un-logged free dialogue leaves nothing to resume.
+func (s *Server) leaveSession(ss *shellSession) {
+	if ss == nil {
+		return
+	}
+	if s.sessions.liveIDs()[ss.id] {
+		return
+	}
+	if !sessionQuiescent(ss) {
+		return
+	}
+	if ss.sess != nil && ss.shellInstance != "" {
+		if inst, ok := ss.sess.Instance(ss.shellInstance); ok && inst.Status == engine.StatusRunning {
+			_ = ss.sess.Abandon(ss.shellInstance, "auto-concluded: session left with no open work")
+		}
+	}
+	ss.close()
+	s.sessions.drop(ss.id)
+}
+
+// sessionQuiescent reports whether nothing but the session shell is
+// running — the state in which leaving a session ends it.
+func sessionQuiescent(ss *shellSession) bool {
+	if ss.sess == nil {
+		return true
+	}
+	for _, inst := range ss.sess.Instances() {
+		if inst.ID != ss.shellInstance && inst.Status == engine.StatusRunning {
+			return false
+		}
+	}
+	return true
 }
 
 // RunHTTP serves streamable HTTP at addr until ctx is cancelled. authToken

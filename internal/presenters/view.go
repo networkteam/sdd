@@ -38,13 +38,13 @@ func renderSection(w io.Writer, g *model.Graph, section query.SectionResult) {
 		if !ok {
 			return
 		}
-		renderAsList(w, g, flat)
+		renderAsList(w, g, flat, section.Brief)
 	case "as-grouped":
 		grouped, ok := section.Data.(model.Grouped)
 		if !ok {
 			return
 		}
-		renderAsGrouped(w, g, grouped)
+		renderAsGrouped(w, g, grouped, section.Brief)
 	case "as-counts":
 		counts, ok := section.Data.(model.Counts)
 		if !ok {
@@ -56,13 +56,13 @@ func renderSection(w io.Writer, g *model.Graph, section query.SectionResult) {
 		if !ok {
 			return
 		}
-		renderAsFocusBlock(w, g, block)
+		renderAsFocusBlock(w, g, block, section.Brief)
 	case "as-participants-block":
 		block, ok := section.Data.(model.ParticipantsBlock)
 		if !ok {
 			return
 		}
-		renderAsParticipantsBlock(w, g, block)
+		renderAsParticipantsBlock(w, g, block, section.Brief)
 	case "as-wip-list":
 		list, ok := section.Data.(model.WipList)
 		if !ok {

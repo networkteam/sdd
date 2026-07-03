@@ -17,15 +17,28 @@ import (
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// framingLayout renders the session framing an /sdd skill session gets
-// injected at start: aspirations, guiding directives, active focus, and
-// participants.
-const framingLayout = `aspirations,` +
-	`kind(directive):intent(guiding):active:name("Guiding directives"):as-list,` +
-	`focus,` +
-	`participants`
+// framingLayout renders the session framing injected once per consumer:
+// aspirations, guiding directives, active focus, and participants. Brief
+// rendering plus heat-ranked caps keep the block a few KB — full summaries
+// measured ~21KB, and framing is orientation, not decision material
+// (d-tac-bfc's carve-out of the framing share of s-tac-4hh).
+const framingLayout = `aspirations:rank(heat(exp-14d)):n(8):brief,` +
+	`kind(directive):intent(guiding):active:rank(heat(exp-14d)):n(10):name("Guiding directives"):brief:as-list,` +
+	`focus:brief,` +
+	`participants:brief`
+
+// defaultShellCanonical is the shell procedure start_session opens when the
+// caller names none — the interactive user-dialogue base. Projects override
+// conduct by superseding its chain; future shells (autonomous sessions)
+// enter through the same door with an explicit shell param.
+const defaultShellCanonical = "user-dialogue"
 
 // --- the loop -------------------------------------------------------------
+
+type StartSessionArgs struct {
+	Shell string `json:"shell,omitempty" jsonschema:"shell procedure to open the session with, by canonical; defaults to user-dialogue"`
+	Label string `json:"label,omitempty" jsonschema:"short single-line subject label for the session; set it early, update when the subject sharpens"`
+}
 
 type StartProcedureArgs struct {
 	Canonical string         `json:"canonical" jsonschema:"the procedure to start, by its stable name (e.g. capture)"`
@@ -48,10 +61,10 @@ type AbandonArgs struct {
 }
 
 type AbandonResult struct {
-	Abandoned    bool     `json:"abandoned"`
-	HeldMarkers  []string `json:"held_markers,omitempty" jsonschema:"WIP markers the instance holds; left standing — resume later or close via groom"`
-	Instructions string   `json:"instructions,omitempty"`
-	OpenThreads  string   `json:"open_threads,omitempty" jsonschema:"parked work at this junction: this dialogue's other threads, then other open dialogues"`
+	Abandoned    bool       `json:"abandoned"`
+	HeldMarkers  []string   `json:"held_markers,omitempty" jsonschema:"WIP markers the instance holds; left standing — resume later or close via groom"`
+	Instructions string     `json:"instructions,omitempty"`
+	Base         *BaseServe `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue now stands"`
 }
 
 type ChooserOptionResult struct {
@@ -79,7 +92,25 @@ type ServeResult struct {
 	PendingChooser *ChooserResult `json:"pending_chooser,omitempty"`
 	Produced       map[string]any `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
 	Framing        string         `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); delivered once per agent session"`
-	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"parked work, present at junctions only (session entry, completion, abandon): this dialogue's other threads, then other open dialogues"`
+	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"open work, carried on the session shell's serves only: this dialogue's other threads, then other parked dialogues"`
+	Base           *BaseServe     `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue lands now that this move has ended"`
+}
+
+// BaseServe is the session shell's serve as nested into landing responses
+// (move completion, abandon). Same shape as ServeResult minus the nesting
+// field — the shell never lands on itself, and the omission keeps the JSON
+// schema acyclic.
+type BaseServe struct {
+	Session        string         `json:"session"`
+	Instance       string         `json:"instance"`
+	Procedure      string         `json:"procedure"`
+	Status         string         `json:"status"`
+	Step           string         `json:"step,omitempty"`
+	Goal           string         `json:"goal"`
+	Instructions   string         `json:"instructions,omitempty"`
+	PendingChooser *ChooserResult `json:"pending_chooser,omitempty"`
+	Framing        string         `json:"framing,omitempty"`
+	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"open work: this dialogue's other threads, then other parked dialogues"`
 }
 
 // --- sessions & staging ----------------------------------------------------
@@ -98,10 +129,9 @@ type ResumeSessionResult struct {
 	Session      string        `json:"session"`
 	Participant  string        `json:"participant,omitempty"`
 	Label        string        `json:"label,omitempty" jsonschema:"the session's subject label, when one was recorded"`
-	Open         []ServeResult `json:"open_instances" jsonschema:"current serve for every running instance"`
+	Open         []ServeResult `json:"open_instances" jsonschema:"current serve for every running instance; the session shell's serve carries the open-threads block"`
 	Framing      string        `json:"framing,omitempty"`
 	Instructions string        `json:"instructions,omitempty"`
-	OpenThreads  string        `json:"open_threads,omitempty" jsonschema:"other open dialogues beyond this one"`
 }
 
 type StageAttachmentArgs struct {
@@ -129,6 +159,7 @@ type SearchArgs struct {
 
 type SearchResult struct {
 	Results string `json:"results" jsonschema:"matching entries with citations"`
+	Hint    string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 type ViewArgs struct {
@@ -137,6 +168,7 @@ type ViewArgs struct {
 
 type ViewResult struct {
 	Sections string `json:"sections"`
+	Hint     string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 type ShowArgs struct {
@@ -147,6 +179,7 @@ type ShowArgs struct {
 
 type ShowResult struct {
 	Entries string `json:"entries"`
+	Hint    string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 type ReadAttachmentArgs struct {
@@ -165,6 +198,7 @@ type ReadAttachmentResult struct {
 	More       bool     `json:"more"`
 	Available  []string `json:"available" jsonschema:"the entry's attachment filenames"`
 	Path       string   `json:"path,omitempty" jsonschema:"absolute filesystem path; present only for local (stdio) clients, which may read the file directly instead of paging"`
+	Hint       string   `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 type InfoArgs struct{}
@@ -174,6 +208,7 @@ type InfoResult struct {
 	Language    string `json:"language,omitempty" jsonschema:"configured graph language; empty = English"`
 	Search      string `json:"search" jsonschema:"available retrieval modes: text or vector,text"`
 	Version     string `json:"version,omitempty"`
+	Hint        string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 type RegistryArgs struct {
@@ -190,39 +225,51 @@ type RegistryFuncResult struct {
 
 type RegistryResult struct {
 	Functions []RegistryFuncResult `json:"functions"`
+	Hint      string               `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 func (s *Server) registerTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "start_session",
+		Description: "Open the dialogue session — the door every session enters through. Auto-starts the " +
+			"session shell (user-dialogue by default) and returns its opening serve: your orientation, " +
+			"the available moves, and any parked work as continuation options. Call it once at the start; " +
+			"call it again to have the orientation re-served.",
+	}, s.startSession)
+
+	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "start_procedure",
-		Description: "Start a procedure instance (a playbook move such as capture). Returns the current " +
-			"step's instructions, the report schema to answer with, and the goal that advances it. " +
-			"This is the only path that leads to graph writes — writes happen inside procedure " +
-			"transitions, never through a direct tool.",
+		Description: "Start a procedure instance (a playbook move such as capture) inside the open session. " +
+			"Returns the current step's instructions, the report schema to answer with, and the goal that " +
+			"advances it. This is the only path that leads to graph writes — writes happen inside " +
+			"procedure transitions, never through a direct tool.",
 	}, s.startProcedure)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "next",
 		Description: "Advance a procedure instance: send state fields per the served report_schema, or " +
 			"answer a pending chooser with {chooser, choice, userWords?, fields?}. User choosers must " +
-			"carry the user's answer relayed verbatim in userWords.",
+			"carry the user's answer relayed verbatim in userWords. When a move ends, the response " +
+			"carries the session shell's serve — where the dialogue lands.",
 	}, s.next)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "abandon",
-		Description: "Abandon a running procedure instance, with a reason. Nothing is cleaned up " +
-			"implicitly: held WIP markers are surfaced and left standing for resume or grooming.",
+		Description: "Abandon a running move instance, with a reason. Nothing is cleaned up " +
+			"implicitly: held WIP markers are surfaced and left standing for resume or grooming. " +
+			"The session shell concludes through its own junction, never through abandon.",
 	}, s.abandon)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "list_sessions",
-		Description: "List open dialogue sessions (running procedure instances) with participant, anchor, and last activity.",
+		Description: "List parked dialogue sessions (open moves, not bound to a live connection) with participant, anchor, and last activity.",
 	}, s.listSessions)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "resume_session",
-		Description: "Resume a persisted session by handle: replays its log and returns the current serve " +
-			"for every running instance. Step position and evidence persist across restarts.",
+		Description: "Switch this connection to a parked session: replays its log and returns the current " +
+			"serve for every running instance. Step position and evidence persist across restarts. " +
+			"Leaving the current session ends it when nothing is open, parks it when moves are open.",
 	}, s.resumeSession)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -266,12 +313,19 @@ func (s *Server) registerTools() {
 	}, s.registryDocs)
 }
 
-// ensureSession returns the SDD session bound to the calling MCP session,
-// creating and binding a fresh one on first stateful use.
-func (s *Server) ensureSession(ms *mcp.ServerSession) (*shellSession, error) {
+// boundSession returns the SDD session bound to the calling connection, or
+// a door-pointing error — every stateful tool requires the session that
+// start_session opens.
+func (s *Server) boundSession(ms *mcp.ServerSession) (*shellSession, error) {
 	if ss := s.sessions.bound(ms); ss != nil {
 		return ss, nil
 	}
+	return nil, toolError("no session is open — start_session is the door (reads stay free)")
+}
+
+// newShellSession creates a fresh SDD session (log, registry, engine),
+// unbound — the door binds it after the shell procedure started.
+func (s *Server) newShellSession() (*shellSession, error) {
 	now := time.Now()
 	id := newSessionID(now)
 	logFile, err := s.sessions.openLog(id)
@@ -303,18 +357,77 @@ func (s *Server) ensureSession(ms *mcp.ServerSession) (*shellSession, error) {
 	}
 	ss.engine = engine.New(registry, graph)
 	ss.sess = ss.engine.NewSession(id, participant, engine.NewWriterSink(logFile))
-	s.sessions.bind(ms, ss)
 	return ss, nil
+}
+
+func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, args StartSessionArgs) (*mcp.CallToolResult, ServeResult, error) {
+	canonical := strings.TrimSpace(args.Shell)
+	if canonical == "" {
+		canonical = defaultShellCanonical
+	}
+
+	// Knocking on an already-open door re-serves the shell's orientation in
+	// full — the "re-servable on demand" half of the tier-one contract.
+	if ss := s.sessions.bound(req.Session); ss != nil && ss.shellInstance != "" {
+		if inst, ok := ss.sess.Instance(ss.shellInstance); ok && inst.Status == engine.StatusRunning {
+			ss.touch(time.Now())
+			if err := applyLabel(ss, args.Label); err != nil {
+				return nil, ServeResult{}, err
+			}
+			s.forgetServed(ss, ss.shellInstance)
+			serve, err := ss.sess.Serve(ss.shellInstance)
+			if err != nil {
+				return nil, ServeResult{}, err
+			}
+			return nil, s.toServeResult(ss, serve), nil
+		}
+	}
+
+	ss, err := s.newShellSession()
+	if err != nil {
+		return nil, ServeResult{}, err
+	}
+	spec, err := s.loadProcedure(ss, canonical)
+	if err != nil {
+		ss.close()
+		return nil, ServeResult{}, err
+	}
+	if spec.Class != model.ProcedureClassShell {
+		ss.close()
+		return nil, ServeResult{}, toolError("%q is a move, not a session shell — open the session first, then start it with start_procedure", canonical)
+	}
+	serve, err := ss.sess.Start(spec, nil, "")
+	if err != nil {
+		ss.close()
+		return nil, ServeResult{}, err
+	}
+	ss.shellInstance = serve.Instance
+	// Label lands only now — after the canonical resolved and the shell
+	// started (d-cpt-h99 rider: a rejected start must not label a session).
+	if err := applyLabel(ss, args.Label); err != nil {
+		return nil, ServeResult{}, err
+	}
+	prev := s.sessions.bind(req.Session, ss)
+	s.watchDisconnect(req.Session)
+	s.leaveSession(prev)
+	return nil, s.toServeResult(ss, serve), nil
+}
+
+// forgetServed clears the served-instruction memory for one instance so its
+// units serve full-text again.
+func (s *Server) forgetServed(ss *shellSession, instance string) {
+	for key := range ss.served {
+		if strings.HasPrefix(key, instance+"/") {
+			delete(ss.served, key)
+		}
+	}
 }
 
 func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, args StartProcedureArgs) (*mcp.CallToolResult, ServeResult, error) {
 	if strings.TrimSpace(args.Canonical) == "" {
 		return nil, ServeResult{}, toolError("canonical is required")
 	}
-	// A fresh binding means this call is the session entry — a junction that
-	// carries the open-threads block alongside the framing.
-	entering := s.sessions.bound(req.Session) == nil
-	ss, err := s.ensureSession(req.Session)
+	ss, err := s.boundSession(req.Session)
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
@@ -323,23 +436,30 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 		return nil, ServeResult{}, err
 	}
 
-	if err := applyLabel(ss, args.Label); err != nil {
-		return nil, ServeResult{}, err
-	}
-
 	spec, err := s.loadProcedure(ss, args.Canonical)
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	serve, err := ss.sess.Start(spec, args.Params, args.Parent)
+	if spec.Class == model.ProcedureClassShell {
+		return nil, ServeResult{}, toolError("%q is a session shell — sessions open through start_session, not start_procedure", args.Canonical)
+	}
+	// Label lands only after the canonical resolved (d-cpt-h99 rider): a
+	// rejected start_procedure must not label the session.
+	if err := applyLabel(ss, args.Label); err != nil {
+		return nil, ServeResult{}, err
+	}
+
+	// Moves nest under the session shell by construction — an explicit
+	// parent (a sub-move dispatched from a running move) wins.
+	parent := args.Parent
+	if parent == "" {
+		parent = ss.shellInstance
+	}
+	serve, err := ss.sess.Start(spec, args.Params, parent)
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	res := s.toServeResult(ss, serve)
-	if entering && res.OpenThreads == "" {
-		res.OpenThreads = s.openThreadsBlock(ss, true)
-	}
-	return nil, res, nil
+	return nil, s.toServeResult(ss, serve), nil
 }
 
 // maxLabelLen caps session labels — a label is a list row, not a summary.
@@ -363,9 +483,9 @@ func applyLabel(ss *shellSession, label string) error {
 }
 
 func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextArgs) (*mcp.CallToolResult, ServeResult, error) {
-	ss := s.sessions.bound(req.Session)
-	if ss == nil {
-		return nil, ServeResult{}, toolError("no session is bound — call start_procedure or resume_session first")
+	ss, err := s.boundSession(req.Session)
+	if err != nil {
+		return nil, ServeResult{}, err
 	}
 	if args.Instance == "" {
 		return nil, ServeResult{}, toolError("instance is required")
@@ -382,7 +502,6 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 	}
 
 	var serve *engine.Serve
-	var err error
 	if chooser, choice, ok := chooserAnswer(args.Report); ok {
 		fields, _ := args.Report["fields"].(map[string]any)
 		userWords, _ := args.Report["userWords"].(string)
@@ -393,7 +512,39 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	return nil, s.toServeResult(ss, serve), nil
+	res := s.toServeResult(ss, serve)
+	// A move that ended lands the dialogue back on the session shell's
+	// junction — told on every response, never left to agent memory.
+	if serve.Status != engine.StatusRunning && serve.Instance != ss.shellInstance {
+		res.Base = s.serveShell(ss)
+	}
+	return nil, res, nil
+}
+
+// serveShell re-serves the session shell's current position — the landing
+// every ended move returns the dialogue to. Nil when the session has no
+// shell (should not happen behind the door; callers omit the field then).
+func (s *Server) serveShell(ss *shellSession) *BaseServe {
+	if ss.shellInstance == "" || ss.sess == nil {
+		return nil
+	}
+	serve, err := ss.sess.Serve(ss.shellInstance)
+	if err != nil {
+		return nil
+	}
+	res := s.toServeResult(ss, serve)
+	return &BaseServe{
+		Session:        res.Session,
+		Instance:       res.Instance,
+		Procedure:      res.Procedure,
+		Status:         res.Status,
+		Step:           res.Step,
+		Goal:           res.Goal,
+		Instructions:   res.Instructions,
+		PendingChooser: res.PendingChooser,
+		Framing:        res.Framing,
+		OpenThreads:    res.OpenThreads,
+	}
 }
 
 // chooserAnswer detects the chooser-answer form of a report: an object
@@ -406,12 +557,15 @@ func chooserAnswer(report map[string]any) (chooser, choice string, ok bool) {
 }
 
 func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
-	ss := s.sessions.bound(req.Session)
-	if ss == nil {
-		return nil, AbandonResult{}, toolError("no session is bound — call start_procedure or resume_session first")
+	ss, err := s.boundSession(req.Session)
+	if err != nil {
+		return nil, AbandonResult{}, err
 	}
 	if args.Instance == "" {
 		return nil, AbandonResult{}, toolError("instance is required")
+	}
+	if args.Instance == ss.shellInstance {
+		return nil, AbandonResult{}, toolError("the session shell concludes through its own junction (answer conclude) — abandon is for moves")
 	}
 	ss.touch(time.Now())
 
@@ -428,37 +582,50 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 	if len(held) > 0 {
 		res.Instructions = "The instance holds WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
 	}
-	res.OpenThreads = s.openThreadsBlock(ss, true)
+	// Abandoning a move lands the dialogue back on the shell junction.
+	res.Base = s.serveShell(ss)
 	return nil, res, nil
 }
 
 func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ ListSessionsArgs) (*mcp.CallToolResult, ListSessionsResult, error) {
+	if _, err := s.boundSession(req.Session); err != nil {
+		return nil, ListSessionsResult{}, err
+	}
 	descs, err := s.sessions.listOpenSessions()
 	if err != nil {
 		return nil, ListSessionsResult{}, err
-	}
-	if current := s.sessions.bound(req.Session); current != nil {
-		for i := range descs {
-			if descs[i].Session == current.id {
-				descs[i].Current = true
-			}
-		}
 	}
 	return nil, ListSessionsResult{Sessions: descs}, nil
 }
 
 func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, args ResumeSessionArgs) (*mcp.CallToolResult, ResumeSessionResult, error) {
+	current, err := s.boundSession(req.Session)
+	if err != nil {
+		return nil, ResumeSessionResult{}, err
+	}
 	if args.Session == "" {
 		return nil, ResumeSessionResult{}, toolError("session is required")
 	}
+	if args.Session == current.id {
+		return nil, ResumeSessionResult{}, toolError("session %s is the one this connection is already in", args.Session)
+	}
+
 	if live := s.sessions.lookupID(args.Session); live != nil && live.logFile != nil {
-		// The session is already live in this server process (possibly bound
-		// to another connection). Rebind rather than replaying over an open
-		// log; served-instruction memory resets for the new consumer.
+		// The session is already in memory. Bound to another connection it
+		// is live, not parked — refuse rather than yanking it over. Parked
+		// in memory, rebind without replaying over the open log;
+		// served-instruction memory resets for the new consumer.
+		if s.sessions.liveIDs()[args.Session] {
+			return nil, ResumeSessionResult{}, toolError("session %s is live on another connection — only parked sessions resume", args.Session)
+		}
 		live.served = map[string]bool{}
 		live.framed = false
 		live.openThreadsIntroduced = false
-		s.sessions.bind(req.Session, live)
+		if err := s.ensureShellInstance(live); err != nil {
+			return nil, ResumeSessionResult{}, err
+		}
+		prev := s.sessions.bind(req.Session, live)
+		s.leaveSession(prev)
 		res, err := s.resumeResult(live)
 		return nil, res, err
 	}
@@ -502,9 +669,37 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 	}
 	ss.logFile = logFile
 	ss.sess = sess
-	s.sessions.bind(req.Session, ss)
+	if err := s.ensureShellInstance(ss); err != nil {
+		ss.close()
+		return nil, ResumeSessionResult{}, err
+	}
+	prev := s.sessions.bind(req.Session, ss)
+	s.leaveSession(prev)
 	res, err := s.resumeResult(ss)
 	return nil, res, err
+}
+
+// ensureShellInstance re-derives the session's shell instance after replay
+// or rebind, auto-starting the default shell when none is running — a
+// resumed pre-shell session gains a base to land on (d-tac-bfc).
+func (s *Server) ensureShellInstance(ss *shellSession) error {
+	for _, inst := range ss.sess.Instances() {
+		if inst.Status == engine.StatusRunning && inst.Spec.Class == model.ProcedureClassShell {
+			ss.shellInstance = inst.ID
+			return nil
+		}
+	}
+	ss.shellInstance = ""
+	spec, err := s.loadProcedure(ss, defaultShellCanonical)
+	if err != nil {
+		return fmt.Errorf("auto-starting session shell: %v", err)
+	}
+	serve, err := ss.sess.Start(spec, nil, "")
+	if err != nil {
+		return fmt.Errorf("auto-starting session shell: %v", err)
+	}
+	ss.shellInstance = serve.Instance
+	return nil
 }
 
 func (s *Server) resumeResult(ss *shellSession) (ResumeSessionResult, error) {
@@ -525,14 +720,13 @@ func (s *Server) resumeResult(ss *shellSession) (ResumeSessionResult, error) {
 		res.Open = append(res.Open, s.toServeResult(ss, serve))
 	}
 	// Framing rides the resume result itself, not the per-instance serves.
+	// Open threads need no separate slot: the shell's serve in the Open
+	// list carries the block.
 	for i := range res.Open {
 		res.Open[i].Framing = ""
 	}
 	ss.framed = false
 	res.Framing = s.framingFor(ss)
-	// Resume is a junction: surface the other open dialogues (this session's
-	// own threads are already the Open list above).
-	res.OpenThreads = s.openThreadsBlock(ss, false)
 	return res, nil
 }
 
@@ -543,7 +737,7 @@ func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, 
 	if (args.Content == "") == (args.Path == "") {
 		return nil, StageAttachmentResult{}, toolError("pass exactly one of content or path")
 	}
-	ss, err := s.ensureSession(req.Session)
+	ss, err := s.boundSession(req.Session)
 	if err != nil {
 		return nil, StageAttachmentResult{}, err
 	}
@@ -566,7 +760,18 @@ func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, 
 	return nil, StageAttachmentResult{Handle: args.Name}, nil
 }
 
-func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
+// readHint is the one-line breadcrumb every free read carries while no
+// session is bound: an agent that enters through a pasted entry ID gets its
+// data and the trail to the door. No path through the tool surface avoids a
+// breadcrumb (d-cpt-h99).
+func (s *Server) readHint(ms *mcp.ServerSession) string {
+	if s.sessions.bound(ms) != nil {
+		return ""
+	}
+	return "no dialogue session is open — start_session is the door; reads stay free"
+}
+
+func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
 	if len(args.Terms) == 0 && args.Query == "" {
 		return nil, SearchResult{}, toolError("pass terms (text mode), query (vector mode), or both (hybrid)")
 	}
@@ -620,10 +825,10 @@ func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, args Search
 	if strings.TrimSpace(out) == "" {
 		out = "(no entries matched — try another phrasing, or proceed if the topic is genuinely new)"
 	}
-	return nil, SearchResult{Results: out}, nil
+	return nil, SearchResult{Results: out, Hint: s.readHint(req.Session)}, nil
 }
 
-func (s *Server) view(ctx context.Context, _ *mcp.CallToolRequest, args ViewArgs) (*mcp.CallToolResult, ViewResult, error) {
+func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewArgs) (*mcp.CallToolResult, ViewResult, error) {
 	if strings.TrimSpace(args.Layout) == "" {
 		return nil, ViewResult{}, toolError("layout is required")
 	}
@@ -635,10 +840,10 @@ func (s *Server) view(ctx context.Context, _ *mcp.CallToolRequest, args ViewArgs
 	if err != nil {
 		return nil, ViewResult{}, err
 	}
-	return nil, ViewResult{Sections: out}, nil
+	return nil, ViewResult{Sections: out, Hint: s.readHint(req.Session)}, nil
 }
 
-func (s *Server) show(ctx context.Context, _ *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {
+func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
 	}
@@ -658,10 +863,10 @@ func (s *Server) show(ctx context.Context, _ *mcp.CallToolRequest, args ShowArgs
 	if err != nil {
 		return nil, ShowResult{}, err
 	}
-	return nil, ShowResult{Entries: out}, nil
+	return nil, ShowResult{Entries: out, Hint: s.readHint(req.Session)}, nil
 }
 
-func (s *Server) readAttachment(ctx context.Context, _ *mcp.CallToolRequest, args ReadAttachmentArgs) (*mcp.CallToolResult, ReadAttachmentResult, error) {
+func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, args ReadAttachmentArgs) (*mcp.CallToolResult, ReadAttachmentResult, error) {
 	if args.ID == "" {
 		return nil, ReadAttachmentResult{}, toolError("id is required")
 	}
@@ -688,6 +893,7 @@ func (s *Server) readAttachment(ctx context.Context, _ *mcp.CallToolRequest, arg
 		TotalBytes: res.TotalBytes,
 		More:       res.More,
 		Available:  res.Available,
+		Hint:       s.readHint(req.Session),
 	}
 	if s.local {
 		out.Path = res.Path
@@ -695,7 +901,7 @@ func (s *Server) readAttachment(ctx context.Context, _ *mcp.CallToolRequest, arg
 	return nil, out, nil
 }
 
-func (s *Server) info(ctx context.Context, _ *mcp.CallToolRequest, _ InfoArgs) (*mcp.CallToolResult, InfoResult, error) {
+func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, _ InfoArgs) (*mcp.CallToolResult, InfoResult, error) {
 	info, err := s.finder.Info(query.InfoQuery{})
 	if err != nil {
 		return nil, InfoResult{}, err
@@ -705,10 +911,11 @@ func (s *Server) info(ctx context.Context, _ *mcp.CallToolRequest, _ InfoArgs) (
 		Language:    info.Language,
 		Search:      info.Search,
 		Version:     s.version,
+		Hint:        s.readHint(req.Session),
 	}, nil
 }
 
-func (s *Server) registryDocs(ctx context.Context, _ *mcp.CallToolRequest, args RegistryArgs) (*mcp.CallToolResult, RegistryResult, error) {
+func (s *Server) registryDocs(ctx context.Context, req *mcp.CallToolRequest, args RegistryArgs) (*mcp.CallToolResult, RegistryResult, error) {
 	var class engine.FuncClass
 	switch args.Class {
 	case "", string(engine.ClassPredicate), string(engine.ClassQuery), string(engine.ClassCommand):
@@ -716,7 +923,7 @@ func (s *Server) registryDocs(ctx context.Context, _ *mcp.CallToolRequest, args 
 	default:
 		return nil, RegistryResult{}, toolError("unknown class %q: predicate, query, or command", args.Class)
 	}
-	res := RegistryResult{}
+	res := RegistryResult{Hint: s.readHint(req.Session)}
 	for _, doc := range s.docsRegistry.Docs(class) {
 		res.Functions = append(res.Functions, RegistryFuncResult{
 			Name:   doc.Name,
@@ -757,9 +964,9 @@ func (s *Server) toServeResult(ss *shellSession, serve *engine.Serve) ServeResul
 			ss.served[key] = true
 		}
 	}
-	if serve.Status != engine.StatusRunning {
-		// A terminal serve is a junction — completion or procedure-exit
-		// abandonment both hand the dialogue back.
+	// Open threads ride the session shell's serves only — the junction the
+	// dialogue stands on. Mid-procedure serves never carry the block.
+	if ss.shellInstance != "" && serve.Instance == ss.shellInstance {
 		res.OpenThreads = s.openThreadsBlock(ss, true)
 	}
 	if serve.Chooser != nil {
@@ -805,13 +1012,14 @@ func (s *Server) framingFor(ss *shellSession) string {
 }
 
 // loadProcedure resolves a canonical to its execution head and loads the
-// spec against the session's registry.
+// spec against the session's registry. The not-found error lists move
+// canonicals only — shells enter through the door, not this path.
 func (s *Server) loadProcedure(ss *shellSession, canonical string) (*engine.Spec, error) {
 	entry := ss.engine.Graph.ResolveProcedure(canonical)
 	if entry == nil {
 		available := make([]string, 0)
 		for _, chain := range ss.engine.Graph.ProcedureChains() {
-			if chain.Head != nil && chain.Head.Canonical != "" {
+			if chain.Head != nil && chain.Head.Canonical != "" && !chain.Head.IsShellProcedure() {
 				available = append(available, chain.Head.Canonical)
 			}
 		}

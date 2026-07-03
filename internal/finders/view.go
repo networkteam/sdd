@@ -107,7 +107,7 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
 
 // supportedNotInner lists the inner filter names accepted by `not(<inner>)`
 // in d-tac-e1s's first cut. Pure set-shaped filters with unambiguous
@@ -295,6 +295,7 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 			Render: spec.render,
 			Name:   spec.sectionName(),
 			Data:   block,
+			Brief:  spec.brief,
 		}, nil
 	}
 
@@ -307,6 +308,7 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 			Render: spec.render,
 			Name:   spec.sectionName(),
 			Data:   model.Grouped{Field: spec.groupField, Groups: groups},
+			Brief:  spec.brief,
 		}, nil
 	}
 	if spec.expandField == "involvement" {
@@ -319,6 +321,7 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 			Render: spec.render,
 			Name:   spec.sectionName(),
 			Data:   block,
+			Brief:  spec.brief,
 		}, nil
 	}
 	// Flat-list output: each section renders independently. Cross-
@@ -337,6 +340,7 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 		Render: spec.render,
 		Name:   spec.sectionName(),
 		Data:   flat,
+		Brief:  spec.brief,
 	}, nil
 }
 
@@ -522,6 +526,12 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 		}
 		spec.stalledThreshold = v
 		spec.stalledSet = true
+
+	case fn.Name == "brief":
+		if len(fn.Args) > 0 {
+			return fmt.Errorf("brief takes no arguments")
+		}
+		spec.brief = true
 
 	case isRenderFunction(fn.Name):
 		// Render is treated like other non-filter modifiers: last-write-

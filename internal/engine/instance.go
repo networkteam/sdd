@@ -398,6 +398,9 @@ func (s *Session) serve(inst *Instance) (*Serve, error) {
 			sv.Goal = "judge and answer the chooser, with the evidence its option collects"
 		}
 	}
+	if step.Goal != "" {
+		sv.Goal = step.Goal
+	}
 
 	sv.Diagnostics = diagnostics
 	sv.Instructions = ComposeInstructions(instructions, diagnostics)

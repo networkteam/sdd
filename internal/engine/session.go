@@ -253,6 +253,11 @@ func (s *Session) Start(spec *Spec, params map[string]any, parent string) (*Serv
 		"entry":     spec.EntryID,
 		"step":      inst.Step,
 	}
+	// Shell-ness rides the log so descriptors stay self-derived (no spec
+	// resolution when listing); absent means move, which covers old logs.
+	if spec.Class == model.ProcedureClassShell {
+		data["class"] = string(spec.Class)
+	}
 	if len(params) > 0 {
 		data["params"] = params
 	}

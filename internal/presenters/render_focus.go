@@ -20,7 +20,7 @@ import (
 // `actors:` lines, then per-target entry lines with state and score.
 // The `name(...)` modifier (handled by RenderView) supplies an outer
 // `## <title>` header when present.
-func renderAsFocusBlock(w io.Writer, g *model.Graph, block model.FocusBlock) {
+func renderAsFocusBlock(w io.Writer, g *model.Graph, block model.FocusBlock, brief bool) {
 	for i, group := range block.Focuses {
 		if i > 0 {
 			fmt.Fprintln(w)
@@ -28,10 +28,10 @@ func renderAsFocusBlock(w io.Writer, g *model.Graph, block model.FocusBlock) {
 		// Focus header: `###` followed by the focus's own entry line so
 		// the reader gets identity + status + summary without ceremony.
 		fmt.Fprint(w, "### ")
-		fmt.Fprint(w, focusHeaderLine(g, group.Focus))
+		fmt.Fprint(w, focusHeaderLine(g, group.Focus, brief))
 		writeFocusDefaults(w, group)
 		for _, target := range group.Targets {
-			writeFocusTarget(w, g, target)
+			writeFocusTarget(w, g, target, brief)
 		}
 	}
 }
@@ -39,12 +39,16 @@ func renderAsFocusBlock(w io.Writer, g *model.Graph, block model.FocusBlock) {
 // focusHeaderLine renders the focus entry as a single line — same shape
 // as EntryLine but without the leading two-space indent and trailing
 // newline so it can sit after the `### ` marker.
-func focusHeaderLine(g *model.Graph, focus *model.Entry) string {
+func focusHeaderLine(g *model.Graph, focus *model.Entry, brief bool) string {
 	if focus == nil {
 		return "<missing focus>\n"
 	}
 	var sb strings.Builder
-	EntryLine(&sb, focus, g)
+	if brief {
+		EntryLineBrief(&sb, focus, g)
+	} else {
+		EntryLine(&sb, focus, g)
+	}
 	// EntryLine writes "  <id> ... \n"; strip the leading spaces — the
 	// `### ` marker provides visual offset already.
 	return strings.TrimLeft(sb.String(), " ")
@@ -65,7 +69,7 @@ func writeFocusDefaults(w io.Writer, group model.FocusGroup) {
 // writeFocusTarget renders one involvement target with state + score
 // segments. Indented four spaces under the focus header so the visual
 // nesting is unambiguous when several focuses sit in the same block.
-func writeFocusTarget(w io.Writer, g *model.Graph, target model.FocusTarget) {
+func writeFocusTarget(w io.Writer, g *model.Graph, target model.FocusTarget, brief bool) {
 	if target.Target == nil {
 		return
 	}
@@ -74,8 +78,14 @@ func writeFocusTarget(w io.Writer, g *model.Graph, target model.FocusTarget) {
 	// Inline a trimmed EntryLineWithScore — same shape as the as-list
 	// scored output so readers can compare across surfaces. The leading
 	// two-space indent from EntryLine collapses with our `  - ` prefix.
+	// Brief keeps the state segment (it is what the block is for) and
+	// compacts the entry line itself.
 	var sb strings.Builder
-	EntryLineWithScore(&sb, target.Target, g, target.Score)
+	if brief {
+		EntryLineBrief(&sb, target.Target, g)
+	} else {
+		EntryLineWithScore(&sb, target.Target, g, target.Score)
+	}
 	fmt.Fprint(w, strings.TrimLeft(sb.String(), " "))
 }
 

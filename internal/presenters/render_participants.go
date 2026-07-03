@@ -15,9 +15,13 @@ import (
 // Empty groups suppress output entirely. The CLI shell handles the
 // outer `## <name>` header (when name() is set), so this function
 // focuses on the per-actor bodies.
-func renderAsParticipantsBlock(w io.Writer, g *model.Graph, block model.ParticipantsBlock) {
+func renderAsParticipantsBlock(w io.Writer, g *model.Graph, block model.ParticipantsBlock, brief bool) {
 	if len(block.Groups) == 0 {
 		return
+	}
+	line := EntryLine
+	if brief {
+		line = EntryLineBrief
 	}
 	for i, grp := range block.Groups {
 		if grp.Actor == nil {
@@ -27,9 +31,9 @@ func renderAsParticipantsBlock(w io.Writer, g *model.Graph, block model.Particip
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintf(w, "### %s\n", grp.Actor.Canonical)
-		EntryLine(w, grp.Actor, g)
+		line(w, grp.Actor, g)
 		for _, r := range grp.Roles {
-			EntryLine(w, r, g)
+			line(w, r, g)
 		}
 	}
 }

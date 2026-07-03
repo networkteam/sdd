@@ -26,6 +26,7 @@ func (s *Server) buildRegistry(ss *shellSession) (*engine.Registry, error) {
 	r := engine.NewRegistry()
 	for _, register := range []func(*engine.Registry, *shellSession) error{
 		s.registerQueries,
+		s.registerShellPredicates,
 		s.registerWriteCommands,
 		s.registerWipCommands,
 	} {
@@ -34,6 +35,22 @@ func (s *Server) buildRegistry(ss *shellSession) (*engine.Registry, error) {
 		}
 	}
 	return r, nil
+}
+
+// registerShellPredicates wires the session-scoped predicates the engine
+// core cannot own: they read the shell session's instance set, not the
+// store or graph.
+func (s *Server) registerShellPredicates(r *engine.Registry, ss *shellSession) error {
+	return r.RegisterPredicate(engine.Predicate{
+		Doc: engine.FuncDoc{
+			Name: "sessionQuiescent",
+			Doc:  "Nothing but the session shell is running — no open move instances in this session.",
+		},
+		Fn: func(_ *engine.Context) (bool, error) {
+			return sessionQuiescent(ss), nil
+		},
+		FailMessage: "open threads remain — settle each with the user (finish it, abandon it, or park the session)",
+	})
 }
 
 func (s *Server) registerQueries(r *engine.Registry, ss *shellSession) error {
@@ -99,6 +116,26 @@ func (s *Server) registerQueries(r *engine.Registry, ss *shellSession) error {
 				return nil, fmt.Errorf("entryChains: neither anchor nor targets is set in the store")
 			}
 			return s.renderShow(ctx.Graph, ids, intArg(args, "up", query.DefaultUpDepth), intArg(args, "down", query.DefaultDownDepth))
+		},
+	}); err != nil {
+		return err
+	}
+
+	if err := r.RegisterQuery(engine.Query{
+		Doc: engine.FuncDoc{
+			Name: "procedureList",
+			Doc:  "The live playbook moves, one line each: canonical plus the first sentence of the head entry's summary. Shell-class procedures are excluded — they enter through start_session.",
+		},
+		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
+			var sb strings.Builder
+			for _, chain := range ctx.Graph.ProcedureChains() {
+				head := chain.Head
+				if head == nil || head.Canonical == "" || head.IsShellProcedure() || len(chain.LiveHeads) == 0 {
+					continue
+				}
+				fmt.Fprintf(&sb, "- %s — %s\n", head.Canonical, firstSummarySentence(head))
+			}
+			return strings.TrimRight(sb.String(), "\n"), nil
 		},
 	}); err != nil {
 		return err
@@ -429,6 +466,23 @@ func intArg(args map[string]any, name string, fallback int) int {
 	default:
 		return fallback
 	}
+}
+
+// firstSummarySentence reduces an entry's summary (or content, when no
+// summary is stored) to its leading sentence for one-line enumerations.
+func firstSummarySentence(e *model.Entry) string {
+	src := e.Summary
+	if src == "" {
+		src = e.Content
+	}
+	src = strings.TrimSpace(src)
+	if i := strings.IndexByte(src, '\n'); i >= 0 {
+		src = strings.TrimSpace(src[:i])
+	}
+	if i := strings.Index(src, ". "); i >= 0 {
+		return src[:i+1]
+	}
+	return src
 }
 
 // validAttachmentName rejects handles that could escape the staging dir.

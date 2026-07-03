@@ -39,4 +39,7 @@ type SectionResult struct {
 	Render string            // render function name (e.g. "as-list")
 	Name   string            // section header set by `name(string)`; empty = no header
 	Data   model.SectionData // shape-tagged data variant produced by the finder
+	// Brief switches entry-line rendering to the compact form: identity
+	// qualifiers plus the first summary sentence, no attribute segments.
+	Brief bool
 }

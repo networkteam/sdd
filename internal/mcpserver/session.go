@@ -14,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/networkteam/sdd/internal/engine"
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // shellSession is one SDD dialogue session as the shell sees it: the engine
@@ -28,6 +29,11 @@ type shellSession struct {
 	engine  *engine.Engine
 	sess    *engine.Session
 	logFile *os.File
+
+	// shellInstance is the session's base (shell-class) procedure instance —
+	// the resident junction free dialogue pends on, where every move lands
+	// when it ends. Set by the session door and re-derived on resume.
+	shellInstance string
 
 	// served tracks instruction units already served full-text to the bound
 	// agent, keyed instance+"/"+unit. Reset by rebinding (resume_session) —
@@ -52,14 +58,30 @@ type sessionStore struct {
 	mu    sync.Mutex
 	byMCP map[*mcp.ServerSession]*shellSession
 	byID  map[string]*shellSession
+	// watched marks connections that already have a disconnect watcher —
+	// one goroutine per connection, spawned on first bind.
+	watched map[*mcp.ServerSession]bool
 }
 
 func newSessionStore(dir string) *sessionStore {
 	return &sessionStore{
-		dir:   dir,
-		byMCP: make(map[*mcp.ServerSession]*shellSession),
-		byID:  make(map[string]*shellSession),
+		dir:     dir,
+		byMCP:   make(map[*mcp.ServerSession]*shellSession),
+		byID:    make(map[string]*shellSession),
+		watched: make(map[*mcp.ServerSession]bool),
 	}
+}
+
+// markWatched records a disconnect watcher for the connection, returning
+// false when one is already running.
+func (st *sessionStore) markWatched(ms *mcp.ServerSession) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.watched[ms] {
+		return false
+	}
+	st.watched[ms] = true
+	return true
 }
 
 // bound returns the SDD session bound to the MCP session, or nil.
@@ -70,12 +92,38 @@ func (st *sessionStore) bound(ms *mcp.ServerSession) *shellSession {
 }
 
 // bind associates the MCP session with an SDD session, replacing any prior
-// binding (the previous session stays open on disk and listable).
-func (st *sessionStore) bind(ms *mcp.ServerSession, ss *shellSession) {
+// binding. Returns the previously bound session (nil when none) so the
+// caller can apply the leave rule — end a quiescent session, park one with
+// open moves.
+func (st *sessionStore) bind(ms *mcp.ServerSession, ss *shellSession) *shellSession {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	prev := st.byMCP[ms]
 	st.byMCP[ms] = ss
 	st.byID[ss.id] = ss
+	if prev == ss {
+		return nil
+	}
+	return prev
+}
+
+// unbind detaches the MCP session, returning the session it was bound to
+// (nil when none). Idempotent — the disconnect watcher and the stdio
+// post-run sweep may both fire.
+func (st *sessionStore) unbind(ms *mcp.ServerSession) *shellSession {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	ss := st.byMCP[ms]
+	delete(st.byMCP, ms)
+	delete(st.watched, ms)
+	return ss
+}
+
+// drop removes a session from the in-memory index (after it ended).
+func (st *sessionStore) drop(id string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	delete(st.byID, id)
 }
 
 // lookupID returns an in-memory session by ID, or nil.
@@ -83,6 +131,31 @@ func (st *sessionStore) lookupID(id string) *shellSession {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	return st.byID[id]
+}
+
+// liveIDs returns the session IDs currently bound to a connection. A
+// session bound to a live connection is live by definition — it is not
+// parked, so listings and open-threads blocks exclude it.
+func (st *sessionStore) liveIDs() map[string]bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	live := make(map[string]bool, len(st.byMCP))
+	for _, ss := range st.byMCP {
+		live[ss.id] = true
+	}
+	return live
+}
+
+// connections returns the currently bound MCP sessions — the stdio
+// post-run sweep drains them synchronously before the process exits.
+func (st *sessionStore) connections() []*mcp.ServerSession {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := make([]*mcp.ServerSession, 0, len(st.byMCP))
+	for ms := range st.byMCP {
+		out = append(out, ms)
+	}
+	return out
 }
 
 // newSessionID mints a session handle: timestamped for human-readable file
@@ -132,9 +205,8 @@ type sessionDescriptor struct {
 	Label        string               `json:"label,omitempty" jsonschema:"the session's subject — agent-supplied, falling back to the first line of the most recent drafted body; blank when nothing was drafted"`
 	Participant  string               `json:"participant,omitempty"`
 	Anchor       string               `json:"anchor,omitempty" jsonschema:"entry the session's work is anchored on, when a procedure param carried one"`
-	Open         []instanceDescriptor `json:"open_instances" jsonschema:"running procedure instances with their current step"`
+	Open         []instanceDescriptor `json:"open_instances" jsonschema:"running move instances with their current step (the session shell is not listed)"`
 	LastActivity string               `json:"last_activity,omitempty"`
-	Current      bool                 `json:"current,omitempty" jsonschema:"true when this is the session bound to the calling agent"`
 }
 
 type instanceDescriptor struct {
@@ -147,13 +219,18 @@ type instanceDescriptor struct {
 // through the engine: participant from the meta line, label from the last
 // labeled line (falling back to the first line of the most recent drafted
 // body), per-instance procedure and step from started/transition lines,
-// liveness from completed/abandoned.
+// liveness from completed/abandoned. Shell-class instances (the session
+// base) are excluded from the open list — a session whose only running
+// instance is its shell has no work to resume, so it never lists as open.
+// Shell-ness comes from the started event's class field, keeping the
+// descriptor self-derived (old logs without the field read as moves).
 func deriveDescriptor(id string, events []engine.Event) sessionDescriptor {
 	desc := sessionDescriptor{Session: id}
 	type instState struct {
 		procedure string
 		step      string
 		running   bool
+		shell     bool
 	}
 	instances := map[string]*instState{}
 	var order []string
@@ -182,6 +259,9 @@ func deriveDescriptor(id string, events []engine.Event) sessionDescriptor {
 			is := &instState{running: true}
 			is.procedure, _ = ev.Data["procedure"].(string)
 			is.step, _ = ev.Data["step"].(string)
+			if class, ok := ev.Data["class"].(string); ok {
+				is.shell = class == string(model.ProcedureClassShell)
+			}
 			if params, ok := ev.Data["params"].(map[string]any); ok {
 				if anchor, ok := params["anchor"].(string); ok && desc.Anchor == "" {
 					desc.Anchor = anchor
@@ -204,7 +284,7 @@ func deriveDescriptor(id string, events []engine.Event) sessionDescriptor {
 
 	for _, instID := range order {
 		is := instances[instID]
-		if !is.running {
+		if !is.running || is.shell {
 			continue
 		}
 		desc.Open = append(desc.Open, instanceDescriptor{
@@ -233,7 +313,9 @@ func firstLine(s string) string {
 }
 
 // listOpenSessions scans the sessions directory and returns descriptors for
-// every session with at least one running instance, newest activity first.
+// every parked session — at least one running move instance (the shell
+// alone doesn't count), and not currently bound to a live connection —
+// newest activity first.
 func (st *sessionStore) listOpenSessions() ([]sessionDescriptor, error) {
 	entries, err := os.ReadDir(st.dir)
 	if err != nil {
@@ -242,6 +324,7 @@ func (st *sessionStore) listOpenSessions() ([]sessionDescriptor, error) {
 		}
 		return nil, fmt.Errorf("reading sessions dir: %w", err)
 	}
+	live := st.liveIDs()
 
 	var out []sessionDescriptor
 	for _, e := range entries {
@@ -249,6 +332,9 @@ func (st *sessionStore) listOpenSessions() ([]sessionDescriptor, error) {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".jsonl")
+		if live[id] {
+			continue
+		}
 		events, err := st.readLog(id)
 		if err != nil {
 			// A corrupt or version-skewed log must not hide the healthy

@@ -933,6 +933,15 @@ func validateProcedureFrontmatter(e *Entry) {
 			Message: fmt.Sprintf("procedure decision should live at process layer (got %s)", e.Layer),
 		})
 	}
+	switch e.Class {
+	case "", ProcedureClassMove, ProcedureClassShell:
+	default:
+		e.Warnings = append(e.Warnings, Warning{
+			Field:   "class",
+			Value:   string(e.Class),
+			Message: "procedure class must be move or shell (empty means move)",
+		})
+	}
 }
 
 // validateProcedureInvariant enforces write-once-across-chains for procedure

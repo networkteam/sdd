@@ -1,51 +1,32 @@
 package mcpserver
 
 // Server-level instructions and the few fixed instruction snippets the shell
-// itself contributes. Step-by-step guidance lives in procedure entries and is
-// served by the engine per step — the shell only frames the loop. Keep these
-// short, imperative, and free of SDD-internal jargon the agent cannot
-// resolve from the same response.
+// itself contributes. This is knowledge tier zero — the connection handshake:
+// the minimum an agent needs to not misread a read, plus the door. It must
+// survive truncation (some clients render instructions poorly), so it stays
+// short and front-loads what matters. Tier one is the session shell's opening
+// serve (the user-dialogue base procedure); tier two is the per-step units.
 
 const serverInstructions = `This server hosts an SDD (Signal-Dialogue-Decision) graph: an append-only
 record of project observations (signals) and commitments (decisions) grown
 through dialogue between the user and their agents.
 
-Work runs as procedures — guided moves the server drives step by step:
+The minimum to read it right:
 
-- start_procedure begins a move (e.g. capture); every response carries the
-  current step's instructions, a report_schema, and the goal that advances
-  it. Follow the served instructions; report with next.
-- next either sends state fields (per report_schema) or answers a pending
-  chooser. A "user" chooser belongs to the human: put the options to them
-  and relay their answer verbatim in userWords — never answer it yourself.
-- Graph writes happen only inside procedure transitions. There is no
-  direct write tool, and validation runs inside the write step.
-- abandon discards an instance explicitly; list_sessions and
-  resume_session continue earlier sessions after a restart.
-- A move dispatched from another move (an engage junction leading into a
-  capture) starts with parent set to the spawning instance — lineage for
-  the session log. The explore procedure is designed to run in a
-  disposable context: spawn a sub-agent against this server and take back
-  only its briefing.
-- Junction responses (session entry, resume, completion, abandon) may
-  carry an open_threads block — parked work to offer the user as
-  continuation options; mid-procedure responses never carry it.
-- A session is one dialogue with the user; it can outlive your own agent
-  session. Give it a short subject label early (label on start_procedure
-  or next) and update the label when the dialogue's subject sharpens —
-  labels are how a user tells parked dialogues apart. In dialogue, refer
-  to a session's procedure instances as its threads.
+- Every entry is a signal (something noticed) or a decision (something
+  committed to). Entries are immutable — current status is derived from
+  the graph, never edited in place.
+- An entry's one-line summary is a pointer, not a fact. Read entries in
+  full (show) before relying on them.
 
-Reads are free and never gated: search (find entries), view (overview
-layouts), show (full entries with reference chains), read_attachment,
-info, and registry. Ground dialogue in them liberally — an entry's
-one-line summary is a pointer, not a fact.
-
-The first response of a session carries a framing block (aspirations,
-guiding directives, focus, participants): hold it as context, don't dump
-it at the user.`
+Everything else is served. Call start_session to begin: it opens the
+dialogue session and returns your orientation — the process core, how the
+dialogue should feel, and the moves you can start. All stateful tools
+require a session and point back to this door; the read tools (search,
+view, show, read_attachment, info, registry) are always free.`
 
 const resumeInstructions = `Session resumed: step position and collected evidence persist; the
-open_instances list carries each running instance's current serve. Brief
-the user on where the work stands (procedure, step, goal) before
+open_instances list carries each running instance's current serve — the
+session shell (user-dialogue) among them, carrying the open-threads block.
+Brief the user on where the work stands (procedure, step, goal) before
 continuing, and continue through next.`

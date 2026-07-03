@@ -58,6 +58,11 @@ type NewEntryCmd struct {
 	// on non-role entries.
 	Actor string
 
+	// Class is only meaningful for kind: procedure decisions — the
+	// procedure's execution role (move or shell; empty means move). Lets a
+	// project supersede a shell procedure through normal capture.
+	Class string
+
 	// TopicLabels carries inline topic labels (CSV form on the CLI; flat
 	// list here). Valid on any non-annotation entry. Stored verbatim;
 	// parsing into TopicPath happens during BuildEntry so the command
@@ -139,6 +144,13 @@ func (c *NewEntryCmd) Validate() error {
 	case c.Intent == "" && effectiveKind == model.KindDirective:
 		return fmt.Errorf("directives require an explicit --intent (pending, guiding, or settled)")
 	}
+
+	switch {
+	case c.Class != "" && effectiveKind != model.KindProcedure:
+		return fmt.Errorf("class is only valid on procedure decisions (got %s)", effectiveKind)
+	case c.Class != "" && c.Class != string(model.ProcedureClassMove) && c.Class != string(model.ProcedureClassShell):
+		return fmt.Errorf("invalid class %q (expected move or shell)", c.Class)
+	}
 	return nil
 }
 
@@ -159,6 +171,7 @@ func (c *NewEntryCmd) BuildEntry(id string) (*model.Entry, error) {
 		Intent:       model.Intent(c.Intent),
 		Canonical:    c.Canonical,
 		Aliases:      c.Aliases,
+		Class:        model.ProcedureClass(c.Class),
 		Actor:        c.Actor,
 		FocusActors:  c.FocusActors,
 		FocusWhen:    c.FocusWhen,
