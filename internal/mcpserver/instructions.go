@@ -22,6 +22,11 @@ Work runs as procedures — guided moves the server drives step by step:
   direct write tool, and validation runs inside the write step.
 - abandon discards an instance explicitly; list_sessions and
   resume_session continue earlier sessions after a restart.
+- A session is one dialogue with the user; it can outlive your own agent
+  session. Give it a short subject label early (label on start_procedure
+  or next) and update the label when the dialogue's subject sharpens —
+  labels are how a user tells parked dialogues apart. In dialogue, refer
+  to a session's procedure instances as its threads.
 
 Reads are free and never gated: search (find entries), view (overview
 layouts), show (full entries with reference chains), read_attachment,

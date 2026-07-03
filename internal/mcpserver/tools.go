@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -29,6 +30,7 @@ const framingLayout = `aspirations,` +
 type StartProcedureArgs struct {
 	Canonical string         `json:"canonical" jsonschema:"the procedure to start, by its stable name (e.g. capture)"`
 	Params    map[string]any `json:"params,omitempty" jsonschema:"typed start params per the procedure's declaration"`
+	Label     string         `json:"label,omitempty" jsonschema:"short single-line subject label for the session (the dialogue); set it early, update when the subject sharpens"`
 }
 
 type NextArgs struct {
@@ -36,6 +38,7 @@ type NextArgs struct {
 	// Report carries either state fields for the current step (per the served
 	// report_schema) or a chooser answer {chooser, choice, userWords?, fields?}.
 	Report map[string]any `json:"report" jsonschema:"state fields per the served report_schema, or a chooser answer object {chooser, choice, userWords?, fields?}"`
+	Label  string         `json:"label,omitempty" jsonschema:"update the session's subject label when the dialogue's subject has sharpened"`
 }
 
 type AbandonArgs struct {
@@ -91,6 +94,7 @@ type ResumeSessionArgs struct {
 type ResumeSessionResult struct {
 	Session      string        `json:"session"`
 	Participant  string        `json:"participant,omitempty"`
+	Label        string        `json:"label,omitempty" jsonschema:"the session's subject label, when one was recorded"`
 	Open         []ServeResult `json:"open_instances" jsonschema:"current serve for every running instance"`
 	Framing      string        `json:"framing,omitempty"`
 	Instructions string        `json:"instructions,omitempty"`
@@ -312,6 +316,10 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 		return nil, ServeResult{}, err
 	}
 
+	if err := applyLabel(ss, args.Label); err != nil {
+		return nil, ServeResult{}, err
+	}
+
 	spec, err := s.loadProcedure(ss, args.Canonical)
 	if err != nil {
 		return nil, ServeResult{}, err
@@ -321,6 +329,26 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 		return nil, ServeResult{}, err
 	}
 	return nil, s.toServeResult(ss, serve), nil
+}
+
+// maxLabelLen caps session labels — a label is a list row, not a summary.
+const maxLabelLen = 120
+
+// applyLabel validates and records an agent-supplied session label. Empty
+// means "no update"; the engine skips appending an unchanged value.
+func applyLabel(ss *shellSession, label string) error {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return nil
+	}
+	if strings.ContainsAny(label, "\n\r") {
+		return toolError("label must be a single line")
+	}
+	if utf8.RuneCountInString(label) > maxLabelLen {
+		return toolError("label exceeds %d characters — it is a list row, not a summary", maxLabelLen)
+	}
+	ss.sess.SetLabel(label)
+	return nil
 }
 
 func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextArgs) (*mcp.CallToolResult, ServeResult, error) {
@@ -336,6 +364,9 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 	}
 	ss.touch(time.Now())
 	if err := s.refreshGraph(ss); err != nil {
+		return nil, ServeResult{}, err
+	}
+	if err := applyLabel(ss, args.Label); err != nil {
 		return nil, ServeResult{}, err
 	}
 
@@ -467,6 +498,7 @@ func (s *Server) resumeResult(ss *shellSession) (ResumeSessionResult, error) {
 	res := ResumeSessionResult{
 		Session:      ss.id,
 		Participant:  ss.sess.Participant,
+		Label:        ss.sess.Label,
 		Instructions: resumeInstructions,
 	}
 	for _, inst := range ss.sess.Instances() {

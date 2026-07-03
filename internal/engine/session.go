@@ -23,7 +23,11 @@ const (
 	// EventSessionMeta is the session-level header line (no instance):
 	// participant identity, so a log is self-describing for list_sessions
 	// descriptors without resolving any procedure spec.
-	EventSessionMeta   EventType = "session_meta"
+	EventSessionMeta EventType = "session_meta"
+	// EventLabeled carries a human-meaningful session label (no instance):
+	// the dialogue's subject, agent-supplied and updatable as it sharpens.
+	// Last one wins on fold and replay.
+	EventLabeled       EventType = "labeled"
 	EventStarted       EventType = "started"
 	EventReport        EventType = "report"
 	EventChooserAnswer EventType = "chooser_answer"
@@ -118,6 +122,10 @@ func New(registry *Registry, graph *model.Graph) *Engine {
 type Session struct {
 	ID          string
 	Participant string
+	// Label is the session's human-meaningful subject line — what a user
+	// picks a parked dialogue by. Agent-supplied via SetLabel, updatable;
+	// empty until supplied.
+	Label string
 
 	engine    *Engine
 	sink      EventSink
@@ -158,6 +166,17 @@ func (e *Engine) NewSession(id, participant string, sink EventSink, opts ...Sess
 		})
 	}
 	return s
+}
+
+// SetLabel records the session's subject label. Idempotent per value — a
+// resent identical label appends nothing, so agents may safely carry the
+// label on every call.
+func (s *Session) SetLabel(label string) {
+	if label == s.Label {
+		return
+	}
+	s.Label = label
+	s.appendEvent("", EventLabeled, map[string]any{"label": label})
 }
 
 // appendEvent writes one event to the log. Sink errors fail loudly at the
@@ -448,6 +467,11 @@ func (s *Session) applyEvent(ev Event, resolve SpecResolver) error {
 	case EventSessionMeta:
 		if p, ok := ev.Data["participant"].(string); ok && p != "" {
 			s.Participant = p
+		}
+
+	case EventLabeled:
+		if l, ok := ev.Data["label"].(string); ok {
+			s.Label = l
 		}
 
 	case EventStarted:

@@ -126,6 +126,7 @@ func (ss *shellSession) close() {
 // when a procedure changed underneath a stale session.
 type sessionDescriptor struct {
 	Session      string               `json:"session" jsonschema:"session handle; pass to resume_session"`
+	Label        string               `json:"label,omitempty" jsonschema:"the session's subject — agent-supplied, falling back to the first line of the most recent drafted body; blank when nothing was drafted"`
 	Participant  string               `json:"participant,omitempty"`
 	Anchor       string               `json:"anchor,omitempty" jsonschema:"entry the session's work is anchored on, when a procedure param carried one"`
 	Open         []instanceDescriptor `json:"open_instances" jsonschema:"running procedure instances with their current step"`
@@ -140,8 +141,10 @@ type instanceDescriptor struct {
 }
 
 // deriveDescriptor folds a session log into its descriptor without replaying
-// through the engine: participant from the meta line, per-instance procedure
-// and step from started/transition lines, liveness from completed/abandoned.
+// through the engine: participant from the meta line, label from the last
+// labeled line (falling back to the first line of the most recent drafted
+// body), per-instance procedure and step from started/transition lines,
+// liveness from completed/abandoned.
 func deriveDescriptor(id string, events []engine.Event) sessionDescriptor {
 	desc := sessionDescriptor{Session: id}
 	type instState struct {
@@ -151,6 +154,7 @@ func deriveDescriptor(id string, events []engine.Event) sessionDescriptor {
 	}
 	instances := map[string]*instState{}
 	var order []string
+	var bodyLine string
 
 	for _, ev := range events {
 		if !ev.TS.IsZero() {
@@ -160,6 +164,16 @@ func deriveDescriptor(id string, events []engine.Event) sessionDescriptor {
 		case engine.EventSessionMeta:
 			if p, ok := ev.Data["participant"].(string); ok && p != "" {
 				desc.Participant = p
+			}
+		case engine.EventLabeled:
+			if l, ok := ev.Data["label"].(string); ok {
+				desc.Label = l
+			}
+		case engine.EventReport:
+			if fields, ok := ev.Data["fields"].(map[string]any); ok {
+				if body, ok := fields["body"].(string); ok && strings.TrimSpace(body) != "" {
+					bodyLine = firstLine(body)
+				}
 			}
 		case engine.EventStarted:
 			is := &instState{running: true}
@@ -196,7 +210,23 @@ func deriveDescriptor(id string, events []engine.Event) sessionDescriptor {
 			Step:      is.step,
 		})
 	}
+	if desc.Label == "" {
+		desc.Label = bodyLine
+	}
 	return desc
+}
+
+// firstLine reduces a drafted body to a label-sized single line.
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "\n\r"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	runes := []rune(s)
+	if len(runes) > maxLabelLen {
+		s = string(runes[:maxLabelLen-1]) + "…"
+	}
+	return s
 }
 
 // listOpenSessions scans the sessions directory and returns descriptors for

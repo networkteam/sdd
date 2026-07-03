@@ -532,6 +532,57 @@ func TestBlockedWriteRoutesToOverride(t *testing.T) {
 // then re-hosts the sessions dir on a fresh server (the restart): the
 // session lists with its open instance, resumes by log replay, serves the
 // full unit text again (new agent consumer), and completes.
+// TestSessionLabelFallbackAndValidation covers the label's derivation ladder
+// on the descriptor — blank before anything is drafted, first line of the
+// most recent drafted body as fallback, explicit label winning — and the
+// single-line/length validation on the loop tools.
+func TestSessionLabelFallbackAndValidation(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+
+	var listed mcpserver.ListSessionsResult
+	call(t, cs, "list_sessions", map[string]any{}, &listed)
+	if len(listed.Sessions) != 1 || listed.Sessions[0].Label != "" {
+		t.Fatalf("nothing drafted and no label supplied — label must be blank, got %+v", listed.Sessions)
+	}
+
+	// A drafted body backfills the label from its first line.
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	call(t, cs, "list_sessions", map[string]any{}, &listed)
+	if !strings.HasPrefix(listed.Sessions[0].Label, "Test capture entry") {
+		t.Fatalf("label should fall back to the drafted body's first line, got %q", listed.Sessions[0].Label)
+	}
+
+	// An explicit label wins over the derived fallback.
+	call(t, cs, "next", map[string]any{
+		"instance": serve.Instance,
+		"report": map[string]any{"chooser": "playback", "choice": "adjust", "userWords": "keep going",
+			"fields": map[string]any{"confidence": "medium"}},
+		"label": "Oscillation gap capture",
+	}, &serve)
+	call(t, cs, "list_sessions", map[string]any{}, &listed)
+	if listed.Sessions[0].Label != "Oscillation gap capture" {
+		t.Fatalf("explicit label must win over the fallback, got %q", listed.Sessions[0].Label)
+	}
+
+	// Validation: multi-line and oversized labels are rejected.
+	if msg := callExpectError(t, cs, "next", map[string]any{
+		"instance": serve.Instance, "report": map[string]any{"confidence": "low"},
+		"label": "two\nlines",
+	}); !strings.Contains(msg, "single line") {
+		t.Fatalf("multi-line label should be rejected, got %q", msg)
+	}
+	if msg := callExpectError(t, cs, "next", map[string]any{
+		"instance": serve.Instance, "report": map[string]any{"confidence": "low"},
+		"label": strings.Repeat("x", 200),
+	}); !strings.Contains(msg, "120") {
+		t.Fatalf("oversized label should be rejected, got %q", msg)
+	}
+}
+
 func TestSessionResumeAcrossServers(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
@@ -540,8 +591,14 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	call(t, cs, "start_procedure", map[string]any{
 		"canonical": "capture",
 		"params":    map[string]any{"anchor": fixtureGapID},
+		"label":     "Capture: something about oscillation",
 	}, &serve)
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	// The label update rides an ordinary next call as the subject sharpens.
+	call(t, cs, "next", map[string]any{
+		"instance": serve.Instance,
+		"report":   assembleReport(),
+		"label":    "Capture: oscillation gap in integration tests",
+	}, &serve)
 	if serve.Step != "playback" {
 		t.Fatalf("setup: expected playback, got %q", serve.Step)
 	}
@@ -560,12 +617,18 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	if desc.Session != sessionID || desc.Participant != "Tester" || desc.Anchor != fixtureGapID {
 		t.Fatalf("descriptor diverged: %+v", desc)
 	}
+	if desc.Label != "Capture: oscillation gap in integration tests" {
+		t.Fatalf("descriptor should carry the last supplied label across restart, got %q", desc.Label)
+	}
 	if len(desc.Open) != 1 || desc.Open[0].Procedure != "capture" || desc.Open[0].Step != "playback" {
 		t.Fatalf("open instance descriptor diverged: %+v", desc.Open)
 	}
 
 	var resumed mcpserver.ResumeSessionResult
 	call(t, cs2, "resume_session", map[string]any{"session": sessionID}, &resumed)
+	if resumed.Label != "Capture: oscillation gap in integration tests" {
+		t.Fatalf("resume briefing should carry the session label, got %q", resumed.Label)
+	}
 	if len(resumed.Open) != 1 {
 		t.Fatalf("expected one running instance after resume, got %+v", resumed.Open)
 	}
