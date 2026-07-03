@@ -1,0 +1,77 @@
+package mcpserver
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/networkteam/sdd/internal/engine"
+)
+
+// Open-threads blocks surface parked work at junction points only — procedure
+// completion (terminal serves), session entry, resume, and abandon — never on
+// mid-procedure serves. The property that a user is not reminded of other
+// work after every interview answer holds by construction: no code path
+// attaches the block to a running serve inside a procedure.
+
+// openThreadsIntro is the base instruction served the first time a block
+// appears to the bound agent consumer; later blocks carry the one-line
+// reminder, the same memory pattern as served instruction units.
+const openThreadsIntro = `Open work, in continuation order — this dialogue's other threads first, then
+other open dialogues (resume_session picks one up). Present it to the user in
+their language as options to continue, never as an obligation:`
+
+const openThreadsReminder = "(open work, in continuation order — offer continuations as before)"
+
+// openThreadsBlock renders the open work visible from a junction: the bound
+// session's other running instances first, then every other open dialogue
+// from the session store. Empty when there is nothing open — junctions with
+// no parked work stay quiet.
+func (s *Server) openThreadsBlock(ss *shellSession, includeOwnThreads bool) string {
+	var lines []string
+
+	if includeOwnThreads && ss.sess != nil {
+		for _, inst := range ss.sess.Instances() {
+			if inst.Status != engine.StatusRunning {
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("- (this dialogue) %s: %s at %s", inst.ID, inst.Spec.Canonical, inst.Step))
+		}
+	}
+
+	if descs, err := s.sessions.listOpenSessions(); err == nil {
+		for _, d := range descs {
+			if d.Session == ss.id {
+				continue
+			}
+			var b strings.Builder
+			fmt.Fprintf(&b, "- %s", d.Session)
+			if d.Label != "" {
+				fmt.Fprintf(&b, " %q", d.Label)
+			}
+			if d.Participant != "" {
+				fmt.Fprintf(&b, " (%s)", d.Participant)
+			}
+			var open []string
+			for _, inst := range d.Open {
+				open = append(open, inst.Procedure+" at "+inst.Step)
+			}
+			if len(open) > 0 {
+				fmt.Fprintf(&b, " — open: %s", strings.Join(open, ", "))
+			}
+			if d.LastActivity != "" {
+				fmt.Fprintf(&b, ", last active %s", d.LastActivity)
+			}
+			lines = append(lines, b.String())
+		}
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	header := openThreadsReminder
+	if !ss.openThreadsIntroduced {
+		ss.openThreadsIntroduced = true
+		header = openThreadsIntro
+	}
+	return header + "\n" + strings.Join(lines, "\n")
+}

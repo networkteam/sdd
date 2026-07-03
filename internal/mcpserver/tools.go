@@ -31,6 +31,7 @@ type StartProcedureArgs struct {
 	Canonical string         `json:"canonical" jsonschema:"the procedure to start, by its stable name (e.g. capture)"`
 	Params    map[string]any `json:"params,omitempty" jsonschema:"typed start params per the procedure's declaration"`
 	Label     string         `json:"label,omitempty" jsonschema:"short single-line subject label for the session (the dialogue); set it early, update when the subject sharpens"`
+	Parent    string         `json:"parent,omitempty" jsonschema:"instance handle of the spawning instance, when this is a sub-move (e.g. a capture dispatched from an engage); records lineage in the session log"`
 }
 
 type NextArgs struct {
@@ -50,6 +51,7 @@ type AbandonResult struct {
 	Abandoned    bool     `json:"abandoned"`
 	HeldMarkers  []string `json:"held_markers,omitempty" jsonschema:"WIP markers the instance holds; left standing — resume later or close via groom"`
 	Instructions string   `json:"instructions,omitempty"`
+	OpenThreads  string   `json:"open_threads,omitempty" jsonschema:"parked work at this junction: this dialogue's other threads, then other open dialogues"`
 }
 
 type ChooserOptionResult struct {
@@ -77,6 +79,7 @@ type ServeResult struct {
 	PendingChooser *ChooserResult `json:"pending_chooser,omitempty"`
 	Produced       map[string]any `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
 	Framing        string         `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); delivered once per agent session"`
+	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"parked work, present at junctions only (session entry, completion, abandon): this dialogue's other threads, then other open dialogues"`
 }
 
 // --- sessions & staging ----------------------------------------------------
@@ -98,6 +101,7 @@ type ResumeSessionResult struct {
 	Open         []ServeResult `json:"open_instances" jsonschema:"current serve for every running instance"`
 	Framing      string        `json:"framing,omitempty"`
 	Instructions string        `json:"instructions,omitempty"`
+	OpenThreads  string        `json:"open_threads,omitempty" jsonschema:"other open dialogues beyond this one"`
 }
 
 type StageAttachmentArgs struct {
@@ -307,6 +311,9 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 	if strings.TrimSpace(args.Canonical) == "" {
 		return nil, ServeResult{}, toolError("canonical is required")
 	}
+	// A fresh binding means this call is the session entry — a junction that
+	// carries the open-threads block alongside the framing.
+	entering := s.sessions.bound(req.Session) == nil
 	ss, err := s.ensureSession(req.Session)
 	if err != nil {
 		return nil, ServeResult{}, err
@@ -324,11 +331,15 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	serve, err := ss.sess.Start(spec, args.Params, "")
+	serve, err := ss.sess.Start(spec, args.Params, args.Parent)
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	return nil, s.toServeResult(ss, serve), nil
+	res := s.toServeResult(ss, serve)
+	if entering && res.OpenThreads == "" {
+		res.OpenThreads = s.openThreadsBlock(ss, true)
+	}
+	return nil, res, nil
 }
 
 // maxLabelLen caps session labels — a label is a list row, not a summary.
@@ -417,6 +428,7 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 	if len(held) > 0 {
 		res.Instructions = "The instance holds WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
 	}
+	res.OpenThreads = s.openThreadsBlock(ss, true)
 	return nil, res, nil
 }
 
@@ -445,6 +457,7 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 		// log; served-instruction memory resets for the new consumer.
 		live.served = map[string]bool{}
 		live.framed = false
+		live.openThreadsIntroduced = false
 		s.sessions.bind(req.Session, live)
 		res, err := s.resumeResult(live)
 		return nil, res, err
@@ -517,6 +530,9 @@ func (s *Server) resumeResult(ss *shellSession) (ResumeSessionResult, error) {
 	}
 	ss.framed = false
 	res.Framing = s.framingFor(ss)
+	// Resume is a junction: surface the other open dialogues (this session's
+	// own threads are already the Open list above).
+	res.OpenThreads = s.openThreadsBlock(ss, false)
 	return res, nil
 }
 
@@ -740,6 +756,11 @@ func (s *Server) toServeResult(ss *shellSession, serve *engine.Serve) ServeResul
 		} else {
 			ss.served[key] = true
 		}
+	}
+	if serve.Status != engine.StatusRunning {
+		// A terminal serve is a junction — completion or procedure-exit
+		// abandonment both hand the dialogue back.
+		res.OpenThreads = s.openThreadsBlock(ss, true)
 	}
 	if serve.Chooser != nil {
 		ch := &ChooserResult{Kind: string(serve.Chooser.Kind)}

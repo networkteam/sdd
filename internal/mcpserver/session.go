@@ -36,6 +36,9 @@ type shellSession struct {
 	// framed marks that the session framing block was delivered to the
 	// bound agent consumer.
 	framed bool
+	// openThreadsIntroduced marks that an open-threads block was delivered
+	// with its base instruction; later blocks carry a one-line reminder.
+	openThreadsIntroduced bool
 
 	lastActivity time.Time
 }

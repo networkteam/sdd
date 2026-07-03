@@ -22,6 +22,14 @@ Work runs as procedures — guided moves the server drives step by step:
   direct write tool, and validation runs inside the write step.
 - abandon discards an instance explicitly; list_sessions and
   resume_session continue earlier sessions after a restart.
+- A move dispatched from another move (an engage junction leading into a
+  capture) starts with parent set to the spawning instance — lineage for
+  the session log. The explore procedure is designed to run in a
+  disposable context: spawn a sub-agent against this server and take back
+  only its briefing.
+- Junction responses (session entry, resume, completion, abandon) may
+  carry an open_threads block — parked work to offer the user as
+  continuation options; mid-procedure responses never carry it.
 - A session is one dialogue with the user; it can outlive your own agent
   session. Give it a short subject label early (label on start_procedure
   or next) and update the label when the dialogue's subject sharpens —

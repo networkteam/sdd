@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/llm"
@@ -809,4 +810,214 @@ func TestHTTPTransportAuth(t *testing.T) {
 	if res.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated request should 401, got %d", res.StatusCode)
 	}
+}
+
+// TestEmbeddedEngageExploreProcedures drives the shipped engage and explore
+// base entries over MCP with the production entryChains query: anchor
+// resolution against the graph, chains rendered into the brief/inspect units,
+// the moves junction, and the parent link tying the explore sub-move to the
+// engage instance in the session log.
+func TestEmbeddedEngageExploreProcedures(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	path := filepath.Join(graphDir, "2026/06/01-100000-s-tac-aaa.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(gapEntry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+
+	// Engage: anchor step stalls a made-up anchor, accepts the fixture gap.
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "engage"}, &serve)
+	if serve.Step != "anchor" || serve.Status != "running" {
+		t.Fatalf("expected running at anchor, got %s at %q", serve.Status, serve.Step)
+	}
+	engageInstance := serve.Instance
+
+	call(t, cs, "next", map[string]any{"instance": engageInstance, "report": map[string]any{
+		"anchor": "20260601-110000-s-tac-zzz",
+	}}, &serve)
+	if serve.Step != "anchor" || !strings.Contains(serve.Instructions, "does not resolve") {
+		t.Fatalf("unresolved anchor should hold the gate naming it, got step %q: %q", serve.Step, serve.Instructions)
+	}
+
+	call(t, cs, "next", map[string]any{"instance": engageInstance, "report": map[string]any{
+		"anchor": fixtureGapID,
+		"goal":   "orient on the oscillation gap",
+	}}, &serve)
+	if serve.Step != "brief" {
+		t.Fatalf("resolved anchor should reach brief, got %q (%s)", serve.Step, serve.Instructions)
+	}
+	// The injected chains carry the anchor's full body — served, not fetched.
+	if !strings.Contains(serve.Instructions, "contradictory findings across runs on identical input") {
+		t.Fatalf("brief unit should serve the anchor's full body via entryChains, got %q", serve.Instructions)
+	}
+
+	call(t, cs, "next", map[string]any{"instance": engageInstance, "report": map[string]any{
+		"brief":       "Narrative: open gap, no downstream activity; needs a decision.",
+		"widenReport": "searched oscillation and pre-flight angles; chain already saturates",
+	}}, &serve)
+	if serve.Step != "moves" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
+		t.Fatalf("brief should reach the moves user junction, got %q", serve.Step)
+	}
+
+	call(t, cs, "next", map[string]any{"instance": engageInstance, "report": map[string]any{
+		"chooser": "moves", "choice": "move", "userWords": "let's explore around it first",
+		"fields": map[string]any{"selectedMove": "explore the neighborhood"},
+	}}, &serve)
+	if serve.Status != "completed" {
+		t.Fatalf("move pick should complete the engagement, got %s at %q", serve.Status, serve.Step)
+	}
+
+	// Explore as a sub-move of the finished engage, parent-linked.
+	call(t, cs, "start_procedure", map[string]any{
+		"canonical": "explore",
+		"parent":    engageInstance,
+		"params": map[string]any{
+			"targets": []string{fixtureGapID},
+			"goal":    "overview: what surrounds the oscillation gap",
+		},
+	}, &serve)
+	if serve.Step != "inspect" {
+		t.Fatalf("explore should start at inspect, got %q", serve.Step)
+	}
+	if !strings.Contains(serve.Instructions, "overview: what surrounds the oscillation gap") {
+		t.Fatalf("inspect unit should carry the goal verbatim, got %q", serve.Instructions)
+	}
+	if !strings.Contains(serve.Instructions, "contradictory findings across runs on identical input") {
+		t.Fatalf("inspect unit should serve the target chains, got %q", serve.Instructions)
+	}
+	exploreInstance := serve.Instance
+
+	call(t, cs, "next", map[string]any{"instance": exploreInstance, "report": map[string]any{
+		"widenReport":  "two angles searched, nothing beyond the target",
+		"inspectedIds": []string{fixtureGapID},
+		"briefing":     "## Goal\noverview: what surrounds the oscillation gap\n\n## Targets\n" + fixtureGapID,
+	}}, &serve)
+	if serve.Status != "completed" {
+		t.Fatalf("batched mission report should complete explore, got %s at %q (%s)", serve.Status, serve.Step, serve.Instructions)
+	}
+
+	// The parent link is durable: the started event in the session log
+	// carries it, so replay and forensics keep the lineage.
+	events, err := readSessionLog(t, env.sessionsDir, serve.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ev := range events {
+		if ev.Event == engine.EventStarted && ev.Instance == exploreInstance {
+			if p, _ := ev.Data["parent"].(string); p != engageInstance {
+				t.Fatalf("explore started event parent = %q, want %q", p, engageInstance)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no started event for the explore instance in the session log")
+	}
+
+	// An unknown parent is rejected by the engine's single validation path.
+	msg := callExpectError(t, cs, "start_procedure", map[string]any{
+		"canonical": "explore",
+		"parent":    "i_nope",
+		"params": map[string]any{
+			"targets": []string{fixtureGapID},
+			"goal":    "any",
+		},
+	})
+	if !strings.Contains(msg, "parent") {
+		t.Fatalf("unknown parent error should name it, got %q", msg)
+	}
+}
+
+// TestJunctionOpenThreads pins the d-tac-nqo property: the open-threads block
+// appears exactly at junctions — session entry, terminal serves, abandon,
+// resume — never on mid-procedure serves, with the base instruction once and
+// the one-line reminder after.
+func TestJunctionOpenThreads(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+
+	// Dialogue A parks a capture at assemble.
+	csA := connect(t, env.srv)
+	var serveA mcpserver.ServeResult
+	call(t, csA, "start_procedure", map[string]any{"canonical": "capture", "label": "parked capture A"}, &serveA)
+	sessionA := serveA.Session
+
+	// Dialogue B enters fresh: the session-entry junction surfaces A.
+	csB := connect(t, env.srv)
+	var serve mcpserver.ServeResult
+	call(t, csB, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	if !strings.Contains(serve.OpenThreads, sessionA) || !strings.Contains(serve.OpenThreads, "parked capture A") {
+		t.Fatalf("session entry should surface dialogue A, got %q", serve.OpenThreads)
+	}
+	if !strings.Contains(serve.OpenThreads, "never as an obligation") {
+		t.Fatalf("first block should carry the base instruction, got %q", serve.OpenThreads)
+	}
+
+	// Mid-procedure serves carry no block — by construction.
+	call(t, csB, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	if serve.OpenThreads != "" {
+		t.Fatalf("mid-procedure serve must not carry open threads, got %q", serve.OpenThreads)
+	}
+	call(t, csB, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+		"chooser": "playback", "choice": "confirm", "userWords": "capture it",
+	}}, &serve)
+	if serve.OpenThreads != "" {
+		t.Fatalf("chooser serve must not carry open threads, got %q", serve.OpenThreads)
+	}
+
+	// Completion is a junction: block present, now as the one-line reminder.
+	call(t, csB, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+		"chooser": "verifySummary", "choice": "faithful", "userWords": "",
+		"fields": map[string]any{"fidelityNote": "matches"},
+	}}, &serve)
+	if serve.Status != "completed" {
+		t.Fatalf("expected completion, got %s at %q", serve.Status, serve.Step)
+	}
+	if !strings.Contains(serve.OpenThreads, sessionA) {
+		t.Fatalf("completion junction should surface dialogue A, got %q", serve.OpenThreads)
+	}
+	if strings.Contains(serve.OpenThreads, "never as an obligation") || !strings.Contains(serve.OpenThreads, "offer continuations as before") {
+		t.Fatalf("later blocks should be the reminder, got %q", serve.OpenThreads)
+	}
+
+	// A second start in the same bound session is not a session entry: no block.
+	call(t, csB, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	if serve.OpenThreads != "" {
+		t.Fatalf("non-entry start must not carry open threads, got %q", serve.OpenThreads)
+	}
+
+	// Abandon is a junction.
+	var ab mcpserver.AbandonResult
+	call(t, csB, "abandon", map[string]any{"instance": serve.Instance, "reason": "test teardown"}, &ab)
+	if !strings.Contains(ab.OpenThreads, sessionA) {
+		t.Fatalf("abandon junction should surface dialogue A, got %q", ab.OpenThreads)
+	}
+
+	// Resume is a junction listing *other* dialogues; B has nothing running,
+	// so resuming A from B's connection yields no block — own threads live in
+	// open_instances, not the block.
+	var res mcpserver.ResumeSessionResult
+	call(t, csB, "resume_session", map[string]any{"session": sessionA}, &res)
+	if len(res.Open) != 1 {
+		t.Fatalf("resume should serve A's open instance, got %d", len(res.Open))
+	}
+	if res.OpenThreads != "" {
+		t.Fatalf("resume block lists other dialogues only; B is closed, got %q", res.OpenThreads)
+	}
+}
+
+// readSessionLog reads a session's JSONL event log from the sessions dir.
+func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
+	t.Helper()
+	f, err := os.Open(filepath.Join(dir, session+".jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return engine.ReadEvents(f)
 }

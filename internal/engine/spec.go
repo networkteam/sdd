@@ -455,20 +455,38 @@ var unitHeading = regexp.MustCompile(`(?m)^##\s+unit:\s*(\S+)\s*$`)
 
 // parseUnits splits a procedure body into named instruction units. A unit
 // runs from its heading to the next `## ` heading or the end of the body.
+// Headings inside fenced code blocks are unit content, not boundaries — a
+// unit may quote markdown structure (e.g. a briefing template).
 func parseUnits(body string) map[string]string {
 	units := make(map[string]string)
-	matches := unitHeading.FindAllStringSubmatchIndex(body, -1)
-	for i, m := range matches {
-		name := body[m[2]:m[3]]
-		start := m[1]
-		end := len(body)
-		if i+1 < len(matches) {
-			end = matches[i+1][0]
-		} else if next := strings.Index(body[start:], "\n## "); next >= 0 {
-			end = start + next
+	var name string
+	var buf []string
+	inFence := false
+	flush := func() {
+		if name != "" {
+			units[name] = strings.TrimSpace(strings.Join(buf, "\n"))
 		}
-		units[name] = strings.TrimSpace(body[start:end])
+		name, buf = "", nil
 	}
+	for line := range strings.SplitSeq(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inFence = !inFence
+		} else if !inFence {
+			if m := unitHeading.FindStringSubmatch(line); m != nil {
+				flush()
+				name = m[1]
+				continue
+			}
+			if strings.HasPrefix(line, "## ") {
+				flush()
+				continue
+			}
+		}
+		if name != "" {
+			buf = append(buf, line)
+		}
+	}
+	flush()
 	return units
 }
 

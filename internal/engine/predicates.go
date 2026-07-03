@@ -35,16 +35,19 @@ type playbackConfirmation struct {
 // contract (hasKind reads entryKind — the capture spine collects the target
 // kind under that name, kind being the param that pre-selects it).
 var presenceFields = map[string]string{
-	"hasBody":        "body",
-	"hasRefs":        "refs",
-	"hasTopics":      "topics",
-	"hasConfidence":  "confidence",
-	"hasKind":        "entryKind",
-	"hasLayer":       "layer",
-	"hasWidenReport": "widenReport",
-	"hasAnchor":      "anchor",
-	"hasTargets":     "targets",
-	"hasGoal":        "goal",
+	"hasBody":         "body",
+	"hasRefs":         "refs",
+	"hasTopics":       "topics",
+	"hasConfidence":   "confidence",
+	"hasKind":         "entryKind",
+	"hasLayer":        "layer",
+	"hasWidenReport":  "widenReport",
+	"hasAnchor":       "anchor",
+	"hasTargets":      "targets",
+	"hasGoal":         "goal",
+	"hasBrief":        "brief",
+	"hasBriefing":     "briefing",
+	"hasInspectedIds": "inspectedIds",
 }
 
 func registerBuiltinPredicates(r *Registry) {
@@ -61,6 +64,26 @@ func registerBuiltinPredicates(r *Registry) {
 			FailMessage: fmt.Sprintf("%s is missing or empty", field),
 		})
 	}
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "anchorsResolve",
+			Doc:   "The anchor and every target resolve to existing graph entries.",
+			Reads: []string{"anchor", "targets"},
+		},
+		Fn:          idsResolve("anchor", "targets"),
+		FailMessage: "the anchor or a target does not resolve in the graph — engage on entries that exist",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "inspectedIdsResolve",
+			Doc:   "Every inspected ID resolves to an existing graph entry.",
+			Reads: []string{"inspectedIds"},
+		},
+		Fn:          idsResolve("inspectedIds"),
+		FailMessage: "an inspected ID does not resolve in the graph — the evidence must name entries that exist",
+	})
 
 	mustRegisterPredicate(r, Predicate{
 		Doc: FuncDoc{
@@ -164,6 +187,29 @@ func registerBuiltinCommands(r *Registry) {
 			return nil
 		},
 	})
+}
+
+// idsResolve builds a predicate checking that every entry ID stored under the
+// named fields exists in the graph. Absent fields pass — presence is the
+// paired has* predicate's job.
+func idsResolve(fields ...string) func(*Context) (bool, error) {
+	return func(ctx *Context) (bool, error) {
+		if ctx.Graph == nil {
+			return false, fmt.Errorf("idsResolve needs a graph")
+		}
+		for _, field := range fields {
+			v, ok := ctx.Store.Get(field)
+			if !ok {
+				continue
+			}
+			for _, id := range asStrings(v) {
+				if _, ok := ctx.Graph.ByID[id]; !ok {
+					return false, nil
+				}
+			}
+		}
+		return true, nil
+	}
 }
 
 func refsResolve(ctx *Context) (bool, error) {
