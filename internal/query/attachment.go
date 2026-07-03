@@ -47,4 +47,9 @@ type ReadAttachmentResult struct {
 	// Available lists the entry's attachment filenames — the discoverable
 	// surface when Name was ambiguous or the caller wants the inventory.
 	Available []string
+	// Path is the attachment's absolute filesystem path. The accessor always
+	// resolves it; consumers decide whether to expose it (the MCP tool hands
+	// it out only to local clients, which can then read the file directly
+	// instead of paging).
+	Path string
 }

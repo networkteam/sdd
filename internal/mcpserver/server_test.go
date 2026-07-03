@@ -184,8 +184,8 @@ type testEnv struct {
 
 // newTestServer builds a server over a fixture graph with deterministic
 // pre-flight findings and text-mode search. Passing existing dirs re-hosts
-// them on a fresh server (the restart scenario).
-func newTestServer(t *testing.T, findings []query.Finding, graphDir, sessionsDir string) testEnv {
+// them on a fresh server (the restart scenario); mutate tweaks Options.
+func newTestServer(t *testing.T, findings []query.Finding, graphDir, sessionsDir string, mutate ...func(*mcpserver.Options)) testEnv {
 	t.Helper()
 	if graphDir == "" {
 		graphDir = writeFixtureGraph(t)
@@ -204,7 +204,7 @@ func newTestServer(t *testing.T, findings []query.Finding, graphDir, sessionsDir
 		Reader:   fakeReader{Finder: finder, findings: findings},
 	})
 
-	srv, err := mcpserver.New(mcpserver.Options{
+	opts := mcpserver.Options{
 		Handler:      handler,
 		Finder:       finder,
 		Searcher:     finders.NewSearchFinder(finders.SearchFinderOptions{GraphDir: graphDir}),
@@ -212,7 +212,11 @@ func newTestServer(t *testing.T, findings []query.Finding, graphDir, sessionsDir
 		GraphDir:     graphDir,
 		SessionsDir:  sessionsDir,
 		Version:      "test",
-	})
+	}
+	for _, m := range mutate {
+		m(&opts)
+	}
+	srv, err := mcpserver.New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +575,8 @@ func TestChooserSequenceValidation(t *testing.T) {
 	}
 }
 
-// TestReadAttachmentPaging pages through a fixture attachment.
+// TestReadAttachmentPaging pages through a fixture attachment on a remote
+// (non-local) server: content pages, and no filesystem path leaks out.
 func TestReadAttachmentPaging(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
@@ -580,6 +585,9 @@ func TestReadAttachmentPaging(t *testing.T) {
 	call(t, cs, "read_attachment", map[string]any{"id": fixtureGapID, "max_bytes": 6}, &page1)
 	if page1.Name != "notes.md" || page1.Content != "012345" || !page1.More {
 		t.Fatalf("first page diverged: %+v", page1)
+	}
+	if page1.Path != "" {
+		t.Fatalf("a remote client must not receive a filesystem path, got %q", page1.Path)
 	}
 	var page2 mcpserver.ReadAttachmentResult
 	call(t, cs, "read_attachment", map[string]any{
@@ -590,6 +598,26 @@ func TestReadAttachmentPaging(t *testing.T) {
 	}
 	if page1.TotalBytes != 10 {
 		t.Fatalf("total bytes diverged: %d", page1.TotalBytes)
+	}
+}
+
+// TestReadAttachmentLocalPath checks that a local (stdio) client gets the
+// absolute path alongside the content, so it can read the file directly.
+func TestReadAttachmentLocalPath(t *testing.T) {
+	env := newTestServer(t, nil, "", "", func(o *mcpserver.Options) { o.LocalClient = true })
+	cs := connect(t, env.srv)
+
+	var res mcpserver.ReadAttachmentResult
+	call(t, cs, "read_attachment", map[string]any{"id": fixtureGapID}, &res)
+	want, err := filepath.Abs(filepath.Join(env.graphDir, "2026/06/01-100000-s-tac-aaa/notes.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Path != want {
+		t.Fatalf("local client should receive the absolute path:\n got %q\nwant %q", res.Path, want)
+	}
+	if content, err := os.ReadFile(res.Path); err != nil || string(content) != "0123456789" {
+		t.Fatalf("returned path must be directly readable: %v (%q)", err, content)
 	}
 }
 

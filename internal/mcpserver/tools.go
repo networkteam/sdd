@@ -156,6 +156,7 @@ type ReadAttachmentResult struct {
 	TotalBytes int64    `json:"total_bytes"`
 	More       bool     `json:"more"`
 	Available  []string `json:"available" jsonschema:"the entry's attachment filenames"`
+	Path       string   `json:"path,omitempty" jsonschema:"absolute filesystem path; present only for local (stdio) clients, which may read the file directly instead of paging"`
 }
 
 type InfoArgs struct{}
@@ -631,7 +632,7 @@ func (s *Server) readAttachment(ctx context.Context, _ *mcp.CallToolRequest, arg
 	if err != nil {
 		return nil, ReadAttachmentResult{}, err
 	}
-	return nil, ReadAttachmentResult{
+	out := ReadAttachmentResult{
 		Name:       res.Name,
 		Content:    res.Content,
 		Offset:     res.Offset,
@@ -639,7 +640,11 @@ func (s *Server) readAttachment(ctx context.Context, _ *mcp.CallToolRequest, arg
 		TotalBytes: res.TotalBytes,
 		More:       res.More,
 		Available:  res.Available,
-	}, nil
+	}
+	if s.local {
+		out.Path = res.Path
+	}
+	return nil, out, nil
 }
 
 func (s *Server) info(ctx context.Context, _ *mcp.CallToolRequest, _ InfoArgs) (*mcp.CallToolResult, InfoResult, error) {

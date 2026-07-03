@@ -54,6 +54,10 @@ type Options struct {
 	// SessionsDir holds the per-participant append-only JSONL session logs
 	// and the per-session attachment staging scratch. Local, gitignored.
 	SessionsDir string
+	// LocalClient marks the connecting client as sharing this filesystem
+	// (stdio transport). Local clients get absolute paths in read results
+	// (read_attachment) so they can read files directly instead of paging.
+	LocalClient bool
 	Version     string
 }
 
@@ -66,6 +70,7 @@ type Server struct {
 	searcher Searcher
 	vector   bool
 	graphDir string
+	local    bool
 	version  string
 	sessions *sessionStore
 	// docsRegistry answers the registry tool: function docs are identical
@@ -90,6 +95,7 @@ func New(opts Options) (*Server, error) {
 		searcher: opts.Searcher,
 		vector:   opts.VectorSearch,
 		graphDir: opts.GraphDir,
+		local:    opts.LocalClient,
 		version:  opts.Version,
 		sessions: newSessionStore(opts.SessionsDir),
 	}

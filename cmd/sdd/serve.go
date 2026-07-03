@@ -73,6 +73,7 @@ func serveCmd() *cli.Command {
 				return err
 			}
 
+			transport := cmd.String("transport")
 			srv, err := mcpserver.New(mcpserver.Options{
 				Handler:      handler,
 				Finder:       finder,
@@ -80,6 +81,7 @@ func serveCmd() *cli.Command {
 				VectorSearch: vector,
 				GraphDir:     dir,
 				SessionsDir:  filepath.Join(sddDir, "sessions"),
+				LocalClient:  transport == "stdio",
 				Version:      version,
 			})
 			if err != nil {
@@ -89,7 +91,7 @@ func serveCmd() *cli.Command {
 			ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
-			switch cmd.String("transport") {
+			switch transport {
 			case "stdio":
 				return srv.RunStdio(ctx)
 			case "http":

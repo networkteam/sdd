@@ -46,7 +46,12 @@ func (f *Finder) ReadAttachment(q query.ReadAttachmentQuery) (*query.ReadAttachm
 		return nil, fmt.Errorf("entry %s has no attachment %q (available: %v)", q.EntryID, name, available)
 	}
 
-	file, err := os.Open(filepath.Join(q.GraphDir, filepath.FromSlash(rel)))
+	absPath, err := filepath.Abs(filepath.Join(q.GraphDir, filepath.FromSlash(rel)))
+	if err != nil {
+		return nil, fmt.Errorf("resolving attachment path %s: %w", name, err)
+	}
+
+	file, err := os.Open(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("opening attachment %s: %w", name, err)
 	}
@@ -70,6 +75,7 @@ func (f *Finder) ReadAttachment(q query.ReadAttachmentQuery) (*query.ReadAttachm
 		Offset:     offset,
 		TotalBytes: total,
 		Available:  available,
+		Path:       absPath,
 	}
 	if offset >= total {
 		return result, nil
