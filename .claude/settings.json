@@ -10,7 +10,8 @@
       "Skill(sdd-catchup)",
       "Skill(sdd-explore)",
       "Skill(sdd-groom)",
-      "Skill(sdd)"
+      "Skill(sdd)",
+      "mcp__sdd__*"
     ]
   },
   "worktree": {
