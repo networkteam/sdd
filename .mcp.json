@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "sdd": {
+      "type": "stdio",
+      "command": "sdd",
+      "args": [
+        "serve"
+      ],
+      "env": {}
+    }
+  }
+}
