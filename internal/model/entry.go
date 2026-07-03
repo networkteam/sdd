@@ -305,6 +305,26 @@ func (e *Entry) IsShellProcedure() bool {
 	return e.IsProcedure() && e.Class == ProcedureClassShell
 }
 
+// FirstSummarySentence returns the leading sentence of the entry's stored
+// summary, falling back to the body when no summary is stored — the
+// one-line micro-summary shared by show trees, brief entry lines, and
+// serve-side enumerations. A sentence ends at the first ". " or line
+// break, whichever comes first.
+func (e *Entry) FirstSummarySentence() string {
+	src := e.Summary
+	if src == "" {
+		src = e.Content
+	}
+	src = strings.TrimSpace(src)
+	if i := strings.IndexByte(src, '\n'); i >= 0 {
+		src = strings.TrimSpace(src[:i])
+	}
+	if i := strings.Index(src, ". "); i >= 0 {
+		src = src[:i+1]
+	}
+	return src
+}
+
 // IsSettled returns true if this is a directive born terminal via
 // intent: settled — a decision that needs no follow-up and carries no closing
 // edge. Intent is only meaningful on directives, so the kind guard keeps a

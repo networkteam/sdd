@@ -133,7 +133,7 @@ func (s *Server) registerQueries(r *engine.Registry, ss *shellSession) error {
 				if head == nil || head.Canonical == "" || head.IsShellProcedure() || len(chain.LiveHeads) == 0 {
 					continue
 				}
-				fmt.Fprintf(&sb, "- %s — %s\n", head.Canonical, firstSummarySentence(head))
+				fmt.Fprintf(&sb, "- %s — %s\n", head.Canonical, head.FirstSummarySentence())
 			}
 			return strings.TrimRight(sb.String(), "\n"), nil
 		},
@@ -466,23 +466,6 @@ func intArg(args map[string]any, name string, fallback int) int {
 	default:
 		return fallback
 	}
-}
-
-// firstSummarySentence reduces an entry's summary (or content, when no
-// summary is stored) to its leading sentence for one-line enumerations.
-func firstSummarySentence(e *model.Entry) string {
-	src := e.Summary
-	if src == "" {
-		src = e.Content
-	}
-	src = strings.TrimSpace(src)
-	if i := strings.IndexByte(src, '\n'); i >= 0 {
-		src = strings.TrimSpace(src[:i])
-	}
-	if i := strings.Index(src, ". "); i >= 0 {
-		return src[:i+1]
-	}
-	return src
 }
 
 // validAttachmentName rejects handles that could escape the staging dir.

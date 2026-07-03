@@ -62,11 +62,7 @@ func EntryLineBrief(w io.Writer, e *model.Entry, g *model.Graph) {
 	sb.WriteString(" ")
 	sb.WriteString(e.TypeLabel())
 	sb.WriteString(" ")
-	desc := e.Summary
-	if desc == "" {
-		desc = e.ShortContent(200)
-	}
-	sb.WriteString(firstSentence(desc))
+	sb.WriteString(e.FirstSummarySentence())
 	sb.WriteString("\n")
 	fmt.Fprint(w, sb.String())
 }

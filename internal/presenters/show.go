@@ -199,11 +199,7 @@ func treeSentence(item model.ShowTreeItem, primaryID string) string {
 	case item.ShownBelow:
 		return "(see below)"
 	}
-	src := item.Entry.Summary
-	if src == "" {
-		src = item.Entry.Content
-	}
-	return firstSentence(src)
+	return item.Entry.FirstSummarySentence()
 }
 
 // treeVerb is the leading relation word for a tree node. A refs/refd-by edge
@@ -258,22 +254,4 @@ func topicLabels(paths []model.TopicPath) []string {
 		labels[i] = p.String()
 	}
 	return labels
-}
-
-// firstSentence returns the leading sentence of s — text up to the first
-// sentence-ending ". " or the first line break, whichever comes first. Used
-// for the compact depth-level micro-summary in the show tree; stored summaries
-// are never modified.
-func firstSentence(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = strings.TrimSpace(s[:i])
-	}
-	if i := strings.Index(s, ". "); i >= 0 {
-		return s[:i+1]
-	}
-	return s
 }
