@@ -8,6 +8,18 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
+// projectEntries filters out the embedded base procedures LoadGraph always
+// merges in, so on-disk fixture counts stay stable as the embedded set grows.
+func projectEntries(g *model.Graph) []*model.Entry {
+	var entries []*model.Entry
+	for _, e := range g.Entries {
+		if !e.Embedded {
+			entries = append(entries, e)
+		}
+	}
+	return entries
+}
+
 func TestLoadGraph(t *testing.T) {
 	dir := t.TempDir()
 
@@ -48,8 +60,8 @@ Done signal closing decision.`)
 		t.Fatal(err)
 	}
 
-	if len(g.Entries) != 3 {
-		t.Fatalf("Entries = %d, want 3", len(g.Entries))
+	if entries := projectEntries(g); len(entries) != 3 {
+		t.Fatalf("Entries = %d, want 3", len(entries))
 	}
 
 	// Signal is closed by decision
@@ -102,10 +114,11 @@ See [design](./06-115516-s-stg-beh/design.md) for details.`)
 		t.Fatal(err)
 	}
 
-	if len(g.Entries) != 1 {
-		t.Fatalf("Entries = %d, want 1", len(g.Entries))
+	entries := projectEntries(g)
+	if len(entries) != 1 {
+		t.Fatalf("Entries = %d, want 1", len(entries))
 	}
-	e := g.Entries[0]
+	e := entries[0]
 	if len(e.Attachments) != 1 {
 		t.Fatalf("Attachments = %v, want 1 entry", e.Attachments)
 	}

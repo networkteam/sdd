@@ -9,12 +9,35 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/query"
 )
+
+// withoutEmbedded filters the embedded base-procedure IDs out of a callback
+// ID list — the graph load merges them in, and they get indexed like any
+// entry, but fixture assertions count only the on-disk project entries.
+func withoutEmbedded(t *testing.T, ids []string) []string {
+	t.Helper()
+	base, err := baseprocedures.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	embedded := make(map[string]bool, len(base))
+	for _, e := range base {
+		embedded[e.ID] = true
+	}
+	var project []string
+	for _, id := range ids {
+		if !embedded[id] {
+			project = append(project, id)
+		}
+	}
+	return project
+}
 
 // fakeEmbedder produces deterministic 4-dim embeddings keyed off the
 // SHA-256 of the input. Stable across runs; usable for similarity tests
@@ -112,30 +135,35 @@ func TestIndexHandler_Build(t *testing.T) {
 	})
 
 	var indexed []string
+	chunksByID := map[string]int{}
 	cmd := &command.BuildIndexCmd{
-		OnEntryIndexed: func(id string, n int) { indexed = append(indexed, id) },
+		OnEntryIndexed: func(id string, n int) { indexed = append(indexed, id); chunksByID[id] = n },
 		OnEntrySkipped: func(id string) { t.Errorf("unexpected skip for %s", id) },
 	}
 	if err := h.Build(context.Background(), cmd); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(indexed) != 2 {
-		t.Errorf("expected 2 entries indexed, got %d (%v)", len(indexed), indexed)
+	if got := withoutEmbedded(t, indexed); len(got) != 2 {
+		t.Errorf("expected 2 project entries indexed, got %d (%v)", len(got), got)
 	}
 	if emb.calls != 1 {
 		t.Errorf("expected 1 cross-entry batched embed call, got %d", emb.calls)
 	}
-	// Each entry: 1 summary + 1 body = 2 chunks. 4 chunks total.
-	if emb.totalInputs != 4 {
-		t.Errorf("expected 4 chunks embedded, got %d", emb.totalInputs)
+	// Each project entry: 1 summary + 1 body = 2 chunks.
+	for _, id := range withoutEmbedded(t, indexed) {
+		if chunksByID[id] != 2 {
+			t.Errorf("entry %s: expected 2 chunks, got %d", id, chunksByID[id])
+		}
 	}
-	// Manifest should record both entries.
+	// Manifest should record both project entries.
 	manifest, err := index.LoadManifest(indexDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Entries) != 2 {
-		t.Errorf("expected manifest to have 2 entries, got %d", len(manifest.Entries))
+	for _, id := range []string{"20260101-100000-s-tac-aaa", "20260101-100001-s-tac-bbb"} {
+		if _, ok := manifest.Entries[id]; !ok {
+			t.Errorf("manifest is missing entry %s", id)
+		}
 	}
 }
 
@@ -179,8 +207,8 @@ func TestIndexHandler_BuildFiresOnBatchStart(t *testing.T) {
 	if len(batches) != 1 {
 		t.Fatalf("expected 1 batch, got %d (%v)", len(batches), batches)
 	}
-	if len(batches[0]) != 2 {
-		t.Errorf("batch carried %d entry IDs, want 2 (%v)", len(batches[0]), batches[0])
+	if got := withoutEmbedded(t, batches[0]); len(got) != 2 {
+		t.Errorf("batch carried %d project entry IDs, want 2 (%v)", len(got), batches[0])
 	}
 	// The planned total is the chunk sum, and it must equal both the batch's
 	// announced chunk count and the chunks reported as entries complete — the
@@ -228,8 +256,8 @@ func TestIndexHandler_BuildSkipsUnchanged(t *testing.T) {
 	if err := h.Build(context.Background(), cmd); err != nil {
 		t.Fatalf("second Build: %v", err)
 	}
-	if len(skipped) != 1 {
-		t.Errorf("expected 1 skip on second build, got %d (%v)", len(skipped), skipped)
+	if got := withoutEmbedded(t, skipped); len(got) != 1 {
+		t.Errorf("expected 1 project-entry skip on second build, got %d (%v)", len(got), skipped)
 	}
 	if emb.calls != firstCalls {
 		t.Errorf("second build should not call embedder when nothing changed (got %d additional calls)", emb.calls-firstCalls)

@@ -6,92 +6,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// The capture-shaped fixture from the surface spec (plan d-tac-ry0 §3),
-// adapted minimally: the chooser-collected evidence fields (fidelityNote,
-// correctedSummary) are declared in state per the reports-write-only-state
-// trust rule.
-const captureFixture = `---
-type: decision
-layer: prc
-kind: procedure
-canonical: capture
-params:
-    anchor: {type: entry-id, optional: true, desc: entry this capture is anchored on}
-    supersedes: {type: entry-id, optional: true, desc: chain head this capture replaces}
-    closes: {type: list<entry-id>, optional: true, desc: entries this capture resolves}
-    kind: {type: entry-kind, optional: true, desc: pre-selected target kind}
-state:
-    body: {type: text, desc: entry description; self-describing first sentence}
-    entryKind: {type: entry-kind, desc: signal or decision kind}
-    layer: {type: layer, desc: strategic | conceptual | tactical | operational | process}
-    refs: {type: list<ref>, desc: "each {id, kind, desc?}"}
-    topics: {type: list<label>, desc: reuse existing labels}
-    confidence: {type: confidence, desc: honest confidence}
-    intent: {type: intent, optional: true, desc: required when entryKind is directive}
-    widenReport: {type: text, desc: searches run and entries inspected before drafting}
-    fidelityNote: {type: text, optional: true, desc: one-line fidelity note}
-    correctedSummary: {type: text, optional: true, desc: corrected summary on drift}
-steps:
-    - id: assemble
-      collect: [body, entryKind, layer, refs, topics, confidence, "intent?", widenReport]
-      inject:
-          - {fn: viewLayout, args: {layout: "active:as-counts"}}
-      transitions:
-          - when: hasBody and hasRefs and hasTopics and hasWidenReport
-                  and refsResolve and refKindsValid
-                  and participantsCanonical and intentPresentIfDirective
-            to: playback
-    - id: playback
-      chooser: user
-      options:
-          - {choice: confirm, call: confirmPlayback, to: write}
-          - {choice: adjust, collect: ["body?", "refs?", "topics?", "confidence?", "intent?"], to: assemble}
-          - {choice: abort, to: end(abandoned)}
-    - id: write
-      guard: playbackConfirmed
-      op: newEntry
-      transitions:
-          - when: noHighFindings
-            to: verifySummary
-          - otherwise: reviseOrOverride
-    - id: reviseOrOverride
-      chooser: user
-      render: findings
-      options:
-          - {choice: revise, collect: ["body?", "refs?", "topics?"], to: assemble}
-          - {choice: override, call: recordOverride, to: write}
-          - {choice: abort, to: end(abandoned)}
-    - id: verifySummary
-      chooser: agent
-      inject:
-          - {fn: generatedSummary}
-      options:
-          - {choice: faithful, collect: [fidelityNote], to: end(completed)}
-          - {choice: drifted, collect: [correctedSummary], call: replaceSummary, to: end(completed)}
----
-
-The shared capture spine.
-
-## unit: assemble
-
-Draft the entry. Existing topics: {{.viewLayout}}
-
-## unit: playback
-
-Play back to the user: {{.body}}
-
-## unit: findings
-
-Pre-flight findings to resolve or override.
-
-## unit: verifySummary
-
-Verify the generated summary: {{.generatedSummary}}
-`
+// captureEntry returns the real embedded base capture procedure — the
+// per-procedure table tests below drive the shipped entry, not a parallel
+// fixture, so spec drift between tests and the served procedure is
+// impossible.
+func captureEntry(t *testing.T) *model.Entry {
+	t.Helper()
+	entries, err := baseprocedures.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Canonical == "capture" {
+			return e
+		}
+	}
+	t.Fatal("embedded base entries carry no capture procedure")
+	return nil
+}
 
 const fixtureRefID = "20260601-120000-d-tac-ref"
 
@@ -147,10 +84,7 @@ func newFixtureEnv(t *testing.T) *fixtureEnv {
 	t.Helper()
 	env := &fixtureEnv{}
 
-	entry, err := model.ParseEntry("20260702-120000-d-prc-cap.md", captureFixture)
-	if err != nil {
-		t.Fatal(err)
-	}
+	entry := captureEntry(t)
 
 	reg := NewRegistry()
 	mustRegisterQuery(reg, Query{

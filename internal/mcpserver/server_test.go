@@ -23,8 +23,13 @@ import (
 )
 
 const (
-	fixtureGapID       = "20260601-100000-s-tac-aaa"
-	fixtureProcedureID = "20260601-120000-d-prc-cap"
+	fixtureGapID = "20260601-100000-s-tac-aaa"
+
+	// embeddedCaptureID is the base capture procedure shipped inside the
+	// binary (internal/baseprocedures/entries). The fixture procedure
+	// supersedes it, exercising the project-head-wins fork rule on the
+	// production resolution path.
+	embeddedCaptureID = "20260703-094500-d-prc-cap"
 )
 
 // stubRunner satisfies llm.Runner for finder construction; the paths the
@@ -48,13 +53,17 @@ func (f fakeReader) Preflight(context.Context, query.PreflightQuery) (*query.Pre
 }
 
 // captureProcedure is the capture-shaped fixture from the surface spec §3,
-// stored as a normal graph entry so canonical resolution and spec load run
-// the production path.
+// stored as a normal graph entry superseding the embedded base capture — a
+// project override, so canonical resolution picks it under project-head-wins
+// while the spec load runs the production path. Its minimal instruction
+// units keep the shell assertions decoupled from the base entry's prose.
 const captureProcedure = `---
 type: decision
 layer: process
 kind: procedure
 canonical: capture
+supersedes:
+    - ` + embeddedCaptureID + `
 participants:
     - Tester
 confidence: medium
@@ -134,12 +143,7 @@ Pre-flight findings to resolve or override.
 Verify the generated summary: {{.generatedSummary}}
 `
 
-func writeFixtureGraph(t *testing.T) string {
-	t.Helper()
-	graphDir := filepath.Join(t.TempDir(), "graph")
-
-	entries := map[string]string{
-		"2026/06/01-100000-s-tac-aaa.md": `---
+const gapEntry = `---
 type: signal
 layer: tactical
 kind: gap
@@ -152,8 +156,15 @@ summary: Pre-flight verdict oscillation produces contradictory findings across r
 ---
 
 Pre-flight verdict oscillation produces contradictory findings across runs on identical input.
-`,
-		"2026/06/01-120000-d-prc-cap.md": captureProcedure,
+`
+
+func writeFixtureGraph(t *testing.T) string {
+	t.Helper()
+	graphDir := filepath.Join(t.TempDir(), "graph")
+
+	entries := map[string]string{
+		"2026/06/01-100000-s-tac-aaa.md": gapEntry,
+		"2026/07/04-120000-d-prc-tst.md": captureProcedure,
 	}
 	for rel, content := range entries {
 		path := filepath.Join(graphDir, rel)
@@ -429,6 +440,62 @@ func TestCaptureProcedureLoop(t *testing.T) {
 	}
 	if !strings.Contains(string(materialized), "Staged before the capture ran") {
 		t.Fatalf("materialized attachment content diverged: %q", materialized)
+	}
+}
+
+// TestEmbeddedCaptureProcedure drives the shipped base capture procedure
+// (internal/baseprocedures/entries) over MCP with no project override in the
+// graph: canonical resolution falls through to the embedded entry, its
+// instruction units render over the store and injections, and the full spine
+// completes with a written entry.
+func TestEmbeddedCaptureProcedure(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	path := filepath.Join(graphDir, "2026/06/01-100000-s-tac-aaa.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(gapEntry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	if serve.Step != "assemble" || serve.Status != "running" {
+		t.Fatalf("expected running at assemble, got %s at %q", serve.Status, serve.Step)
+	}
+	if !strings.Contains(serve.Instructions, "Ground before you draft") {
+		t.Fatalf("expected the embedded assemble unit, got %q", serve.Instructions)
+	}
+	if !strings.Contains(serve.Instructions, "testing/fixture") {
+		t.Fatalf("assemble unit should render the injected topic counts, got %q", serve.Instructions)
+	}
+
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	if serve.Step != "playback" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
+		t.Fatalf("expected pending user chooser at playback, got step %q", serve.Step)
+	}
+	if !strings.Contains(serve.Instructions, "Test capture entry") {
+		t.Fatalf("playback unit should render the drafted body verbatim, got %q", serve.Instructions)
+	}
+
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+		"chooser": "playback", "choice": "confirm", "userWords": "yes, capture it",
+	}}, &serve)
+	if serve.Step != "verifySummary" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "agent" {
+		t.Fatalf("confirm should write and reach verifySummary, got step %q status %s (%s)", serve.Step, serve.Status, serve.Instructions)
+	}
+
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+		"chooser": "verifySummary", "choice": "faithful", "userWords": "",
+		"fields": map[string]any{"fidelityNote": "summary matches the confirmed body"},
+	}}, &serve)
+	if serve.Status != "completed" {
+		t.Fatalf("expected completion, got %s at %q", serve.Status, serve.Step)
+	}
+	if entryID, _ := serve.Produced["entryId"].(string); entryID == "" {
+		t.Fatalf("completion should produce the created entry ID, got %v", serve.Produced)
 	}
 }
 

@@ -1,6 +1,7 @@
 package baseprocedures
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -84,15 +85,28 @@ func TestLoad_RejectsUnparseableFilename(t *testing.T) {
 
 func TestEntries_EmbeddedSetLoads(t *testing.T) {
 	// The real embedded set must always load cleanly — a failure here is a
-	// broken build. The set may be empty (the capture procedure ships in a
-	// later slice); every entry present must be a marked procedure.
+	// broken build. Every entry present must be a marked procedure, and the
+	// capture procedure (the shared spine) must ship. Structural spec
+	// validation of the capture entry runs in the engine's per-procedure
+	// table tests, which load it through the production path.
 	entries, err := Entries()
 	if err != nil {
 		t.Fatalf("embedded base procedures failed to load: %v", err)
 	}
+	var canonicals []string
 	for _, e := range entries {
 		if !e.Embedded || !e.IsProcedure() {
 			t.Errorf("embedded entry %s: Embedded=%v kind=%s", e.ID, e.Embedded, e.Kind)
 		}
+		if e.Summary == "" {
+			t.Errorf("embedded entry %s ships without a summary", e.ID)
+		}
+		if len(e.Participants) > 0 {
+			t.Errorf("embedded entry %s carries participants — base entries are framework artifacts", e.ID)
+		}
+		canonicals = append(canonicals, e.Canonical)
+	}
+	if !slices.Contains(canonicals, "capture") {
+		t.Errorf("embedded set must ship the capture procedure, got canonicals %v", canonicals)
 	}
 }

@@ -93,8 +93,8 @@ Working on it.
 		t.Fatalf("LoadGraph: %v", err)
 	}
 
-	if len(g.Entries) != 1 {
-		t.Errorf("got %d entries, want 1 (WIP marker should be skipped)", len(g.Entries))
+	if entries := projectEntries(g); len(entries) != 1 {
+		t.Errorf("got %d entries, want 1 (WIP marker should be skipped)", len(entries))
 	}
 }
 
