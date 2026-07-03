@@ -1,7 +1,7 @@
 ---
 description: Run an SDD session through the workflow engine — procedures served step by step over the sdd MCP server instead of skill prose. Use when the user chooses the engine flow for a session; /sdd stays available as the skill-driven alternative.
 name: sdd-engine
-sdd-content-hash: 091390fe51e0278037724dcca69756d143f4d1a47ee4d9c335be955e12a14a70
+sdd-content-hash: 9d1edf637a013f63966f1359c271be2d9aa2cc83500cd8dbffbd561fcbda8424
 sdd-version: dev
 ---
 
@@ -33,6 +33,11 @@ then restart the session. Don't attempt to fall back to the `sdd` CLI for writes
 ## Reads are free
 
 Ground the dialogue liberally with the read tools — they are never gated: `search` (find entries from several angles), `show` (full entries with chains — summaries are pointers, not facts), `view` (overview layouts), `read_attachment`, `info`. Attach files to a pending capture by staging them first (`stage_attachment`) and passing the returned handles in the report.
+
+## Sub-moves and side missions
+
+- When a junction dispatches a follow-up move — an engage whose picked move leads into a capture — start the next procedure with `parent` set to the spawning instance, so the lineage lands in the session log.
+- The `explore` procedure is a compression mission designed for a disposable context: spawn a sub-agent (Task tool, `general-purpose`) connected to this same sdd server, have it run `start_procedure` with canonical `explore` and `targets` + `goal` params, and take back only the briefing it returns. Its wide reading burns in the sub-agent's context, not yours. Run it inline only when the surface is small enough to pay for.
 
 ## Ending
 
