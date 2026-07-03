@@ -1021,3 +1021,40 @@ func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	defer func() { _ = f.Close() }()
 	return engine.ReadEvents(f)
 }
+
+// TestEmbeddedCatchupProcedure drives the shipped catch-up base entry over
+// MCP with the production viewLayout query: the multi-section lane layout
+// parses and renders against the real graph, the briefing report reaches the
+// junction, and the user's pick completes the check-in.
+func TestEmbeddedCatchupProcedure(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "catch-up"}, &serve)
+	if serve.Step != "compose" || serve.Status != "running" {
+		t.Fatalf("expected running at compose, got %s at %q", serve.Status, serve.Step)
+	}
+	// The multi-section layout rendered for real: lane headers present, and
+	// the fixture gap surfaces in the open-and-warm lane by its summary.
+	for _, want := range []string{"Recent done", "Open and warm", "Pre-flight verdict oscillation"} {
+		if !strings.Contains(serve.Instructions, want) {
+			t.Fatalf("compose unit should carry %q from the injected lanes, got %q", want, serve.Instructions)
+		}
+	}
+
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+		"briefing": "**One open gap.**\n\n1. Decide the oscillation gap (`s-tac-aaa`).\n\n**What do you want to move forward?**",
+	}}, &serve)
+	if serve.Step != "junction" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
+		t.Fatalf("briefing should reach the junction user chooser, got %q", serve.Step)
+	}
+
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+		"chooser": "junction", "choice": "pursue", "userWords": "the oscillation gap",
+		"fields": map[string]any{"selectedThread": "decide the oscillation gap"},
+	}}, &serve)
+	if serve.Status != "completed" {
+		t.Fatalf("pursue should complete the check-in, got %s at %q", serve.Status, serve.Step)
+	}
+}

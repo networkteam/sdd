@@ -80,6 +80,13 @@ func newProcEnv(t *testing.T, canonical string) *procEnv {
 
 	reg := NewRegistry()
 	mustRegisterQuery(reg, Query{
+		Doc: FuncDoc{Name: "viewLayout", Doc: "fake view pipeline"},
+		Fn: func(_ *Context, args map[string]any) (any, error) {
+			layout, _ := args["layout"].(string)
+			return "lanes for " + layout, nil
+		},
+	})
+	mustRegisterQuery(reg, Query{
 		Doc: FuncDoc{Name: "entryChains", Doc: "fake chain render", Reads: []string{"anchor", "targets"}},
 		Fn: func(ctx *Context, _ map[string]any) (any, error) {
 			var ids []string

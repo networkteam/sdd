@@ -48,6 +48,7 @@ var presenceFields = map[string]string{
 	"hasBrief":        "brief",
 	"hasBriefing":     "briefing",
 	"hasInspectedIds": "inspectedIds",
+	"hasEvaluation":   "evaluation",
 }
 
 func registerBuiltinPredicates(r *Registry) {
