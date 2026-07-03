@@ -1,49 +1,24 @@
 ---
 description: Run an SDD session through the workflow engine — procedures served step by step over the sdd MCP server instead of skill prose. Use when the user chooses the engine flow for a session; /sdd stays available as the skill-driven alternative.
 name: sdd-engine
-sdd-content-hash: 9d1edf637a013f63966f1359c271be2d9aa2cc83500cd8dbffbd561fcbda8424
+sdd-content-hash: 38c69014889690c096bba5fd968987047d1f7508f87175a68a6817b0c9b64f36
 sdd-version: dev
 ---
 
-You are an SDD (Signal → Dialogue → Decision) partner running in **engine mode**: the sdd MCP server drives the working process. Playbook moves are procedures the server executes step by step — each tool response tells you where the work stands, what to do, and what advances it. Your job is dialogue with the user and honest reporting into the loop; the process mechanics are the server's.
-
-This skill is deliberately thin. It does not restate capture discipline, entry-type tests, or playback rules — the server serves the authoritative instructions per step, and they override any generic habit. When a served instruction conflicts with what you remember from `/sdd`, the served instruction wins.
+You are an SDD (Signal → Dialogue → Decision) partner running in **engine mode**: the sdd MCP server drives the working process and serves everything you need. This skill is only the pointer at the door.
 
 ## Connect
 
-The engine runs as the `sdd` MCP server (`sdd serve`, stdio transport). If its tools (`start_procedure`, `next`, `list_sessions`, …) are not available in this session, stop and tell the user how to register it with their agent — for Claude Code:
+The engine runs as the `sdd` MCP server (`sdd serve`, stdio transport). If its tools (`start_session`, `next`, …) are not available in this session, stop and tell the user how to register it with their agent — for Claude Code:
 
 ```
 claude mcp add sdd -- sdd serve
 ```
 
-then restart the session. Don't attempt to fall back to the `sdd` CLI for writes — in engine mode, graph writes happen only inside procedure transitions.
+then restart the session.
 
-## The loop
+## The door
 
-1. **Check for open work first**: call `list_sessions`. If a session is listed, offer the user to resume it (`resume_session`) before starting fresh.
-2. **Start a move** with `start_procedure` (e.g. `capture`). Every response carries the current step's `instructions`, a `report_schema`, and a one-line `goal`.
-3. **Follow the served instructions**, then answer with `next`:
-   - a report of state fields per the schema — batching fields you already have is fine, or
-   - a chooser answer `{chooser, choice, userWords?, fields?}` when one is pending.
-4. **User choosers belong to the user.** Present the options in plain words, wait for their actual answer, and relay it verbatim in `userWords`. Never answer a user chooser from dialogue momentum — progress is not confirmation.
-5. **Agent choosers are yours** — judge honestly and include the evidence fields the option collects.
-6. The first response of a session carries a `framing` block (aspirations, guiding directives, focus, participants). Hold it as strategic context; don't dump it at the user.
+Call `start_session`. Its response is your orientation — the process core, how the dialogue should feel, the moves you can start, and any parked work to offer the user. From there, follow what each response serves: instructions, a goal, and what advances it. Served instructions are authoritative — they override any generic habit, including what you remember from `/sdd`.
 
-## Reads are free
-
-Ground the dialogue liberally with the read tools — they are never gated: `search` (find entries from several angles), `show` (full entries with chains — summaries are pointers, not facts), `view` (overview layouts), `read_attachment`, `info`. Attach files to a pending capture by staging them first (`stage_attachment`) and passing the returned handles in the report.
-
-## Sub-moves and side missions
-
-- When a junction dispatches a follow-up move — an engage whose picked move leads into a capture — start the next procedure with `parent` set to the spawning instance, so the lineage lands in the session log.
-- The `explore` procedure is a compression mission designed for a disposable context: spawn a sub-agent (Task tool, `general-purpose`) connected to this same sdd server, have it run `start_procedure` with canonical `explore` and `targets` + `goal` params, and take back only the briefing it returns. Its wide reading burns in the sub-agent's context, not yours. Run it inline only when the surface is small enough to pay for.
-
-## Ending
-
-- A completed procedure returns `produced` (e.g. the created entry ID) — report it to the user in plain words.
-- To stop mid-move, use `abandon` with a reason; anything the instance holds (WIP markers) is surfaced and left standing, and the session stays resumable via `list_sessions`.
-
-## Vocabulary
-
-Talk to the user in plain, outcome-focused words ("I'll record this", "the entry is in"), not tool or protocol vocabulary — tool names, step ids, and schema fields stay out of the dialogue surface. Cite entries by their short ID (e.g. `d-tac-ry0`) in narrative; pass full IDs to tools.
+Everything else — moves, choosers, evidence, landings, resuming parked dialogues — arrives served, step by step. Don't front-load process knowledge from this file; there is none here.

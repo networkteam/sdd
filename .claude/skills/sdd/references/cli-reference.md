@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: b364c38c5605110795e3feada5552a2add7b1ab6f9970ee07a8e54f765f923a5
+sdd-content-hash: 74c0cc66e14b070253be1d85f4eb4ed8c993e6fcab46cb0658bb8db4a0924383
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -79,6 +79,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 | `expand(refs)` | Per row, render each entry's outgoing refs as indented sub-lines (as-list only). Optional nested `expand(refs(inactive))` narrows to refs whose target is currently inactive. Composes with filters, `rank`, and `n` |
 | `group(by(<field>))` | Bucket entries by field — one of `kind`, `layer`, `type`, `participant` — producing a grouped shape (consume with `as-grouped`). `participant` is multi-valued: a co-authored entry buckets under each author |
 | `stalled(<value>)` | Threshold below which a focus target with assigned actors is "stalled" (default 1.0) |
+| `brief` | Compact entry lines: identity qualifiers plus the first summary sentence, no attribute segments (confidence, status, score, topics, participants). For injection surfaces where full lines cost context; composes with the entry-line renders, rejected for `as-counts` |
 
 **`expand(refs)` sub-line shape.** Each ref renders as `→ <verb> <full-id> {status: …}` with an optional `: "<desc>"` clause when the ref carries a description. The verb is the per-ref kind (`grounded-in`, `builds-on`, `refines`, `addresses`, `surfaces`, `surfaced-by`, `depends-on`, `required-by`, `related`); legacy bare-string refs (kind `unknown`) render with the generic verb `refs`, and legacy on-disk `grounds`/`evidence` render as `grounded-in` (resolved at parse). Status surfaces the referenced entry's *current* derived state, so stale summary prose can't mislead a reader into treating a closed dependency as still open. Done-signal targets carry no status segment (they are terminal). Three shapes:
 
@@ -224,6 +225,7 @@ Depth is controlled per direction by `--up` / `--down` (see the `sdd show` entry
 - `--intent pending|guiding|settled` — directive lifecycle posture (kind: directive only). **Required on every directive capture** — no default; rejected on any other kind. `pending` demands follow-up, `guiding` is standing context that shapes later decisions, `settled` is born-terminal (needs no closing edge; a medium pre-flight finding fires if the body doesn't justify the terminality).
 - `--kind <kind>` — signals: gap (default), fact, question, insight, done, actor, annotation; decisions: directive (default), activity, plan, contract, aspiration, role, focus, procedure
 - `--canonical name` — frontmatter `canonical` (kind: actor and kind: procedure — actor identity or playbook-move identity)
+- `--class move|shell` — frontmatter `class` (kind: procedure only). Default move (a playbook step started through the engine loop); `shell` marks a session base auto-started by the engine's session door — set it when superseding a shell procedure such as `user-dialogue`
 - `--aliases a,b` — frontmatter `aliases` (kind: actor only)
 - `--actor canonical` — frontmatter `actor` (kind: role only)
 - `--topics LABEL[,LABEL...]` — inline `topics:` labels (any kind). CSV form. Each label is a topic-path string (`/`-joined components, e.g. `infrastructure/cli`).
