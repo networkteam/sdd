@@ -209,8 +209,10 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 	case "", model.ProcedureClassMove:
 	case model.ProcedureClassShell:
 		spec.Class = model.ProcedureClassShell
+	case model.ProcedureClassTask:
+		spec.Class = model.ProcedureClassTask
 	default:
-		addProblem("class: unknown class %q (move or shell)", entry.Class)
+		addProblem("class: unknown class %q (move, shell, or task)", entry.Class)
 	}
 
 	raw := entry.ProcedureSpec
@@ -296,6 +298,11 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 			if _, ok := spec.Units[step.Render]; !ok {
 				addProblem("%s: render names unit %q, but the body has no `## unit: %s` section", prefix, step.Render, step.Render)
 			}
+		}
+		// A task runs in a delegate context with no user present — a user
+		// chooser there would block on a dialogue turn that never comes.
+		if spec.Class == model.ProcedureClassTask && step.Chooser == ChooserUser {
+			addProblem("%s: a task procedure has no user present — user choosers are not allowed (dispatch resolves its inputs as params)", prefix)
 		}
 	}
 
@@ -591,6 +598,15 @@ func specError(canonical, entryID string, problems []string) error {
 func (s *Spec) paramNames() []string {
 	names := make([]string, 0, len(s.Params))
 	for n := range s.Params {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (s *Spec) stateNames() []string {
+	names := make([]string, 0, len(s.State))
+	for n := range s.State {
 		names = append(names, n)
 	}
 	sort.Strings(names)

@@ -130,7 +130,7 @@ func (s *Server) registerQueries(r *engine.Registry, ss *shellSession) error {
 			var sb strings.Builder
 			for _, chain := range ctx.Graph.ProcedureChains() {
 				head := chain.Head
-				if head == nil || head.Canonical == "" || head.IsShellProcedure() || len(chain.LiveHeads) == 0 {
+				if head == nil || head.Canonical == "" || head.IsShellProcedure() || head.IsTaskProcedure() || len(chain.LiveHeads) == 0 {
 					continue
 				}
 				fmt.Fprintf(&sb, "- %s — %s\n", head.Canonical, head.FirstSummarySentence())

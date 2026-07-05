@@ -297,12 +297,23 @@ type ProcedureClass string
 const (
 	ProcedureClassMove  ProcedureClass = "move"
 	ProcedureClassShell ProcedureClass = "shell"
+	// ProcedureClassTask is a procedure a move delegates work to: dispatched
+	// with resolved params, no user choosers, kept off the shell's move
+	// enumeration and junction offers, and preferring a disposable (forked)
+	// context. Explore is its first member.
+	ProcedureClassTask ProcedureClass = "task"
 )
 
 // IsShellProcedure returns true if this procedure is a session shell —
 // auto-started by the session door rather than startable as a move.
 func (e *Entry) IsShellProcedure() bool {
 	return e.IsProcedure() && e.Class == ProcedureClassShell
+}
+
+// IsTaskProcedure returns true if this procedure is a task — a delegate move
+// dispatched to a disposable context, kept off the shell's offered moves.
+func (e *Entry) IsTaskProcedure() bool {
+	return e.IsProcedure() && e.Class == ProcedureClassTask
 }
 
 // FirstSummarySentence returns the leading sentence of the entry's stored

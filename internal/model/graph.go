@@ -934,12 +934,12 @@ func validateProcedureFrontmatter(e *Entry) {
 		})
 	}
 	switch e.Class {
-	case "", ProcedureClassMove, ProcedureClassShell:
+	case "", ProcedureClassMove, ProcedureClassShell, ProcedureClassTask:
 	default:
 		e.Warnings = append(e.Warnings, Warning{
 			Field:   "class",
 			Value:   string(e.Class),
-			Message: "procedure class must be move or shell (empty means move)",
+			Message: "procedure class must be move, shell, or task (empty means move)",
 		})
 	}
 }

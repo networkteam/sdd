@@ -49,6 +49,48 @@ func NewStore(spec *Spec) *Store {
 	}
 }
 
+// SetStart applies the start-time input map, the shared seeding primitive
+// (d-tac-tlo): a key naming a declared param sets that param (fixed at
+// start), a key naming a declared state field seeds it — a start-time state
+// write, equivalent to an immediate report, so an entry gate reading it is
+// satisfied on entry. Move dispatch and direct start share this: a caller
+// passing an anchor a procedure declares as state seeds the resolver, and the
+// parent handoff seeds the same fields from the parent's store. Unknown keys
+// are rejected.
+func (s *Store) SetStart(inputs map[string]any) error {
+	params := make(map[string]any)
+	seed := make(map[string]any)
+	for name, v := range inputs {
+		switch {
+		case s.isParam(name):
+			params[name] = v
+		case s.isState(name):
+			seed[name] = v
+		default:
+			return fmt.Errorf("unknown start input %q (params: %s; seedable state: %s)", name, joinNames(s.spec.paramNames()), joinNames(s.spec.stateNames()))
+		}
+	}
+	if err := s.SetParams(params); err != nil {
+		return err
+	}
+	if len(seed) > 0 {
+		if _, err := s.WriteState(seed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) isParam(name string) bool {
+	_, ok := s.spec.Params[name]
+	return ok
+}
+
+func (s *Store) isState(name string) bool {
+	_, ok := s.spec.State[name]
+	return ok
+}
+
 // SetParams validates and writes the start-time params. Required params must
 // be present; unknown params are rejected.
 func (s *Store) SetParams(params map[string]any) error {

@@ -476,8 +476,8 @@ func TestCapture_ParamsValidatedAtStart(t *testing.T) {
 		t.Errorf("malformed param must fail start, got %v", err)
 	}
 	if _, err := env.session.Start(env.spec, map[string]any{"unknown": true}, ""); err == nil ||
-		!strings.Contains(err.Error(), "unknown param") {
-		t.Errorf("unknown param must fail start, got %v", err)
+		!strings.Contains(err.Error(), "unknown start input") {
+		t.Errorf("unknown start input must fail start, got %v", err)
 	}
 	if _, err := env.session.Start(env.spec, map[string]any{"anchor": fixtureRefID}, ""); err != nil {
 		t.Errorf("valid param rejected: %v", err)

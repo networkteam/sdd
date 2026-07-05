@@ -42,7 +42,7 @@ type StartSessionArgs struct {
 
 type StartProcedureArgs struct {
 	Canonical string         `json:"canonical" jsonschema:"the procedure to start, by its stable name (e.g. capture)"`
-	Params    map[string]any `json:"params,omitempty" jsonschema:"typed start params per the procedure's declaration"`
+	Params    map[string]any `json:"params,omitempty" jsonschema:"typed start inputs per the procedure's declaration: declared params, plus any declared state field the caller wants to seed at start (e.g. a known anchor)"`
 	Label     string         `json:"label,omitempty" jsonschema:"short single-line subject label for the session (the dialogue); set it early, update when the subject sharpens"`
 	Parent    string         `json:"parent,omitempty" jsonschema:"instance handle of the spawning instance, when this is a sub-move (e.g. a capture dispatched from an engage); records lineage in the session log"`
 }
@@ -1019,7 +1019,7 @@ func (s *Server) loadProcedure(ss *shellSession, canonical string) (*engine.Spec
 	if entry == nil {
 		available := make([]string, 0)
 		for _, chain := range ss.engine.Graph.ProcedureChains() {
-			if chain.Head != nil && chain.Head.Canonical != "" && !chain.Head.IsShellProcedure() {
+			if chain.Head != nil && chain.Head.Canonical != "" && !chain.Head.IsShellProcedure() && !chain.Head.IsTaskProcedure() {
 				available = append(available, chain.Head.Canonical)
 			}
 		}

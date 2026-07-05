@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -508,6 +509,116 @@ func TestEmbeddedCaptureProcedure(t *testing.T) {
 	}
 	if entryID, _ := serve.Produced["entryId"].(string); entryID == "" {
 		t.Fatalf("completion should produce the created entry ID, got %v", serve.Produced)
+	}
+}
+
+// TestEmbeddedEvaluateToCaptureHandoff is the slice-A evidence run over MCP:
+// an evaluation widens once, then dispatches a capture as a sub-move. The
+// capture inherits the evaluation's grounding through the seeding handoff, so
+// its assemble gate passes without a second widen and the whole capture
+// completes in four tool calls (the d-tac-tlo evaluate→capture friction the
+// contract removes). Uses a graph with no capture override so both procedures
+// resolve to the shipped embedded entries.
+func TestEmbeddedEvaluateToCaptureHandoff(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	path := filepath.Join(graphDir, "2026/06/01-100000-s-tac-aaa.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(gapEntry), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+
+	// A known anchor passed as a start input seeds the anchor state and
+	// auto-advances the resolver straight to assess (the uniform anchor
+	// contract — no separate resolver turn for a known entry).
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"canonical": "evaluate",
+		"params":    map[string]any{"anchor": fixtureGapID},
+	}, &serve)
+	if serve.Procedure != "evaluate" || serve.Step != "assess" {
+		t.Fatalf("a seeded anchor should auto-advance evaluate to assess, got %s at %q", serve.Procedure, serve.Step)
+	}
+	evalInstance := serve.Instance
+
+	// The one widen of the whole flow happens here, in the evaluation.
+	const widen = "searched post-landing signals and neighbors; inspected " + fixtureGapID +
+		" — the teardown edge is the only new thing bearing on the work."
+	call(t, cs, "next", map[string]any{"instance": evalInstance, "report": map[string]any{
+		"evaluation":  "Inner: sound against its ACs. Outer: smoke check passes; one small teardown rough edge remains.",
+		"widenReport": widen,
+	}}, &serve)
+	if serve.Step != "junction" {
+		t.Fatalf("evaluation should reach the junction, got %q", serve.Step)
+	}
+
+	// Record a finding — the evaluation completes, its grounding retained in
+	// its store for the dispatched capture to inherit.
+	call(t, cs, "next", map[string]any{"instance": evalInstance, "report": map[string]any{
+		"chooser": "junction", "choice": "record", "userWords": "record the teardown finding",
+		"fields": map[string]any{"selectedFindings": "the teardown rough edge"},
+	}}, &serve)
+	if serve.Status != "completed" {
+		t.Fatalf("record should complete the evaluation, got %s at %q", serve.Status, serve.Step)
+	}
+
+	// Capture #1: dispatch the finding as a sub-move of the evaluation.
+	captureCalls := 1
+	var cap mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"canonical": "capture",
+		"parent":    evalInstance,
+		"params":    map[string]any{"anchor": fixtureGapID, "kind": "gap"},
+	}, &cap)
+	if cap.Step != "assemble" {
+		t.Fatalf("capture should open at assemble, got %q", cap.Step)
+	}
+	if slices.Contains(cap.Missing, "widenReport") {
+		t.Fatalf("capture should inherit widenReport via the handoff, but it is missing: %v", cap.Missing)
+	}
+	if !strings.Contains(cap.Instructions, "inherited") || !strings.Contains(cap.Instructions, "teardown edge is the only new thing") {
+		t.Errorf("assemble should surface the inherited grounding, got %q", cap.Instructions)
+	}
+
+	// Capture #2: draft with NO widenReport — the handoff already satisfied
+	// it, so one report cascades assemble → playback.
+	captureCalls++
+	call(t, cs, "next", map[string]any{"instance": cap.Instance, "report": map[string]any{
+		"body":       "Record the teardown rough edge from the evaluation as a follow-up gap to fix next.",
+		"entryKind":  "gap",
+		"layer":      "tactical",
+		"refs":       []map[string]any{{"id": fixtureGapID, "kind": "related", "desc": "the evaluated work this follow-up sits beside"}},
+		"topics":     []string{"testing/fixture"},
+		"confidence": "low",
+	}}, &cap)
+	if cap.Step != "playback" {
+		t.Fatalf("assemble should cascade to playback without a re-widen, got %q (missing %v)", cap.Step, cap.Missing)
+	}
+
+	// Capture #3: confirm — writes through the (stubbed) gate to verifySummary.
+	captureCalls++
+	call(t, cs, "next", map[string]any{"instance": cap.Instance, "report": map[string]any{
+		"chooser": "playback", "choice": "confirm", "userWords": "yes, capture it",
+	}}, &cap)
+	if cap.Step != "verifySummary" {
+		t.Fatalf("confirm should write and reach verifySummary, got %q status %s", cap.Step, cap.Status)
+	}
+
+	// Capture #4: verify the summary — completes.
+	captureCalls++
+	call(t, cs, "next", map[string]any{"instance": cap.Instance, "report": map[string]any{
+		"chooser": "verifySummary", "choice": "faithful",
+		"fields": map[string]any{"fidelityNote": "summary matches the confirmed body"},
+	}}, &cap)
+	if cap.Status != "completed" {
+		t.Fatalf("capture should complete, got %s at %q", cap.Status, cap.Step)
+	}
+	if captureCalls > 4 {
+		t.Fatalf("capture took %d calls; the evidence bar is one widen and <= 4 capture calls", captureCalls)
 	}
 }
 

@@ -242,11 +242,16 @@ func (s *Session) Start(spec *Spec, params map[string]any, parent string) (*Serv
 		Status: StatusRunning,
 		Parent: parent,
 	}
-	if err := inst.Store.SetParams(params); err != nil {
+	if err := inst.Store.SetStart(params); err != nil {
 		return nil, fmt.Errorf("start %s: %w", spec.Canonical, err)
 	}
 	s.instances[inst.ID] = inst
 	s.order = append(s.order, inst.ID)
+
+	seed, err := s.seedFromParent(inst, parent)
+	if err != nil {
+		return nil, fmt.Errorf("start %s: %w", spec.Canonical, err)
+	}
 
 	data := map[string]any{
 		"procedure": spec.Canonical,
@@ -264,12 +269,63 @@ func (s *Session) Start(spec *Spec, params map[string]any, parent string) (*Serv
 	if parent != "" {
 		data["parent"] = parent
 	}
+	// Seeds ride the started event so replay restores the inherited grounding
+	// — a parked-and-resumed child keeps the record its gate passed on.
+	if len(seed) > 0 {
+		data["seed"] = seed
+	}
 	s.appendEvent(inst.ID, EventStarted, data)
 
 	if err := s.cascade(inst); err != nil {
 		return nil, err
 	}
 	return s.serve(inst)
+}
+
+// groundingHandoffFields are the store fields a dispatching parent hands down
+// to a spawned child by default — its grounding evidence (widenReport) and
+// the anchor. Seeded into the child's declared state on start so the child's
+// grounding gate is satisfied on entry, without re-widening, and a
+// parked-and-resumed child keeps the record. The unified seeding contract
+// (d-tac-tlo): widenReport and anchor by default. A field the child does not
+// declare as state, or one the caller already set, is left untouched.
+var groundingHandoffFields = []string{"widenReport", "anchor"}
+
+// seedFromParent copies the grounding handoff set from a spawning parent's
+// store into the child's declared state, returning the seeded values for the
+// started-event log. Only fields the child declares as state and has not
+// already set receive a seed, and only when the parent holds a non-empty
+// value — so a cold start (no parent) or a parent lacking the evidence seeds
+// nothing, and the gate is then satisfied only by fresh reports.
+func (s *Session) seedFromParent(inst *Instance, parent string) (map[string]any, error) {
+	if parent == "" {
+		return nil, nil
+	}
+	p, ok := s.instances[parent]
+	if !ok {
+		return nil, nil // parent existence is validated by the caller (Start)
+	}
+	seed := make(map[string]any)
+	for _, name := range groundingHandoffFields {
+		if _, declared := inst.Spec.State[name]; !declared {
+			continue // the child must declare it as report-writable state to receive it
+		}
+		if inst.Store.Has(name) {
+			continue // already set on this instance — never overwrite
+		}
+		if !p.Store.Has(name) {
+			continue // the parent has no evidence to hand down
+		}
+		v, _ := p.Store.Get(name)
+		seed[name] = v
+	}
+	if len(seed) == 0 {
+		return nil, nil
+	}
+	if _, err := inst.Store.WriteState(seed); err != nil {
+		return nil, fmt.Errorf("seeding from parent %s: %w", parent, err)
+	}
+	return seed, nil
 }
 
 // Report applies state fields from a transition report, re-evaluates, and
@@ -503,11 +559,19 @@ func (s *Session) applyEvent(ev Event, resolve SpecResolver) error {
 			Parent: parent,
 		}
 		if params, ok := ev.Data["params"].(map[string]any); ok {
-			if err := inst.Store.SetParams(params); err != nil {
+			if err := inst.Store.SetStart(params); err != nil {
 				return err
 			}
-		} else if err := inst.Store.SetParams(nil); err != nil {
+		} else if err := inst.Store.SetStart(nil); err != nil {
 			return err
+		}
+		// Restore the grounding seeded from the parent at dispatch — logged on
+		// the started event, re-applied here so a resumed child keeps the
+		// record its gate passed on (no re-widen after a restart).
+		if seed, ok := ev.Data["seed"].(map[string]any); ok {
+			if _, err := inst.Store.WriteState(seed); err != nil {
+				return err
+			}
 		}
 		s.instances[inst.ID] = inst
 		s.order = append(s.order, inst.ID)

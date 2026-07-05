@@ -47,12 +47,38 @@ func TestEvaluate_HappyPath(t *testing.T) {
 	}
 }
 
-func TestEvaluate_AnchorParamRequired(t *testing.T) {
+func TestEvaluate_AnchorResolvedByResolver(t *testing.T) {
 	env := newProcEnv(t, "evaluate")
 
-	if _, err := env.session.Start(env.spec, nil, ""); err == nil ||
-		!strings.Contains(err.Error(), "anchor") {
-		t.Errorf("start without anchor must fail naming it, got %v", err)
+	// The uniform anchor contract: a cold start with no anchor does not fail —
+	// it stalls at the resolver step, naming the anchor as what advances it,
+	// where the agent resolves the user's pointer. A required param would
+	// reject instead; the resolver keeps resolution in dialogue.
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatalf("start without anchor should stall at the resolver, not error: %v", err)
+	}
+	if sv.Step != "anchor" {
+		t.Fatalf("cold start step = %s, want the anchor resolver", sv.Step)
+	}
+	missingAnchor := false
+	for _, m := range sv.Missing {
+		if m == "anchor" {
+			missingAnchor = true
+		}
+	}
+	if !missingAnchor {
+		t.Errorf("resolver should name anchor as missing, got %v", sv.Missing)
+	}
+
+	// A resolved anchor advances to assess — the same place a seeded anchor
+	// auto-advances to on entry.
+	sv, err = env.session.Report(sv.Instance, map[string]any{"anchor": procAnchorID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "assess" {
+		t.Fatalf("after resolving the anchor, step = %s, want assess", sv.Step)
 	}
 }
 
