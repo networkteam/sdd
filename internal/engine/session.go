@@ -282,21 +282,15 @@ func (s *Session) Start(spec *Spec, params map[string]any, parent string) (*Serv
 	return s.serve(inst)
 }
 
-// groundingHandoffFields are the store fields a dispatching parent hands down
-// to a spawned child by default — its grounding evidence (widenReport) and
-// the anchor. Seeded into the child's declared state on start so the child's
-// grounding gate is satisfied on entry, without re-widening, and a
-// parked-and-resumed child keeps the record. The unified seeding contract
-// (d-tac-tlo): widenReport and anchor by default. A field the child does not
-// declare as state, or one the caller already set, is left untouched.
-var groundingHandoffFields = []string{"widenReport", "anchor"}
-
-// seedFromParent copies the grounding handoff set from a spawning parent's
-// store into the child's declared state, returning the seeded values for the
-// started-event log. Only fields the child declares as state and has not
-// already set receive a seed, and only when the parent holds a non-empty
-// value — so a cold start (no parent) or a parent lacking the evidence seeds
-// nothing, and the gate is then satisfied only by fresh reports.
+// seedFromParent copies grounding down the dispatch edge from a spawning
+// parent's store into the child's declared state, returning the seeded values
+// for the started-event log. The mapping is whatever the parent's most recently
+// answered dispatching junction declared (dispatchSeed) — there is no default,
+// so a child dispatched on a path that answered no seed-bearing option inherits
+// nothing. When the answered option named a procedure, the seed applies only to
+// a child of that procedure. For each child field ← parent field pair, a seed
+// lands only when the child declares the field as state, has not already set it
+// (a caller override wins), and the parent holds a non-empty source value.
 func (s *Session) seedFromParent(inst *Instance, parent string) (map[string]any, error) {
 	if parent == "" {
 		return nil, nil
@@ -305,20 +299,28 @@ func (s *Session) seedFromParent(inst *Instance, parent string) (map[string]any,
 	if !ok {
 		return nil, nil // parent existence is validated by the caller (Start)
 	}
+	if len(p.dispatchSeed) == 0 {
+		return nil, nil // no seed-bearing junction was answered on the dispatch path
+	}
+	if p.dispatchProcedure != "" && p.dispatchProcedure != inst.Spec.Canonical {
+		return nil, nil // the pending seed was declared for a different child procedure
+	}
+
 	seed := make(map[string]any)
-	for _, name := range groundingHandoffFields {
-		if _, declared := inst.Spec.State[name]; !declared {
+	for childField, parentField := range p.dispatchSeed {
+		if _, declared := inst.Spec.State[childField]; !declared {
 			continue // the child must declare it as report-writable state to receive it
 		}
-		if inst.Store.Has(name) {
+		if inst.Store.Has(childField) {
 			continue // already set on this instance — never overwrite
 		}
-		if !p.Store.Has(name) {
-			continue // the parent has no evidence to hand down
+		if !p.Store.Has(parentField) {
+			continue // the parent has no evidence to hand down under this name
 		}
-		v, _ := p.Store.Get(name)
-		seed[name] = v
+		v, _ := p.Store.Get(parentField)
+		seed[childField] = v
 	}
+
 	if len(seed) == 0 {
 		return nil, nil
 	}
@@ -326,6 +328,18 @@ func (s *Session) seedFromParent(inst *Instance, parent string) (map[string]any,
 		return nil, fmt.Errorf("seeding from parent %s: %w", parent, err)
 	}
 	return seed, nil
+}
+
+// recordDispatchSeed stashes a chosen option's declared handoff on the parent
+// instance, so the next child dispatched under it inherits exactly that
+// mapping. Persistent (not consume-once): a junction that fans out several
+// children — evaluate recording several findings — seeds each one.
+func recordDispatchSeed(inst *Instance, opt *Option) {
+	if opt.Dispatch == nil || len(opt.Dispatch.Seed) == 0 {
+		return
+	}
+	inst.dispatchSeed = opt.Dispatch.Seed
+	inst.dispatchProcedure = opt.Dispatch.Procedure
 }
 
 // Report applies state fields from a transition report, re-evaluates, and
@@ -446,6 +460,10 @@ func (s *Session) Answer(instanceID, chooser, choice string, fields map[string]a
 		data["fields"] = fields
 	}
 	s.appendEvent(inst.ID, EventChooserAnswer, data)
+
+	// A dispatching junction's declared handoff rides the answered option:
+	// stash it so the next child started under this instance inherits it.
+	recordDispatchSeed(inst, opt)
 
 	if opt.Call != "" {
 		if err := s.runCommand(inst, opt.Call); err != nil {
@@ -599,6 +617,22 @@ func (s *Session) applyEvent(ev Event, resolve SpecResolver) error {
 		if fields, ok := ev.Data["fields"].(map[string]any); ok {
 			if _, err := inst.Store.WriteState(fields); err != nil {
 				return err
+			}
+		}
+		// Re-derive the dispatch handoff the answered option declares — it lives
+		// in the spec, keyed by (step, choice) the answer already logs, so no
+		// dedicated log field is needed. Only matters for a child dispatched
+		// after resume; a child already dispatched restores its own seed from
+		// its started event.
+		if chooser, _ := ev.Data["chooser"].(string); chooser != "" {
+			if step := inst.Spec.StepByID[chooser]; step != nil {
+				choice, _ := ev.Data["choice"].(string)
+				for i := range step.Options {
+					if step.Options[i].Choice == choice {
+						recordDispatchSeed(inst, &step.Options[i])
+						break
+					}
+				}
 			}
 		}
 

@@ -34,6 +34,16 @@ type Instance struct {
 	// stalled gate re-evaluated by a later report doesn't re-run its side
 	// effect. Reset on every transition.
 	opDone bool
+	// dispatchSeed is the handoff a dispatching junction declared when its
+	// option was answered — child field ← parent field. The next child started
+	// under this instance inherits it (seedFromParent). Empty until a
+	// seed-bearing option is answered; re-derived from the chooser answer on
+	// replay.
+	dispatchSeed map[string]string
+	// dispatchProcedure guards dispatchSeed to a named child canonical when the
+	// answered option declared one; empty means the seed applies to whatever is
+	// dispatched next (a generic junction like engage's move).
+	dispatchProcedure string
 }
 
 // currentStep returns the instance's step definition, nil when terminal.
@@ -57,9 +67,12 @@ type ChooserOption struct {
 	Collect []CollectField
 }
 
-// ChooserServe is the pending-chooser part of a serve: who answers and what
-// the options are.
+// ChooserServe is the pending-chooser part of a serve: which step's chooser is
+// pending, who answers, and what the options are. Chooser is the step ID the
+// caller must name in a chooser answer — carried here so the value the answer
+// requires appears in the payload it answers.
 type ChooserServe struct {
+	Chooser string
 	Kind    ChooserKind
 	Options []ChooserOption
 }
@@ -391,7 +404,11 @@ func (s *Session) serve(inst *Instance) (*Serve, error) {
 		for _, o := range step.Options {
 			options = append(options, ChooserOption{Choice: o.Choice, Collect: o.Collect})
 		}
-		sv.Chooser = &ChooserServe{Kind: step.Chooser, Options: options}
+		sv.Chooser = &ChooserServe{Chooser: step.ID, Kind: step.Chooser, Options: options}
+		// At a chooser the report is a chooser-answer envelope, not a flat
+		// state write — serve the schema that matches, so collected fields nest
+		// under `fields` and the chooser is named where the answer needs it.
+		sv.ReportSchema = inst.Spec.AnswerSchemaForStep(step)
 		if step.Chooser == ChooserUser {
 			sv.Goal = "put the choice to the user and relay their answer verbatim"
 		} else {

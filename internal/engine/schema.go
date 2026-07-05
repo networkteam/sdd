@@ -50,6 +50,66 @@ func (s *Spec) ReportSchemaForStep(step *Step) map[string]any {
 	return schema
 }
 
+// AnswerSchemaForStep generates the JSON Schema for a chooser step's answer:
+// the chooser to name (its step id), the choice to pick, the user's verbatim
+// words for a user chooser, and the option-collected fields nested under
+// `fields`. A flat report schema at a chooser step misled callers into placing
+// collected fields at the top level (rejected); this envelope makes the
+// required nesting explicit. `fields` unions every option's collect fields —
+// each option enforces its own required set at answer time, so the envelope
+// marks none of them required.
+func (s *Spec) AnswerSchemaForStep(step *Step) map[string]any {
+	choices := make([]any, 0, len(step.Options))
+	fieldProps := make(map[string]any)
+	for _, o := range step.Options {
+		choices = append(choices, o.Choice)
+		for _, cf := range o.Collect {
+			if _, seen := fieldProps[cf.Name]; seen {
+				continue
+			}
+			if decl, ok := s.State[cf.Name]; ok {
+				fieldProps[cf.Name] = schemaForType(decl.Type, decl.Desc)
+			}
+		}
+	}
+
+	properties := map[string]any{
+		"chooser": map[string]any{
+			"type":        "string",
+			"const":       step.ID,
+			"description": "the pending chooser's step id — copy it verbatim from pending_chooser.chooser",
+		},
+		"choice": map[string]any{
+			"type":        "string",
+			"enum":        choices,
+			"description": "the option to take",
+		},
+	}
+	required := []string{"choice", "chooser"}
+	if step.Chooser == ChooserUser {
+		properties["userWords"] = map[string]any{
+			"type":        "string",
+			"description": "the user's answer, relayed verbatim",
+		}
+		required = append(required, "userWords")
+	}
+	if len(fieldProps) > 0 {
+		properties["fields"] = map[string]any{
+			"type":                 "object",
+			"properties":           fieldProps,
+			"additionalProperties": false,
+			"description":          "state fields the chosen option collects — nested here, not at the top level",
+		}
+	}
+
+	return map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"required":             required,
+		"additionalProperties": false,
+	}
+}
+
 // schemaForType maps a domain type to its JSON Schema fragment. Validation
 // on arrival is VarType.ValidateValue — the schema is the advertised
 // contract, the store write is the enforcement.
