@@ -174,7 +174,7 @@ type ViewResult struct {
 }
 
 type ShowArgs struct {
-	IDs  []string `json:"ids" jsonschema:"full entry IDs to show"`
+	IDs  []string `json:"ids" jsonschema:"entry IDs to show; accepts an unambiguous short ID ({type}-{layer}-{suffix}) and resolves it to the full entry"`
 	Up   int      `json:"up,omitempty" jsonschema:"upstream chain depth; default 2"`
 	Down int      `json:"down,omitempty" jsonschema:"downstream chain depth; default 1"`
 }
