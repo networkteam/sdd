@@ -510,6 +510,20 @@ func TestEmbeddedCaptureProcedure(t *testing.T) {
 		t.Fatalf("assemble unit should render the injected topic counts, got %q", serve.Instructions)
 	}
 
+	// A draft ref'ing an entry never served in full holds the assemble gate —
+	// the rejection names exactly the un-inspected ID (d-tac-dbk).
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	if serve.Step != "assemble" {
+		t.Fatalf("un-inspected ref should hold the gate at assemble, got %q", serve.Step)
+	}
+	if !strings.Contains(serve.Instructions, fixtureGapID) {
+		t.Fatalf("rejection should name the un-inspected ID, got %q", serve.Instructions)
+	}
+
+	// The agent reads it through the same free tool; the gate passes on
+	// re-report.
+	var shown mcpserver.ShowResult
+	call(t, cs, "show", map[string]any{"ids": []string{fixtureGapID}}, &shown)
 	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
 	if serve.Step != "playback" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
 		t.Fatalf("expected pending user chooser at playback, got step %q", serve.Step)

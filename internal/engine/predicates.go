@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/networkteam/sdd/internal/model"
@@ -117,6 +118,28 @@ func registerBuiltinPredicates(r *Registry) {
 		},
 		Fn:          refsResolve,
 		FailMessage: "a referenced entry does not resolve in the graph — every reference must point at an existing entry",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name: "refsInspected",
+			Doc: "Every draft ref (refs, supersedes, closes) was served to this session at full depth — " +
+				"a show call, an injected chain's primary, or a same-session write. The read set is " +
+				"session-level, so evidence inspected by a dispatching parent counts for its seeded children.",
+			Reads: []string{"refs", "supersedes", "closes"},
+		},
+		Fn: func(ctx *Context) (bool, error) {
+			return len(uninspectedRefs(ctx)) == 0, nil
+		},
+		FailMessage: "a draft ref was not inspected at full depth this session",
+		FailDetail: func(ctx *Context) string {
+			missing := uninspectedRefs(ctx)
+			if len(missing) == 0 {
+				return ""
+			}
+			return "refs not inspected at full depth this session: " + strings.Join(missing, ", ") +
+				" — read them with show (reads stay free), then report again"
+		},
 	})
 
 	mustRegisterPredicate(r, Predicate{
@@ -263,6 +286,38 @@ func refsResolve(ctx *Context) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// uninspectedRefs returns the draft's ref targets (refs, supersedes, closes)
+// not yet served to the session at full depth, sorted. Presence and
+// resolution are other predicates' jobs — this one only compares against the
+// read set.
+func uninspectedRefs(ctx *Context) []string {
+	var missing []string
+	seen := map[string]bool{}
+	check := func(id string) {
+		if id == "" || seen[id] {
+			return
+		}
+		seen[id] = true
+		if ctx.Reads[id] != ReadFull {
+			missing = append(missing, id)
+		}
+	}
+	if v, ok := ctx.Store.Get("refs"); ok {
+		for _, r := range asRefs(v) {
+			check(r.ID)
+		}
+	}
+	for _, field := range []string{"supersedes", "closes"} {
+		if v, ok := ctx.Store.Get(field); ok {
+			for _, id := range asStrings(v) {
+				check(id)
+			}
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 func refKindsValid(ctx *Context) (bool, error) {

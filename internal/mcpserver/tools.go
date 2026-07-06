@@ -773,6 +773,33 @@ func (s *Server) readHint(ms *mcp.ServerSession) string {
 	return "no dialogue session is open — start_session is the door; reads stay free"
 }
 
+// logRead records a read event on the calling connection's bound session.
+// Reads stay free and ungated — tracking is logging, not gating (d-tac-dbk);
+// with no session bound there is nothing to log against.
+func (s *Server) logRead(ms *mcp.ServerSession, tool string, full, summary []string) {
+	if ss := s.sessions.bound(ms); ss != nil && ss.sess != nil {
+		ss.sess.LogRead(tool, full, summary)
+	}
+}
+
+// showReads extracts the read-event ID sets from a show result: primaries
+// render their bodies (full depth), chain items render as summary bullets.
+func showReads(res *query.ShowResult) (full, summary []string) {
+	for _, g := range res.Groups {
+		if g.Primary != nil {
+			full = append(full, g.Primary.ID)
+		}
+		for _, items := range [][]model.ShowTreeItem{g.Upstream, g.Downstream} {
+			for _, item := range items {
+				if item.Entry != nil {
+					summary = append(summary, item.Entry.ID)
+				}
+			}
+		}
+	}
+	return full, summary
+}
+
 func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
 	if len(args.Terms) == 0 && args.Query == "" {
 		return nil, SearchResult{}, toolError("pass terms (text mode), query (vector mode), or both (hybrid)")
@@ -821,6 +848,13 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	if err != nil {
 		return nil, SearchResult{}, toolError("searching: %v", err)
 	}
+	var hits []string
+	for _, e := range res.Entries {
+		if e.Entry != nil {
+			hits = append(hits, e.Entry.ID)
+		}
+	}
+	s.logRead(req.Session, "search", nil, hits)
 	var sb strings.Builder
 	presenters.RenderSearch(&sb, res, graph)
 	out := sb.String()
@@ -861,10 +895,12 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	if down == 0 {
 		down = query.DefaultDownDepth
 	}
-	out, err := s.renderShow(graph, args.IDs, up, down)
+	out, res, err := s.renderShow(graph, args.IDs, up, down)
 	if err != nil {
 		return nil, ShowResult{}, err
 	}
+	full, summary := showReads(res)
+	s.logRead(req.Session, "show", full, summary)
 	return nil, ShowResult{Entries: out, Hint: s.readHint(req.Session)}, nil
 }
 
@@ -887,6 +923,10 @@ func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, a
 	if err != nil {
 		return nil, ReadAttachmentResult{}, err
 	}
+	// An attachment read is neither a body serve nor a chain bullet — it logs
+	// at summary depth under its own tool name, so the audit trail keeps the
+	// distinction while the inspection gate stays body-strict.
+	s.logRead(req.Session, "read_attachment", nil, []string{args.ID})
 	out := ReadAttachmentResult{
 		Name:       res.Name,
 		Content:    res.Content,
@@ -1064,8 +1104,9 @@ func (s *Server) renderView(graph *model.Graph, layout string) (string, error) {
 	return sb.String(), nil
 }
 
-// renderShow renders entries with chains as plain markdown.
-func (s *Server) renderShow(graph *model.Graph, ids []string, up, down int) (string, error) {
+// renderShow renders entries with chains as plain markdown, returning the
+// structured result alongside so callers can log what was served.
+func (s *Server) renderShow(graph *model.Graph, ids []string, up, down int) (string, *query.ShowResult, error) {
 	res, err := s.finder.Show(query.ShowQuery{
 		Graph:     graph,
 		IDs:       ids,
@@ -1073,11 +1114,11 @@ func (s *Server) renderShow(graph *model.Graph, ids []string, up, down int) (str
 		DownDepth: down,
 	})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var sb strings.Builder
 	presenters.RenderShow(&sb, res, presenters.ShowOptions{})
-	return sb.String(), nil
+	return sb.String(), res, nil
 }
 
 func parseEntryType(in string) (model.EntryType, error) {

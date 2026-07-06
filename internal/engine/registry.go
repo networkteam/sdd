@@ -38,6 +38,10 @@ type Context struct {
 	// Step is the step the function runs at — commands like confirmPlayback
 	// record it (the reopen target when a confirmation goes stale).
 	Step string
+	// Reads is the session's folded read set — the deepest depth each entry
+	// was served at (refsInspected evaluates it). Nil means nothing was
+	// served; reading a nil map is safe.
+	Reads map[string]ReadDepth
 }
 
 // PredicateFunc is a pure check over the store (and graph): no side effects,
@@ -58,6 +62,11 @@ type Predicate struct {
 	Doc         FuncDoc
 	Fn          PredicateFunc
 	FailMessage string
+	// FailDetail, when set, renders the failure message against the live
+	// context — for gates whose rejection must name the offending values
+	// (refsInspected naming the un-inspected IDs). Empty results fall back
+	// to FailMessage.
+	FailDetail func(ctx *Context) string
 }
 
 // Query is a registered query.

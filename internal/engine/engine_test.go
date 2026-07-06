@@ -32,7 +32,11 @@ func captureEntry(t *testing.T) *model.Entry {
 
 const fixtureRefID = "20260601-120000-d-tac-ref"
 
-// fixtureGraph returns a graph holding the entry the fixture refs resolve
+// fixtureRef2ID resolves in the fixture graph but is never logged as read —
+// the refsInspected gate tests draft against it.
+const fixtureRef2ID = "20260601-130000-s-tac-raw"
+
+// fixtureGraph returns a graph holding the entries the fixture refs resolve
 // against. No actor signals — participantsCanonical runs in grace mode.
 func fixtureGraph(t *testing.T) *model.Graph {
 	t.Helper()
@@ -48,7 +52,18 @@ A directive the fixture capture refs.
 	if err != nil {
 		t.Fatal(err)
 	}
-	return model.NewGraph([]*model.Entry{target})
+	uninspected, err := model.ParseEntry(fixtureRef2ID+".md", `---
+type: signal
+layer: tac
+kind: gap
+---
+
+A signal no fixture session has read in full.
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return model.NewGraph([]*model.Entry{target, uninspected})
 }
 
 // fixtureEnv is the test harness around one engine + session: a registry
@@ -143,6 +158,10 @@ func newFixtureEnv(t *testing.T) *fixtureEnv {
 		ts = ts.Add(time.Second)
 		return ts
 	}))
+	// The fixture session inspected its ref in full — matching fullDraft's
+	// widenReport claim — so the refsInspected gate passes. Gate tests draft
+	// against fixtureRef2ID, which is never logged.
+	env.session.LogRead("show", []string{fixtureRefID}, nil)
 	return env
 }
 
