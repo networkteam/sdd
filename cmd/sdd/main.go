@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
@@ -982,10 +983,18 @@ func summarizeCmd() *cli.Command {
 	}
 }
 
+// commitTimeout bounds each git invocation in the auto-commit path. A commit
+// that shells out to an interactive signer (SSH/GPG) would otherwise block
+// indefinitely when sdd runs as a long-lived server; the timeout is a backstop
+// on top of the TTY detach below. See d-tac-zhp.
+const commitTimeout = 30 * time.Second
+
 func gitCommit(message string, filePaths ...string) error {
-	args := append([]string{"add"}, filePaths...)
-	add := exec.Command("git", args...)
-	if out, err := add.CombinedOutput(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), commitTimeout)
+	defer cancel()
+
+	addArgs := append([]string{"add"}, filePaths...)
+	if out, err := runDetachedGit(ctx, addArgs...); err != nil {
 		return fmt.Errorf("git add: %s (%w)", out, err)
 	}
 
@@ -993,12 +1002,27 @@ func gitCommit(message string, filePaths ...string) error {
 	// Without `-- <paths>`, `git commit` records the whole index, sweeping any
 	// pre-staged unrelated work into the CLI's own commit.
 	commitArgs := append([]string{"commit", "-m", message, "--"}, filePaths...)
-	commit := exec.Command("git", commitArgs...)
-	if out, err := commit.CombinedOutput(); err != nil {
+	if out, err := runDetachedGit(ctx, commitArgs...); err != nil {
 		return fmt.Errorf("git commit: %s (%w)", out, err)
 	}
 
 	return nil
+}
+
+// runDetachedGit runs a git subprocess detached from any controlling terminal
+// (Setsid starts a new session with no controlling TTY) and bounded by ctx.
+// Detaching is the fix for the auto-commit hang (d-tac-zhp): an interactive
+// signing or credential prompt has no TTY to read from, so it fails immediately
+// instead of suspending the backgrounded process on SIGTTIN. The context
+// timeout is a backstop for any other blocking helper.
+func runDetachedGit(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return out, fmt.Errorf("git %s: timed out after %s (a commit signer or credential helper may be blocking on input)", args[0], commitTimeout)
+	}
+	return out, err
 }
 
 func isBranchMerged(branch string) bool {

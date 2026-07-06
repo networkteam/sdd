@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,14 +44,69 @@ func (f *fakeReader) SkillStatus(ctx context.Context, q query.SkillStatusQuery) 
 }
 
 // recordingCommitter captures commit calls so tests can assert whether a
-// commit was attempted.
+// commit was attempted. Set err to make Commit fail (the fail-loud path).
 type recordingCommitter struct {
 	calls int
+	err   error
 }
 
 func (r *recordingCommitter) Commit(message string, paths ...string) error {
 	r.calls++
-	return nil
+	return r.err
+}
+
+// TestNewEntry_CommitFailure_IsLoudAndDurable is the regression test for
+// d-tac-zhp: a failed auto-commit must surface as an error (not be swallowed as
+// a warning), while the entry file it wrote stays on disk — durable but loud.
+func TestNewEntry_CommitFailure_IsLoudAndDurable(t *testing.T) {
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	committer := &recordingCommitter{err: errors.New("signing timed out")}
+	var reportedID string
+
+	h := handlers.New(handlers.Options{
+		GraphDir:  tmp,
+		SDDDir:    sddDir,
+		Reader:    &fakeReader{},
+		Committer: committer,
+		Stderr:    &bytes.Buffer{},
+	})
+
+	cmd := &command.NewEntryCmd{
+		Type:          model.TypeSignal,
+		Layer:         model.LayerTactical,
+		Description:   "durable but loud",
+		SkipPreflight: true,
+		OnNewEntry:    func(id, _ string) { reportedID = id },
+	}
+
+	err := h.NewEntry(context.Background(), cmd)
+	if err == nil {
+		t.Fatal("NewEntry: expected the commit failure to propagate, got nil")
+	}
+	if !strings.Contains(err.Error(), "git commit") {
+		t.Errorf("error = %v, want it to name the git commit failure", err)
+	}
+	if committer.calls != 1 {
+		t.Errorf("Committer.Commit called %d times, want 1", committer.calls)
+	}
+
+	// Durable: the entry was reported before the commit, and its file remains on
+	// disk despite the failure.
+	if reportedID == "" {
+		t.Fatal("OnNewEntry should fire before the commit so the durable entry is still reported")
+	}
+	relPath, err := model.IDToRelPath(reportedID)
+	if err != nil {
+		t.Fatalf("IDToRelPath(%s): %v", reportedID, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, relPath)); statErr != nil {
+		t.Errorf("entry file should remain on disk after a commit failure: %v", statErr)
+	}
 }
 
 // TestNewEntry_DryRun_SavesStdinOnValidationFailure is the regression test for

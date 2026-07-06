@@ -228,16 +228,19 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		}
 	}
 
-	// Commit. Warn but don't fail if git refuses.
+	// Report the created entry before committing: the file is already on disk
+	// (durable), so the caller learns it exists even if the commit then fails.
+	if cmd.OnNewEntry != nil {
+		cmd.OnNewEntry(id, entry.Summary)
+	}
+
+	// Commit. A failure is surfaced, not swallowed — the entry stays on disk but
+	// the error propagates (durable but loud). See d-tac-zhp.
 	if h.committer != nil {
 		msg := fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72))
 		if err := h.committer.Commit(msg, commitPaths...); err != nil {
-			fmt.Fprintf(h.stderr, "warning: git commit failed: %v\n", err)
+			return fmt.Errorf("git commit: %w", err)
 		}
-	}
-
-	if cmd.OnNewEntry != nil {
-		cmd.OnNewEntry(id, entry.Summary)
 	}
 	return nil
 }

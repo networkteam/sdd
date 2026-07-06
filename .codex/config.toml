@@ -1,0 +1,17 @@
+[mcp_servers.sdd]
+command = "sdd"
+args = ["serve"]
+cwd = "."
+default_tools_approval_mode = "approve"
+
+[mcp_servers.sdd.tools.search]
+approval_mode = "approve"
+
+[mcp_servers.sdd.tools.stage_attachment]
+approval_mode = "approve"
+
+[mcp_servers.sdd.tools.list_sessions]
+approval_mode = "approve"
+
+[mcp_servers.sdd.tools.info]
+approval_mode = "approve"

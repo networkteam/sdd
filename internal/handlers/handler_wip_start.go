@@ -71,7 +71,7 @@ func (h *Handler) StartWIP(ctx context.Context, cmd *command.StartWIPCmd) error 
 	if h.committer != nil {
 		msg := fmt.Sprintf("sdd: wip start %s (%s)", cmd.EntryID, cmd.Participant)
 		if err := h.committer.Commit(msg, markerPath); err != nil {
-			fmt.Fprintf(h.stderr, "warning: git commit failed: %v\n", err)
+			return fmt.Errorf("git commit: %w", err)
 		}
 	}
 

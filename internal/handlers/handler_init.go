@@ -321,7 +321,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		if len(commitPaths) > 0 {
 			msg := initCommitMessage(sddExisted)
 			if err := h.committer.Commit(msg, commitPaths...); err != nil {
-				log.Warn("git commit failed", "err", err)
+				return fmt.Errorf("git commit: %w", err)
 			}
 		}
 	}

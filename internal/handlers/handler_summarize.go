@@ -165,7 +165,7 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			msg = fmt.Sprintf("sdd: summarize %s", cmd.EntryIDs[0])
 		}
 		if err := h.committer.Commit(msg, commitPaths...); err != nil {
-			fmt.Fprintf(h.stderr, "warning: git commit failed: %v\n", err)
+			return fmt.Errorf("git commit: %w", err)
 		}
 	}
 
@@ -217,7 +217,7 @@ func (h *Handler) summarizeExplicit(graph *model.Graph, idArg, text string, onSu
 	if h.committer != nil {
 		msg := fmt.Sprintf("sdd: summarize %s (manual)", entry.ID)
 		if err := h.committer.Commit(msg, filePath); err != nil {
-			fmt.Fprintf(h.stderr, "warning: git commit failed: %v\n", err)
+			return fmt.Errorf("git commit: %w", err)
 		}
 	}
 

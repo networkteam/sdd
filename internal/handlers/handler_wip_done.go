@@ -41,12 +41,12 @@ func (h *Handler) FinishWIP(ctx context.Context, cmd *command.FinishWIPCmd) erro
 		cmd.OnRemoved(cmd.MarkerID)
 	}
 
-	// Stage the deletion and commit. Warn but don't fail when git refuses —
-	// the marker is already off disk; commit failure is recoverable.
+	// Stage the deletion and commit. The marker is already off disk (durable);
+	// a commit failure surfaces as an error rather than being swallowed — see d-tac-zhp.
 	if h.committer != nil {
 		msg := fmt.Sprintf("sdd: wip done %s", cmd.MarkerID)
 		if err := h.committer.Commit(msg, markerPath); err != nil {
-			fmt.Fprintf(h.stderr, "warning: git commit failed: %v\n", err)
+			return fmt.Errorf("git commit: %w", err)
 		}
 	}
 
