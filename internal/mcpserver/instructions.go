@@ -22,8 +22,10 @@ The minimum to read it right:
 Everything else is served. Call start_session to begin: it opens the
 dialogue session and returns your orientation — the process core, how the
 dialogue should feel, and the moves you can start. All stateful tools
-require a session and point back to this door; the read tools (search,
-view, show, read_attachment, info, registry) are always free.`
+require a session and point back to this door (one exception: abandon
+tears down a parked session by handle without opening one); the read
+tools (search, view, show, read_attachment, info, registry) are always
+free.`
 
 const resumeInstructions = `Session resumed: step position and collected evidence persist; the
 open_instances list carries each running instance's current serve — the

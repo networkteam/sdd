@@ -147,7 +147,17 @@ func (s *Server) registerQueries(r *engine.Registry, ss *shellSession) error {
 			if len(ids) == 0 {
 				return nil, fmt.Errorf("entryChains: neither anchor nor targets is set in the store")
 			}
-			return s.renderShow(ctx.Graph, ids, intArg(args, "up", query.DefaultUpDepth), intArg(args, "down", query.DefaultDownDepth))
+			rendered, res, err := s.renderShow(ctx.Graph, ids, intArg(args, "up", query.DefaultUpDepth), intArg(args, "down", query.DefaultDownDepth))
+			if err != nil {
+				return nil, err
+			}
+			// An injected chain is a serve like any other: its primaries carry
+			// bodies (full depth), its chain items are summary bullets.
+			if ss.sess != nil {
+				full, summary := showReads(res)
+				ss.sess.LogRead("inject:entryChains", full, summary)
+			}
+			return rendered, nil
 		},
 	}); err != nil {
 		return err
@@ -387,6 +397,12 @@ func (s *Server) runNewEntry(ctx *engine.Context, ss *shellSession) error {
 		return fmt.Errorf("newEntry: %w", handlerErr)
 	}
 	ctx.Store.WriteEngine("entryId", createdID)
+	// The write is the deepest read there is — the body came from this
+	// session. Logging it lets a follow-up capture ref the new entry without
+	// a ceremonial show.
+	if ss.sess != nil {
+		ss.sess.LogRead("newEntry", []string{createdID}, nil)
+	}
 	return s.refreshGraph(ss)
 }
 

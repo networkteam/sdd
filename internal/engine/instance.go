@@ -117,7 +117,7 @@ type Serve struct {
 // evalGuard evaluates a guard against the registry, returning the verdict
 // and the failing predicates for diagnostics.
 func (s *Session) evalGuard(inst *Instance, g *GuardExpr) (bool, []FailedPredicate, error) {
-	ctx := &Context{Store: inst.Store, Graph: s.engine.Graph, Step: inst.Step}
+	ctx := s.funcContext(inst)
 	ok, err := g.Eval(func(name string) (bool, error) {
 		p, found := s.engine.Registry.Predicate(name)
 		if !found {
@@ -144,10 +144,22 @@ func (s *Session) evalGuard(inst *Instance, g *GuardExpr) (bool, []FailedPredica
 			return false, nil, err
 		}
 		if !v {
-			failing = append(failing, FailedPredicate{Name: name, Message: p.FailMessage})
+			msg := p.FailMessage
+			if p.FailDetail != nil {
+				if detail := p.FailDetail(ctx); detail != "" {
+					msg = detail
+				}
+			}
+			failing = append(failing, FailedPredicate{Name: name, Message: msg})
 		}
 	}
 	return false, failing, nil
+}
+
+// funcContext builds the Context registry functions run against at the
+// instance's current position.
+func (s *Session) funcContext(inst *Instance) *Context {
+	return &Context{Store: inst.Store, Graph: s.engine.Graph, Step: inst.Step, Reads: s.reads}
 }
 
 // cascade advances gate steps until something stops them — a failing
@@ -263,7 +275,7 @@ func (s *Session) runCommand(inst *Instance, name string) error {
 	if !ok {
 		return fmt.Errorf("instance %s: %q is not a registered command", inst.ID, name)
 	}
-	ctx := &Context{Store: inst.Store, Graph: s.engine.Graph, Step: inst.Step}
+	ctx := s.funcContext(inst)
 	inst.Store.beginJournal()
 	err := cmd.Fn(ctx)
 	writes := inst.Store.drainJournal()
@@ -503,7 +515,7 @@ func (s *Session) renderUnit(inst *Instance, step *Step) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
 		}
-		result, err := q.Fn(&Context{Store: inst.Store, Graph: s.engine.Graph, Step: inst.Step}, args)
+		result, err := q.Fn(s.funcContext(inst), args)
 		if err != nil {
 			return "", fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
 		}

@@ -11,10 +11,11 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-// logVersion stamps every event line. A session generally does not survive
+// LogVersion stamps every event line. A session generally does not survive
 // an sdd upgrade mid-flight — replay rejects unknown versions rather than
-// guessing (accepted per the surface spec).
-const logVersion = 1
+// guessing (accepted per the surface spec). Exported for shells that append
+// terminal events to a parked log without replaying it (teardown by handle).
+const LogVersion = 1
 
 // EventType is one of the closed set of session-log events.
 type EventType string
@@ -36,6 +37,26 @@ const (
 	EventTransition    EventType = "transition"
 	EventCompleted     EventType = "completed"
 	EventAbandoned     EventType = "abandoned"
+	// EventRead records what a read surface served to the session: the tool,
+	// the entry IDs, and the depth — metadata only, never payloads. Reads stay
+	// free and ungated; tracking is logging, not gating (d-tac-dbk). No
+	// instance — the read set is session-level, so evidence inspected by a
+	// dispatching parent counts for its seeded children.
+	EventRead EventType = "read"
+	// EventParked records that a running move was deliberately parked back to
+	// the session junction — state kept, resumable through next. Forensic
+	// only: a resuming agent can tell a shelved move from one that drifted.
+	EventParked EventType = "parked"
+)
+
+// ReadDepth classifies how deeply an entry was served: full means the body
+// was served (a show primary, an injected chain's primary, or a same-session
+// write); summary covers chain bullets, search headers, and snippets.
+type ReadDepth string
+
+const (
+	ReadSummary ReadDepth = "summary"
+	ReadFull    ReadDepth = "full"
 )
 
 // Event is one line of the append-only session log. Memory is the runtime
@@ -134,6 +155,11 @@ type Session struct {
 	counter   int
 	instances map[string]*Instance
 	order     []string
+	// reads folds the session's read events into the deepest depth each entry
+	// was served at — what the refsInspected gate evaluates. Session-level by
+	// design: a parent's inspections count for children dispatched in the same
+	// session, and replay restores the set from the logged read events.
+	reads map[string]ReadDepth
 	// sinkErr carries a deferred log-append failure; surfaced by the next
 	// advance call so a durability problem can't pass silently.
 	sinkErr error
@@ -156,6 +182,7 @@ func (e *Engine) NewSession(id, participant string, sink EventSink, opts ...Sess
 		sink:        sink,
 		now:         time.Now,
 		instances:   map[string]*Instance{},
+		reads:       map[string]ReadDepth{},
 	}
 	for _, o := range opts {
 		o(s)
@@ -179,6 +206,74 @@ func (s *Session) SetLabel(label string) {
 	s.appendEvent("", EventLabeled, map[string]any{"label": label})
 }
 
+// LogRead records what a read surface served to the session: entry IDs at
+// full depth (body served) and summary depth (headers, chain bullets,
+// snippets), attributed to the serving tool. Every call appends a read event
+// — re-reads are part of the forensic record — and folds into the session's
+// read set, where full depth never downgrades. Empty calls append nothing.
+func (s *Session) LogRead(tool string, full, summary []string) {
+	full = s.foldReads(full, ReadFull)
+	summary = s.foldReads(summary, ReadSummary)
+	if len(full) == 0 && len(summary) == 0 {
+		return
+	}
+	data := map[string]any{"tool": tool}
+	if len(full) > 0 {
+		data["full"] = full
+	}
+	if len(summary) > 0 {
+		data["summary"] = summary
+	}
+	s.appendEvent("", EventRead, data)
+}
+
+// foldReads folds IDs into the read set at depth (full wins over summary)
+// and returns them deduplicated, empties dropped — the event payload.
+func (s *Session) foldReads(ids []string, depth ReadDepth) []string {
+	var kept []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		kept = append(kept, id)
+		if s.reads[id] != ReadFull {
+			s.reads[id] = depth
+		}
+	}
+	return kept
+}
+
+// ReadDepthOf returns the deepest depth the entry was served to this session
+// at (empty when never served).
+func (s *Session) ReadDepthOf(id string) ReadDepth {
+	return s.reads[id]
+}
+
+// Park records that a running move was deliberately parked back to the
+// session junction: state kept, position kept, resumable through the normal
+// advance path. The event is forensic — nothing about the instance changes —
+// but it makes the shelving auditable and legible to a resuming agent.
+func (s *Session) Park(instanceID, note string) error {
+	if err := s.checkSink(); err != nil {
+		return err
+	}
+	inst, ok := s.instances[instanceID]
+	if !ok {
+		return fmt.Errorf("instance %q not found in session", instanceID)
+	}
+	if inst.Status != StatusRunning {
+		return fmt.Errorf("instance %s has ended (%s) — only running moves park", instanceID, inst.Outcome)
+	}
+	data := map[string]any{"step": inst.Step}
+	if note != "" {
+		data["note"] = note
+	}
+	s.appendEvent(inst.ID, EventParked, data)
+	return nil
+}
+
 // appendEvent writes one event to the log. Sink errors fail loudly at the
 // call sites that can surface them; here the event is built centrally.
 func (s *Session) appendEvent(instance string, typ EventType, data map[string]any) {
@@ -190,7 +285,7 @@ func (s *Session) appendEvent(instance string, typ EventType, data map[string]an
 	// in-memory run; it is carried on the session and surfaced by the next
 	// advance call.
 	if err := s.sink.Append(Event{
-		V:        logVersion,
+		V:        LogVersion,
 		TS:       s.now(),
 		Session:  s.ID,
 		Seq:      s.seq,
@@ -535,8 +630,8 @@ type SpecResolver func(canonical string) (*Spec, error)
 func (e *Engine) ReplaySession(id, participant string, events []Event, resolve SpecResolver, sink EventSink, opts ...SessionOption) (*Session, error) {
 	s := e.NewSession(id, participant, nil, opts...)
 	for _, ev := range events {
-		if ev.V != logVersion {
-			return nil, fmt.Errorf("session log event seq %d has version %d, this sdd speaks version %d — sessions do not survive an sdd upgrade mid-flight", ev.Seq, ev.V, logVersion)
+		if ev.V != LogVersion {
+			return nil, fmt.Errorf("session log event seq %d has version %d, this sdd speaks version %d — sessions do not survive an sdd upgrade mid-flight", ev.Seq, ev.V, LogVersion)
 		}
 		if ev.Seq > s.seq {
 			s.seq = ev.Seq
@@ -689,7 +784,25 @@ func (s *Session) applyEvent(ev Event, resolve SpecResolver) error {
 		inst.Status = StatusAbandoned
 		inst.Outcome = "abandoned"
 
-	case EventServed:
+	case EventRead:
+		// Restore the read set so a resumed session keeps the inspection
+		// evidence its gates passed on (or will pass on).
+		for _, key := range []struct {
+			field string
+			depth ReadDepth
+		}{{"full", ReadFull}, {"summary", ReadSummary}} {
+			if ids, ok := ev.Data[key.field].([]any); ok {
+				for _, v := range ids {
+					if id, ok := v.(string); ok && id != "" {
+						if s.reads[id] != ReadFull {
+							s.reads[id] = key.depth
+						}
+					}
+				}
+			}
+		}
+
+	case EventServed, EventParked:
 		// Forensic only — no state effect.
 
 	default:

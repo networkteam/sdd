@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -333,6 +334,106 @@ func assembleReport() map[string]any {
 	}
 }
 
+// TestSearchDefaults_HeaderOnlyHitCapped pins the drill-serve defaults
+// (d-tac-dbk): no limit and no max_citations means at most 8 hits and zero
+// citation lines — the measured 26.5KB drill was this tool with snippet
+// defaults. Snippets and a higher cap stay one explicit parameter away.
+func TestSearchDefaults_HeaderOnlyHitCapped(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	for i := range 12 {
+		path := filepath.Join(graphDir, fmt.Sprintf("2026/06/02-1000%02d-s-tac-h%02d.md", i, i))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := fmt.Sprintf(`---
+type: signal
+layer: tactical
+kind: gap
+summary: Probe entry %02d observes the flux capacitor drill cost.
+---
+
+Probe entry %02d: the flux capacitor drill needs observing.
+`, i, i)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+
+	var res mcpserver.SearchResult
+	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}}, &res)
+	if strings.Contains(res.Results, "↳") {
+		t.Fatalf("default search must be header-only, got citations: %q", res.Results)
+	}
+	if hits := strings.Count(res.Results, "-s-tac-h"); hits != 8 {
+		t.Fatalf("default search returned %d hits, want the cap of 8", hits)
+	}
+
+	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}, "max_citations": 2, "limit": 12}, &res)
+	if !strings.Contains(res.Results, "↳") {
+		t.Fatalf("explicit max_citations should render citation lines, got %q", res.Results)
+	}
+	if hits := strings.Count(res.Results, "-s-tac-h"); hits != 12 {
+		t.Fatalf("explicit limit should raise the cap, got %d hits", hits)
+	}
+}
+
+// languageFinder builds a finder whose config carries the given locale.
+func languageFinder(lang string) *finders.Finder {
+	return finders.New(finders.Options{
+		PreflightRunner: stubRunner{},
+		Config:          &model.Config{Participant: "Tester", Language: lang},
+	})
+}
+
+// TestVocabularyBlockForNonEnglishGraphs serves the bundled translation
+// table exactly once per connection when the graph language is non-English —
+// locale rendering's engine-surface home (d-tac-dbk, s-tac-fgy).
+func TestVocabularyBlockForNonEnglishGraphs(t *testing.T) {
+	env := newTestServer(t, nil, "", "", func(o *mcpserver.Options) {
+		o.Finder = languageFinder("de")
+	})
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+	if !strings.Contains(door.Vocabulary, "Vokabular") {
+		t.Fatalf("a German graph's first serve should carry the vocabulary table, got %q", door.Vocabulary)
+	}
+	if !strings.Contains(door.Instructions, "Language: de") {
+		t.Fatalf("the shell orientation should state the locale, got %q", door.Instructions)
+	}
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	if serve.Vocabulary != "" {
+		t.Fatalf("the vocabulary serves once per connection, got it again: %q", serve.Vocabulary)
+	}
+}
+
+// TestVocabularyBlockAbsentForEnglish keeps English (default) graphs free of
+// the block entirely.
+func TestVocabularyBlockAbsentForEnglish(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	if door := openSession(t, cs); door.Vocabulary != "" {
+		t.Fatalf("an English graph serves no vocabulary block, got %q", door.Vocabulary)
+	}
+}
+
+// TestVocabularyBlockMissingLocaleNote serves an explicit note when the
+// configured locale has no bundled reference — the commitment never drops
+// silently.
+func TestVocabularyBlockMissingLocaleNote(t *testing.T) {
+	env := newTestServer(t, nil, "", "", func(o *mcpserver.Options) {
+		o.Finder = languageFinder("fr")
+	})
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+	if !strings.Contains(door.Vocabulary, "no bundled vocabulary") || !strings.Contains(door.Vocabulary, "vocabulary-fr.md") {
+		t.Fatalf("a locale without a bundled reference should serve the explicit note, got %q", door.Vocabulary)
+	}
+}
+
 // TestToolSurfaceMatchesSpec pins the tool list to the surface spec §5 —
 // exactly these tools, and in particular no direct write tool.
 func TestToolSurfaceMatchesSpec(t *testing.T) {
@@ -349,7 +450,7 @@ func TestToolSurfaceMatchesSpec(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{
-		"abandon", "info", "list_sessions", "next", "read_attachment",
+		"abandon", "info", "list_sessions", "next", "park", "read_attachment",
 		"registry", "resume_session", "search", "show", "stage_attachment",
 		"start_procedure", "start_session", "view",
 	}
@@ -427,18 +528,34 @@ func TestCaptureProcedureLoop(t *testing.T) {
 		t.Fatalf("playback unit should serve full text first, got %q", firstPlayback)
 	}
 
-	// Adjust bounces through assemble and back to playback: the second
-	// playback serve must be the one-line reminder, not the full unit.
+	// Adjust bounces through assemble and back to playback. The body changed,
+	// so the re-rendered unit is different bytes — served in full again: a
+	// confirm must never bind to an unseen description (content-hash dedup,
+	// no per-step memory; d-tac-dbk).
+	const tightened = "Test capture entry, tightened: the fixture oscillation gap also " +
+		"shows up in integration tests, verifying the engine write path end to end."
 	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "adjust", "userWords": "tighten the first sentence",
-		"fields": map[string]any{"body": "Test capture entry, tightened: the fixture oscillation gap also " +
-			"shows up in integration tests, verifying the engine write path end to end."},
+		"fields": map[string]any{"body": tightened},
 	}}, &serve)
 	if serve.Step != "playback" {
 		t.Fatalf("adjust should cascade back to playback, got %q", serve.Step)
 	}
+	if !strings.Contains(serve.Instructions, "Play back to the user") || !strings.Contains(serve.Instructions, "tightened") {
+		t.Fatalf("a changed playback must serve in full, got %q", serve.Instructions)
+	}
+
+	// A second adjust that changes nothing re-renders identical bytes — the
+	// serve stubs to the one-line reminder.
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+		"chooser": "playback", "choice": "adjust", "userWords": "no, keep it",
+		"fields": map[string]any{"body": tightened},
+	}}, &serve)
+	if serve.Step != "playback" {
+		t.Fatalf("no-op adjust should cascade back to playback, got %q", serve.Step)
+	}
 	if strings.Contains(serve.Instructions, "Play back to the user") || !strings.Contains(serve.Instructions, "served earlier this session") {
-		t.Fatalf("second playback serve should be a reminder, got %q", serve.Instructions)
+		t.Fatalf("an unchanged playback re-serve should stub to the reminder, got %q", serve.Instructions)
 	}
 
 	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
@@ -510,6 +627,20 @@ func TestEmbeddedCaptureProcedure(t *testing.T) {
 		t.Fatalf("assemble unit should render the injected topic counts, got %q", serve.Instructions)
 	}
 
+	// A draft ref'ing an entry never served in full holds the assemble gate —
+	// the rejection names exactly the un-inspected ID (d-tac-dbk).
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	if serve.Step != "assemble" {
+		t.Fatalf("un-inspected ref should hold the gate at assemble, got %q", serve.Step)
+	}
+	if !strings.Contains(serve.Instructions, fixtureGapID) {
+		t.Fatalf("rejection should name the un-inspected ID, got %q", serve.Instructions)
+	}
+
+	// The agent reads it through the same free tool; the gate passes on
+	// re-report.
+	var shown mcpserver.ShowResult
+	call(t, cs, "show", map[string]any{"ids": []string{fixtureGapID}}, &shown)
 	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
 	if serve.Step != "playback" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
 		t.Fatalf("expected pending user chooser at playback, got step %q", serve.Step)
@@ -770,10 +901,14 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	}
 	sessionID := serve.Session
 
-	// Restart: same graph and sessions dirs, fresh server and connection.
+	// Restart: same graph and sessions dirs, fresh server and connection —
+	// the reconnect pays orientation exactly once, at its own door.
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
-	openSession(t, cs2)
+	door := openSession(t, cs2)
+	if door.Framing == "" {
+		t.Fatal("a fresh connection's door serve should carry the framing")
+	}
 
 	var listed mcpserver.ListSessionsResult
 	call(t, cs2, "list_sessions", map[string]any{}, &listed)
@@ -812,13 +947,17 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	if rehydrated.Step != "playback" || rehydrated.PendingChooser == nil {
 		t.Fatalf("resume should rehydrate the pending chooser at playback, got %+v", rehydrated)
 	}
-	// Served-instruction memory reset: the new consumer gets full text, and
-	// the report evidence persisted through the log replay.
+	// Served-once memory is per connection: this connection never saw the
+	// playback unit, so it serves in full — the report evidence persisted
+	// through the log replay.
 	if !strings.Contains(rehydrated.Instructions, "Play back to the user") {
 		t.Fatalf("resume should serve the full unit text again, got %q", rehydrated.Instructions)
 	}
-	if resumed.Framing == "" {
-		t.Fatal("resume should carry the session framing for the new consumer")
+	// This connection already paid orientation at its own door, and the
+	// graph hasn't moved — identical framing bytes dedup to nothing on the
+	// resume (the s-tac-w3v reconnect double-pay drops to once).
+	if resumed.Framing != "" {
+		t.Fatalf("a connection that paid orientation must not re-pay it on resume, got %q", resumed.Framing)
 	}
 
 	call(t, cs2, "next", map[string]any{"instance": rehydrated.Instance, "report": map[string]any{
@@ -836,6 +975,12 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	call(t, cs2, "list_sessions", map[string]any{}, &listedAfter)
 	if len(listedAfter.Sessions) != 0 {
 		t.Fatalf("completed session must drop off the open list, got %+v", listedAfter.Sessions)
+	}
+
+	// Re-knocking on the door clears the connection's served-once memory —
+	// the orientation re-serves in full, on demand.
+	if reshell := openSession(t, cs2); reshell.Framing == "" {
+		t.Fatal("a repeated start_session should re-serve the framing in full")
 	}
 }
 
@@ -865,6 +1010,266 @@ func TestAbandonLeavesLogStanding(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(env.sessionsDir, serve.Session+".jsonl")); err != nil {
 		t.Fatalf("session log must stay on disk: %v", err)
+	}
+}
+
+// TestParkMove shelves a seeded capture back to the shell junction: the
+// response lands on the shell with the move listed as an open thread, the
+// state keeps across a restart, and next resumes it where it stood
+// (d-tac-dbk park affordance).
+func TestParkMove(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+
+	// A mid-dialogue capture-worthy item: start the capture, seed what is
+	// known through the normal start params, and park it.
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"canonical": "capture",
+		"params":    map[string]any{"anchor": fixtureGapID, "body": "A draft noted for later."},
+		"label":     "noted for later",
+	}, &serve)
+
+	var parked mcpserver.ParkResult
+	call(t, cs, "park", map[string]any{"instance": serve.Instance, "note": "user wants this after the main work"}, &parked)
+	if !parked.Parked || parked.Procedure != "capture" || parked.Step != serve.Step {
+		t.Fatalf("park should confirm the shelved move, got %+v", parked)
+	}
+	if parked.Base == nil || parked.Base.Procedure != "user-dialogue" {
+		t.Fatalf("park should land the dialogue on the shell junction, got %+v", parked.Base)
+	}
+	if !strings.Contains(parked.Base.OpenThreads, "capture at "+serve.Step) {
+		t.Fatalf("the parked move should list as an open thread, got %q", parked.Base.OpenThreads)
+	}
+
+	// The parked event is in the log — legible to whoever resumes.
+	events, err := readSessionLog(t, env.sessionsDir, serve.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawParked := false
+	for _, ev := range events {
+		if ev.Event == engine.EventParked && ev.Instance == serve.Instance {
+			sawParked = true
+			if note, _ := ev.Data["note"].(string); note != "user wants this after the main work" {
+				t.Fatalf("parked event should carry the note, got %v", ev.Data)
+			}
+		}
+	}
+	if !sawParked {
+		t.Fatal("parking should log a parked event")
+	}
+
+	// Restart: the parked draft survives — session lists, and next resumes
+	// the move with its seeded state intact.
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	openSession(t, cs2)
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs2, "resume_session", map[string]any{"session": serve.Session}, &resumed)
+	var capServe *mcpserver.ServeResult
+	for i := range resumed.Open {
+		if resumed.Open[i].Procedure == "capture" {
+			capServe = &resumed.Open[i]
+		}
+	}
+	if capServe == nil || capServe.Step != serve.Step {
+		t.Fatalf("the parked capture should rehydrate at its step, got %+v", resumed.Open)
+	}
+	if slices.Contains(capServe.Missing, "body") {
+		t.Fatalf("the seeded draft state should survive the park, missing = %v", capServe.Missing)
+	}
+
+	// Park guard rails: the shell never parks, unknown instances are named.
+	var shellServe *mcpserver.ServeResult
+	for i := range resumed.Open {
+		if resumed.Open[i].Procedure == "user-dialogue" {
+			shellServe = &resumed.Open[i]
+		}
+	}
+	if shellServe == nil {
+		t.Fatalf("resume should rehydrate the shell, got %+v", resumed.Open)
+	}
+	if msg := callExpectError(t, cs2, "park", map[string]any{"instance": shellServe.Instance}); !strings.Contains(msg, "park is for moves") {
+		t.Fatalf("parking the shell should be refused, got %q", msg)
+	}
+	if msg := callExpectError(t, cs2, "park", map[string]any{"instance": "i_99"}); !strings.Contains(msg, "not found") {
+		t.Fatalf("unknown instance should be named, got %q", msg)
+	}
+}
+
+// TestAbandonSessionByHandle_Parked tears down a parked-on-disk session in
+// one unbound call — no resume, no framing (d-tac-dbk; baseline was six
+// calls + ~28KB framing per session). The response names the label and the
+// discarded threads, and the session drops off the open list.
+func TestAbandonSessionByHandle_Parked(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"canonical": "capture",
+		"label":     "Stale capture to tear down",
+	}, &serve)
+	sessionID := serve.Session
+
+	// Restart: the session is parked on disk, known to no live server.
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+
+	// One call, no session bound, no framing anywhere in the response.
+	var down mcpserver.AbandonResult
+	call(t, cs2, "abandon", map[string]any{"session": sessionID, "reason": "stale"}, &down)
+	if !down.Abandoned || down.Session != sessionID {
+		t.Fatalf("teardown should confirm the session, got %+v", down)
+	}
+	if down.Label != "Stale capture to tear down" {
+		t.Fatalf("teardown should name the label, got %q", down.Label)
+	}
+	if len(down.DiscardedThreads) != 1 || !strings.Contains(down.DiscardedThreads[0], "capture at") {
+		t.Fatalf("teardown should name the discarded threads, got %v", down.DiscardedThreads)
+	}
+	if down.Base != nil {
+		t.Fatalf("an unbound teardown has no dialogue to land, got %+v", down.Base)
+	}
+
+	openSession(t, cs2)
+	var listed mcpserver.ListSessionsResult
+	call(t, cs2, "list_sessions", map[string]any{}, &listed)
+	if len(listed.Sessions) != 0 {
+		t.Fatalf("torn-down session must drop off the open list, got %+v", listed.Sessions)
+	}
+	if _, err := os.Stat(filepath.Join(env.sessionsDir, sessionID+".jsonl")); err != nil {
+		t.Fatalf("teardown closes the log, never deletes it: %v", err)
+	}
+}
+
+// TestAbandonSessionByHandle_InMemory tears down a session parked in memory
+// (left behind by a client disconnect with an open move) and lands the
+// bound caller back on their own shell junction.
+func TestAbandonSessionByHandle_InMemory(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "capture", "label": "parked draft"}, &serve)
+	parkedID := serve.Session
+	_ = cs.Close() // disconnect with an open move: the session parks in memory
+
+	cs2 := connect(t, env.srv)
+	openSession(t, cs2)
+	// The disconnect watcher parks asynchronously — wait until it lists.
+	var listed mcpserver.ListSessionsResult
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		call(t, cs2, "list_sessions", map[string]any{}, &listed)
+		if len(listed.Sessions) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("disconnected session never parked, got %+v", listed.Sessions)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	var down mcpserver.AbandonResult
+	call(t, cs2, "abandon", map[string]any{"session": parkedID, "reason": "not needed"}, &down)
+	if !down.Abandoned || down.Session != parkedID || down.Label != "parked draft" {
+		t.Fatalf("teardown diverged: %+v", down)
+	}
+	if len(down.DiscardedThreads) != 1 || !strings.Contains(down.DiscardedThreads[0], "capture at") {
+		t.Fatalf("teardown should name the discarded threads, got %v", down.DiscardedThreads)
+	}
+	if down.Base == nil || down.Base.Procedure != "user-dialogue" {
+		t.Fatalf("a bound caller lands back on their shell junction, got %+v", down.Base)
+	}
+
+	call(t, cs2, "list_sessions", map[string]any{}, &listed)
+	if len(listed.Sessions) != 0 {
+		t.Fatalf("torn-down session must drop off the open list, got %+v", listed.Sessions)
+	}
+}
+
+// TestAbandonSessionByHandle_SurfacesHeldMarkers folds WIP markers out of a
+// parked log so teardown surfaces them — left standing for grooming, never
+// silently dropped. The log is synthetic: descriptors and teardown folds are
+// self-derived from events, no procedure resolution.
+func TestAbandonSessionByHandle_SurfacesHeldMarkers(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	sessionID := "s_20260706-090000-deadbeef"
+	lines := []string{
+		`{"v":1,"ts":"2026-07-06T09:00:00Z","session":"` + sessionID + `","seq":1,"event":"session_meta","data":{"participant":"Tester"}}`,
+		`{"v":1,"ts":"2026-07-06T09:00:01Z","session":"` + sessionID + `","seq":2,"instance":"i_1","event":"started","data":{"procedure":"implementation","step":"work"}}`,
+		`{"v":1,"ts":"2026-07-06T09:00:02Z","session":"` + sessionID + `","seq":3,"instance":"i_1","event":"op_result","data":{"step":"setup","fn":"wipStart","writes":{"wipMarker":"wip-123"}}}`,
+	}
+	if err := os.MkdirAll(env.sessionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(env.sessionsDir, sessionID+".jsonl")
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cs := connect(t, env.srv)
+	var down mcpserver.AbandonResult
+	call(t, cs, "abandon", map[string]any{"session": sessionID, "reason": "orphaned"}, &down)
+	if len(down.HeldMarkers) != 1 || down.HeldMarkers[0] != "wip-123" {
+		t.Fatalf("teardown should surface held markers, got %+v", down)
+	}
+	if !strings.Contains(down.Instructions, "grooming") {
+		t.Fatalf("held markers should route the user to grooming, got %q", down.Instructions)
+	}
+}
+
+// TestAbandonSessionByHandle_Rejections pins the teardown guard rails.
+func TestAbandonSessionByHandle_Rejections(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	serve := openSession(t, cs)
+
+	if msg := callExpectError(t, cs, "abandon", map[string]any{}); !strings.Contains(msg, "exactly one") {
+		t.Fatalf("neither instance nor session should be rejected, got %q", msg)
+	}
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": "i_1", "session": "s_x"}); !strings.Contains(msg, "exactly one") {
+		t.Fatalf("both instance and session should be rejected, got %q", msg)
+	}
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": serve.Session}); !strings.Contains(msg, "own junction") {
+		t.Fatalf("tearing down the bound session should point at conclude, got %q", msg)
+	}
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": "s_nope"}); !strings.Contains(msg, "unknown session") {
+		t.Fatalf("unknown session should be named, got %q", msg)
+	}
+
+	// A session live on another connection refuses teardown.
+	cs2 := connect(t, env.srv)
+	other := openSession(t, cs2)
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": other.Session}); !strings.Contains(msg, "live on another connection") {
+		t.Fatalf("live session should refuse teardown, got %q", msg)
+	}
+}
+
+// TestUnboundRejectionInlinesParkedSessions pins the discovery half of the
+// teardown flow: a stateful call with no session bound is rejected with the
+// parked-sessions list inline (handle + label), so the agent's next call can
+// already be the resume or the teardown.
+func TestUnboundRejectionInlinesParkedSessions(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "capture", "label": "the parked one"}, &serve)
+
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	msg := callExpectError(t, cs2, "next", map[string]any{"instance": "i_2", "report": map[string]any{"x": "y"}})
+	if !strings.Contains(msg, "start_session is the door") {
+		t.Fatalf("unbound rejection should point at the door, got %q", msg)
+	}
+	if !strings.Contains(msg, serve.Session) || !strings.Contains(msg, "the parked one") {
+		t.Fatalf("unbound rejection should inline the parked session (handle + label), got %q", msg)
 	}
 }
 
