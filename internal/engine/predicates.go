@@ -51,6 +51,7 @@ var presenceFields = map[string]string{
 	"hasPlan":         "plan",
 	"hasContract":     "contract",
 	"hasDoneEntry":    "doneEntry",
+	"hasCandidates":   "candidates",
 
 	// The evaluate lens gate: at least one lens judgment must land before the
 	// junction; evidence fields are instructed alongside, never gated.
