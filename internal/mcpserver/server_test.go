@@ -395,7 +395,7 @@ func TestToolSurfaceMatchesSpec(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{
-		"abandon", "info", "list_sessions", "next", "read_attachment",
+		"abandon", "info", "list_sessions", "next", "park", "read_attachment",
 		"registry", "resume_session", "search", "show", "stage_attachment",
 		"start_procedure", "start_session", "view",
 	}
@@ -955,6 +955,92 @@ func TestAbandonLeavesLogStanding(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(env.sessionsDir, serve.Session+".jsonl")); err != nil {
 		t.Fatalf("session log must stay on disk: %v", err)
+	}
+}
+
+// TestParkMove shelves a seeded capture back to the shell junction: the
+// response lands on the shell with the move listed as an open thread, the
+// state keeps across a restart, and next resumes it where it stood
+// (d-tac-dbk park affordance).
+func TestParkMove(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+
+	// A mid-dialogue capture-worthy item: start the capture, seed what is
+	// known through the normal start params, and park it.
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"canonical": "capture",
+		"params":    map[string]any{"anchor": fixtureGapID, "body": "A draft noted for later."},
+		"label":     "noted for later",
+	}, &serve)
+
+	var parked mcpserver.ParkResult
+	call(t, cs, "park", map[string]any{"instance": serve.Instance, "note": "user wants this after the main work"}, &parked)
+	if !parked.Parked || parked.Procedure != "capture" || parked.Step != serve.Step {
+		t.Fatalf("park should confirm the shelved move, got %+v", parked)
+	}
+	if parked.Base == nil || parked.Base.Procedure != "user-dialogue" {
+		t.Fatalf("park should land the dialogue on the shell junction, got %+v", parked.Base)
+	}
+	if !strings.Contains(parked.Base.OpenThreads, "capture at "+serve.Step) {
+		t.Fatalf("the parked move should list as an open thread, got %q", parked.Base.OpenThreads)
+	}
+
+	// The parked event is in the log — legible to whoever resumes.
+	events, err := readSessionLog(t, env.sessionsDir, serve.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawParked := false
+	for _, ev := range events {
+		if ev.Event == engine.EventParked && ev.Instance == serve.Instance {
+			sawParked = true
+			if note, _ := ev.Data["note"].(string); note != "user wants this after the main work" {
+				t.Fatalf("parked event should carry the note, got %v", ev.Data)
+			}
+		}
+	}
+	if !sawParked {
+		t.Fatal("parking should log a parked event")
+	}
+
+	// Restart: the parked draft survives — session lists, and next resumes
+	// the move with its seeded state intact.
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	openSession(t, cs2)
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs2, "resume_session", map[string]any{"session": serve.Session}, &resumed)
+	var capServe *mcpserver.ServeResult
+	for i := range resumed.Open {
+		if resumed.Open[i].Procedure == "capture" {
+			capServe = &resumed.Open[i]
+		}
+	}
+	if capServe == nil || capServe.Step != serve.Step {
+		t.Fatalf("the parked capture should rehydrate at its step, got %+v", resumed.Open)
+	}
+	if slices.Contains(capServe.Missing, "body") {
+		t.Fatalf("the seeded draft state should survive the park, missing = %v", capServe.Missing)
+	}
+
+	// Park guard rails: the shell never parks, unknown instances are named.
+	var shellServe *mcpserver.ServeResult
+	for i := range resumed.Open {
+		if resumed.Open[i].Procedure == "user-dialogue" {
+			shellServe = &resumed.Open[i]
+		}
+	}
+	if shellServe == nil {
+		t.Fatalf("resume should rehydrate the shell, got %+v", resumed.Open)
+	}
+	if msg := callExpectError(t, cs2, "park", map[string]any{"instance": shellServe.Instance}); !strings.Contains(msg, "park is for moves") {
+		t.Fatalf("parking the shell should be refused, got %q", msg)
+	}
+	if msg := callExpectError(t, cs2, "park", map[string]any{"instance": "i_99"}); !strings.Contains(msg, "not found") {
+		t.Fatalf("unknown instance should be named, got %q", msg)
 	}
 }
 

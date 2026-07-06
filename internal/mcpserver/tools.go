@@ -79,6 +79,20 @@ type AbandonResult struct {
 	Base             *BaseServe `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue now stands"`
 }
 
+type ParkArgs struct {
+	Instance string `json:"instance" jsonschema:"running move instance to park"`
+	Note     string `json:"note,omitempty" jsonschema:"one line on why the move is shelved — carried in the session log for whoever resumes it"`
+}
+
+type ParkResult struct {
+	Parked       bool       `json:"parked"`
+	Instance     string     `json:"instance"`
+	Procedure    string     `json:"procedure"`
+	Step         string     `json:"step"`
+	Instructions string     `json:"instructions,omitempty"`
+	Base         *BaseServe `json:"base_junction,omitempty" jsonschema:"the session shell's serve — where the dialogue lands"`
+}
+
 type ChooserOptionResult struct {
 	Choice  string   `json:"choice"`
 	Collect []string `json:"collect,omitempty" jsonschema:"state fields this option carries (suffix ? = optional)"`
@@ -275,6 +289,14 @@ func (s *Server) registerTools() {
 			"surfaced and left standing for resume or grooming. The session shell concludes through " +
 			"its own junction, never through abandon.",
 	}, s.abandon)
+
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "park",
+		Description: "Park a running move back to the session junction: state and step position keep, " +
+			"the move lists as an open thread (at junctions and on conclude), and next resumes it. " +
+			"Use it when the user shelves work mid-dialogue — a seeded draft parks as a graph-visible " +
+			"thread instead of living in conversation memory as an agent promise.",
+	}, s.park)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "list_sessions",
@@ -608,6 +630,44 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 	}
 	// Abandoning a move lands the dialogue back on the shell junction.
 	res.Base = s.serveShell(req.Session, ss)
+	return nil, res, nil
+}
+
+// park shelves a running move back to the shell junction: nothing about the
+// instance changes — state, step, and evidence keep — but the shelving is
+// logged (legible to a resuming agent) and the response lands the dialogue
+// on the shell, with the move now listed among the open threads
+// (d-tac-dbk). Seeded drafts ride the normal dispatch path; park adds no
+// side channel.
+func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkArgs) (*mcp.CallToolResult, ParkResult, error) {
+	ss, err := s.boundSession(req.Session)
+	if err != nil {
+		return nil, ParkResult{}, err
+	}
+	if args.Instance == "" {
+		return nil, ParkResult{}, toolError("instance is required")
+	}
+	if args.Instance == ss.shellInstance {
+		return nil, ParkResult{}, toolError("the session shell is the junction moves park back to — park is for moves")
+	}
+	ss.touch(time.Now())
+
+	inst, ok := ss.sess.Instance(args.Instance)
+	if !ok {
+		return nil, ParkResult{}, toolError("instance %q not found in session", args.Instance)
+	}
+	if err := ss.sess.Park(args.Instance, args.Note); err != nil {
+		return nil, ParkResult{}, err
+	}
+	res := ParkResult{
+		Parked:    true,
+		Instance:  inst.ID,
+		Procedure: inst.Spec.Canonical,
+		Step:      inst.Step,
+		Instructions: "The move is parked with its state kept — it stays listed as an open thread " +
+			"and resumes through next. Tell the user it is recorded as open work, not forgotten.",
+		Base: s.serveShell(req.Session, ss),
+	}
 	return nil, res, nil
 }
 
