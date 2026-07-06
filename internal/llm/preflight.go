@@ -357,9 +357,9 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 
 // formatProposedEntryForPreflight renders the proposed entry plus its stored
 // intent. Intent is appended here — pre-flight only — rather than in the
-// shared FormatEntryForPrompt so the summary prompt (and its skip-hash) stays
-// unchanged and existing summaries don't restamp. The settled-justification
-// rubric reads this line to decide whether its guard matches.
+// shared FormatEntryForPrompt, so it stays out of the summary-generation
+// prompt, which has no use for it. The settled-justification rubric reads this
+// line to decide whether its guard matches.
 func formatProposedEntryForPreflight(e *model.Entry) string {
 	s := FormatEntryForPrompt(e)
 	if e.Intent != "" {

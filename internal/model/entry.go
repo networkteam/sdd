@@ -250,12 +250,11 @@ type Entry struct {
 	Preflight   string    // "skipped" or "error" annotation from pre-flight validation
 	Attachments []string  // filenames discovered from the co-located attachment directory
 	Summary     string    // LLM-generated summary: this entry + direct relationships
-	SummaryHash string    // hex-encoded hash of the rendered summary prompt inputs
 	Warnings    []Warning // validation issues found during graph construction
 	// Embedded marks a base entry compiled into the sdd binary (base
 	// procedures) rather than loaded from the graph directory. Set by the
 	// loader, never serialized. Write-side surfaces (summary regeneration,
-	// summary-hash lint) skip embedded entries — there is no file to write.
+	// missing-summary lint) skip embedded entries — there is no file to write.
 	Embedded bool
 }
 
@@ -375,7 +374,6 @@ type frontmatter struct {
 	Steps        yaml.Node         `yaml:"steps,omitempty"`
 	Preflight    string            `yaml:"preflight,omitempty"`
 	Summary      string            `yaml:"summary,omitempty"`
-	SummaryHash  string            `yaml:"summary_hash,omitempty"`
 }
 
 // involvementYAML mirrors the on-disk shape for involvement triples. The
@@ -432,7 +430,6 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		FocusWhen:    fm.FocusWhen,
 		Preflight:    fm.Preflight,
 		Summary:      fm.Summary,
-		SummaryHash:  fm.SummaryHash,
 		Content:      strings.TrimSpace(body),
 		Time:         idParts.Time,
 	}
@@ -643,7 +640,6 @@ func FormatFrontmatter(e *Entry) string {
 		FocusWhen:    e.FocusWhen,
 		Preflight:    e.Preflight,
 		Summary:      e.Summary,
-		SummaryHash:  e.SummaryHash,
 	}
 
 	// Topics: annotation entries emit AnnotationTopics verbatim (preserves

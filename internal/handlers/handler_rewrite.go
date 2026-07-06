@@ -94,7 +94,6 @@ func (h *Handler) RewriteEntry(ctx context.Context, cmd *command.RewriteEntryCmd
 	rewritten.Type = cmd.NewType
 	rewritten.Kind = cmd.NewKind
 	rewritten.Summary = ""
-	rewritten.SummaryHash = ""
 
 	oldRelPath, err := model.IDToRelPath(resolvedID)
 	if err != nil {
@@ -160,7 +159,6 @@ func (h *Handler) RewriteEntry(ctx context.Context, cmd *command.RewriteEntryCmd
 		inboundPath := filepath.Join(h.graphDir, relPath)
 		// Invalidate the summary — the references it was computed from have changed.
 		e.Summary = ""
-		e.SummaryHash = ""
 		content := model.FormatFrontmatter(e) + "\n" + e.Content + "\n"
 		if err := os.WriteFile(inboundPath, []byte(content), 0644); err != nil {
 			return fmt.Errorf("writing inbound %s: %w", inboundPath, err)

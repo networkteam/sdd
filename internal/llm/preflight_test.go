@@ -325,51 +325,6 @@ func Test_FormatEntryForPrompt_MixedRefsRenderMultiline(t *testing.T) {
 	}
 }
 
-// Test_FormatEntryForPrompt_LegacyEntrySummaryHashStable is the load-bearing
-// guarantee behind d-tac-4ub: a stored summary hash generated under the
-// pre-slice-2 prompt format must remain valid after slice 2 ships. The hash
-// is computed from the full rendered prompt; if the render of a legacy entry
-// changes by even one byte, every stored hash in the historical graph goes
-// stale at once.
-//
-// The hash sentinel pins the expected hex value computed from a known-stable
-// rendered prompt. If a future change to FormatEntryForPrompt (or summary
-// template) breaks this assertion, the offending change either needs to scope
-// itself away from legacy entries or accept that every existing summary hash
-// must be regenerated.
-func Test_FormatEntryForPrompt_LegacyEntrySummaryHashStable(t *testing.T) {
-	e := &model.Entry{
-		ID:    "20260410-120000-d-tac-xyz",
-		Type:  model.TypeDecision,
-		Layer: model.LayerTactical,
-		Kind:  model.KindPlan,
-		Refs: []model.Ref{
-			{ID: "20260410-110000-s-cpt-aaa", Kind: model.RefKindUnknown},
-		},
-		Closes:     []string{"20260410-100000-s-stg-bbb"},
-		Confidence: "high",
-		Content:    "Body of a legacy entry — its summary hash must survive ref-kind metadata work.",
-	}
-
-	got := FormatEntryForPrompt(e)
-	// Pinned byte-for-byte to catch any future render drift on legacy entries.
-	// Any character change here would invalidate every stored summary hash on
-	// pre-slice-2 entries (the hash is computed from the full rendered prompt
-	// — see RenderSummaryPrompt + ComputePromptHash). Update the want string
-	// only when an intentional reshape of the pre-slice-2 prompt is approved.
-	want := "ID: 20260410-120000-d-tac-xyz\n" +
-		"Type: decision\n" +
-		"Layer: tactical\n" +
-		"Kind: plan\n" +
-		"Refs: 20260410-110000-s-cpt-aaa\n" +
-		"Closes: 20260410-100000-s-stg-bbb\n" +
-		"Confidence: high\n" +
-		"\nBody of a legacy entry — its summary hash must survive ref-kind metadata work."
-	if got != want {
-		t.Errorf("legacy entry render drifted; this would invalidate every stored summary hash on legacy entries.\nwant:\n%s\n\ngot:\n%s", want, got)
-	}
-}
-
 // Test_formatEntryForSummaryPrompt_LegacyAliasRefKind pins the s-tac-koz fix:
 // the summary prompt renders a legacy grounds/evidence ref with its on-disk
 // kind (so the rename never enters the summary hash and the stored hash stays

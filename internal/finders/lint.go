@@ -3,22 +3,20 @@ package finders
 import (
 	"fmt"
 
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
 
 // Lint returns every entry in the graph that has at least one warning,
 // alongside the total warning count. Pure read — graph validation runs at
-// graph-construction time, this just collects the results. Also checks
-// summary hash staleness.
+// graph-construction time, this just collects the results. Also flags entries
+// that are missing a summary.
 func (f *Finder) Lint(q query.LintQuery) (*query.LintResult, error) {
 	if q.Graph == nil {
 		return nil, fmt.Errorf("graph is required")
 	}
 
-	// Check summary hashes for staleness.
-	validateSummaryHashes(q.Graph)
+	validateSummaries(q.Graph)
 
 	entries := q.Graph.Lint()
 	total := 0
@@ -28,42 +26,21 @@ func (f *Finder) Lint(q query.LintQuery) (*query.LintResult, error) {
 	return &query.LintResult{Entries: entries, TotalIssues: total}, nil
 }
 
-// validateSummaryHashes checks all entries for stale or missing summaries
-// and adds warnings to entries where the hash doesn't match.
-func validateSummaryHashes(graph *model.Graph) {
+// validateSummaries flags entries that have no summary yet. Under the
+// on-demand summary model (d-cpt-4qi) summaries carry no staleness tracking —
+// an entry's meaning is fixed at creation, so there is nothing to detect drift
+// against; lint only surfaces the absence of a summary.
+func validateSummaries(graph *model.Graph) {
 	for _, entry := range graph.Entries {
 		// Embedded base entries ship their summary with the binary — there
-		// is no file to regenerate, so staleness doesn't apply.
+		// is no file to regenerate.
 		if entry.Embedded {
 			continue
 		}
-		if entry.Summary == "" && entry.SummaryHash == "" {
+		if entry.Summary == "" {
 			entry.Warnings = append(entry.Warnings, model.Warning{
 				Field:   "summary",
 				Message: "missing summary (run sdd summarize to generate)",
-			})
-			continue
-		}
-
-		if entry.Summary != "" && entry.SummaryHash == "" {
-			entry.Warnings = append(entry.Warnings, model.Warning{
-				Field:   "summary_hash",
-				Message: "summary exists but no hash — run sdd summarize to regenerate",
-			})
-			continue
-		}
-
-		// Recompute hash and compare.
-		req, err := llm.RenderSummaryPrompt(entry, graph)
-		if err != nil {
-			continue // skip entries where prompt rendering fails
-		}
-		currentHash := llm.ComputePromptHash(req.Combined())
-		if entry.SummaryHash != currentHash {
-			entry.Warnings = append(entry.Warnings, model.Warning{
-				Field:   "summary_hash",
-				Value:   entry.SummaryHash,
-				Message: fmt.Sprintf("stale summary hash (stored %s..., current %s...) — run sdd summarize %s", entry.SummaryHash[:8], currentHash[:8], entry.ID),
 			})
 		}
 	}

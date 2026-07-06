@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"crypto/sha256"
 	"embed"
 	"fmt"
 	"strings"
@@ -15,26 +14,18 @@ import (
 //go:embed summary_templates/*.tmpl
 var summaryTemplates embed.FS
 
-// SummarizeResult holds the generated summary and its prompt hash.
+// SummarizeResult holds the generated summary.
 type SummarizeResult struct {
-	Summary     string
-	SummaryHash string
+	Summary string
 }
 
 // Summarize generates a summary for a single entry using the LLM runner.
-// Returns nil if the entry's stored SummaryHash matches the computed hash
-// (skip). Set force to regenerate regardless.
-func Summarize(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, force bool) (*SummarizeResult, error) {
+// Summaries are derived on demand with no staleness tracking (d-cpt-4qi), so
+// this always regenerates — the caller decides when to invoke it.
+func Summarize(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph) (*SummarizeResult, error) {
 	req, err := RenderSummaryPrompt(entry, graph)
 	if err != nil {
 		return nil, fmt.Errorf("rendering summary prompt: %w", err)
-	}
-
-	hash := ComputePromptHash(req.Combined())
-
-	// Skip if hash matches — summary is current.
-	if !force && entry.SummaryHash == hash {
-		return nil, nil
 	}
 
 	start := time.Now()
@@ -49,8 +40,7 @@ func Summarize(ctx context.Context, runner Runner, entry *model.Entry, graph *mo
 	summary := strings.TrimSpace(output.Text)
 
 	return &SummarizeResult{
-		Summary:     summary,
-		SummaryHash: hash,
+		Summary: summary,
 	}, nil
 }
 
@@ -131,10 +121,9 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 // Refs rendering is conditional on the entry's ref shape, per d-tac-4ub:
 //
 //   - All-legacy (every ref has Kind == RefKindUnknown — bare-string YAML
-//     fallback): render the flat `Refs: id1, id2` format. This preserves the
-//     byte-identical prompt shape pre-slice-2, so legacy entries keep their
-//     stored summary hashes stable (no spurious "stale summary hash" warnings
-//     on every read).
+//     fallback): render the flat `Refs: id1, id2` format. Legacy refs carry no
+//     kind or desc, so the object form would only add empty `(kind: unknown)`
+//     noise.
 //   - Object-form (any ref carries a capturable kind): render multi-line
 //     `  - id (kind: K): desc` so the LLM sees ref metadata, enabling the
 //     ref-meta consistency check (see ref_meta_consistency.tmpl).
@@ -145,19 +134,21 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 //
 // This renders canonical (parse-resolved) ref kinds — the form pre-flight and
 // all user-facing prompt contexts need. The summary-generation prompt instead
-// calls formatEntryForSummaryPrompt, which renders each ref's on-disk kind so
-// the grounds/evidence → grounded-in rename never enters the summary hash
-// (s-tac-koz).
+// calls formatEntryForSummaryPrompt, which renders each ref's on-disk kind.
+// That divergence existed only to keep the (now-removed) summary hash stable
+// across the grounds/evidence → grounded-in rename (s-tac-koz); it is retained
+// unchanged and slated for review now that summaries carry no hash.
 func FormatEntryForPrompt(e *model.Entry) string {
 	return formatEntryForPrompt(e, false)
 }
 
 // formatEntryForSummaryPrompt renders an entry for the summary-generation
-// prompt using each ref's on-disk kind (pre-alias-resolution). A legacy
-// grounds/evidence ref renders as it was stored, so the alias never changes
-// the summary prompt and the entry's stored hash stays valid without a
-// re-summarize (s-tac-koz). Pre-flight must NOT use this — it judges ref-meta
-// against the canonical vocabulary.
+// prompt using each ref's on-disk kind (pre-alias-resolution) rather than the
+// canonical kind. This divergence from FormatEntryForPrompt existed only to
+// hold the (now-removed) summary hash stable across the grounds/evidence →
+// grounded-in rename (s-tac-koz); it is retained unchanged and slated for
+// review. Pre-flight must NOT use this — it judges ref-meta against the
+// canonical vocabulary.
 func formatEntryForSummaryPrompt(e *model.Entry) string {
 	return formatEntryForPrompt(e, true)
 }
@@ -206,8 +197,8 @@ func formatEntryForPrompt(e *model.Entry, onDiskRefKinds bool) string {
 
 // allLegacyRefs reports whether every ref in the slice is a legacy bare-string
 // ref (Kind == RefKindUnknown). Used by FormatEntryForPrompt to fall back to
-// the pre-slice-2 flat ref rendering so legacy entries' summary-hash stability
-// is preserved.
+// the flat ref rendering for such entries, whose refs carry no kind/desc worth
+// showing in object form.
 func allLegacyRefs(refs []model.Ref) bool {
 	for _, r := range refs {
 		if r.Kind != model.RefKindUnknown {
@@ -215,11 +206,4 @@ func allLegacyRefs(refs []model.Ref) bool {
 		}
 	}
 	return true
-}
-
-// ComputePromptHash returns the hex-encoded SHA-256 hash of the rendered prompt.
-// Uses the first 16 bytes (32 hex chars) — enough for collision avoidance.
-func ComputePromptHash(prompt string) string {
-	h := sha256.Sum256([]byte(prompt))
-	return fmt.Sprintf("%x", h[:16])
 }
