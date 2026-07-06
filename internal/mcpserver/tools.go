@@ -33,6 +33,11 @@ const framingLayout = `aspirations:rank(heat(exp-14d)):n(8):brief,` +
 // enter through the same door with an explicit shell param.
 const defaultShellCanonical = "user-dialogue"
 
+// defaultSearchHits caps search responses when the caller sets no limit —
+// the CLI's `--limit 8` drill behavior, adopted as the MCP default
+// (d-tac-dbk serve sizes).
+const defaultSearchHits = 8
+
 // --- the loop -------------------------------------------------------------
 
 type StartSessionArgs struct {
@@ -155,8 +160,8 @@ type SearchArgs struct {
 	Layer             string   `json:"layer,omitempty" jsonschema:"filter: stg, cpt, tac, ops, prc"`
 	Kind              string   `json:"kind,omitempty" jsonschema:"filter: entry kind"`
 	IncludeSuperseded bool     `json:"include_superseded,omitempty"`
-	Limit             int      `json:"limit,omitempty"`
-	MaxCitations      *int     `json:"max_citations,omitempty" jsonschema:"citation lines per entry; 0 = headers only"`
+	Limit             int      `json:"limit,omitempty" jsonschema:"hit cap; default 8"`
+	MaxCitations      *int     `json:"max_citations,omitempty" jsonschema:"citation snippet lines per entry; default 0 = headers only — depth comes from show, not snippets"`
 }
 
 type SearchResult struct {
@@ -815,13 +820,21 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 		return nil, SearchResult{}, toolError("loading graph: %v", err)
 	}
 
+	// Drill-serve defaults (d-tac-dbk): header-only, hit-capped — the
+	// measured 26.5KB drill was this tool's response with snippet defaults.
+	// Snippets stay one explicit parameter away; depth flows through show,
+	// where it is logged as inspection.
+	limit := args.Limit
+	if limit == 0 {
+		limit = defaultSearchHits
+	}
 	sq := query.SearchQuery{
 		Graph:                graph,
 		Terms:                args.Terms,
 		Phrase:               args.Query,
 		IncludeSuperseded:    args.IncludeSuperseded,
-		Limit:                args.Limit,
-		MaxCitationsPerEntry: query.DefaultMaxCitationsPerEntry,
+		Limit:                limit,
+		MaxCitationsPerEntry: 0,
 	}
 	if args.MaxCitations != nil {
 		sq.MaxCitationsPerEntry = *args.MaxCitations

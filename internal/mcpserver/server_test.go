@@ -333,6 +333,51 @@ func assembleReport() map[string]any {
 	}
 }
 
+// TestSearchDefaults_HeaderOnlyHitCapped pins the drill-serve defaults
+// (d-tac-dbk): no limit and no max_citations means at most 8 hits and zero
+// citation lines — the measured 26.5KB drill was this tool with snippet
+// defaults. Snippets and a higher cap stay one explicit parameter away.
+func TestSearchDefaults_HeaderOnlyHitCapped(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	for i := range 12 {
+		path := filepath.Join(graphDir, fmt.Sprintf("2026/06/02-1000%02d-s-tac-h%02d.md", i, i))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := fmt.Sprintf(`---
+type: signal
+layer: tactical
+kind: gap
+summary: Probe entry %02d observes the flux capacitor drill cost.
+---
+
+Probe entry %02d: the flux capacitor drill needs observing.
+`, i, i)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+
+	var res mcpserver.SearchResult
+	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}}, &res)
+	if strings.Contains(res.Results, "↳") {
+		t.Fatalf("default search must be header-only, got citations: %q", res.Results)
+	}
+	if hits := strings.Count(res.Results, "-s-tac-h"); hits != 8 {
+		t.Fatalf("default search returned %d hits, want the cap of 8", hits)
+	}
+
+	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}, "max_citations": 2, "limit": 12}, &res)
+	if !strings.Contains(res.Results, "↳") {
+		t.Fatalf("explicit max_citations should render citation lines, got %q", res.Results)
+	}
+	if hits := strings.Count(res.Results, "-s-tac-h"); hits != 12 {
+		t.Fatalf("explicit limit should raise the cap, got %d hits", hits)
+	}
+}
+
 // TestToolSurfaceMatchesSpec pins the tool list to the surface spec §5 —
 // exactly these tools, and in particular no direct write tool.
 func TestToolSurfaceMatchesSpec(t *testing.T) {
