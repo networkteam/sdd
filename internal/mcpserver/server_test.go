@@ -473,18 +473,34 @@ func TestCaptureProcedureLoop(t *testing.T) {
 		t.Fatalf("playback unit should serve full text first, got %q", firstPlayback)
 	}
 
-	// Adjust bounces through assemble and back to playback: the second
-	// playback serve must be the one-line reminder, not the full unit.
+	// Adjust bounces through assemble and back to playback. The body changed,
+	// so the re-rendered unit is different bytes — served in full again: a
+	// confirm must never bind to an unseen description (content-hash dedup,
+	// no per-step memory; d-tac-dbk).
+	const tightened = "Test capture entry, tightened: the fixture oscillation gap also " +
+		"shows up in integration tests, verifying the engine write path end to end."
 	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "adjust", "userWords": "tighten the first sentence",
-		"fields": map[string]any{"body": "Test capture entry, tightened: the fixture oscillation gap also " +
-			"shows up in integration tests, verifying the engine write path end to end."},
+		"fields": map[string]any{"body": tightened},
 	}}, &serve)
 	if serve.Step != "playback" {
 		t.Fatalf("adjust should cascade back to playback, got %q", serve.Step)
 	}
+	if !strings.Contains(serve.Instructions, "Play back to the user") || !strings.Contains(serve.Instructions, "tightened") {
+		t.Fatalf("a changed playback must serve in full, got %q", serve.Instructions)
+	}
+
+	// A second adjust that changes nothing re-renders identical bytes — the
+	// serve stubs to the one-line reminder.
+	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+		"chooser": "playback", "choice": "adjust", "userWords": "no, keep it",
+		"fields": map[string]any{"body": tightened},
+	}}, &serve)
+	if serve.Step != "playback" {
+		t.Fatalf("no-op adjust should cascade back to playback, got %q", serve.Step)
+	}
 	if strings.Contains(serve.Instructions, "Play back to the user") || !strings.Contains(serve.Instructions, "served earlier this session") {
-		t.Fatalf("second playback serve should be a reminder, got %q", serve.Instructions)
+		t.Fatalf("an unchanged playback re-serve should stub to the reminder, got %q", serve.Instructions)
 	}
 
 	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
@@ -830,10 +846,14 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	}
 	sessionID := serve.Session
 
-	// Restart: same graph and sessions dirs, fresh server and connection.
+	// Restart: same graph and sessions dirs, fresh server and connection —
+	// the reconnect pays orientation exactly once, at its own door.
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
-	openSession(t, cs2)
+	door := openSession(t, cs2)
+	if door.Framing == "" {
+		t.Fatal("a fresh connection's door serve should carry the framing")
+	}
 
 	var listed mcpserver.ListSessionsResult
 	call(t, cs2, "list_sessions", map[string]any{}, &listed)
@@ -872,13 +892,17 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	if rehydrated.Step != "playback" || rehydrated.PendingChooser == nil {
 		t.Fatalf("resume should rehydrate the pending chooser at playback, got %+v", rehydrated)
 	}
-	// Served-instruction memory reset: the new consumer gets full text, and
-	// the report evidence persisted through the log replay.
+	// Served-once memory is per connection: this connection never saw the
+	// playback unit, so it serves in full — the report evidence persisted
+	// through the log replay.
 	if !strings.Contains(rehydrated.Instructions, "Play back to the user") {
 		t.Fatalf("resume should serve the full unit text again, got %q", rehydrated.Instructions)
 	}
-	if resumed.Framing == "" {
-		t.Fatal("resume should carry the session framing for the new consumer")
+	// This connection already paid orientation at its own door, and the
+	// graph hasn't moved — identical framing bytes dedup to nothing on the
+	// resume (the s-tac-w3v reconnect double-pay drops to once).
+	if resumed.Framing != "" {
+		t.Fatalf("a connection that paid orientation must not re-pay it on resume, got %q", resumed.Framing)
 	}
 
 	call(t, cs2, "next", map[string]any{"instance": rehydrated.Instance, "report": map[string]any{
@@ -896,6 +920,12 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	call(t, cs2, "list_sessions", map[string]any{}, &listedAfter)
 	if len(listedAfter.Sessions) != 0 {
 		t.Fatalf("completed session must drop off the open list, got %+v", listedAfter.Sessions)
+	}
+
+	// Re-knocking on the door clears the connection's served-once memory —
+	// the orientation re-serves in full, on demand.
+	if reshell := openSession(t, cs2); reshell.Framing == "" {
+		t.Fatal("a repeated start_session should re-serve the framing in full")
 	}
 }
 

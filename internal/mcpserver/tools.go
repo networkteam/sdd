@@ -372,7 +372,6 @@ func (s *Server) newShellSession() (*shellSession, error) {
 		id:           id,
 		participant:  participant,
 		logFile:      logFile,
-		served:       map[string]bool{},
 		lastActivity: now,
 	}
 	registry, err := s.buildRegistry(ss)
@@ -397,19 +396,21 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 	}
 
 	// Knocking on an already-open door re-serves the shell's orientation in
-	// full — the "re-servable on demand" half of the tier-one contract.
+	// full — the "re-servable on demand" half of the tier-one contract. The
+	// connection's served-block memory resets, so units and framing serve
+	// full text again.
 	if ss := s.sessions.bound(req.Session); ss != nil && ss.shellInstance != "" {
 		if inst, ok := ss.sess.Instance(ss.shellInstance); ok && inst.Status == engine.StatusRunning {
 			ss.touch(time.Now())
 			if err := applyLabel(ss, args.Label); err != nil {
 				return nil, ServeResult{}, err
 			}
-			s.forgetServed(ss, ss.shellInstance)
+			s.forgetConnection(req.Session)
 			serve, err := ss.sess.Serve(ss.shellInstance)
 			if err != nil {
 				return nil, ServeResult{}, err
 			}
-			return nil, s.toServeResult(ss, serve), nil
+			return nil, s.toServeResult(req.Session, ss, serve), nil
 		}
 	}
 
@@ -440,17 +441,7 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 	prev := s.sessions.bind(req.Session, ss)
 	s.watchDisconnect(req.Session)
 	s.leaveSession(prev)
-	return nil, s.toServeResult(ss, serve), nil
-}
-
-// forgetServed clears the served-instruction memory for one instance so its
-// units serve full-text again.
-func (s *Server) forgetServed(ss *shellSession, instance string) {
-	for key := range ss.served {
-		if strings.HasPrefix(key, instance+"/") {
-			delete(ss.served, key)
-		}
-	}
+	return nil, s.toServeResult(req.Session, ss, serve), nil
 }
 
 func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, args StartProcedureArgs) (*mcp.CallToolResult, ServeResult, error) {
@@ -489,7 +480,7 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	return nil, s.toServeResult(ss, serve), nil
+	return nil, s.toServeResult(req.Session, ss, serve), nil
 }
 
 // maxLabelLen caps session labels — a label is a list row, not a summary.
@@ -542,11 +533,11 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	res := s.toServeResult(ss, serve)
+	res := s.toServeResult(req.Session, ss, serve)
 	// A move that ended lands the dialogue back on the session shell's
 	// junction — told on every response, never left to agent memory.
 	if serve.Status != engine.StatusRunning && serve.Instance != ss.shellInstance {
-		res.Base = s.serveShell(ss)
+		res.Base = s.serveShell(req.Session, ss)
 	}
 	return nil, res, nil
 }
@@ -554,7 +545,7 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 // serveShell re-serves the session shell's current position — the landing
 // every ended move returns the dialogue to. Nil when the session has no
 // shell (should not happen behind the door; callers omit the field then).
-func (s *Server) serveShell(ss *shellSession) *BaseServe {
+func (s *Server) serveShell(ms *mcp.ServerSession, ss *shellSession) *BaseServe {
 	if ss.shellInstance == "" || ss.sess == nil {
 		return nil
 	}
@@ -562,7 +553,7 @@ func (s *Server) serveShell(ss *shellSession) *BaseServe {
 	if err != nil {
 		return nil
 	}
-	res := s.toServeResult(ss, serve)
+	res := s.toServeResult(ms, ss, serve)
 	return &BaseServe{
 		Session:        res.Session,
 		Instance:       res.Instance,
@@ -616,7 +607,7 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 		res.Instructions = "The instance holds WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
 	}
 	// Abandoning a move lands the dialogue back on the shell junction.
-	res.Base = s.serveShell(ss)
+	res.Base = s.serveShell(req.Session, ss)
 	return nil, res, nil
 }
 
@@ -680,7 +671,7 @@ func (s *Server) abandonSession(req *mcp.CallToolRequest, args AbandonArgs) (*mc
 		res.Instructions = "The discarded threads hold WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
 	}
 	if current != nil {
-		res.Base = s.serveShell(current)
+		res.Base = s.serveShell(req.Session, current)
 	}
 	return nil, res, nil
 }
@@ -711,20 +702,18 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 	if live := s.sessions.lookupID(args.Session); live != nil && live.logFile != nil {
 		// The session is already in memory. Bound to another connection it
 		// is live, not parked — refuse rather than yanking it over. Parked
-		// in memory, rebind without replaying over the open log;
-		// served-instruction memory resets for the new consumer.
+		// in memory, rebind without replaying over the open log; served-once
+		// memory is per connection, so a genuinely new consumer gets full
+		// text while a same-connection switch never re-pays it.
 		if s.sessions.liveIDs()[args.Session] {
 			return nil, ResumeSessionResult{}, toolError("session %s is live on another connection — only parked sessions resume", args.Session)
 		}
-		live.served = map[string]bool{}
-		live.framed = false
-		live.openThreadsIntroduced = false
 		if err := s.ensureShellInstance(live); err != nil {
 			return nil, ResumeSessionResult{}, err
 		}
 		prev := s.sessions.bind(req.Session, live)
 		s.leaveSession(prev)
-		res, err := s.resumeResult(live)
+		res, err := s.resumeResult(req.Session, live)
 		return nil, res, err
 	}
 
@@ -740,7 +729,6 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 	ss := &shellSession{
 		id:           args.Session,
 		participant:  desc.Participant,
-		served:       map[string]bool{},
 		lastActivity: time.Now(),
 	}
 	registry, err := s.buildRegistry(ss)
@@ -773,7 +761,7 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 	}
 	prev := s.sessions.bind(req.Session, ss)
 	s.leaveSession(prev)
-	res, err := s.resumeResult(ss)
+	res, err := s.resumeResult(req.Session, ss)
 	return nil, res, err
 }
 
@@ -800,13 +788,18 @@ func (s *Server) ensureShellInstance(ss *shellSession) error {
 	return nil
 }
 
-func (s *Server) resumeResult(ss *shellSession) (ResumeSessionResult, error) {
+func (s *Server) resumeResult(ms *mcp.ServerSession, ss *shellSession) (ResumeSessionResult, error) {
 	res := ResumeSessionResult{
 		Session:      ss.id,
 		Participant:  ss.sess.Participant,
 		Label:        ss.sess.Label,
 		Instructions: resumeInstructions,
 	}
+	// Framing rides the resume result itself, not the per-instance serves —
+	// computed first so the per-serve framing below dedups against it. A
+	// same-connection resume after the door already paid orientation gets
+	// nothing here (s-tac-w3v); a fresh connection gets it in full.
+	res.Framing = s.framingBlock(ms, ss)
 	for _, inst := range ss.sess.Instances() {
 		if inst.Status != engine.StatusRunning {
 			continue
@@ -815,16 +808,13 @@ func (s *Server) resumeResult(ss *shellSession) (ResumeSessionResult, error) {
 		if err != nil {
 			return ResumeSessionResult{}, err
 		}
-		res.Open = append(res.Open, s.toServeResult(ss, serve))
+		res.Open = append(res.Open, s.toServeResult(ms, ss, serve))
 	}
-	// Framing rides the resume result itself, not the per-instance serves.
 	// Open threads need no separate slot: the shell's serve in the Open
 	// list carries the block.
 	for i := range res.Open {
 		res.Open[i].Framing = ""
 	}
-	ss.framed = false
-	res.Framing = s.framingFor(ss)
 	return res, nil
 }
 
@@ -1085,10 +1075,10 @@ func (s *Server) registryDocs(ctx context.Context, req *mcp.CallToolRequest, arg
 // --- serve conversion --------------------------------------------------------
 
 // toServeResult converts an engine serve into the tool response, applying
-// served-instruction memory (full unit text once per agent session, a
-// one-line reminder after) and injecting the session framing on the first
-// serve a bound agent sees.
-func (s *Server) toServeResult(ss *shellSession, serve *engine.Serve) ServeResult {
+// served-once memory: full text the first time this connection sees these
+// exact rendered bytes, a one-line stub after — identical bytes stub,
+// changed content always serves in full (d-tac-dbk).
+func (s *Server) toServeResult(ms *mcp.ServerSession, ss *shellSession, serve *engine.Serve) ServeResult {
 	res := ServeResult{
 		Session:      ss.id,
 		Instance:     serve.Instance,
@@ -1101,19 +1091,14 @@ func (s *Server) toServeResult(ss *shellSession, serve *engine.Serve) ServeResul
 		ReportSchema: serve.ReportSchema,
 		Produced:     serve.Produced,
 	}
-	if serve.Unit != "" {
-		key := serve.Instance + "/" + serve.Unit
-		if ss.served[key] {
-			reminder := fmt.Sprintf("(step %s instructions were served earlier this session — follow them; goal: %s)", serve.Step, serve.Goal)
-			res.Instructions = engine.ComposeInstructions(reminder, serve.Diagnostics)
-		} else {
-			ss.served[key] = true
-		}
+	if serve.Unit != "" && s.servedBefore(ms, serve.UnitText) {
+		reminder := fmt.Sprintf("(step %s instructions were served earlier this session — follow them; goal: %s)", serve.Step, serve.Goal)
+		res.Instructions = engine.ComposeInstructions(reminder, serve.Diagnostics)
 	}
 	// Open threads ride the session shell's serves only — the junction the
 	// dialogue stands on. Mid-procedure serves never carry the block.
 	if ss.shellInstance != "" && serve.Instance == ss.shellInstance {
-		res.OpenThreads = s.openThreadsBlock(ss, true)
+		res.OpenThreads = s.openThreadsBlock(ms, ss, true)
 	}
 	if serve.Chooser != nil {
 		ch := &ChooserResult{Chooser: serve.Chooser.Chooser, Kind: string(serve.Chooser.Kind)}
@@ -1135,7 +1120,7 @@ func (s *Server) toServeResult(ss *shellSession, serve *engine.Serve) ServeResul
 	if inst, ok := ss.sess.Instance(serve.Instance); ok && inst.Spec.Class == model.ProcedureClassTask {
 		res.Execution = executionForkPreferred
 	}
-	res.Framing = s.framingFor(ss)
+	res.Framing = s.framingBlock(ms, ss)
 	return res
 }
 
@@ -1144,13 +1129,27 @@ func (s *Server) toServeResult(ss *shellSession, serve *engine.Serve) ServeResul
 // paid fallback (d-tac-tlo). Consuming it in harness automation stays deferred.
 const executionForkPreferred = "fork-preferred"
 
-// framingFor renders the session framing once per bound agent consumer.
-func (s *Server) framingFor(ss *shellSession) string {
-	if ss.framed {
+// framingBlock returns the session framing for this serve: the full render
+// the first time this connection sees these exact bytes, empty when
+// unchanged since. Changed content — the graph moved mid-session, a focus
+// was captured — always serves in full; there are no semantic skip rules
+// (d-tac-dbk). Re-orientation on demand goes through start_session, which
+// clears the connection's memory.
+func (s *Server) framingBlock(ms *mcp.ServerSession, ss *shellSession) string {
+	framing := s.renderFraming(ss)
+	if s.servedBefore(ms, framing) {
 		return ""
 	}
-	ss.framed = true
+	return framing
+}
 
+// renderFraming renders the session framing, cached per graph value — the
+// graph reloads on every advance call, so the cache mainly spares re-renders
+// within one response (a resume rehydrating several serves).
+func (s *Server) renderFraming(ss *shellSession) string {
+	if ss.engine != nil && ss.framingGraph == ss.engine.Graph && ss.framingText != "" {
+		return ss.framingText
+	}
 	var sb strings.Builder
 	if info, err := s.finder.Info(query.InfoQuery{}); err == nil {
 		fmt.Fprintf(&sb, "Local participant: %s\n", info.LocalParticipant)
@@ -1159,12 +1158,15 @@ func (s *Server) framingFor(ss *shellSession) string {
 		}
 		fmt.Fprintf(&sb, "Search: %s\n\n", info.Search)
 	}
-	framing, err := s.renderView(ss.engine.Graph, framingLayout)
-	if err != nil {
-		// Framing is orientation, not a gate — serve the loop anyway.
-		return sb.String()
+	text := sb.String()
+	// A failed view render degrades to the info header — framing is
+	// orientation, not a gate.
+	if framing, err := s.renderView(ss.engine.Graph, framingLayout); err == nil {
+		text += framing
 	}
-	return sb.String() + framing
+	ss.framingGraph = ss.engine.Graph
+	ss.framingText = text
+	return text
 }
 
 // loadProcedure resolves a canonical to its execution head and loads the

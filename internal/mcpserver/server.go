@@ -19,12 +19,14 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -76,6 +78,14 @@ type Server struct {
 	// docsRegistry answers the registry tool: function docs are identical
 	// across per-session registries, so one throwaway instance serves them.
 	docsRegistry *engine.Registry
+
+	// servedBlocks is the served-once memory: per connection, the content
+	// hashes of rendered blocks (instruction units, framing, the open-threads
+	// intro) already served in full. Keyed to the connection — not the
+	// session binding — so a same-connection resume never re-pays orientation
+	// while a fresh consumer always gets full text (d-tac-dbk, s-tac-w3v).
+	servedMu     sync.Mutex
+	servedBlocks map[*mcp.ServerSession]map[[sha256.Size]byte]bool
 }
 
 // New constructs the server and registers the workflow tool surface.
@@ -90,14 +100,15 @@ func New(opts Options) (*Server, error) {
 		return nil, errors.New("mcpserver: SessionsDir is required")
 	}
 	s := &Server{
-		handler:  opts.Handler,
-		finder:   opts.Finder,
-		searcher: opts.Searcher,
-		vector:   opts.VectorSearch,
-		graphDir: opts.GraphDir,
-		local:    opts.LocalClient,
-		version:  opts.Version,
-		sessions: newSessionStore(opts.SessionsDir),
+		handler:      opts.Handler,
+		finder:       opts.Finder,
+		searcher:     opts.Searcher,
+		vector:       opts.VectorSearch,
+		graphDir:     opts.GraphDir,
+		local:        opts.LocalClient,
+		version:      opts.Version,
+		sessions:     newSessionStore(opts.SessionsDir),
+		servedBlocks: map[*mcp.ServerSession]map[[sha256.Size]byte]bool{},
 	}
 	docsRegistry, err := s.buildRegistry(&shellSession{id: "docs"})
 	if err != nil {
@@ -143,7 +154,42 @@ func (s *Server) watchDisconnect(ms *mcp.ServerSession) {
 // whatever session it held. Idempotent — the watcher and the stdio sweep
 // may both fire.
 func (s *Server) handleDisconnect(ms *mcp.ServerSession) {
+	s.forgetConnection(ms)
 	s.leaveSession(s.sessions.unbind(ms))
+}
+
+// servedBefore reports whether these exact block bytes were already served
+// on this connection, recording them when not. Served-once memory keys to
+// the connection and dedups by content hash over the rendered bytes
+// (post-template, post-injection): identical bytes are stubbed or omitted by
+// the caller, changed content always serves in full — no semantic skip rules
+// (d-tac-dbk).
+func (s *Server) servedBefore(ms *mcp.ServerSession, block string) bool {
+	if ms == nil || block == "" {
+		return false
+	}
+	sum := sha256.Sum256([]byte(block))
+	s.servedMu.Lock()
+	defer s.servedMu.Unlock()
+	blocks := s.servedBlocks[ms]
+	if blocks == nil {
+		blocks = map[[sha256.Size]byte]bool{}
+		s.servedBlocks[ms] = blocks
+	}
+	if blocks[sum] {
+		return true
+	}
+	blocks[sum] = true
+	return false
+}
+
+// forgetConnection drops a connection's served-block memory: on disconnect
+// (the entry would leak), and on a repeated start_session — the door
+// re-serves the full orientation on demand.
+func (s *Server) forgetConnection(ms *mcp.ServerSession) {
+	s.servedMu.Lock()
+	defer s.servedMu.Unlock()
+	delete(s.servedBlocks, ms)
 }
 
 // leaveSession applies the leave rule to a session a connection stepped

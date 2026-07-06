@@ -35,16 +35,12 @@ type shellSession struct {
 	// when it ends. Set by the session door and re-derived on resume.
 	shellInstance string
 
-	// served tracks instruction units already served full-text to the bound
-	// agent, keyed instance+"/"+unit. Reset by rebinding (resume_session) —
-	// a new agent consumer gets full text again.
-	served map[string]bool
-	// framed marks that the session framing block was delivered to the
-	// bound agent consumer.
-	framed bool
-	// openThreadsIntroduced marks that an open-threads block was delivered
-	// with its base instruction; later blocks carry a one-line reminder.
-	openThreadsIntroduced bool
+	// framingGraph/framingText cache the rendered session framing per graph
+	// value — the graph reloads per advance call, so the cache mainly spares
+	// re-renders within one response (resume rehydrating several serves).
+	// Served-once memory lives on the server, keyed to the connection.
+	framingGraph *model.Graph
+	framingText  string
 
 	lastActivity time.Time
 }

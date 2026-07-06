@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/networkteam/sdd/internal/engine"
 )
 
@@ -14,8 +16,8 @@ import (
 // only attach point is the shell instance's serve.
 
 // openThreadsIntro is the base instruction served the first time a block
-// appears to the bound agent consumer; later blocks carry the one-line
-// reminder, the same memory pattern as served instruction units.
+// appears on a connection; later blocks carry the one-line reminder, the
+// same served-once memory as instruction units (connection-keyed, hashed).
 const openThreadsIntro = `Open work, in continuation order — this dialogue's other threads first, then
 other open dialogues (resume_session picks one up). Present it to the user in
 their language as options to continue, never as an obligation:`
@@ -26,7 +28,7 @@ const openThreadsReminder = "(open work, in continuation order — offer continu
 // session's other running instances first, then every other open dialogue
 // from the session store. Empty when there is nothing open — junctions with
 // no parked work stay quiet.
-func (s *Server) openThreadsBlock(ss *shellSession, includeOwnThreads bool) string {
+func (s *Server) openThreadsBlock(ms *mcp.ServerSession, ss *shellSession, includeOwnThreads bool) string {
 	var lines []string
 
 	if includeOwnThreads && ss.sess != nil {
@@ -69,8 +71,7 @@ func (s *Server) openThreadsBlock(ss *shellSession, includeOwnThreads bool) stri
 		return ""
 	}
 	header := openThreadsReminder
-	if !ss.openThreadsIntroduced {
-		ss.openThreadsIntroduced = true
+	if !s.servedBefore(ms, openThreadsIntro) {
 		header = openThreadsIntro
 	}
 	return header + "\n" + strings.Join(lines, "\n")
