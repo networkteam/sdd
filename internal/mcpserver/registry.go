@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,6 +36,37 @@ func (s *Server) buildRegistry(ss *shellSession) (*engine.Registry, error) {
 		}
 	}
 	return r, nil
+}
+
+// procedureParamSignature renders a move's accepted start params as a compact
+// signature, e.g. "(anchor?: entry-id, supersedes?: entry-id)" — the typed
+// inputs a caller may pass to start_procedure, so the accepted set is visible
+// where moves are offered rather than only discovered through a rejected call
+// (s-tac-ay5). Optional params carry a trailing "?", matching the chooser
+// collect-field convention. Params are parsed straight from the head's
+// frontmatter (no registry validation needed) and rendered in name order.
+// Returns "" when the move declares no params, or when the spec can't be
+// parsed — the move listing degrades to canonical + summary, never fails.
+func procedureParamSignature(head *model.Entry) string {
+	spec, err := engine.ParseSpec(head)
+	if err != nil || len(spec.Params) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(spec.Params))
+	for name := range spec.Params {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		decl := spec.Params[name]
+		optional := ""
+		if decl.Optional {
+			optional = "?"
+		}
+		parts = append(parts, fmt.Sprintf("%s%s: %s", name, optional, decl.Type))
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
 }
 
 // registerShellPredicates wires the session-scoped predicates the engine
@@ -124,7 +156,7 @@ func (s *Server) registerQueries(r *engine.Registry, ss *shellSession) error {
 	if err := r.RegisterQuery(engine.Query{
 		Doc: engine.FuncDoc{
 			Name: "procedureList",
-			Doc:  "The live playbook moves, one line each: canonical plus the first sentence of the head entry's summary. Shell-class procedures are excluded — they enter through start_session.",
+			Doc:  "The live playbook moves, one line each: canonical, a compact signature of its accepted start params, and the first sentence of the head entry's summary. Shell-class procedures are excluded — they enter through start_session.",
 		},
 		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
 			var sb strings.Builder
@@ -133,7 +165,7 @@ func (s *Server) registerQueries(r *engine.Registry, ss *shellSession) error {
 				if head == nil || head.Canonical == "" || head.IsShellProcedure() || head.IsTaskProcedure() || len(chain.LiveHeads) == 0 {
 					continue
 				}
-				fmt.Fprintf(&sb, "- %s — %s\n", head.Canonical, head.FirstSummarySentence())
+				fmt.Fprintf(&sb, "- %s%s — %s\n", head.Canonical, procedureParamSignature(head), head.FirstSummarySentence())
 			}
 			return strings.TrimRight(sb.String(), "\n"), nil
 		},

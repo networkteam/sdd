@@ -358,6 +358,31 @@ func TestToolSurfaceMatchesSpec(t *testing.T) {
 	}
 }
 
+// TestOrientationListsMoveParamSignatures verifies the shell orientation's
+// move listing carries each move's accepted start-param signature, so a
+// caller sees the params where the move is offered rather than only through a
+// rejected start_procedure round-trip (s-tac-ay5). The capture fixture
+// declares anchor/closes/kind/supersedes, all optional, rendered in name
+// order with a trailing "?" per optional param.
+func TestOrientationListsMoveParamSignatures(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+
+	serve := openSession(t, cs)
+	// Params render in name order; the type render is VarType.String().
+	want := "capture(anchor?: entry-id, closes?: list<entry-id>, kind?: entry-kind, supersedes?: entry-id)"
+	if !strings.Contains(serve.Instructions, want) {
+		t.Fatalf("orientation move listing should carry the capture param signature %q, got:\n%s", want, serve.Instructions)
+	}
+	// A move with no declared params renders bare — no empty parens. A space
+	// after the canonical (before the " - " summary separator) holds only when
+	// no "(" was appended; the em-dash separator itself is left out of the
+	// match to stay byte-agnostic.
+	if !strings.Contains(serve.Instructions, "- catch-up ") {
+		t.Fatalf("a paramless move should render without parens, got:\n%s", serve.Instructions)
+	}
+}
+
 // TestCaptureProcedureLoop drives the full capture spine over MCP: batch
 // report, playback chooser with served-instruction memory, staged
 // attachment materialized by the write gate, summary verification, and the
@@ -1141,7 +1166,7 @@ func TestDoorGatingAndShellLifecycle(t *testing.T) {
 	if !strings.Contains(shell.Instructions, "Participant: Tester") {
 		t.Fatalf("opening serve should carry the session info header, got %q", shell.Instructions)
 	}
-	if !strings.Contains(shell.Instructions, "- capture — ") {
+	if !strings.Contains(shell.Instructions, "- capture(") {
 		t.Fatalf("opening serve should enumerate the moves, got %q", shell.Instructions)
 	}
 	if strings.Contains(shell.Instructions, "- user-dialogue") {
