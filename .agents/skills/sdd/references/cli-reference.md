@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: 74c0cc66e14b070253be1d85f4eb4ed8c993e6fcab46cb0658bb8db4a0924383
+    sdd-content-hash: 811c581f825abe82c2dd5da8ba1ac7771ac105eb573131278384a1233e70741c
     sdd-version: dev
 ---
 # SDD CLI Reference
@@ -13,9 +13,9 @@ metadata:
 - `sdd show <id> [<id2> ...]` — multiple IDs in one call render their entries back to back (handy for comparing a cluster, e.g. the entries a new one will ref)
 - `sdd show <id> --up N --down N` — set the upstream and downstream expansion depths independently. Defaults: `--up 2 --down 1` (downstream fans out faster, so it stays shallower). `0` turns a direction off; `--up 0 --down 0` is the primary entry alone. Increase (e.g. `--up 4 --down 3`) to see more of an entry's surroundings on demand.
 - `sdd new <type> <layer> [flags] <description>` — create entries (output prints the new entry ID, file path, and the LLM-generated summary so the agent can verify fidelity)
-- `sdd summarize [<id> | --all]` — regenerate entry summaries
-- `sdd summarize <id> --text "<summary>"` — write a user-supplied summary directly, bypassing the LLM. Use `--text -` to read from stdin. Single entry only; rejected with `--all` or multiple IDs. The hash is recomputed from the current prompt so subsequent automatic regenerations skip-by-hash unless `--force` is passed.
-- `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, stale summaries). When an embedding provider is configured, also reports the search index's fingerprint and drift count.
+- `sdd summarize <id>` — regenerate the named entry's summary unconditionally (summaries are derived on demand with no staleness tracking). `sdd summarize --all` fills only entries that have no summary yet; add `--force` to regenerate every entry.
+- `sdd summarize <id> --text "<summary>"` — write a user-supplied summary directly, bypassing the LLM. Use `--text -` to read from stdin. Single entry only; rejected with `--all` or multiple IDs.
+- `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, missing summaries). When an embedding provider is configured, also reports the search index's fingerprint and drift count.
 - `sdd index` — warm up the per-participant search index at `.sdd/index/` over every entry on disk. Skips entries whose stored hash and embedder fingerprint match the manifest; `--force` re-embeds everything regardless. Required only on a fresh clone or after deliberate full rebuilds — `sdd search` lazy-fills missing/stale entries on demand.
 - `sdd search [--term <regex>...] [--query <phrase>] [--type d|s] [--layer ...] [--kind ...] [--include-superseded] [--limit N] [--max-citations N]` — three-mode retrieval. `--term` runs text mode (live grep with multi-term AND), `--query` runs vector mode, both flags together run hybrid (RRF fusion). At least one of `--term` / `--query` is required; vector and hybrid require `Search: vector,text` in the `sdd info` header. `--max-citations` caps the snippet sub-lines per entry (default 3); `--max-citations 0` suppresses them entirely, rendering entry headers only — the terse "which entries match, and what topics do they carry" lookup. See [search reference](search.md) for citation reading and mode selection guidance.
 - `sdd wip start <entry-id> --exclusive --participant <name> <description>` — create WIP marker
