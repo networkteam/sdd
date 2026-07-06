@@ -1030,6 +1030,11 @@ func TestEmbeddedEngageExploreProcedures(t *testing.T) {
 	if serve.Step != "moves" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
 		t.Fatalf("brief should reach the moves user junction, got %q", serve.Step)
 	}
+	// The pending chooser names itself by step id — the value a chooser answer
+	// must supply, so it appears in the payload it answers (s-tac-keb).
+	if serve.PendingChooser.Chooser != "moves" {
+		t.Fatalf("pending_chooser must name its step id, got %q", serve.PendingChooser.Chooser)
+	}
 
 	call(t, cs, "next", map[string]any{"instance": engageInstance, "report": map[string]any{
 		"chooser": "moves", "choice": "move", "userWords": "let's explore around it first",
@@ -1050,6 +1055,11 @@ func TestEmbeddedEngageExploreProcedures(t *testing.T) {
 	}, &serve)
 	if serve.Step != "inspect" {
 		t.Fatalf("explore should start at inspect, got %q", serve.Step)
+	}
+	// explore is a task — its serves carry the fork-preferred execution hint
+	// (d-tac-tlo, s-tac-p21 finding 3).
+	if serve.Execution != "fork-preferred" {
+		t.Fatalf("task-class serve should carry execution fork-preferred, got %q", serve.Execution)
 	}
 	if !strings.Contains(serve.Instructions, "overview: what surrounds the oscillation gap") {
 		t.Fatalf("inspect unit should carry the goal verbatim, got %q", serve.Instructions)

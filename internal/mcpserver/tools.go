@@ -73,6 +73,7 @@ type ChooserOptionResult struct {
 }
 
 type ChooserResult struct {
+	Chooser string                `json:"chooser" jsonschema:"the pending chooser's step id — the value to put in a chooser answer's chooser field"`
 	Kind    string                `json:"kind" jsonschema:"who answers: agent (advisory judgment) or user (relay their answer verbatim)"`
 	Options []ChooserOptionResult `json:"options"`
 }
@@ -90,6 +91,7 @@ type ServeResult struct {
 	Missing        []string       `json:"missing,omitempty" jsonschema:"required report fields not yet provided"`
 	ReportSchema   map[string]any `json:"report_schema,omitempty" jsonschema:"JSON Schema for the current step's report"`
 	PendingChooser *ChooserResult `json:"pending_chooser,omitempty"`
+	Execution      string         `json:"execution,omitempty" jsonschema:"execution hint for this instance; fork-preferred means the procedure is a task best run in a disposable forked context"`
 	Produced       map[string]any `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
 	Framing        string         `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); delivered once per agent session"`
 	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"open work, carried on the session shell's serves only: this dialogue's other threads, then other parked dialogues"`
@@ -970,7 +972,7 @@ func (s *Server) toServeResult(ss *shellSession, serve *engine.Serve) ServeResul
 		res.OpenThreads = s.openThreadsBlock(ss, true)
 	}
 	if serve.Chooser != nil {
-		ch := &ChooserResult{Kind: string(serve.Chooser.Kind)}
+		ch := &ChooserResult{Chooser: serve.Chooser.Chooser, Kind: string(serve.Chooser.Kind)}
 		for _, o := range serve.Chooser.Options {
 			opt := ChooserOptionResult{Choice: o.Choice}
 			for _, cf := range o.Collect {
@@ -984,9 +986,19 @@ func (s *Server) toServeResult(ss *shellSession, serve *engine.Serve) ServeResul
 		}
 		res.PendingChooser = ch
 	}
+	// A task prefers a disposable forked context — surface the hint so a
+	// harness that automates the fork has a structured signal, not just prose.
+	if inst, ok := ss.sess.Instance(serve.Instance); ok && inst.Spec.Class == model.ProcedureClassTask {
+		res.Execution = executionForkPreferred
+	}
 	res.Framing = s.framingFor(ss)
 	return res
 }
+
+// executionForkPreferred is the execution hint carried on task-class serves:
+// the procedure is best dispatched to a disposable forked context, inline as a
+// paid fallback (d-tac-tlo). Consuming it in harness automation stays deferred.
+const executionForkPreferred = "fork-preferred"
 
 // framingFor renders the session framing once per bound agent consumer.
 func (s *Server) framingFor(ss *shellSession) string {

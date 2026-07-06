@@ -82,6 +82,30 @@ type Option struct {
 	Call    string // command run on selection, per its Go contract
 	Collect []CollectField
 	To      string
+	// Dispatch declares the grounding this junction option seeds into a child
+	// dispatched after it is answered (child field ← parent field, named in the
+	// parent's own spec). Nil means this option hands nothing down.
+	Dispatch *Dispatch
+}
+
+// Dispatch is a junction option's declaration of the grounding it seeds into a
+// child dispatched after this option is answered. The seeding contract
+// (d-tac-tlo) keeps the declaration entirely in the parent's spec: answering an
+// option carrying a Dispatch stashes its Seed on the parent instance, and the
+// next child started under that parent inherits exactly that mapping. There is
+// no engine-wide default — a handoff happens only where a junction declares
+// one, so every inheritance is readable at the junction that grants it.
+type Dispatch struct {
+	// Procedure optionally names the child canonical this option dispatches.
+	// When set, it guards the handoff — the seed applies only to a child of
+	// that procedure. Omit it for a generic junction whose child is chosen at
+	// runtime (e.g. engage's move), where the seed applies to whatever is
+	// dispatched next.
+	Procedure string
+	// Seed maps child field ← parent field: the key is the field the child
+	// declares as state, the value is this parent's own declared field carrying
+	// the evidence. Required — a Dispatch with no seed has nothing to carry.
+	Seed map[string]string
 }
 
 // Transition is one ordered {when, to} entry; the final entry may be an
@@ -137,10 +161,16 @@ type injectYAML struct {
 }
 
 type optionYAML struct {
-	Choice  string   `yaml:"choice"`
-	Call    string   `yaml:"call"`
-	Collect []string `yaml:"collect"`
-	To      string   `yaml:"to"`
+	Choice   string        `yaml:"choice"`
+	Call     string        `yaml:"call"`
+	Collect  []string      `yaml:"collect"`
+	To       string        `yaml:"to"`
+	Dispatch *dispatchYAML `yaml:"dispatch"`
+}
+
+type dispatchYAML struct {
+	Procedure string            `yaml:"procedure"`
+	Seed      map[string]string `yaml:"seed"`
 }
 
 type transitionYAML struct {
@@ -288,6 +318,25 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 					addProblem("%s: option %q collects %q, which is not declared in state", prefix, o.Choice, c.Name)
 				}
 			}
+			if o.Dispatch != nil {
+				if len(o.Dispatch.Seed) == 0 {
+					addProblem("%s: option %q dispatch: needs a seed mapping (child field <- parent field)", prefix, o.Choice)
+				}
+				// The source side of each seed mapping (the parent field) must
+				// be one this spec declares — a mistyped source would silently
+				// carry nothing, the exact failure the per-junction mapping
+				// exists to make loud. The child field (the key) is validated
+				// against the child at write time, not here.
+				for child, parentField := range o.Dispatch.Seed {
+					if _, isState := spec.State[parentField]; isState {
+						continue
+					}
+					if _, isParam := spec.Params[parentField]; isParam {
+						continue
+					}
+					addProblem("%s: option %q dispatch seeds %q from %q, which is not a declared param or state field of this procedure", prefix, o.Choice, child, parentField)
+				}
+			}
 		}
 		for _, c := range step.Collect {
 			if _, ok := spec.State[c.Name]; !ok {
@@ -388,6 +437,9 @@ func parseStep(sy stepYAML, index int) (*Step, []string) {
 			continue
 		}
 		opt := Option{Choice: oy.Choice, Call: oy.Call, To: oy.To}
+		if oy.Dispatch != nil {
+			opt.Dispatch = &Dispatch{Procedure: oy.Dispatch.Procedure, Seed: oy.Dispatch.Seed}
+		}
 		for _, f := range oy.Collect {
 			cf, err := parseCollectField(f)
 			if err != nil {
