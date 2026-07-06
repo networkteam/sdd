@@ -423,6 +423,86 @@ func TestHandoff_ProcedureGuardSkipsMismatch(t *testing.T) {
 	}
 }
 
+// A parent with two junctions: the first seeds a handoff, the second grants
+// none — used to lock that answering a plain option clears a prior stash.
+const seedMultiJunctionParentFrontmatter = `state:
+    widenReport: {type: text, desc: grounding}
+    anchor: {type: entry-id, desc: the anchor}
+steps:
+    - id: first
+      chooser: user
+      options:
+          - choice: seed
+            dispatch:
+                seed:
+                    widenReport: widenReport
+                    anchor: anchor
+            to: second
+    - id: second
+      chooser: user
+      options:
+          - {choice: plain, to: end(completed)}
+`
+
+// TestHandoff_NonDispatchOptionClearsSeed covers the stash lifecycle: after a
+// seed-bearing option is answered, answering a later plain option on the same
+// parent clears the mapping, so a child dispatched afterward inherits nothing
+// its own junction never granted. The clear derives from the logged chooser
+// answers, so a replayed session agrees with the live one.
+func TestHandoff_NonDispatchOptionClearsSeed(t *testing.T) {
+	env := newSeedEnv(t)
+	multi, err := LoadSpec(procedureEntry(t, "20260706-010000-d-prc-mlt", "seedmulti", "", seedMultiJunctionParentFrontmatter, "multi-junction parent"), NewRegistry())
+	if err != nil {
+		t.Fatalf("loading multi-junction parent: %v", err)
+	}
+
+	parent, err := env.session.Start(multi, map[string]any{"widenReport": "held grounding", "anchor": procAnchorID}, "")
+	if err != nil {
+		t.Fatalf("starting multi-junction parent: %v", err)
+	}
+	// Answer the seed-bearing junction, then a plain one on the same parent.
+	parent, err = env.session.Answer(parent.Instance, "first", "seed", nil, "hand off")
+	if err != nil {
+		t.Fatalf("answering the seed junction: %v", err)
+	}
+	if _, err := env.session.Answer(parent.Instance, "second", "plain", nil, "no handoff here"); err != nil {
+		t.Fatalf("answering the plain junction: %v", err)
+	}
+
+	child, err := env.session.Start(env.child, nil, parent.Instance)
+	if err != nil {
+		t.Fatalf("starting child after the plain answer: %v", err)
+	}
+	if got := fieldValue(t, env.session, child.Instance, "widenReport"); got != nil {
+		t.Errorf("a later plain answer must clear the stashed seed; child inherited %v", got)
+	}
+
+	// Replay agreement: fold the log and dispatch another child under the
+	// replayed parent — the clear must survive replay, so it inherits nothing
+	// too.
+	resolve := func(canonical string) (*Spec, error) {
+		switch canonical {
+		case "seedmulti":
+			return multi, nil
+		case "seedchild":
+			return env.child, nil
+		default:
+			return nil, nil
+		}
+	}
+	replayed, err := env.session.engine.ReplaySession("s_seed", "christopher", env.sink.events, resolve, nil)
+	if err != nil {
+		t.Fatalf("replaying session: %v", err)
+	}
+	child2, err := replayed.Start(env.child, nil, parent.Instance)
+	if err != nil {
+		t.Fatalf("dispatching under the replayed parent: %v", err)
+	}
+	if got := fieldValue(t, replayed, child2.Instance, "widenReport"); got != nil {
+		t.Errorf("the cleared stash must survive replay; replayed child inherited %v", got)
+	}
+}
+
 // A child whose entry is a grounding gate the seed satisfies, followed by a
 // user chooser — used to lock that seeding advances gates but never skips a
 // chooser.

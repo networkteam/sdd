@@ -330,16 +330,24 @@ func (s *Session) seedFromParent(inst *Instance, parent string) (map[string]any,
 	return seed, nil
 }
 
-// recordDispatchSeed stashes a chosen option's declared handoff on the parent
-// instance, so the next child dispatched under it inherits exactly that
-// mapping. Persistent (not consume-once): a junction that fans out several
-// children — evaluate recording several findings — seeds each one.
+// recordDispatchSeed sets the parent instance's dispatch context to exactly
+// what the just-answered option declares: a dispatch option stashes its
+// mapping (so the next child dispatched under this parent inherits it), and an
+// option carrying no handoff clears any prior stash. The clear matters on a
+// multi-junction parent — after answering a seed-bearing option, a later answer
+// to a plain option must not leave a stale mapping a subsequent child would
+// inherit though its own junction never granted it. Called for every answered
+// option, live and on replay, so both agree from the logged chooser answers.
+// Not consume-once: a junction that fans out several children — evaluate
+// recording several findings — seeds each until another option changes it.
 func recordDispatchSeed(inst *Instance, opt *Option) {
-	if opt.Dispatch == nil || len(opt.Dispatch.Seed) == 0 {
+	if opt.Dispatch != nil && len(opt.Dispatch.Seed) > 0 {
+		inst.dispatchSeed = opt.Dispatch.Seed
+		inst.dispatchProcedure = opt.Dispatch.Procedure
 		return
 	}
-	inst.dispatchSeed = opt.Dispatch.Seed
-	inst.dispatchProcedure = opt.Dispatch.Procedure
+	inst.dispatchSeed = nil
+	inst.dispatchProcedure = ""
 }
 
 // Report applies state fields from a transition report, re-evaluates, and
