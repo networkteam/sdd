@@ -48,7 +48,20 @@ var presenceFields = map[string]string{
 	"hasBrief":        "brief",
 	"hasBriefing":     "briefing",
 	"hasInspectedIds": "inspectedIds",
-	"hasEvaluation":   "evaluation",
+	"hasPlan":         "plan",
+	"hasContract":     "contract",
+	"hasDoneEntry":    "doneEntry",
+	"hasCandidates":   "candidates",
+	"hasSynthesis":    "synthesis",
+
+	// The evaluate lens gate: at least one lens judgment must land before the
+	// junction; evidence fields are instructed alongside, never gated.
+	"hasInnerEvaluation": "innerEvaluation",
+	"hasOuterEvaluation": "outerEvaluation",
+
+	// Engine-written by wipStart (see the shell's Writes contract): presence
+	// routes the implementation closeout through wipDone only on tracked runs.
+	"hasWipMarker": "wipMarker",
 }
 
 func registerBuiltinPredicates(r *Registry) {
@@ -84,6 +97,16 @@ func registerBuiltinPredicates(r *Registry) {
 		},
 		Fn:          idsResolve("inspectedIds"),
 		FailMessage: "an inspected ID does not resolve in the graph — the evidence must name entries that exist",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "doneEntryResolves",
+			Doc:   "The recorded done signal resolves to an existing graph entry.",
+			Reads: []string{"doneEntry"},
+		},
+		Fn:          idsResolve("doneEntry"),
+		FailMessage: "doneEntry does not resolve in the graph — record the closing done signal before closing out",
 	})
 
 	mustRegisterPredicate(r, Predicate{
