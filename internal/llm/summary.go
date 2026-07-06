@@ -55,7 +55,7 @@ type summaryContext struct {
 // is introduced when templates are refactored (see the plan decision).
 func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error) {
 	sctx := &summaryContext{
-		EntryContent: formatEntryForSummaryPrompt(entry),
+		EntryContent: FormatEntryForPrompt(entry),
 	}
 
 	// Collect direct refs, closes, and supersedes entries.
@@ -84,7 +84,7 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 				triple += " " + e.TypeLabel()
 				parts = append(parts, fmt.Sprintf("[%s] %s (ID: %s)\nSummary: %s", relation, triple, e.ID, e.Summary))
 			} else {
-				parts = append(parts, fmt.Sprintf("[%s] %s", relation, formatEntryForSummaryPrompt(e)))
+				parts = append(parts, fmt.Sprintf("[%s] %s", relation, FormatEntryForPrompt(e)))
 			}
 		}
 	}
@@ -132,28 +132,9 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 // the presence of any object-form ref signals an entry authored under the
 // new contract; rendering uniformly preserves clarity.
 //
-// This renders canonical (parse-resolved) ref kinds — the form pre-flight and
-// all user-facing prompt contexts need. The summary-generation prompt instead
-// calls formatEntryForSummaryPrompt, which renders each ref's on-disk kind.
-// That divergence existed only to keep the (now-removed) summary hash stable
-// across the grounds/evidence → grounded-in rename (s-tac-koz); it is retained
-// unchanged and slated for review now that summaries carry no hash.
+// This renders canonical (parse-resolved) ref kinds — the single form both
+// pre-flight and summary generation consume.
 func FormatEntryForPrompt(e *model.Entry) string {
-	return formatEntryForPrompt(e, false)
-}
-
-// formatEntryForSummaryPrompt renders an entry for the summary-generation
-// prompt using each ref's on-disk kind (pre-alias-resolution) rather than the
-// canonical kind. This divergence from FormatEntryForPrompt existed only to
-// hold the (now-removed) summary hash stable across the grounds/evidence →
-// grounded-in rename (s-tac-koz); it is retained unchanged and slated for
-// review. Pre-flight must NOT use this — it judges ref-meta against the
-// canonical vocabulary.
-func formatEntryForSummaryPrompt(e *model.Entry) string {
-	return formatEntryForPrompt(e, true)
-}
-
-func formatEntryForPrompt(e *model.Entry, onDiskRefKinds bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ID: %s\n", e.ID)
 	fmt.Fprintf(&b, "Type: %s\n", e.Type)
@@ -167,11 +148,7 @@ func formatEntryForPrompt(e *model.Entry, onDiskRefKinds bool) string {
 		} else {
 			b.WriteString("Refs:\n")
 			for _, r := range e.Refs {
-				kind := r.Kind
-				if onDiskRefKinds {
-					kind = r.OnDiskKind()
-				}
-				fmt.Fprintf(&b, "  - %s (kind: %s)", r.ID, kind)
+				fmt.Fprintf(&b, "  - %s (kind: %s)", r.ID, r.Kind)
 				if r.Desc != "" {
 					fmt.Fprintf(&b, ": %s", r.Desc)
 				}
