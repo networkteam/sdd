@@ -62,6 +62,8 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 
 - **Frame cost as maintenance surface and dependencies, not time**: When weighing a technical option (a library, an integration, an adapter), don't estimate effort in hours or days — that's speculation. State what ongoing maintenance surface it opens (code you own, protocols/APIs you must track) and what dependencies it pulls in — how heavy, and how reversible (vendorable? official vs community?). Those are the durable cost signals.
 
+- **Fail loud — never swallow errors into silent fallbacks**: Catch errors early and propagate them to a caller that can act; never degrade a failure to a stderr `warning:` (or any other fallback) that lets execution continue as if nothing broke. This includes background side effects like the git auto-commit: a failed or timed-out commit returns an error — the entry file stays on disk for durability, but the failure surfaces — it is not printed and swallowed.
+
 ## Structure
 
 ```
