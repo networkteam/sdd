@@ -352,6 +352,92 @@ func (st *sessionStore) listOpenSessions() ([]sessionDescriptor, error) {
 	return out, nil
 }
 
+// teardownFold walks a session log for what teardown-by-handle needs beyond
+// the descriptor: every still-running instance (the shell included, so the
+// log closes fully terminal) and the WIP markers those instances currently
+// hold (op_result writes to wipMarker; a later null write clears).
+func teardownFold(events []engine.Event) (running []string, markers []string) {
+	type instState struct {
+		running bool
+		marker  string
+	}
+	instances := map[string]*instState{}
+	var order []string
+	for _, ev := range events {
+		switch ev.Event {
+		case engine.EventStarted:
+			if _, ok := instances[ev.Instance]; !ok {
+				order = append(order, ev.Instance)
+			}
+			instances[ev.Instance] = &instState{running: true}
+		case engine.EventCompleted, engine.EventAbandoned:
+			if is, ok := instances[ev.Instance]; ok {
+				is.running = false
+			}
+		case engine.EventOpResult:
+			is, ok := instances[ev.Instance]
+			if !ok {
+				continue
+			}
+			if writes, ok := ev.Data["writes"].(map[string]any); ok {
+				if v, present := writes["wipMarker"]; present {
+					is.marker, _ = v.(string) // a null write clears
+				}
+			}
+		}
+	}
+	for _, id := range order {
+		is := instances[id]
+		if !is.running {
+			continue
+		}
+		running = append(running, id)
+		if is.marker != "" {
+			markers = append(markers, is.marker)
+		}
+	}
+	return running, markers
+}
+
+// appendAbandons closes a parked session's log in place: one abandoned event
+// per still-running instance, appended without replaying the session and
+// without serving any framing — the point of teardown by handle (d-tac-dbk).
+// Works on version-skewed logs too, since nothing is interpreted beyond the
+// fold — exactly the stale sessions teardown exists for.
+func (st *sessionStore) appendAbandons(id string, events []engine.Event, running []string, reason string) error {
+	if len(running) == 0 {
+		return nil
+	}
+	f, err := st.openLog(id)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	sink := engine.NewWriterSink(f)
+	seq := 0
+	for _, ev := range events {
+		if ev.Seq > seq {
+			seq = ev.Seq
+		}
+	}
+	data := map[string]any{"reason": reason}
+	for _, inst := range running {
+		seq++
+		if err := sink.Append(engine.Event{
+			V:        engine.LogVersion,
+			TS:       time.Now(),
+			Session:  id,
+			Seq:      seq,
+			Instance: inst,
+			Event:    engine.EventAbandoned,
+			Data:     data,
+		}); err != nil {
+			return fmt.Errorf("closing session log: %w", err)
+		}
+	}
+	return nil
+}
+
 // readLog parses a session's JSONL log.
 func (st *sessionStore) readLog(id string) ([]engine.Event, error) {
 	f, err := os.Open(st.logPath(id))

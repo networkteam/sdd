@@ -11,10 +11,11 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-// logVersion stamps every event line. A session generally does not survive
+// LogVersion stamps every event line. A session generally does not survive
 // an sdd upgrade mid-flight — replay rejects unknown versions rather than
-// guessing (accepted per the surface spec).
-const logVersion = 1
+// guessing (accepted per the surface spec). Exported for shells that append
+// terminal events to a parked log without replaying it (teardown by handle).
+const LogVersion = 1
 
 // EventType is one of the closed set of session-log events.
 type EventType string
@@ -284,7 +285,7 @@ func (s *Session) appendEvent(instance string, typ EventType, data map[string]an
 	// in-memory run; it is carried on the session and surfaced by the next
 	// advance call.
 	if err := s.sink.Append(Event{
-		V:        logVersion,
+		V:        LogVersion,
 		TS:       s.now(),
 		Session:  s.ID,
 		Seq:      s.seq,
@@ -629,8 +630,8 @@ type SpecResolver func(canonical string) (*Spec, error)
 func (e *Engine) ReplaySession(id, participant string, events []Event, resolve SpecResolver, sink EventSink, opts ...SessionOption) (*Session, error) {
 	s := e.NewSession(id, participant, nil, opts...)
 	for _, ev := range events {
-		if ev.V != logVersion {
-			return nil, fmt.Errorf("session log event seq %d has version %d, this sdd speaks version %d — sessions do not survive an sdd upgrade mid-flight", ev.Seq, ev.V, logVersion)
+		if ev.V != LogVersion {
+			return nil, fmt.Errorf("session log event seq %d has version %d, this sdd speaks version %d — sessions do not survive an sdd upgrade mid-flight", ev.Seq, ev.V, LogVersion)
 		}
 		if ev.Seq > s.seq {
 			s.seq = ev.Seq

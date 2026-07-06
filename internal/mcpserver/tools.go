@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -61,15 +62,21 @@ type NextArgs struct {
 }
 
 type AbandonArgs struct {
-	Instance string `json:"instance" jsonschema:"instance handle to abandon"`
-	Reason   string `json:"reason,omitempty" jsonschema:"why the instance is being abandoned"`
+	Instance string `json:"instance,omitempty" jsonschema:"instance handle to abandon (a move in the bound session)"`
+	Session  string `json:"session,omitempty" jsonschema:"parked session handle to tear down directly — no resume, no framing; pass exactly one of instance or session"`
+	Reason   string `json:"reason,omitempty" jsonschema:"why the instance or session is being abandoned"`
 }
 
 type AbandonResult struct {
-	Abandoned    bool       `json:"abandoned"`
-	HeldMarkers  []string   `json:"held_markers,omitempty" jsonschema:"WIP markers the instance holds; left standing — resume later or close via groom"`
-	Instructions string     `json:"instructions,omitempty"`
-	Base         *BaseServe `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue now stands"`
+	Abandoned bool   `json:"abandoned"`
+	Session   string `json:"session,omitempty" jsonschema:"the torn-down session, on teardown by handle"`
+	Label     string `json:"label,omitempty" jsonschema:"the torn-down session's subject label"`
+	// DiscardedThreads names what went down with a session teardown — nothing
+	// vanishes silently (d-tac-dbk).
+	DiscardedThreads []string   `json:"discarded_threads,omitempty" jsonschema:"open moves discarded with the session (procedure at step)"`
+	HeldMarkers      []string   `json:"held_markers,omitempty" jsonschema:"WIP markers held; left standing — resume later or close via groom"`
+	Instructions     string     `json:"instructions,omitempty"`
+	Base             *BaseServe `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue now stands"`
 }
 
 type ChooserOptionResult struct {
@@ -262,9 +269,11 @@ func (s *Server) registerTools() {
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "abandon",
-		Description: "Abandon a running move instance, with a reason. Nothing is cleaned up " +
-			"implicitly: held WIP markers are surfaced and left standing for resume or grooming. " +
-			"The session shell concludes through its own junction, never through abandon.",
+		Description: "Abandon a running move instance (instance), or tear down a parked session " +
+			"directly by handle (session) — one call, no resume, no framing; the response names the " +
+			"label and discarded threads. Nothing is cleaned up implicitly: held WIP markers are " +
+			"surfaced and left standing for resume or grooming. The session shell concludes through " +
+			"its own junction, never through abandon.",
 	}, s.abandon)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -322,12 +331,26 @@ func (s *Server) registerTools() {
 
 // boundSession returns the SDD session bound to the calling connection, or
 // a door-pointing error — every stateful tool requires the session that
-// start_session opens.
+// start_session opens. The rejection inlines the parked-sessions list
+// (handle + label), so a fresh-context agent poking at a stale handle gets
+// its bearings in the same round trip (d-tac-dbk).
 func (s *Server) boundSession(ms *mcp.ServerSession) (*shellSession, error) {
 	if ss := s.sessions.bound(ms); ss != nil {
 		return ss, nil
 	}
-	return nil, toolError("no session is open — start_session is the door (reads stay free)")
+	msg := "no session is open — start_session is the door (reads stay free)"
+	if descs, err := s.sessions.listOpenSessions(); err == nil && len(descs) > 0 {
+		lines := make([]string, 0, len(descs))
+		for _, d := range descs {
+			line := d.Session
+			if d.Label != "" {
+				line += " " + strconv.Quote(d.Label)
+			}
+			lines = append(lines, line)
+		}
+		msg += "; parked sessions (resume_session picks one up): " + strings.Join(lines, ", ")
+	}
+	return nil, toolError("%s", msg)
 }
 
 // newShellSession creates a fresh SDD session (log, registry, engine),
@@ -564,12 +587,15 @@ func chooserAnswer(report map[string]any) (chooser, choice string, ok bool) {
 }
 
 func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
+	if (args.Instance == "") == (args.Session == "") {
+		return nil, AbandonResult{}, toolError("pass exactly one of instance (abandon a move in the bound session) or session (tear down a parked session)")
+	}
+	if args.Session != "" {
+		return s.abandonSession(req, args)
+	}
 	ss, err := s.boundSession(req.Session)
 	if err != nil {
 		return nil, AbandonResult{}, err
-	}
-	if args.Instance == "" {
-		return nil, AbandonResult{}, toolError("instance is required")
 	}
 	if args.Instance == ss.shellInstance {
 		return nil, AbandonResult{}, toolError("the session shell concludes through its own junction (answer conclude) — abandon is for moves")
@@ -591,6 +617,71 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 	}
 	// Abandoning a move lands the dialogue back on the shell junction.
 	res.Base = s.serveShell(ss)
+	return nil, res, nil
+}
+
+// abandonSession tears down a parked session by handle: no resume, no
+// framing, one call (d-tac-dbk; the measured baseline was six calls and
+// ~28KB framing per session). The response names the label and every
+// discarded thread — nothing vanishes silently. Needs no bound session:
+// teardown is maintenance, not dialogue.
+func (s *Server) abandonSession(req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
+	current := s.sessions.bound(req.Session)
+	if current != nil && current.id == args.Session {
+		return nil, AbandonResult{}, toolError("session %s is the one this connection is in — the session shell concludes through its own junction (answer conclude)", args.Session)
+	}
+	if s.sessions.liveIDs()[args.Session] {
+		return nil, AbandonResult{}, toolError("session %s is live on another connection — only parked sessions tear down", args.Session)
+	}
+
+	res := AbandonResult{Abandoned: true, Session: args.Session}
+	if live := s.sessions.lookupID(args.Session); live != nil && live.logFile != nil && live.sess != nil {
+		// Parked in memory: end every running instance through the engine
+		// session, whose log file is already open.
+		res.Label = live.sess.Label
+		for _, inst := range live.sess.Instances() {
+			if inst.Status != engine.StatusRunning {
+				continue
+			}
+			if inst.ID != live.shellInstance {
+				res.DiscardedThreads = append(res.DiscardedThreads, inst.Spec.Canonical+" at "+inst.Step)
+				if marker, ok := storeString(inst.Store, "wipMarker"); ok {
+					res.HeldMarkers = append(res.HeldMarkers, marker)
+				}
+			}
+			if err := live.sess.Abandon(inst.ID, args.Reason); err != nil {
+				return nil, AbandonResult{}, err
+			}
+		}
+		live.close()
+		s.sessions.drop(args.Session)
+	} else {
+		// On disk: append terminal events straight to the log — no replay, so
+		// even a version-skewed session tears down.
+		events, err := s.sessions.readLog(args.Session)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, AbandonResult{}, toolError("unknown session %q — list_sessions shows what is parked", args.Session)
+			}
+			return nil, AbandonResult{}, err
+		}
+		desc := deriveDescriptor(args.Session, events)
+		res.Label = desc.Label
+		for _, inst := range desc.Open {
+			res.DiscardedThreads = append(res.DiscardedThreads, inst.Procedure+" at "+inst.Step)
+		}
+		running, markers := teardownFold(events)
+		res.HeldMarkers = markers
+		if err := s.sessions.appendAbandons(args.Session, events, running, args.Reason); err != nil {
+			return nil, AbandonResult{}, err
+		}
+	}
+	if len(res.HeldMarkers) > 0 {
+		res.Instructions = "The discarded threads hold WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
+	}
+	if current != nil {
+		res.Base = s.serveShell(current)
+	}
 	return nil, res, nil
 }
 

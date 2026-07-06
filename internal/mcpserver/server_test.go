@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -924,6 +925,180 @@ func TestAbandonLeavesLogStanding(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(env.sessionsDir, serve.Session+".jsonl")); err != nil {
 		t.Fatalf("session log must stay on disk: %v", err)
+	}
+}
+
+// TestAbandonSessionByHandle_Parked tears down a parked-on-disk session in
+// one unbound call — no resume, no framing (d-tac-dbk; baseline was six
+// calls + ~28KB framing per session). The response names the label and the
+// discarded threads, and the session drops off the open list.
+func TestAbandonSessionByHandle_Parked(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"canonical": "capture",
+		"label":     "Stale capture to tear down",
+	}, &serve)
+	sessionID := serve.Session
+
+	// Restart: the session is parked on disk, known to no live server.
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+
+	// One call, no session bound, no framing anywhere in the response.
+	var down mcpserver.AbandonResult
+	call(t, cs2, "abandon", map[string]any{"session": sessionID, "reason": "stale"}, &down)
+	if !down.Abandoned || down.Session != sessionID {
+		t.Fatalf("teardown should confirm the session, got %+v", down)
+	}
+	if down.Label != "Stale capture to tear down" {
+		t.Fatalf("teardown should name the label, got %q", down.Label)
+	}
+	if len(down.DiscardedThreads) != 1 || !strings.Contains(down.DiscardedThreads[0], "capture at") {
+		t.Fatalf("teardown should name the discarded threads, got %v", down.DiscardedThreads)
+	}
+	if down.Base != nil {
+		t.Fatalf("an unbound teardown has no dialogue to land, got %+v", down.Base)
+	}
+
+	openSession(t, cs2)
+	var listed mcpserver.ListSessionsResult
+	call(t, cs2, "list_sessions", map[string]any{}, &listed)
+	if len(listed.Sessions) != 0 {
+		t.Fatalf("torn-down session must drop off the open list, got %+v", listed.Sessions)
+	}
+	if _, err := os.Stat(filepath.Join(env.sessionsDir, sessionID+".jsonl")); err != nil {
+		t.Fatalf("teardown closes the log, never deletes it: %v", err)
+	}
+}
+
+// TestAbandonSessionByHandle_InMemory tears down a session parked in memory
+// (left behind by a client disconnect with an open move) and lands the
+// bound caller back on their own shell junction.
+func TestAbandonSessionByHandle_InMemory(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "capture", "label": "parked draft"}, &serve)
+	parkedID := serve.Session
+	_ = cs.Close() // disconnect with an open move: the session parks in memory
+
+	cs2 := connect(t, env.srv)
+	openSession(t, cs2)
+	// The disconnect watcher parks asynchronously — wait until it lists.
+	var listed mcpserver.ListSessionsResult
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		call(t, cs2, "list_sessions", map[string]any{}, &listed)
+		if len(listed.Sessions) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("disconnected session never parked, got %+v", listed.Sessions)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	var down mcpserver.AbandonResult
+	call(t, cs2, "abandon", map[string]any{"session": parkedID, "reason": "not needed"}, &down)
+	if !down.Abandoned || down.Session != parkedID || down.Label != "parked draft" {
+		t.Fatalf("teardown diverged: %+v", down)
+	}
+	if len(down.DiscardedThreads) != 1 || !strings.Contains(down.DiscardedThreads[0], "capture at") {
+		t.Fatalf("teardown should name the discarded threads, got %v", down.DiscardedThreads)
+	}
+	if down.Base == nil || down.Base.Procedure != "user-dialogue" {
+		t.Fatalf("a bound caller lands back on their shell junction, got %+v", down.Base)
+	}
+
+	call(t, cs2, "list_sessions", map[string]any{}, &listed)
+	if len(listed.Sessions) != 0 {
+		t.Fatalf("torn-down session must drop off the open list, got %+v", listed.Sessions)
+	}
+}
+
+// TestAbandonSessionByHandle_SurfacesHeldMarkers folds WIP markers out of a
+// parked log so teardown surfaces them — left standing for grooming, never
+// silently dropped. The log is synthetic: descriptors and teardown folds are
+// self-derived from events, no procedure resolution.
+func TestAbandonSessionByHandle_SurfacesHeldMarkers(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	sessionID := "s_20260706-090000-deadbeef"
+	lines := []string{
+		`{"v":1,"ts":"2026-07-06T09:00:00Z","session":"` + sessionID + `","seq":1,"event":"session_meta","data":{"participant":"Tester"}}`,
+		`{"v":1,"ts":"2026-07-06T09:00:01Z","session":"` + sessionID + `","seq":2,"instance":"i_1","event":"started","data":{"procedure":"implementation","step":"work"}}`,
+		`{"v":1,"ts":"2026-07-06T09:00:02Z","session":"` + sessionID + `","seq":3,"instance":"i_1","event":"op_result","data":{"step":"setup","fn":"wipStart","writes":{"wipMarker":"wip-123"}}}`,
+	}
+	if err := os.MkdirAll(env.sessionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(env.sessionsDir, sessionID+".jsonl")
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cs := connect(t, env.srv)
+	var down mcpserver.AbandonResult
+	call(t, cs, "abandon", map[string]any{"session": sessionID, "reason": "orphaned"}, &down)
+	if len(down.HeldMarkers) != 1 || down.HeldMarkers[0] != "wip-123" {
+		t.Fatalf("teardown should surface held markers, got %+v", down)
+	}
+	if !strings.Contains(down.Instructions, "grooming") {
+		t.Fatalf("held markers should route the user to grooming, got %q", down.Instructions)
+	}
+}
+
+// TestAbandonSessionByHandle_Rejections pins the teardown guard rails.
+func TestAbandonSessionByHandle_Rejections(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	serve := openSession(t, cs)
+
+	if msg := callExpectError(t, cs, "abandon", map[string]any{}); !strings.Contains(msg, "exactly one") {
+		t.Fatalf("neither instance nor session should be rejected, got %q", msg)
+	}
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": "i_1", "session": "s_x"}); !strings.Contains(msg, "exactly one") {
+		t.Fatalf("both instance and session should be rejected, got %q", msg)
+	}
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": serve.Session}); !strings.Contains(msg, "own junction") {
+		t.Fatalf("tearing down the bound session should point at conclude, got %q", msg)
+	}
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": "s_nope"}); !strings.Contains(msg, "unknown session") {
+		t.Fatalf("unknown session should be named, got %q", msg)
+	}
+
+	// A session live on another connection refuses teardown.
+	cs2 := connect(t, env.srv)
+	other := openSession(t, cs2)
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": other.Session}); !strings.Contains(msg, "live on another connection") {
+		t.Fatalf("live session should refuse teardown, got %q", msg)
+	}
+}
+
+// TestUnboundRejectionInlinesParkedSessions pins the discovery half of the
+// teardown flow: a stateful call with no session bound is rejected with the
+// parked-sessions list inline (handle + label), so the agent's next call can
+// already be the resume or the teardown.
+func TestUnboundRejectionInlinesParkedSessions(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "capture", "label": "the parked one"}, &serve)
+
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	msg := callExpectError(t, cs2, "next", map[string]any{"instance": "i_2", "report": map[string]any{"x": "y"}})
+	if !strings.Contains(msg, "start_session is the door") {
+		t.Fatalf("unbound rejection should point at the door, got %q", msg)
+	}
+	if !strings.Contains(msg, serve.Session) || !strings.Contains(msg, "the parked one") {
+		t.Fatalf("unbound rejection should inline the parked session (handle + label), got %q", msg)
 	}
 }
 
