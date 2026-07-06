@@ -29,6 +29,9 @@ type procEnv struct {
 	spec    *Spec
 	// chainCalls records the ID sets entryChains served, one string per call.
 	chainCalls []string
+	// wipMarkers records fake wipStart/wipDone calls: "start:<anchor>" /
+	// "done:<marker>", mirroring the shell's command contracts.
+	wipMarkers []string
 }
 
 func baseEntry(t *testing.T, canonical string) *model.Entry {
@@ -101,6 +104,43 @@ func newProcEnv(t *testing.T, canonical string) *procEnv {
 			call := "chains(" + strings.Join(ids, ",") + ")"
 			env.chainCalls = append(env.chainCalls, call)
 			return call, nil
+		},
+	})
+
+	// Fake WIP marker lifecycle, mirroring the shell's command contracts
+	// (registry.go registerWipCommands): wipStart reads anchor+wipDescription
+	// and writes the engine-owned wipMarker; wipDone reads and clears it.
+	mustRegisterCommand(reg, Command{
+		Doc: FuncDoc{
+			Name:   "wipStart",
+			Doc:    "fake exclusive WIP marker creation",
+			Reads:  []string{"anchor", "wipDescription"},
+			Writes: []string{"wipMarker"},
+		},
+		Fn: func(ctx *Context) error {
+			anchor, _ := ctx.Store.Get("anchor")
+			id, _ := anchor.(string)
+			env.wipMarkers = append(env.wipMarkers, "start:"+id)
+			ctx.Store.WriteEngine("wipMarker", "wip-"+id)
+			return nil
+		},
+	})
+	mustRegisterCommand(reg, Command{
+		Doc: FuncDoc{
+			Name:   "wipDone",
+			Doc:    "fake WIP marker removal",
+			Reads:  []string{"wipMarker"},
+			Writes: []string{"wipMarker"},
+		},
+		Fn: func(ctx *Context) error {
+			marker, ok := ctx.Store.Get("wipMarker")
+			if !ok {
+				return errFakeNoMarker
+			}
+			id, _ := marker.(string)
+			env.wipMarkers = append(env.wipMarkers, "done:"+id)
+			ctx.Store.WriteEngine("wipMarker", nil)
+			return nil
 		},
 	})
 
