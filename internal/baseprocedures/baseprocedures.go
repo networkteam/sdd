@@ -27,7 +27,7 @@ var entriesFS embed.FS
 const entriesDir = "entries"
 
 // Entries parses every embedded base procedure entry, marked Embedded so
-// write-side surfaces (summary regeneration, summary-hash lint, lint --fix,
+// write-side surfaces (summary regeneration, missing-summary lint, lint --fix,
 // rewrite) skip them. The embedded set is compile-time constant, so an error
 // here means a broken build — callers fail hard.
 func Entries() ([]*model.Entry, error) {

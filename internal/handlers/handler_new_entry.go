@@ -136,7 +136,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		g.Go(func() error {
 			sctx, scancel := context.WithTimeout(gctx, 60*time.Second)
 			defer scancel()
-			result, err := llm.Summarize(sctx, h.llmRunner, entry, graph, true)
+			result, err := llm.Summarize(sctx, h.llmRunner, entry, graph)
 			if err != nil {
 				slogutils.FromContext(gctx).Warn("summary generation failed", "err", err)
 				return nil // non-fatal: entry is valid without a summary
@@ -179,7 +179,6 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	// Apply summary from the concurrent goroutine.
 	if sumResult != nil {
 		entry.Summary = sumResult.Summary
-		entry.SummaryHash = sumResult.SummaryHash
 	}
 
 	// Write entry file.

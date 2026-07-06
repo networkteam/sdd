@@ -264,7 +264,8 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 	// builds-on (closed or next-step), and refines (active, in-place) — those
 	// three split on the target's status, which the entry text alone can't
 	// reveal. Status is appended here (pre-flight only) rather than in the
-	// shared FormatEntryForPrompt, so summary-prompt hashes stay stable.
+	// shared FormatEntryForPrompt, so it stays out of the summary-generation
+	// prompt, which does not use it.
 	//
 	// When a ref points at a superseded entry, the literal target is kept as
 	// the referenced entry — its superseded status is what the ref-meta check
@@ -357,9 +358,9 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 
 // formatProposedEntryForPreflight renders the proposed entry plus its stored
 // intent. Intent is appended here — pre-flight only — rather than in the
-// shared FormatEntryForPrompt so the summary prompt (and its skip-hash) stays
-// unchanged and existing summaries don't restamp. The settled-justification
-// rubric reads this line to decide whether its guard matches.
+// shared FormatEntryForPrompt, so it stays out of the summary-generation
+// prompt, which has no use for it. The settled-justification rubric reads this
+// line to decide whether its guard matches.
 func formatProposedEntryForPreflight(e *model.Entry) string {
 	s := FormatEntryForPrompt(e)
 	if e.Intent != "" {
@@ -373,7 +374,7 @@ func formatProposedEntryForPreflight(e *model.Entry) string {
 // ref-meta consistency check tell grounded-in / builds-on / refines apart —
 // kinds that split on whether the target is a basis, a closed prior step, or an
 // active commitment refined in place. This is pre-flight only; the summary
-// prompt uses FormatEntryForPrompt unchanged, so summary hashes don't drift.
+// prompt uses FormatEntryForPrompt without the status line.
 func formatReferencedEntry(graph *model.Graph, e *model.Entry) string {
 	return FormatEntryForPrompt(e) + "\nDerived status: " + derivedStatusForPrompt(graph.DerivedStatus(e))
 }

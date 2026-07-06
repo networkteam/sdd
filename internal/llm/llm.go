@@ -28,9 +28,7 @@ type Request struct {
 
 // Combined returns SystemPrompt followed by UserPrompt separated by a blank
 // line when both are non-empty. Runners without native system-prompt support
-// use this to flatten the Request into a single payload. The hash used for
-// summary-skip detection is computed over this combined form so changes to
-// either half invalidate the cached summary.
+// use this to flatten the Request into a single payload.
 func (r Request) Combined() string {
 	if r.SystemPrompt == "" {
 		return r.UserPrompt

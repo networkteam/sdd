@@ -17,20 +17,25 @@ import (
 )
 
 // Summarize executes a SummarizeCmd: loads the graph, determines which
-// entries need summaries, generates them via the LLM, and writes updated
-// frontmatter back to disk. Batch runs (--all or multiple entries) use an
-// errgroup with SetLimit(concurrency) — for remote providers the factory
-// applies a rate limiter on top. A short-lived mutex guards graph reads
-// and writes; the LLM call itself runs without the lock.
+// entries to (re)generate, generates them via the LLM, and writes updated
+// frontmatter back to disk. Summaries are derived on demand with no staleness
+// tracking (d-cpt-4qi): named entries always regenerate, while --all fills
+// only entries that have no summary yet (--force regenerates every entry).
+// Batch runs use an errgroup with SetLimit(concurrency) — for remote providers
+// the factory applies a rate limiter on top. A short-lived mutex guards graph
+// reads and writes; the LLM call itself runs without the lock.
 //
 // When cmd.ExplicitText is set, the LLM is bypassed entirely: the supplied
-// text is written as the summary on a single named entry, with the hash
-// recomputed from the current prompt so future regenerations skip-by-hash.
+// text is written as the summary on a single named entry.
 func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) error {
 	graph, err := h.reader.LoadGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph: %w", err)
 	}
+
+	// Whether this is an --all run (no entry IDs) is decided before ID
+	// resolution reassigns cmd.EntryIDs below.
+	isAll := len(cmd.EntryIDs) == 0
 
 	// Explicit-text path: single entry, no LLM call.
 	if cmd.ExplicitText != nil {
@@ -92,25 +97,28 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 
 	for _, entry := range entries {
 		g.Go(func() error {
-			// Render prompt and check hash under read lock — other workers
-			// may be writing their own entries concurrently.
+			// --all fills only entries that have no summary yet unless
+			// --force regenerates every entry; named entries always
+			// regenerate. Read under the lock — other workers may be writing
+			// their own entries' summaries concurrently.
 			graphMu.RLock()
-			req, renderErr := llm.RenderSummaryPrompt(entry, graph)
-			var currentHash string
-			if renderErr == nil {
-				currentHash = llm.ComputePromptHash(req.Combined())
-			}
-			existingHash := entry.SummaryHash
+			alreadySummarized := entry.Summary != ""
 			graphMu.RUnlock()
-			if renderErr != nil {
-				return fmt.Errorf("rendering summary for %s: %w", entry.ID, renderErr)
-			}
-
-			if !cmd.Force && existingHash == currentHash {
+			if isAll && !cmd.Force && alreadySummarized {
 				if cmd.OnSkipped != nil {
 					cmd.OnSkipped(entry.ID)
 				}
 				return nil
+			}
+
+			// Render prompt under read lock — other workers may be writing
+			// their own entries' summaries concurrently, and those feed
+			// neighbor prose into this prompt.
+			graphMu.RLock()
+			req, renderErr := llm.RenderSummaryPrompt(entry, graph)
+			graphMu.RUnlock()
+			if renderErr != nil {
+				return fmt.Errorf("rendering summary for %s: %w", entry.ID, renderErr)
 			}
 
 			// LLM call without the graph lock.
@@ -126,7 +134,6 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			// under read lock so FormatFrontmatter sees a consistent entry.
 			graphMu.Lock()
 			entry.Summary = summary
-			entry.SummaryHash = currentHash
 			graphMu.Unlock()
 
 			relPath, err := model.IDToRelPath(entry.ID)
@@ -173,8 +180,7 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 }
 
 // summarizeExplicit writes user-supplied summary text on a single entry,
-// bypassing the LLM. The hash is recomputed from the current prompt input so
-// later automatic regenerations skip-by-hash unless --force is passed.
+// bypassing the LLM.
 func (h *Handler) summarizeExplicit(graph *model.Graph, idArg, text string, onSummarized func(id, summary string)) error {
 	resolved, err := graph.ResolveIDs([]string{idArg})
 	if err != nil {
@@ -194,14 +200,7 @@ func (h *Handler) summarizeExplicit(graph *model.Graph, idArg, text string, onSu
 		return fmt.Errorf("--text value is empty after trimming whitespace")
 	}
 
-	req, err := llm.RenderSummaryPrompt(entry, graph)
-	if err != nil {
-		return fmt.Errorf("rendering summary prompt for hash: %w", err)
-	}
-	hash := llm.ComputePromptHash(req.Combined())
-
 	entry.Summary = summary
-	entry.SummaryHash = hash
 
 	relPath, err := model.IDToRelPath(entry.ID)
 	if err != nil {

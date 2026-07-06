@@ -887,11 +887,11 @@ func summarizeCmd() *cli.Command {
 		Flags: []cli.Flag{
 			&cli.BoolFlag{
 				Name:  "all",
-				Usage: "Summarize all entries (in topological order)",
+				Usage: "Fill summaries for every entry that has none (in topological order)",
 			},
 			&cli.BoolFlag{
 				Name:  "force",
-				Usage: "Regenerate even if summary hash matches",
+				Usage: "With --all, regenerate every entry rather than only those missing a summary",
 			},
 			&cli.StringFlag{
 				Name:  "provider",
@@ -953,7 +953,7 @@ func summarizeCmd() *cli.Command {
 					fmt.Fprintf(os.Stderr, "  summarized %s\n", id)
 				},
 				OnSkipped: func(id string) {
-					fmt.Fprintf(os.Stderr, "  skipped %s (hash matches)\n", id)
+					fmt.Fprintf(os.Stderr, "  skipped %s (already has a summary)\n", id)
 				},
 			}
 

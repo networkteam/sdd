@@ -228,12 +228,10 @@ func Test_FormatEntryForPrompt_OmitsEmptyFields(t *testing.T) {
 	}
 }
 
-// Test_FormatEntryForPrompt_LegacyRefsRenderFlat pins the byte-identical-to-pre-
-// slice-2 fallback for entries whose refs are all bare-string legacy
-// (Kind == RefKindUnknown). Per d-tac-4ub: every entry on disk that was
-// authored before the ref-kind metadata change must produce the exact prompt
-// shape it did before, so its stored summary hash stays stable and `sdd lint`
-// reports no stale-summary-hash warnings on every read.
+// Test_FormatEntryForPrompt_LegacyRefsRenderFlat pins the flat-ref fallback for
+// entries whose refs are all bare-string legacy (Kind == RefKindUnknown): with
+// no kind or desc to show, the object form would only add empty `(kind:
+// unknown)` noise, so these render as the flat `Refs: a, b` list.
 func Test_FormatEntryForPrompt_LegacyRefsRenderFlat(t *testing.T) {
 	e := &model.Entry{
 		ID:    "20260410-120000-d-tac-xyz",
@@ -325,59 +323,11 @@ func Test_FormatEntryForPrompt_MixedRefsRenderMultiline(t *testing.T) {
 	}
 }
 
-// Test_FormatEntryForPrompt_LegacyEntrySummaryHashStable is the load-bearing
-// guarantee behind d-tac-4ub: a stored summary hash generated under the
-// pre-slice-2 prompt format must remain valid after slice 2 ships. The hash
-// is computed from the full rendered prompt; if the render of a legacy entry
-// changes by even one byte, every stored hash in the historical graph goes
-// stale at once.
-//
-// The hash sentinel pins the expected hex value computed from a known-stable
-// rendered prompt. If a future change to FormatEntryForPrompt (or summary
-// template) breaks this assertion, the offending change either needs to scope
-// itself away from legacy entries or accept that every existing summary hash
-// must be regenerated.
-func Test_FormatEntryForPrompt_LegacyEntrySummaryHashStable(t *testing.T) {
-	e := &model.Entry{
-		ID:    "20260410-120000-d-tac-xyz",
-		Type:  model.TypeDecision,
-		Layer: model.LayerTactical,
-		Kind:  model.KindPlan,
-		Refs: []model.Ref{
-			{ID: "20260410-110000-s-cpt-aaa", Kind: model.RefKindUnknown},
-		},
-		Closes:     []string{"20260410-100000-s-stg-bbb"},
-		Confidence: "high",
-		Content:    "Body of a legacy entry — its summary hash must survive ref-kind metadata work.",
-	}
-
-	got := FormatEntryForPrompt(e)
-	// Pinned byte-for-byte to catch any future render drift on legacy entries.
-	// Any character change here would invalidate every stored summary hash on
-	// pre-slice-2 entries (the hash is computed from the full rendered prompt
-	// — see RenderSummaryPrompt + ComputePromptHash). Update the want string
-	// only when an intentional reshape of the pre-slice-2 prompt is approved.
-	want := "ID: 20260410-120000-d-tac-xyz\n" +
-		"Type: decision\n" +
-		"Layer: tactical\n" +
-		"Kind: plan\n" +
-		"Refs: 20260410-110000-s-cpt-aaa\n" +
-		"Closes: 20260410-100000-s-stg-bbb\n" +
-		"Confidence: high\n" +
-		"\nBody of a legacy entry — its summary hash must survive ref-kind metadata work."
-	if got != want {
-		t.Errorf("legacy entry render drifted; this would invalidate every stored summary hash on legacy entries.\nwant:\n%s\n\ngot:\n%s", want, got)
-	}
-}
-
-// Test_formatEntryForSummaryPrompt_LegacyAliasRefKind pins the s-tac-koz fix:
-// the summary prompt renders a legacy grounds/evidence ref with its on-disk
-// kind (so the rename never enters the summary hash and the stored hash stays
-// valid), while pre-flight renders the canonical grounded-in (so the ref-meta
-// check still judges against the live vocabulary). Building via ParseEntry is
-// load-bearing — the alias is only resolved through UnmarshalYAML, which is
-// what sets the on-disk kind.
-func Test_formatEntryForSummaryPrompt_LegacyAliasRefKind(t *testing.T) {
+// Test_FormatEntryForPrompt_LegacyAliasRendersCanonical confirms the unified
+// prompt renders a legacy grounds/evidence ref with its canonical resolved kind
+// (grounded-in). Summary generation and pre-flight share this single render
+// path now that no summary hash depends on the on-disk alias value.
+func Test_FormatEntryForPrompt_LegacyAliasRendersCanonical(t *testing.T) {
 	for _, onDisk := range []string{"grounds", "evidence"} {
 		t.Run(onDisk, func(t *testing.T) {
 			src := "---\n" +
@@ -393,42 +343,14 @@ func Test_formatEntryForSummaryPrompt_LegacyAliasRefKind(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseEntry: %v", err)
 			}
-
-			summaryRender := formatEntryForSummaryPrompt(e)
-			if !strings.Contains(summaryRender, "(kind: "+onDisk+")") {
-				t.Errorf("summary prompt must render on-disk kind %q for hash stability, got:\n%s", onDisk, summaryRender)
+			render := FormatEntryForPrompt(e)
+			if !strings.Contains(render, "(kind: grounded-in)") {
+				t.Errorf("legacy %s ref must render canonical grounded-in, got:\n%s", onDisk, render)
 			}
-			if strings.Contains(summaryRender, "grounded-in") {
-				t.Errorf("summary prompt must NOT render canonical grounded-in for a legacy %s ref, got:\n%s", onDisk, summaryRender)
-			}
-
-			preflightRender := FormatEntryForPrompt(e)
-			if !strings.Contains(preflightRender, "(kind: grounded-in)") {
-				t.Errorf("pre-flight prompt must render canonical grounded-in, got:\n%s", preflightRender)
+			if strings.Contains(render, "(kind: "+onDisk+")") {
+				t.Errorf("legacy %s ref must not render the on-disk alias, got:\n%s", onDisk, render)
 			}
 		})
-	}
-}
-
-// Test_formatEntryForSummaryPrompt_NonAliasMatchesCanonical confirms the two
-// render paths diverge ONLY for legacy aliases — a capturable kind renders
-// identically in both.
-func Test_formatEntryForSummaryPrompt_NonAliasMatchesCanonical(t *testing.T) {
-	src := "---\n" +
-		"type: decision\n" +
-		"layer: tactical\n" +
-		"kind: directive\n" +
-		"refs:\n" +
-		"  - id: 20260410-110000-s-cpt-aaa\n" +
-		"    kind: addresses\n" +
-		"---\n" +
-		"Body."
-	e, err := model.ParseEntry("20260410-120000-d-tac-xyz.md", src)
-	if err != nil {
-		t.Fatalf("ParseEntry: %v", err)
-	}
-	if formatEntryForSummaryPrompt(e) != FormatEntryForPrompt(e) {
-		t.Errorf("non-alias refs must render identically in summary and pre-flight paths")
 	}
 }
 
@@ -667,7 +589,7 @@ func Test_renderPreflightPrompt_CarriesSettledRubric(t *testing.T) {
 
 func Test_RenderSummaryPrompt_OmitsIntent(t *testing.T) {
 	// Intent is a pre-flight-only addition; the summary prompt must not carry
-	// it, or every directive's summary hash would shift and restamp.
+	// it — summary generation has no use for the directive's lifecycle posture.
 	dec := &model.Entry{
 		ID: "20260410-130000-d-tac-bbb", Type: model.TypeDecision, Layer: model.LayerTactical,
 		Kind: model.KindDirective, Intent: model.IntentSettled, Content: "decision content",
