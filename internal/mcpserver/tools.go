@@ -119,7 +119,8 @@ type ServeResult struct {
 	PendingChooser *ChooserResult `json:"pending_chooser,omitempty"`
 	Execution      string         `json:"execution,omitempty" jsonschema:"execution hint for this instance; fork-preferred means the procedure is a task best run in a disposable forked context"`
 	Produced       map[string]any `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
-	Framing        string         `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); delivered once per agent session"`
+	Framing        string         `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); served when its content is new to this connection, omitted while unchanged"`
+	Vocabulary     string         `json:"vocabulary,omitempty" jsonschema:"translation table for non-English graphs: canonical tokens stay English, user-facing narration renders in the configured language; served once per connection"`
 	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"open work, carried on the session shell's serves only: this dialogue's other threads, then other parked dialogues"`
 	Base           *BaseServe     `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue lands now that this move has ended"`
 }
@@ -1181,6 +1182,11 @@ func (s *Server) toServeResult(ms *mcp.ServerSession, ss *shellSession, serve *e
 		res.Execution = executionForkPreferred
 	}
 	res.Framing = s.framingBlock(ms, ss)
+	// The vocabulary block is static per process — the connection pays it
+	// exactly once, on whatever serve it sees first.
+	if s.vocabulary != "" && !s.servedBefore(ms, s.vocabulary) {
+		res.Vocabulary = s.vocabulary
+	}
 	return res
 }
 

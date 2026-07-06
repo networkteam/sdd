@@ -379,6 +379,61 @@ Probe entry %02d: the flux capacitor drill needs observing.
 	}
 }
 
+// languageFinder builds a finder whose config carries the given locale.
+func languageFinder(lang string) *finders.Finder {
+	return finders.New(finders.Options{
+		PreflightRunner: stubRunner{},
+		Config:          &model.Config{Participant: "Tester", Language: lang},
+	})
+}
+
+// TestVocabularyBlockForNonEnglishGraphs serves the bundled translation
+// table exactly once per connection when the graph language is non-English —
+// locale rendering's engine-surface home (d-tac-dbk, s-tac-fgy).
+func TestVocabularyBlockForNonEnglishGraphs(t *testing.T) {
+	env := newTestServer(t, nil, "", "", func(o *mcpserver.Options) {
+		o.Finder = languageFinder("de")
+	})
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+	if !strings.Contains(door.Vocabulary, "Vokabular") {
+		t.Fatalf("a German graph's first serve should carry the vocabulary table, got %q", door.Vocabulary)
+	}
+	if !strings.Contains(door.Instructions, "Language: de") {
+		t.Fatalf("the shell orientation should state the locale, got %q", door.Instructions)
+	}
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	if serve.Vocabulary != "" {
+		t.Fatalf("the vocabulary serves once per connection, got it again: %q", serve.Vocabulary)
+	}
+}
+
+// TestVocabularyBlockAbsentForEnglish keeps English (default) graphs free of
+// the block entirely.
+func TestVocabularyBlockAbsentForEnglish(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	if door := openSession(t, cs); door.Vocabulary != "" {
+		t.Fatalf("an English graph serves no vocabulary block, got %q", door.Vocabulary)
+	}
+}
+
+// TestVocabularyBlockMissingLocaleNote serves an explicit note when the
+// configured locale has no bundled reference — the commitment never drops
+// silently.
+func TestVocabularyBlockMissingLocaleNote(t *testing.T) {
+	env := newTestServer(t, nil, "", "", func(o *mcpserver.Options) {
+		o.Finder = languageFinder("fr")
+	})
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+	if !strings.Contains(door.Vocabulary, "no bundled vocabulary") || !strings.Contains(door.Vocabulary, "vocabulary-fr.md") {
+		t.Fatalf("a locale without a bundled reference should serve the explicit note, got %q", door.Vocabulary)
+	}
+}
+
 // TestToolSurfaceMatchesSpec pins the tool list to the surface spec §5 —
 // exactly these tools, and in particular no direct write tool.
 func TestToolSurfaceMatchesSpec(t *testing.T) {
