@@ -153,6 +153,89 @@ func TestInit_RendersMultipleAgents(t *testing.T) {
 	}
 }
 
+// TestInit_RegistersMCPServers verifies a fresh project-scope init writes the
+// per-agent MCP registration: a .mcp.json entry with alwaysLoad and an
+// mcp__sdd__* allow rule for Claude, and a .codex/config.toml forwarding
+// SSH_AUTH_SOCK for Codex — and that a repeat init leaves them byte-identical.
+func TestInit_RegistersMCPServers(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	read := func(rel string) string {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(tmp, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		return string(data)
+	}
+
+	var registered []string
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude, model.AgentCodex},
+		Scope:         model.ScopeProject,
+		OnMCPRegistered: func(target model.AgentTarget, _ string) {
+			registered = append(registered, string(target))
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if mcp := read(".mcp.json"); !strings.Contains(mcp, `"sdd"`) || !strings.Contains(mcp, `"alwaysLoad": true`) {
+		t.Errorf(".mcp.json missing sdd server or alwaysLoad:\n%s", mcp)
+	}
+	if settings := read(".claude/settings.json"); !strings.Contains(settings, "mcp__sdd__*") {
+		t.Errorf("settings.json missing the sdd allow glob:\n%s", settings)
+	}
+	if codex := read(".codex/config.toml"); !strings.Contains(codex, "[mcp_servers.sdd]") || !strings.Contains(codex, `env_vars = ["SSH_AUTH_SOCK"]`) {
+		t.Errorf("config.toml missing sdd table or SSH_AUTH_SOCK forwarding:\n%s", codex)
+	}
+	if !slices.Contains(registered, "claude") || !slices.Contains(registered, "codex") {
+		t.Errorf("OnMCPRegistered did not fire for both agents, got %v", registered)
+	}
+
+	// Idempotent: a repeat init (agents read from config) rewrites nothing.
+	before := map[string]string{".mcp.json": read(".mcp.json"), ".claude/settings.json": read(".claude/settings.json"), ".codex/config.toml": read(".codex/config.toml")}
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for rel, want := range before {
+		if got := read(rel); got != want {
+			t.Errorf("%s changed on idempotent re-init:\n%s", rel, got)
+		}
+	}
+}
+
+// TestInit_UserScopeSkipsMCPRegistration verifies MCP registration is
+// project-scope only for now: a user-scope init installs skills but writes no
+// registration files into the repo tree.
+func TestInit_UserScopeSkipsMCPRegistration(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      repo,
+		UserHome:      home,
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude, model.AgentCodex},
+		Scope:         model.ScopeUser,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{".mcp.json", ".codex/config.toml"} {
+		if _, err := os.Stat(filepath.Join(repo, rel)); !os.IsNotExist(err) {
+			t.Errorf("user scope should not write %s (stat err=%v)", rel, err)
+		}
+	}
+}
+
 // TestInit_ScaffoldsInstructionBridge covers the AGENTS.md / CLAUDE.md bridge:
 // it is created when a non-Claude agent is selected and the files are absent,
 // CLAUDE.md imports AGENTS.md, and an existing CLAUDE.md is never overwritten.

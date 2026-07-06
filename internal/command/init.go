@@ -129,6 +129,12 @@ type InitCmd struct {
 	// selection dropped from the recorded set, reporting the rendered skill
 	// files removed and any user-modified files preserved.
 	OnAgentSkillsPruned func(result AgentPruneResult)
+
+	// OnMCPRegistered fires for each project-scope config file written to
+	// register the SDD MCP server for an agent (a fresh file or an
+	// add-if-missing merge). Does not fire when an existing sdd entry is
+	// left untouched.
+	OnMCPRegistered func(target model.AgentTarget, path string)
 }
 
 // AgentPruneResult reports the outcome of pruning a dropped agent's rendered

@@ -313,6 +313,17 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 	}
 
+	// Register the SDD MCP server per agent so engine mode works out of the
+	// box (d-tac-wfl). Project scope only for now: the registration files
+	// live in the repo tree; user-scope registration (home-dir config) is a
+	// separate path, deferred. User scope still installs skills above — it
+	// just skips this step.
+	if effectiveScope == model.ScopeProject {
+		if err := h.registerMCPServers(effectiveAgents, cmd, &touched); err != nil {
+			return err
+		}
+	}
+
 	// Commit anything touched. Skill files installed under the user-global
 	// scope (outside the repo) are filtered out — they aren't part of the
 	// repo's git tree.
@@ -453,6 +464,46 @@ func agentsDiff(a, b []model.AgentTarget) []model.AgentTarget {
 		}
 	}
 	return out
+}
+
+// registerMCPServers writes the project-scope MCP registration for each agent
+// so engine mode works without manual setup (d-tac-wfl): a .mcp.json entry
+// plus an mcp__sdd__* allow rule for Claude Code, and a .codex/config.toml
+// entry forwarding SSH_AUTH_SOCK for Codex (d-tac-ay1). Writes are
+// add-if-missing — an existing sdd entry is left untouched — so re-running
+// init is idempotent and never clobbers a user's customization. Every written
+// file is appended to touched so the init commit records it.
+func (h *Handler) registerMCPServers(agents []model.AgentTarget, cmd *command.InitCmd, touched *[]string) error {
+	for _, target := range agents {
+		targets, err := model.MCPRegistrationTargets(target, cmd.RepoRoot)
+		if err != nil {
+			return fmt.Errorf("resolving MCP registration for %s: %w", target, err)
+		}
+		for _, rt := range targets {
+			existing, readErr := os.ReadFile(rt.Path)
+			if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+				return fmt.Errorf("reading %s: %w", rt.Path, readErr)
+			}
+			merged, changed, err := rt.Merge(existing)
+			if err != nil {
+				return fmt.Errorf("registering MCP server in %s: %w", rt.Path, err)
+			}
+			if !changed {
+				continue
+			}
+			if err := os.MkdirAll(filepath.Dir(rt.Path), 0o755); err != nil {
+				return fmt.Errorf("creating dir for %s: %w", rt.Path, err)
+			}
+			if err := os.WriteFile(rt.Path, merged, 0o644); err != nil {
+				return fmt.Errorf("writing %s: %w", rt.Path, err)
+			}
+			*touched = append(*touched, rt.Path)
+			if cmd.OnMCPRegistered != nil {
+				cmd.OnMCPRegistered(target, rt.Path)
+			}
+		}
+	}
+	return nil
 }
 
 // pruneAgentSkills removes the sdd-rendered skill files of dropped agents,

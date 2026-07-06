@@ -1829,6 +1829,9 @@ func initCmd() *cli.Command {
 						fmt.Printf("  bridge: %s\n", p)
 					}
 				},
+				OnMCPRegistered: func(target model.AgentTarget, path string) {
+					fmt.Printf("  mcp (%s): %s\n", target, path)
+				},
 				OnAgentSkillsPruned: func(result command.AgentPruneResult) {
 					presenters.RenderInitPrune(os.Stdout, result)
 				},
