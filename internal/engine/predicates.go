@@ -48,7 +48,12 @@ var presenceFields = map[string]string{
 	"hasBrief":        "brief",
 	"hasBriefing":     "briefing",
 	"hasInspectedIds": "inspectedIds",
-	"hasEvaluation":   "evaluation",
+	"hasPlan":         "plan",
+
+	// The evaluate lens gate: at least one lens judgment must land before the
+	// junction; evidence fields are instructed alongside, never gated.
+	"hasInnerEvaluation": "innerEvaluation",
+	"hasOuterEvaluation": "outerEvaluation",
 }
 
 func registerBuiltinPredicates(r *Registry) {

@@ -533,24 +533,27 @@ func TestEmbeddedEvaluateToCaptureHandoff(t *testing.T) {
 	openSession(t, cs)
 
 	// A known anchor passed as a start input seeds the anchor state and
-	// auto-advances the resolver straight to assess (the uniform anchor
+	// auto-advances the resolver straight to scope (the uniform anchor
 	// contract — no separate resolver turn for a known entry).
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{
 		"canonical": "evaluate",
 		"params":    map[string]any{"anchor": fixtureGapID},
 	}, &serve)
-	if serve.Procedure != "evaluate" || serve.Step != "assess" {
-		t.Fatalf("a seeded anchor should auto-advance evaluate to assess, got %s at %q", serve.Procedure, serve.Step)
+	if serve.Procedure != "evaluate" || serve.Step != "scope" {
+		t.Fatalf("a seeded anchor should auto-advance evaluate to scope, got %s at %q", serve.Procedure, serve.Step)
 	}
 	evalInstance := serve.Instance
 
-	// The one widen of the whole flow happens here, in the evaluation.
+	// The one widen of the whole flow happens here, in the evaluation. The
+	// batched report cascades scope → carryOut → junction in one call.
 	const widen = "searched post-landing signals and neighbors; inspected " + fixtureGapID +
 		" — the teardown edge is the only new thing bearing on the work."
 	call(t, cs, "next", map[string]any{"instance": evalInstance, "report": map[string]any{
-		"evaluation":  "Inner: sound against its ACs. Outer: smoke check passes; one small teardown rough edge remains.",
-		"widenReport": widen,
+		"plan":            "Inner only: verify the work against its ACs; outer coverage left for a later run.",
+		"widenReport":     widen,
+		"innerEvidence":   "read the done's claims against the ACs; smoke check run",
+		"innerEvaluation": "sound against its ACs; one small teardown rough edge remains",
 	}}, &serve)
 	if serve.Step != "junction" {
 		t.Fatalf("evaluation should reach the junction, got %q", serve.Step)

@@ -16,25 +16,36 @@ func TestEvaluate_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sv.Step != "assess" {
-		t.Fatalf("start step = %s, want assess", sv.Step)
+	if sv.Step != "scope" {
+		t.Fatalf("start step = %s, want scope", sv.Step)
 	}
 	if !strings.Contains(sv.Instructions, "chains("+procAnchorID+")") {
-		t.Errorf("assess unit should serve the anchor's chains, got %q", sv.Instructions)
+		t.Errorf("scope unit should serve the anchor's chains, got %q", sv.Instructions)
 	}
-	if !strings.Contains(sv.Instructions, "Two lenses — always both") {
-		t.Errorf("assess unit should carry the two-lens contract, got %q", sv.Instructions)
+	if !strings.Contains(sv.Instructions, "verification") || !strings.Contains(sv.Instructions, "validation") {
+		t.Errorf("scope unit should name the lens postures, got %q", sv.Instructions)
 	}
 
 	sv, err = env.session.Report(sv.Instance, map[string]any{
-		"evaluation":  "Inner: matches the ACs. Outer: smoke test passed; one rough edge in teardown.",
-		"widenReport": "searched for post-landing signals; one teardown gap nearby",
+		"plan":        "Inner only: check the done's claims against the ACs and the project's Go guidelines.",
+		"widenReport": "searched for post-landing signals and prior evaluation dones; none recorded yet",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "carryOut" {
+		t.Fatalf("after scope step = %s, want carryOut", sv.Step)
+	}
+
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"innerEvidence":   "read the diff against the ACs; go test ./... green",
+		"innerEvaluation": "sound — matches the ACs; one rough edge in teardown",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sv.Step != "junction" || sv.Chooser == nil || sv.Chooser.Kind != ChooserUser {
-		t.Fatalf("assessment should reach the junction user chooser, got step %q", sv.Step)
+		t.Fatalf("carried-out evaluation should reach the junction user chooser, got step %q", sv.Step)
 	}
 
 	sv, err = env.session.Answer(sv.Instance, "junction", "record",
@@ -71,18 +82,18 @@ func TestEvaluate_AnchorResolvedByResolver(t *testing.T) {
 		t.Errorf("resolver should name anchor as missing, got %v", sv.Missing)
 	}
 
-	// A resolved anchor advances to assess — the same place a seeded anchor
+	// A resolved anchor advances to scope — the same place a seeded anchor
 	// auto-advances to on entry.
 	sv, err = env.session.Report(sv.Instance, map[string]any{"anchor": procAnchorID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sv.Step != "assess" {
-		t.Fatalf("after resolving the anchor, step = %s, want assess", sv.Step)
+	if sv.Step != "scope" {
+		t.Fatalf("after resolving the anchor, step = %s, want scope", sv.Step)
 	}
 }
 
-func TestEvaluate_CleanPassConcludes(t *testing.T) {
+func TestEvaluate_LensGate(t *testing.T) {
 	env := newProcEnv(t, "evaluate")
 
 	sv, err := env.session.Start(env.spec, map[string]any{"anchor": procAnchorID}, "")
@@ -90,17 +101,134 @@ func TestEvaluate_CleanPassConcludes(t *testing.T) {
 		t.Fatal(err)
 	}
 	sv, err = env.session.Report(sv.Instance, map[string]any{
-		"evaluation":  "Both lenses clean.",
+		"plan":        "both lenses",
+		"widenReport": "widened",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "carryOut" {
+		t.Fatalf("step = %s, want carryOut", sv.Step)
+	}
+
+	// Evidence alone is not a judgment — the gate holds until at least one
+	// lens evaluation lands (evidence is instructed, never gated).
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"innerEvidence": "ran the suite",
+		"outerEvidence": "smoke test output",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "carryOut" {
+		t.Fatalf("evidence without a judgment advanced to %s, want carryOut held", sv.Step)
+	}
+
+	// A single lens judgment satisfies the gate — outer alone here; coverage
+	// completeness is a graph property, not a per-run gate.
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"outerEvaluation": "works in use; the user attested the flow end to end",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "junction" {
+		t.Fatalf("one lens judgment should reach the junction, got %s", sv.Step)
+	}
+}
+
+func TestEvaluate_CleanPassRecordsWithoutFindings(t *testing.T) {
+	env := newProcEnv(t, "evaluate")
+
+	sv, err := env.session.Start(env.spec, map[string]any{"anchor": procAnchorID}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"plan":        "inner only",
 		"widenReport": "nothing new since landing",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sv, err = env.session.Answer(sv.Instance, "junction", "conclude", nil, "all good, nothing to record")
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"innerEvaluation": "clean — claims match the commitment",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A clean pass records the evaluation done alone: record with no
+	// selectedFindings is a valid answer (the field is optional).
+	sv, err = env.session.Answer(sv.Instance, "junction", "record", nil, "record the evaluation, no findings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Status != StatusCompleted {
+		t.Fatalf("record without findings should complete, got %s at %q", sv.Status, sv.Step)
+	}
+}
+
+func TestEvaluate_Conclude(t *testing.T) {
+	env := newProcEnv(t, "evaluate")
+
+	sv, err := env.session.Start(env.spec, map[string]any{"anchor": procAnchorID}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"plan":        "outer only",
+		"widenReport": "widened",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"outerEvaluation": "fine in use",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Answer(sv.Instance, "junction", "conclude", nil, "don't record this one")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sv.Status != StatusCompleted {
 		t.Fatalf("conclude should complete, got %s at %q", sv.Status, sv.Step)
+	}
+}
+
+func TestEvaluate_RecordDeclaresCaptureHandoff(t *testing.T) {
+	env := newProcEnv(t, "evaluate")
+
+	// The record option's declared dispatch is the contract the evaluation-done
+	// and finding captures ride: procedure-guarded to capture, seeding the
+	// evaluation's own widenReport. Spec-level assertion so drift between the
+	// shipped entry and the seeding machinery cannot pass unnoticed.
+	var junction *Step
+	for i := range env.spec.Steps {
+		if env.spec.Steps[i].ID == "junction" {
+			junction = env.spec.Steps[i]
+		}
+	}
+	if junction == nil {
+		t.Fatal("evaluate spec has no junction step")
+	}
+	var record *Option
+	for i := range junction.Options {
+		if junction.Options[i].Choice == "record" {
+			record = &junction.Options[i]
+		}
+	}
+	if record == nil {
+		t.Fatal("junction has no record option")
+	}
+	if record.Dispatch == nil {
+		t.Fatal("record declares no dispatch — the capture handoff is gone")
+	}
+	if record.Dispatch.Procedure != "capture" {
+		t.Errorf("record dispatch procedure = %q, want capture", record.Dispatch.Procedure)
+	}
+	if got := record.Dispatch.Seed["widenReport"]; got != "widenReport" {
+		t.Errorf("record dispatch seed widenReport = %q, want widenReport", got)
 	}
 }
