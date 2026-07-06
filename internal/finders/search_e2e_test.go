@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
@@ -154,12 +155,42 @@ func (s *e2eSetup) lazyFill(t *testing.T) {
 	}
 }
 
+// loadGraph loads the fixture's graph scoped to the entries this fixture
+// actually wrote. LoadGraph unconditionally injects the embedded base
+// procedures (see graph.go), so a raw load returns ~10 extra d-prc-*
+// entries the fixture never intended. IndexHandler.Build indexes all of
+// them, and the fake embedder maps every fruit-token-free text — base
+// procedures included — to the same collinear fallback vector, so they
+// tie at cosine 1.0 and can crowd or tie the intended hit in vector and
+// hybrid ranking. Stripping them here keeps the effective corpus (both
+// the text candidate set and the vector rollup, which filters through it)
+// to just the fixture's entries, making ranking deterministic. See
+// s-tac-qtz for the full mechanism.
 func (s *e2eSetup) loadGraph(t *testing.T) *model.Graph {
 	t.Helper()
-	g, err := s.reader.LoadGraph(s.graphDir)
+	full, err := s.reader.LoadGraph(s.graphDir)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	base, err := baseprocedures.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseIDs := make(map[string]bool, len(base))
+	for _, e := range base {
+		baseIDs[e.ID] = true
+	}
+
+	kept := make([]*model.Entry, 0, len(full.Entries))
+	for _, e := range full.Entries {
+		if baseIDs[e.ID] {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	g := model.NewGraph(kept)
+	g.SetGraphDir(s.graphDir)
 	return g
 }
 
