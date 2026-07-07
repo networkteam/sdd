@@ -15,6 +15,38 @@ type Graph struct {
 	ClosedBy     map[string][]string // reverse index: entry ID -> IDs that close it
 	SupersededBy map[string][]string // reverse index: entry ID -> IDs that supersede it
 	graphDir     string
+	// multi back-wires the cross-graph assembly this graph belongs to (nil
+	// for a standalone graph). Set by NewMultiGraph so traversal code
+	// holding any *Graph can resolve cross-repo references.
+	multi *MultiGraph
+	// repoPrefix qualifies this graph's entries on cross-graph surfaces:
+	// "<repo-id>:" for a member graph loaded from a connected repo's cache,
+	// "" for the local graph. Embedded (binary-scoped) entries stay bare
+	// regardless — they are identical in every member graph.
+	repoPrefix string
+}
+
+// nodeKeyFor is the graph-qualified identity of an entry for rendering and
+// cross-graph dedup: a member graph's own entries carry its repo prefix
+// (the (repo-id, entry-id) dedup key in colon form), while embedded entries
+// key by bare ID so exactly one copy ever surfaces.
+func (g *Graph) nodeKeyFor(e *Entry) string {
+	if g.repoPrefix == "" || e.Embedded {
+		return e.ID
+	}
+	return g.repoPrefix + e.ID
+}
+
+// qualifyID prefixes a member-graph entry ID for display outside its graph;
+// embedded entries and local-graph entries stay bare.
+func (g *Graph) qualifyID(id string) string {
+	if g.repoPrefix == "" {
+		return id
+	}
+	if e, ok := g.ByID[id]; ok && e.Embedded {
+		return id
+	}
+	return g.repoPrefix + id
 }
 
 // NewGraph builds a graph from the given entries without touching the filesystem.

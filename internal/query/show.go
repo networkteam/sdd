@@ -27,7 +27,11 @@ const (
 // trail, effective topics) are carried alongside so presenters render without
 // touching the graph. Multiple groups are joined with separators.
 type ShowGroup struct {
-	Primary              *model.Entry
+	Primary *model.Entry
+	// PrimaryID is the display identity — repo-prefixed
+	// (<repo-id>:<entry-id>) when the primary lives in a connected repo's
+	// graph, bare otherwise.
+	PrimaryID            string
 	PrimaryStatus        model.Status
 	PrimarySupersedePath []string
 	PrimaryTopics        []model.TopicPath

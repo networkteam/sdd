@@ -57,7 +57,7 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		fmt.Fprintln(w, clrHeading.Render("# upstream"))
 		fmt.Fprintln(w)
 		for _, item := range g.Upstream {
-			renderTreeItemStyled(w, item, g.Primary.ID)
+			renderTreeItemStyled(w, item, primaryDisplayID(g))
 		}
 	}
 	if len(g.Downstream) > 0 {
@@ -65,7 +65,7 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		fmt.Fprintln(w, clrHeading.Render("# downstream"))
 		fmt.Fprintln(w)
 		for _, item := range g.Downstream {
-			renderTreeItemStyled(w, item, g.Primary.ID)
+			renderTreeItemStyled(w, item, primaryDisplayID(g))
 		}
 	}
 }

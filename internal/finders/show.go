@@ -22,19 +22,23 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 	rendered := make(map[string]bool)
 	primaries := make(map[string]bool, len(resolved))
 	for _, id := range resolved {
-		primaries[id] = true
+		// Dedup keys are display identities (repo-prefixed for cross-repo
+		// primaries); an unresolvable ID fails below with the caller's text.
+		if key, ok := q.Graph.DisplayID(id); ok {
+			primaries[key] = true
+		}
 	}
 
 	groups := make([]query.ShowGroup, 0, len(resolved))
 	for _, id := range resolved {
-		if _, ok := q.Graph.ByID[id]; !ok {
+		tree := q.Graph.BuildShowTree(id, q.UpDepth, q.DownDepth, rendered, primaries)
+		if tree == nil {
 			return nil, fmt.Errorf("entry not found: %s", id)
 		}
 
-		tree := q.Graph.BuildShowTree(id, q.UpDepth, q.DownDepth, rendered, primaries)
-
 		groups = append(groups, query.ShowGroup{
 			Primary:              tree.Primary,
+			PrimaryID:            tree.PrimaryID,
 			PrimaryStatus:        tree.PrimaryStatus,
 			PrimarySupersedePath: tree.PrimarySupersedePath,
 			PrimaryTopics:        tree.PrimaryTopics,

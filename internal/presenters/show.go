@@ -55,7 +55,7 @@ func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		fmt.Fprintln(w, "# upstream")
 		fmt.Fprintln(w)
 		for _, item := range g.Upstream {
-			renderTreeItem(w, item, g.Primary.ID)
+			renderTreeItem(w, item, primaryDisplayID(g))
 		}
 	}
 
@@ -64,9 +64,19 @@ func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		fmt.Fprintln(w, "# downstream")
 		fmt.Fprintln(w)
 		for _, item := range g.Downstream {
-			renderTreeItem(w, item, g.Primary.ID)
+			renderTreeItem(w, item, primaryDisplayID(g))
 		}
 	}
+}
+
+// primaryDisplayID is the primary's display identity — the repo-prefixed
+// form for a cross-repo primary. Falls back to the bare entry ID for
+// callers that construct groups without setting PrimaryID.
+func primaryDisplayID(g query.ShowGroup) string {
+	if g.PrimaryID != "" {
+		return g.PrimaryID
+	}
+	return g.Primary.ID
 }
 
 // showEnvelope is the YAML frontmatter envelope for the primary entry. It
@@ -99,7 +109,7 @@ type showEnvelope struct {
 func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 	e := g.Primary
 	env := showEnvelope{
-		ID:           e.ID,
+		ID:           primaryDisplayID(g),
 		Type:         e.TypeLabel(),
 		Layer:        e.LayerLabel(),
 		Kind:         string(e.Kind),

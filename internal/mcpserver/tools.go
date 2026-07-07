@@ -929,12 +929,16 @@ func (s *Server) logRead(ms *mcp.ServerSession, tool string, full, summary []str
 func showReads(res *query.ShowResult) (full, summary []string) {
 	for _, g := range res.Groups {
 		if g.Primary != nil {
-			full = append(full, g.Primary.ID)
+			if g.PrimaryID != "" {
+				full = append(full, g.PrimaryID)
+			} else {
+				full = append(full, g.Primary.ID)
+			}
 		}
 		for _, items := range [][]model.ShowTreeItem{g.Upstream, g.Downstream} {
 			for _, item := range items {
 				if item.Entry != nil {
-					summary = append(summary, item.Entry.ID)
+					summary = append(summary, item.NodeID())
 				}
 			}
 		}

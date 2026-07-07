@@ -25,24 +25,20 @@ func expandRefs(g *model.Graph, entries []*model.Entry, inactiveOnly bool) [][]m
 		var rows []model.RefExpansion
 		for _, ref := range e.Refs {
 			var status model.Status
+			var supersedePath []string
 			var unresolvedRepo string
-			if repoID, _, isCross := model.SplitCrossRepoID(ref.ID); isCross {
-				// Cross-repo target: no cached remote graph is wired in, so
-				// the status stays unknown and the row carries the
-				// unresolved marker. Remote resolution plugs in here when
-				// the multi-graph source lands.
+			if target, owner, ok := g.ResolveAcross(ref.ID); ok {
+				// Status and supersede trail derive in the owning graph —
+				// for a cross-repo target that is the cached member graph,
+				// with trail IDs qualified for display.
+				status, supersedePath = owner.QualifiedItemStatus(target)
+			} else if repoID, _, isCross := model.SplitCrossRepoID(ref.ID); isCross {
+				// Cross-repo target whose repo is not resolvable: status
+				// stays unknown and the row carries the unresolved marker.
 				unresolvedRepo = repoID
-			} else if target := g.ByID[ref.ID]; target != nil {
-				status = g.DerivedStatus(target)
 			}
 			if inactiveOnly && !isInactiveStatus(status.Kind) {
 				continue
-			}
-			// For a superseded target, carry the trail to the live head so
-			// the presenter can render the supersede path; nil otherwise.
-			var supersedePath []string
-			if status.Kind == model.StatusSupersededBy {
-				supersedePath = g.ResolveRef(ref.ID).Path()
 			}
 			rows = append(rows, model.RefExpansion{
 				Kind:           ref.Kind,

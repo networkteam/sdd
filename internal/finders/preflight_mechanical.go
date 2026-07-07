@@ -58,7 +58,7 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph) []query.Finding
 	findings = append(findings, refKindFindings(entry)...)
 	findings = append(findings, refKindApplicabilityFindings(entry, graph)...)
 	findings = append(findings, supersedeForkFindings(entry, graph)...)
-	findings = append(findings, crossRepoResolutionFindings(entry, nil)...)
+	findings = append(findings, crossRepoResolutionFindings(entry, graphCrossRepoResolver(graph))...)
 
 	if entry.IsActor() {
 		findings = append(findings, actorWriteOnceFindings(entry, graph)...)
@@ -111,11 +111,14 @@ func refKindFindings(entry *model.Entry) []query.Finding {
 func refKindApplicabilityFindings(entry *model.Entry, graph *model.Graph) []query.Finding {
 	var findings []query.Finding
 	for i, r := range entry.Refs {
-		target, ok := graph.ByID[r.ID]
+		// Cross-repo targets resolve through the cached member graph, whose
+		// derivation classifies them; unresolvable targets are skipped
+		// (owned by ref resolution / resolve-or-block).
+		target, owner, ok := graph.ResolveAcross(r.ID)
 		if !ok {
 			continue
 		}
-		status := graph.DerivedStatus(target)
+		status := owner.DerivedStatus(target)
 		class := model.ClassifyRefTarget(target, status)
 		cell, ok := model.RefKindApplicability(r.Kind, class)
 		if !ok || cell.Applicable {
@@ -154,9 +157,26 @@ const (
 )
 
 // crossRepoRefResolver resolves a cross-repo target against the cached
-// remote graph, auto-fetching on cache miss. Wired by the finder when the
-// connected-repos machinery is available; nil means no repo is resolvable.
+// remote graph. nil means no repo is resolvable.
 type crossRepoRefResolver func(repoID, entryID string) crossRepoRefResolution
+
+// graphCrossRepoResolver resolves through the graph's cross-graph assembly
+// (the MultiGraph the GraphSource attached): member graphs load lazily from
+// the connected-repos caches. Fetch-on-miss is the write handler's job —
+// it refreshes caches for referenced repos before pre-flight runs, so this
+// resolver reads the live cache state.
+func graphCrossRepoResolver(graph *model.Graph) crossRepoRefResolver {
+	return func(repoID, entryID string) crossRepoRefResolution {
+		member, err := graph.MemberGraph(repoID)
+		if err != nil || member == nil {
+			return crossRepoRepoUnavailable
+		}
+		if _, ok := member.ByID[entryID]; !ok {
+			return crossRepoEntryMissing
+		}
+		return crossRepoEntryResolved
+	}
+}
 
 // crossRepoResolutionFindings enforces resolve-or-block (d-cpt-uh0) for
 // cross-repo refs: a backward-class ref must resolve in the target repo's
