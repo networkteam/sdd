@@ -1,0 +1,22 @@
+---
+id: 20260410-100200-d-tac-ccc
+type: decision
+kind: directive
+layer: tactical
+refs:
+    - id: github.com/networkteam/other:20260401-090000-d-cpt-rem
+      kind: grounded-in
+      desc: remote basis
+status: active
+time: "2026-04-10 10:02:00"
+---
+
+# body
+
+Decision grounded in a remote entry
+
+# upstream
+
+- grounded-in github.com/networkteam/other:20260401-090000-d-cpt-rem [unresolved: repo github.com/networkteam/other]
+  ↳ remote basis
+

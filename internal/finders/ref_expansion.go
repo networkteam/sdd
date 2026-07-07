@@ -25,7 +25,14 @@ func expandRefs(g *model.Graph, entries []*model.Entry, inactiveOnly bool) [][]m
 		var rows []model.RefExpansion
 		for _, ref := range e.Refs {
 			var status model.Status
-			if target := g.ByID[ref.ID]; target != nil {
+			var unresolvedRepo string
+			if repoID, _, isCross := model.SplitCrossRepoID(ref.ID); isCross {
+				// Cross-repo target: no cached remote graph is wired in, so
+				// the status stays unknown and the row carries the
+				// unresolved marker. Remote resolution plugs in here when
+				// the multi-graph source lands.
+				unresolvedRepo = repoID
+			} else if target := g.ByID[ref.ID]; target != nil {
 				status = g.DerivedStatus(target)
 			}
 			if inactiveOnly && !isInactiveStatus(status.Kind) {
@@ -38,11 +45,12 @@ func expandRefs(g *model.Graph, entries []*model.Entry, inactiveOnly bool) [][]m
 				supersedePath = g.ResolveRef(ref.ID).Path()
 			}
 			rows = append(rows, model.RefExpansion{
-				Kind:          ref.Kind,
-				ID:            ref.ID,
-				Status:        status,
-				Desc:          ref.Desc,
-				SupersedePath: supersedePath,
+				Kind:           ref.Kind,
+				ID:             ref.ID,
+				Status:         status,
+				Desc:           ref.Desc,
+				SupersedePath:  supersedePath,
+				UnresolvedRepo: unresolvedRepo,
 			})
 		}
 		out[i] = rows

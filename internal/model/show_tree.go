@@ -5,7 +5,13 @@ import "sort"
 // ShowTreeItem represents an entry at a specific depth in a show tree.
 // Depth 0 is the primary entry. Depth 1+ entries are summary-only.
 type ShowTreeItem struct {
-	Entry         *Entry
+	Entry *Entry
+	// CrossRepoID is the verbatim <repo-id>:<entry-id> when this node points
+	// across the repo boundary. While the target's graph is not available
+	// locally, Entry stays nil and the node renders unresolved; a resolved
+	// remote node carries both — the remote Entry plus the prefixed ID the
+	// renderer displays.
+	CrossRepoID   string
 	Depth         int
 	Relations     []string       // e.g. ["refs"], ["refs", "closes"], ["refd-by"]
 	RefKind       RefKind        // kind of the refs edge linking parent to this entry (empty when no refs relation or no kind metadata)
@@ -16,6 +22,19 @@ type ShowTreeItem struct {
 	Truncated     []TruncatedRef // children hidden at depth boundary
 	Status        Status         // derived lifecycle status, computed at build so renderers stay pure
 	SupersedePath []string       // resolved origin→head trail when superseded; nil otherwise
+}
+
+// NodeID is the identifier a renderer displays and dedup keys on: the
+// prefixed cross-repo form when the node crosses the boundary, else the
+// entry's own ID.
+func (it ShowTreeItem) NodeID() string {
+	if it.CrossRepoID != "" {
+		return it.CrossRepoID
+	}
+	if it.Entry != nil {
+		return it.Entry.ID
+	}
+	return ""
 }
 
 // TruncatedRef describes a child entry hidden at the depth boundary.
@@ -88,7 +107,7 @@ func (g *Graph) BuildShowTree(id string, upDepth, downDepth int, rendered, prima
 func markRendered(items []ShowTreeItem, rendered map[string]bool) {
 	for i := range items {
 		if !items[i].ShownAbove && !items[i].ShownBelow {
-			rendered[items[i].Entry.ID] = true
+			rendered[items[i].NodeID()] = true
 		}
 	}
 }
@@ -223,6 +242,26 @@ func (g *Graph) itemStatus(e *Entry) (Status, []string) {
 // buildUpstream walks the upstream reference chain in DFS pre-order with
 // depth limit and summary-only rendering at depth > 0.
 func (g *Graph) buildUpstream(id string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
+	// A cross-repo edge is a leaf: the target lives in another graph. With
+	// no cached remote graph wired in, the node renders unresolved — remote
+	// resolution plugs in here when the multi-graph source lands.
+	if IsCrossRepoID(id) {
+		item := ShowTreeItem{
+			CrossRepoID: id,
+			Depth:       depth,
+			Relations:   relations,
+			RefKind:     refKind,
+			RefDesc:     refDesc,
+			SummaryOnly: depth > 0,
+		}
+		if rendered[id] || visited[id] {
+			item.ShownAbove = true
+			return []ShowTreeItem{item}
+		}
+		visited[id] = true
+		return []ShowTreeItem{item}
+	}
+
 	e, ok := g.ByID[id]
 	if !ok {
 		return nil

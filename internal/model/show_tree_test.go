@@ -54,6 +54,35 @@ func TestBuildShowTree_UpstreamChain(t *testing.T) {
 	}
 }
 
+func TestBuildShowTree_CrossRepoRefLeaf(t *testing.T) {
+	crossID := "github.com/networkteam/other:20260401-090000-d-cpt-rem"
+	primary := entry("20260410-100200-d-tac-ccc")
+	primary.Refs = []Ref{{ID: crossID, Kind: RefKindGroundedIn, Desc: "remote basis"}}
+
+	g := NewGraph([]*Entry{primary})
+	tree := g.BuildShowTree(primary.ID, 4, 4, make(map[string]bool), make(map[string]bool))
+
+	if len(tree.Upstream) != 1 {
+		t.Fatalf("Upstream = %d items, want 1", len(tree.Upstream))
+	}
+	item := tree.Upstream[0]
+	if item.Entry != nil {
+		t.Errorf("cross-repo leaf carries an Entry: %+v", item.Entry)
+	}
+	if item.CrossRepoID != crossID {
+		t.Errorf("CrossRepoID = %q, want %q", item.CrossRepoID, crossID)
+	}
+	if item.NodeID() != crossID {
+		t.Errorf("NodeID() = %q, want %q", item.NodeID(), crossID)
+	}
+	if item.RefKind != RefKindGroundedIn || item.RefDesc != "remote basis" {
+		t.Errorf("edge metadata lost: kind=%q desc=%q", item.RefKind, item.RefDesc)
+	}
+	if item.Depth != 1 || !item.SummaryOnly {
+		t.Errorf("leaf shape wrong: depth=%d summaryOnly=%v", item.Depth, item.SummaryOnly)
+	}
+}
+
 func TestBuildShowTree_MaxDepthTruncation(t *testing.T) {
 	root := entry("20260410-100000-s-stg-aaa", withSummary("Root"))
 	a := entry("20260410-100100-s-cpt-bbb", withSummary("A"), withRefs("20260410-100000-s-stg-aaa"))
