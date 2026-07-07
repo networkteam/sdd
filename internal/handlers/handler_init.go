@@ -78,14 +78,29 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	// changed. A repeat init that changes nothing yields no commit.
 	var touched []string
 
+	// Derive the canonical repo identity from the remote (ssh and https
+	// forms normalize equal). No remote or an underivable URL leaves the
+	// repo local-only — a legitimate state, not an error.
+	var derivedRepoID string
+	if cmd.RemoteURL != "" {
+		if id, err := model.DeriveRepoID(cmd.RemoteURL); err == nil {
+			derivedRepoID = id
+		} else {
+			log.Debug("remote URL derives no repo identity; staying local-only", "remote", cmd.RemoteURL, "err", err)
+		}
+	}
+
 	if !sddExisted {
 		if err := os.MkdirAll(sddDir, 0o755); err != nil {
 			return fmt.Errorf("creating %s: %w", sddDir, err)
 		}
-		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.Config{GraphDir: graphDir, Language: cmd.Language, SkillScope: effectiveScope, SupportedAgents: effectiveAgents})), 0o644); err != nil {
+		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.Config{GraphDir: graphDir, RepoID: derivedRepoID, Language: cmd.Language, SkillScope: effectiveScope, SupportedAgents: effectiveAgents})), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", configPath, err)
 		}
 		touched = append(touched, configPath)
+		if derivedRepoID != "" && cmd.OnRepoIDWritten != nil {
+			cmd.OnRepoIDWritten(derivedRepoID)
+		}
 
 		if err := os.MkdirAll(absGraphDir, 0o755); err != nil {
 			return fmt.Errorf("creating graph dir %s: %w", absGraphDir, err)
@@ -117,6 +132,35 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 		if err := os.MkdirAll(absGraphDir, 0o755); err != nil {
 			return fmt.Errorf("creating graph dir %s: %w", absGraphDir, err)
+		}
+
+		// Upgrade case: record the derived repo_id when the existing config
+		// predates the field. An already-recorded value is never touched —
+		// the committed identity is shared by every user of the repo.
+		if derivedRepoID != "" {
+			existing, readErr := os.ReadFile(configPath)
+			if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+				return fmt.Errorf("reading %s: %w", configPath, readErr)
+			}
+			recorded, err := model.ParseConfig(existing)
+			if err != nil {
+				return fmt.Errorf("parsing %s: %w", configPath, err)
+			}
+			if recorded.RepoID == "" {
+				updated, err := model.SetYAMLField(existing, "repo_id", derivedRepoID)
+				if err != nil {
+					return fmt.Errorf("updating %s: %w", configPath, err)
+				}
+				if !bytes.Equal(existing, updated) {
+					if err := os.WriteFile(configPath, updated, 0o644); err != nil {
+						return fmt.Errorf("writing %s: %w", configPath, err)
+					}
+					touched = append(touched, configPath)
+					if cmd.OnRepoIDWritten != nil {
+						cmd.OnRepoIDWritten(derivedRepoID)
+					}
+				}
+			}
 		}
 
 		// Upgrade case: an existing config.yaml predates the skill_scope

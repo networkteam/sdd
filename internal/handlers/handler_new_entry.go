@@ -70,11 +70,20 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		return err
 	}
 
+	// Cross-repo refs resolve against the live caches: refresh the
+	// referenced repos before the graph loads (lazy clone + cooldown pull),
+	// then force-fetch once for any backward-class target still missing —
+	// so a just-pushed remote entry doesn't false-block resolve-or-block.
+	if err := h.freshenReferencedRepos(ctx, entry.Refs); err != nil {
+		return err
+	}
+
 	// Load graph and validate entry against it.
 	graph, err := h.reader.CurrentGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph for validation: %w", err)
 	}
+	graph = h.fetchOnMiss(ctx, graph, entry.Refs)
 
 	// Resolve short-form IDs in refs/closes/supersedes against the graph so
 	// validation and all downstream logic see full IDs.

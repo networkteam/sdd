@@ -288,6 +288,7 @@ func main() {
 			searchCmd(),
 			serveCmd(),
 			syncCmd(),
+			repoCmd(),
 			statsCmd(),
 		},
 	}
@@ -428,6 +429,12 @@ func showCmd() *cli.Command {
 			ids := cmd.Args().Slice()
 			if len(ids) == 0 {
 				return fmt.Errorf("usage: sdd show <id> [id2 id3 ...]")
+			}
+
+			// Cross-repo IDs read through the connected-repos caches — bring
+			// those up to date first (lazy clone + cooldown pull), then load.
+			if err := freshenRepoCaches(ctx, crossRepoIDsIn(ids)); err != nil {
+				return err
 			}
 
 			g, err := loadGraph(cmd)
@@ -1527,6 +1534,16 @@ func gitUserName() string {
 	return strings.TrimSpace(string(out))
 }
 
+// gitRemoteURL returns the repo's origin remote URL, or "" when no remote
+// is configured — the local-only case for repo_id derivation.
+func gitRemoteURL(repoRoot string) string {
+	out, err := exec.Command("git", "-C", repoRoot, "remote", "get-url", "origin").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // isTerminal returns true if f is attached to an interactive terminal. Uses
 // term.IsTerminal rather than os.FileMode checks because special devices
 // like /dev/null are character devices but not terminals — the distinction
@@ -1782,6 +1799,7 @@ func initCmd() *cli.Command {
 				Scope:         scope,
 				ScopeExplicit: scopeExplicit,
 				UserHome:      userHome,
+				RemoteURL:     gitRemoteURL(repoRoot),
 				Force:         cmd.Bool("force"),
 				Bump:          cmd.Bool("bump"),
 				OnMinimumVersionBumped: func(previous, current string) {
@@ -1815,6 +1833,9 @@ func initCmd() *cli.Command {
 				},
 				OnParticipantWritten: func(path, name string) {
 					fmt.Printf("  participant: %s → %s\n", name, path)
+				},
+				OnRepoIDWritten: func(repoID string) {
+					fmt.Printf("  repo_id: %s\n", repoID)
 				},
 				OnSkillsInstalled: func(result command.SkillInstallResult) {
 					// result.InstallDir reflects the scope the handler

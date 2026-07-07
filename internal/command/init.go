@@ -62,6 +62,14 @@ type InitCmd struct {
 	// when Scope = User.
 	UserHome string
 
+	// RemoteURL is the repo's git remote URL (typically origin), resolved
+	// by the caller. When it derives a canonical repo identity, init
+	// records `repo_id` in .sdd/config.yaml — on fresh init and as an
+	// upsert on configs that predate the field. Empty (no remote) or an
+	// underivable URL leaves the repo local-only; the value is never
+	// user-choosable.
+	RemoteURL string
+
 	// Force unconditionally overwrites user-modified skill files,
 	// bypassing PromptOverwrite entirely.
 	Force bool
@@ -113,6 +121,11 @@ type InitCmd struct {
 	// updated in .sdd/config.local.yaml. Does not fire when the existing
 	// value already matches (idempotent re-init produces no callback).
 	OnParticipantWritten func(path, name string)
+
+	// OnRepoIDWritten fires when a derived repo_id is recorded in
+	// .sdd/config.yaml — on fresh init or as an upgrade upsert. Does not
+	// fire when the config already carries a value.
+	OnRepoIDWritten func(repoID string)
 
 	// OnSkillsInstalled fires after the skill install pass completes,
 	// carrying a per-category summary suitable for presenter output.
