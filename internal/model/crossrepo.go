@@ -70,6 +70,50 @@ func isRepoIDChar(c rune) bool {
 	return false
 }
 
+// DeriveRepoID normalizes a git remote URL to the canonical URL-shaped repo
+// identity (host/path). ssh and https forms of the same remote derive equal:
+// scheme, user info, and a trailing .git are stripped, the scp-like ssh form
+// (git@host:org/repo) is folded into host/path, and the host lowercases
+// (path case is preserved). An empty or unrecognizable remote returns an
+// error — a repo without a derivable identity stays local-only.
+func DeriveRepoID(remoteURL string) (string, error) {
+	raw := strings.TrimSpace(remoteURL)
+	if raw == "" {
+		return "", fmt.Errorf("remote URL is empty")
+	}
+
+	// Strip scheme (https://, ssh://, git://).
+	if i := strings.Index(raw, "://"); i >= 0 {
+		raw = raw[i+3:]
+	} else if at := strings.Index(raw, "@"); at >= 0 && strings.Contains(raw[at:], ":") {
+		// scp-like ssh form: git@host:org/repo — fold the colon into a path
+		// separator after dropping the user.
+		raw = raw[at+1:]
+		raw = strings.Replace(raw, ":", "/", 1)
+	}
+	// Strip user info remaining after a scheme (ssh://git@host/...).
+	if at := strings.Index(raw, "@"); at >= 0 && at < strings.IndexByte(raw+"/", '/') {
+		raw = raw[at+1:]
+	}
+	raw = strings.TrimSuffix(raw, "/")
+	raw = strings.TrimSuffix(raw, ".git")
+
+	slash := strings.IndexByte(raw, '/')
+	if slash <= 0 || slash == len(raw)-1 {
+		return "", fmt.Errorf("remote URL %q has no host/path form", remoteURL)
+	}
+	host := strings.ToLower(raw[:slash])
+	// Drop an explicit port — identity is host-scoped, not endpoint-scoped.
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	id := host + raw[slash:]
+	if err := ValidateRepoID(id); err != nil {
+		return "", fmt.Errorf("remote URL %q does not derive a valid repo ID: %w", remoteURL, err)
+	}
+	return id, nil
+}
+
 // ValidateCrossRepoID syntactically validates both portions of a cross-repo
 // reference ID: the repo-id must be URL-shaped and the entry-id must parse
 // as a full entry ID. It does not resolve the target — resolution against

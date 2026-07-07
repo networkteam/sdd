@@ -57,6 +57,37 @@ func TestValidateRepoID(t *testing.T) {
 	}
 }
 
+func TestDeriveRepoID(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		// ssh and https forms of the same remote normalize equal.
+		{"git@github.com:networkteam/sdd.git", "github.com/networkteam/sdd"},
+		{"https://github.com/networkteam/sdd.git", "github.com/networkteam/sdd"},
+		{"https://github.com/networkteam/sdd", "github.com/networkteam/sdd"},
+		{"ssh://git@github.com/networkteam/sdd.git", "github.com/networkteam/sdd"},
+		{"HTTPS://GitHub.com/networkteam/sdd", "github.com/networkteam/sdd"},
+		{"ssh://git@gitlab.example.org:2222/group/sub/repo.git", "gitlab.example.org/group/sub/repo"},
+		{"https://github.com/networkteam/sdd/", "github.com/networkteam/sdd"},
+	}
+	for _, tt := range tests {
+		got, err := DeriveRepoID(tt.in)
+		if err != nil {
+			t.Errorf("DeriveRepoID(%q): unexpected error: %v", tt.in, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("DeriveRepoID(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+	for _, in := range []string{"", "not-a-url", "/local/path/only", "file:///local/repo"} {
+		if got, err := DeriveRepoID(in); err == nil {
+			t.Errorf("DeriveRepoID(%q) = %q, want error", in, got)
+		}
+	}
+}
+
 func TestValidateCrossRepoID(t *testing.T) {
 	if err := ValidateCrossRepoID("github.com/networkteam/other:20260601-120000-s-tac-abc"); err != nil {
 		t.Errorf("valid cross-repo ID rejected: %v", err)
