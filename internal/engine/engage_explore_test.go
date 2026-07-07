@@ -143,6 +143,25 @@ func newProcEnv(t *testing.T, canonical string) *procEnv {
 			return nil
 		},
 	})
+	// wipRemove removes an agent-identified marker by the report-supplied
+	// staleMarker (groom's orphaned-marker path); no wipStart ran, so it
+	// reads a state field rather than the engine-written wipMarker.
+	mustRegisterCommand(reg, Command{
+		Doc: FuncDoc{
+			Name:  "wipRemove",
+			Doc:   "fake removal of an agent-identified WIP marker",
+			Reads: []string{"staleMarker"},
+		},
+		Fn: func(ctx *Context) error {
+			marker, ok := ctx.Store.Get("staleMarker")
+			if !ok {
+				return errFakeNoMarker
+			}
+			id, _ := marker.(string)
+			env.wipMarkers = append(env.wipMarkers, "remove:"+id)
+			return nil
+		},
+	})
 
 	spec, err := LoadSpec(baseEntry(t, canonical), reg)
 	if err != nil {
