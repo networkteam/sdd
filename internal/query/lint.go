@@ -34,4 +34,18 @@ type LintResult struct {
 	// the lint output so the user can see what the index is being
 	// compared against.
 	IndexFingerprint string
+
+	// RepoIndexDrift lists connected repos whose cache index holds entries
+	// embedded under a fingerprint other than the shared (global) embedder.
+	// A drifted repo re-embeds on the next cross-graph search; lint
+	// surfaces it so the cost isn't a surprise. Populated by the CLI lint
+	// action alongside the local index fields.
+	RepoIndexDrift []RepoIndexDriftInfo
+}
+
+// RepoIndexDriftInfo names one connected repo's index drift.
+type RepoIndexDriftInfo struct {
+	RepoID     string
+	DriftCount int
+	EntryCount int
 }

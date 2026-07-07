@@ -16,6 +16,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 )
 
 // framingLayout renders the session framing injected once per consumer:
@@ -184,6 +185,8 @@ type SearchArgs struct {
 	IncludeSuperseded bool     `json:"include_superseded,omitempty"`
 	Limit             int      `json:"limit,omitempty" jsonschema:"hit cap; default 8"`
 	MaxCitations      *int     `json:"max_citations,omitempty" jsonschema:"citation snippet lines per entry; default 0 = headers only — depth comes from show, not snippets"`
+	Repos             []string `json:"repos,omitempty" jsonschema:"also search these connected repos by repo-id (additive to the local graph)"`
+	AllRepos          bool     `json:"all_repos,omitempty" jsonschema:"also search every connected repo"`
 }
 
 type SearchResult struct {
@@ -192,7 +195,9 @@ type SearchResult struct {
 }
 
 type ViewArgs struct {
-	Layout string `json:"layout" jsonschema:"sdd view layout pipeline, e.g. 'active:as-counts' or 'top(15)'"`
+	Layout   string   `json:"layout" jsonschema:"sdd view layout pipeline, e.g. 'active:as-counts' or 'top(15)'"`
+	Repos    []string `json:"repos,omitempty" jsonschema:"also render the layout over these connected repos' graphs (additive to the local graph)"`
+	AllRepos bool     `json:"all_repos,omitempty" jsonschema:"also render the layout over every connected repo"`
 }
 
 type ViewResult struct {
@@ -924,6 +929,20 @@ func (s *Server) logRead(ms *mcp.ServerSession, tool string, full, summary []str
 	}
 }
 
+// crossRepoIDsOf collects the distinct repo IDs named by cross-repo
+// (<repo-id>:<entry-id>) arguments.
+func crossRepoIDsOf(ids []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, id := range ids {
+		if repoID, _, ok := model.SplitCrossRepoID(id); ok && !seen[repoID] {
+			seen[repoID] = true
+			out = append(out, repoID)
+		}
+	}
+	return out
+}
+
 // showReads extracts the read-event ID sets from a show result: primaries
 // render their bodies (full depth), chain items render as summary bullets.
 func showReads(res *query.ShowResult) (full, summary []string) {
@@ -976,6 +995,8 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 		IncludeSuperseded:    args.IncludeSuperseded,
 		Limit:                limit,
 		MaxCitationsPerEntry: 0,
+		Repos:                args.Repos,
+		AllRepos:             args.AllRepos,
 	}
 	if args.MaxCitations != nil {
 		sq.MaxCitationsPerEntry = *args.MaxCitations
@@ -1005,7 +1026,7 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	var hits []string
 	for _, e := range res.Entries {
 		if e.Entry != nil {
-			hits = append(hits, e.Entry.ID)
+			hits = append(hits, e.DisplayID())
 		}
 	}
 	s.logRead(req.Session, "search", nil, hits)
@@ -1022,6 +1043,15 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if strings.TrimSpace(args.Layout) == "" {
 		return nil, ViewResult{}, toolError("layout is required")
 	}
+	repoIDs, err := repos.SelectRepoIDs(args.Repos, args.AllRepos)
+	if err != nil {
+		return nil, ViewResult{}, toolError("%v", err)
+	}
+	if len(repoIDs) > 0 {
+		if _, err := s.handler.EnsureReposFresh(ctx, repoIDs); err != nil {
+			return nil, ViewResult{}, toolError("refreshing repo caches: %v", err)
+		}
+	}
 	graph, err := s.finder.CurrentGraph(s.graphDir)
 	if err != nil {
 		return nil, ViewResult{}, toolError("loading graph: %v", err)
@@ -1030,12 +1060,40 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if err != nil {
 		return nil, ViewResult{}, err
 	}
-	return nil, ViewResult{Sections: out, Hint: s.readHint(req.Session)}, nil
+	// Selected repos render the same layout over their own graphs, each
+	// under a repo heading — entry IDs inside a repo section are scoped by
+	// that heading.
+	var sb strings.Builder
+	sb.WriteString(out)
+	for _, repoID := range repoIDs {
+		member, err := graph.MemberGraph(repoID)
+		if err != nil {
+			return nil, ViewResult{}, toolError("loading graph for %s: %v", repoID, err)
+		}
+		if member == nil {
+			sb.WriteString("\n── repo: " + repoID + " (unavailable) ──\n")
+			continue
+		}
+		mout, err := s.renderView(member, args.Layout)
+		if err != nil {
+			return nil, ViewResult{}, err
+		}
+		sb.WriteString("\n── repo: " + repoID + " ──\n")
+		sb.WriteString(mout)
+	}
+	return nil, ViewResult{Sections: sb.String(), Hint: s.readHint(req.Session)}, nil
 }
 
 func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
+	}
+	// Cross-repo IDs read through the connected-repos caches — freshen the
+	// named repos first (lazy clone + cooldown pull).
+	if repoIDs := crossRepoIDsOf(args.IDs); len(repoIDs) > 0 {
+		if _, err := s.handler.EnsureReposFresh(ctx, repoIDs); err != nil {
+			return nil, ShowResult{}, toolError("refreshing repo caches: %v", err)
+		}
 	}
 	graph, err := s.finder.CurrentGraph(s.graphDir)
 	if err != nil {

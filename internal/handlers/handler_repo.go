@@ -7,7 +7,10 @@ import (
 	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/command"
+	"github.com/networkteam/sdd/internal/index"
+	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
 )
 
@@ -210,6 +213,57 @@ func referencedRepoIDs(refs []model.Ref) []string {
 		}
 	}
 	return out
+}
+
+// PrepareCrossRepoSearch runs the side-effect half of a cross-graph
+// search, mirroring how the local lazy-fill precedes the search finder:
+// resolve the query's repo selection, bring those caches up to date, and —
+// when vector mode is in play — lazy-fill each repo's index with the
+// shared embedder, excluding embedded entries. Entries indexed under a
+// different fingerprint re-embed here rather than excluding the repo, so
+// one vector space holds across every selected index. The finder read
+// (finders.MultiSearch) then runs pure.
+func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuery, embedder llm.Embedder) error {
+	repoIDs, err := repos.SelectRepoIDs(q.Repos, q.AllRepos)
+	if err != nil || len(repoIDs) == 0 {
+		return err
+	}
+	if _, err := h.EnsureReposFresh(ctx, repoIDs); err != nil {
+		return err
+	}
+	if q.Phrase == "" || embedder == nil {
+		return nil
+	}
+	for _, repoID := range repoIDs {
+		cacheDir, err := repos.CacheDir(repoID)
+		if err != nil {
+			return err
+		}
+		if !repos.IsCloned(cacheDir) {
+			continue // unconnected or clone failed — the finder reports the skip
+		}
+		graphDir, err := repos.GraphDir(cacheDir)
+		if err != nil {
+			return err
+		}
+		idxDir := repos.IndexDir(cacheDir)
+		store, err := index.Open(idxDir)
+		if err != nil {
+			return fmt.Errorf("opening index for %s: %w", repoID, err)
+		}
+		ih := NewIndexHandler(IndexHandlerOptions{
+			GraphDir:        graphDir,
+			IndexDir:        idxDir,
+			Embedder:        embedder,
+			IndexStore:      store,
+			Reader:          h.reader,
+			ExcludeEmbedded: true,
+		})
+		if err := ih.LazyFill(ctx, &command.LazyFillIndexCmd{}); err != nil {
+			return fmt.Errorf("indexing %s: %w", repoID, err)
+		}
+	}
+	return nil
 }
 
 // EnsureReposFresh brings the caches of the given connected repos up to

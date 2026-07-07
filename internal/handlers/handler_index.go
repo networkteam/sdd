@@ -42,6 +42,11 @@ type IndexHandler struct {
 	reader     Reader
 	now        func() time.Time
 	stderr     io.Writer
+	// excludeEmbedded skips binary-scoped entries when indexing. Set for
+	// connected-repo cache indexes: embedded entries are identical in every
+	// member graph, so the local index alone covers them and cross-graph
+	// search surfaces exactly one copy.
+	excludeEmbedded bool
 }
 
 // IndexHandlerOptions configures NewIndexHandler. Required fields are
@@ -57,19 +62,23 @@ type IndexHandlerOptions struct {
 	Reader     Reader
 	Now        func() time.Time
 	Stderr     io.Writer
+	// ExcludeEmbedded skips binary-scoped entries — set for connected-repo
+	// cache indexes so embedded entries index only locally.
+	ExcludeEmbedded bool
 }
 
 // NewIndexHandler constructs an IndexHandler with the given dependencies.
 func NewIndexHandler(opts IndexHandlerOptions) *IndexHandler {
 	h := &IndexHandler{
-		graphDir:   opts.GraphDir,
-		indexDir:   opts.IndexDir,
-		embedder:   opts.Embedder,
-		splitter:   opts.Splitter,
-		indexStore: opts.IndexStore,
-		reader:     opts.Reader,
-		now:        opts.Now,
-		stderr:     opts.Stderr,
+		graphDir:        opts.GraphDir,
+		indexDir:        opts.IndexDir,
+		embedder:        opts.Embedder,
+		splitter:        opts.Splitter,
+		indexStore:      opts.IndexStore,
+		reader:          opts.Reader,
+		now:             opts.Now,
+		stderr:          opts.Stderr,
+		excludeEmbedded: opts.ExcludeEmbedded,
 	}
 	if h.splitter == nil {
 		h.splitter = textsplitter.NewSplitter()
@@ -152,6 +161,9 @@ func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 	)
 
 	for _, e := range g.Entries {
+		if h.excludeEmbedded && e.Embedded {
+			continue
+		}
 		hash, err := h.entryStateHash(e)
 		if err != nil {
 			logger.Warn("hash failure, skipping entry", "entry", e.ID, "err", err)

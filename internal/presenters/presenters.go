@@ -33,13 +33,20 @@ import (
 // is empty. Score is per-rendering, computed by a rank algorithm; emitted
 // only via EntryLineWithScore (slice 3 — d-tac-uww).
 func EntryLine(w io.Writer, e *model.Entry, g *model.Graph) {
-	entryLineCore(w, e, g, math.NaN())
+	entryLineCore(w, e, g, math.NaN(), "")
 }
 
 // EntryLineWithScore is EntryLine plus a `{score: X.XXX}` segment after
 // status. Used by the as-list renderer when the section was ranked.
 func EntryLineWithScore(w io.Writer, e *model.Entry, g *model.Graph, score float64) {
-	entryLineCore(w, e, g, score)
+	entryLineCore(w, e, g, score, "")
+}
+
+// EntryLineDisplay is EntryLine with an explicit display identity — used
+// for cross-graph hits, whose IDs render repo-prefixed and whose status
+// derives in the owning member graph passed as g.
+func EntryLineDisplay(w io.Writer, e *model.Entry, g *model.Graph, displayID string) {
+	entryLineCore(w, e, g, math.NaN(), displayID)
 }
 
 // EntryLineBrief writes the compact entry line the `brief` layout modifier
@@ -67,10 +74,13 @@ func EntryLineBrief(w io.Writer, e *model.Entry, g *model.Graph) {
 	fmt.Fprint(w, sb.String())
 }
 
-func entryLineCore(w io.Writer, e *model.Entry, g *model.Graph, score float64) {
+func entryLineCore(w io.Writer, e *model.Entry, g *model.Graph, score float64, displayID string) {
+	if displayID == "" {
+		displayID = e.ID
+	}
 	var sb strings.Builder
 	sb.WriteString("  ")
-	sb.WriteString(e.ID)
+	sb.WriteString(displayID)
 	sb.WriteString(" ")
 	sb.WriteString(e.LayerLabel())
 	if e.Kind != "" {

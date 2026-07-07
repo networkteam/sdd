@@ -7,6 +7,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 	"github.com/urfave/cli/v3"
 )
 
@@ -221,6 +222,14 @@ func viewCmd() *cli.Command {
 				Name:  "layout",
 				Usage: "Pipeline spec: section[:func]*[,section]*. Render terminates each section.",
 			},
+			&cli.StringSliceFlag{
+				Name:  "repo",
+				Usage: "Also render the layout over a connected repo's graph by repo-id (repeatable, additive to the local graph)",
+			},
+			&cli.BoolFlag{
+				Name:  "all-repos",
+				Usage: "Also render the layout over every connected repo",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Bare `sdd view` (no --layout): print help text. Distinct
@@ -250,6 +259,14 @@ func viewCmd() *cli.Command {
 				return err
 			}
 
+			repoIDs, err := repos.SelectRepoIDs(cmd.StringSlice("repo"), cmd.Bool("all-repos"))
+			if err != nil {
+				return err
+			}
+			if err := freshenRepoCaches(ctx, repoIDs); err != nil {
+				return err
+			}
+
 			dir, err := resolveGraphDir(cmd)
 			if err != nil {
 				return err
@@ -267,8 +284,35 @@ func viewCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-
 			presenters.RenderView(os.Stdout, result)
+
+			// Selected repos render the same layout over their own graphs,
+			// each under a repo heading — entry IDs inside a repo section
+			// are scoped by that heading.
+			for _, repoID := range repoIDs {
+				member, err := g.MemberGraph(repoID)
+				if err != nil {
+					return fmt.Errorf("loading graph for %s: %w", repoID, err)
+				}
+				if member == nil {
+					fmt.Fprintf(os.Stdout, "\n── repo: %s (unavailable) ──\n", repoID)
+					continue
+				}
+				cacheDir, err := repos.CacheDir(repoID)
+				if err != nil {
+					return err
+				}
+				memberDir, err := repos.GraphDir(cacheDir)
+				if err != nil {
+					return err
+				}
+				mresult, err := f.View(query.ViewQuery{Graph: member, Layout: layout, GraphDir: memberDir})
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stdout, "\n── repo: %s ──\n", repoID)
+				presenters.RenderView(os.Stdout, mresult)
+			}
 			return nil
 		},
 	}

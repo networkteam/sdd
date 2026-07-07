@@ -143,3 +143,30 @@ func (c *GlobalConfig) RemoveRepo(repoID string) bool {
 	}
 	return false
 }
+
+// SelectRepoIDs resolves a caller's repo selection against the connected
+// set: all=true means every connected repo; an explicitly named repo that
+// is not connected is an error — silent narrowing would misreport
+// coverage. An empty selection resolves to nil.
+func SelectRepoIDs(named []string, all bool) ([]string, error) {
+	if !all && len(named) == 0 {
+		return nil, nil
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	if all {
+		ids := make([]string, 0, len(cfg.Repos))
+		for _, r := range cfg.Repos {
+			ids = append(ids, r.RepoID)
+		}
+		return ids, nil
+	}
+	for _, id := range named {
+		if _, ok := cfg.Connected(id); !ok {
+			return nil, fmt.Errorf("repo %q is not connected — add it with `sdd repo add <clone-url>`", id)
+		}
+	}
+	return named, nil
+}

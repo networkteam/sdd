@@ -21,6 +21,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 )
 
 // resolveEmbeddingConfig builds the effective EmbeddingConfig by merging
@@ -118,6 +119,42 @@ func populateIndexLint(cmd *cli.Command, result *query.LintResult) {
 	result.IndexFingerprint = emb.Fingerprint()
 	result.IndexEntryCount = len(manifest.Entries)
 	result.IndexDriftCount = manifest.MismatchCount(emb.Fingerprint())
+
+	populateRepoIndexLint(result)
+}
+
+// populateRepoIndexLint reports connected repos whose cache index was
+// built under a fingerprint other than the shared (global) embedder — a
+// drifted repo re-embeds on the next cross-graph search, and lint makes
+// that pending cost visible. Degrades silently like the local index
+// section: lint never blocks on cross-repo machinery being absent.
+func populateRepoIndexLint(result *query.LintResult) {
+	gcfg, err := repos.LoadConfig()
+	if err != nil || len(gcfg.Repos) == 0 || gcfg.Embedding.Provider == "" {
+		return
+	}
+	emb, err := embed.New(gcfg.Embedding)
+	if err != nil {
+		return
+	}
+	fingerprint := emb.Fingerprint()
+	for _, r := range gcfg.Repos {
+		cacheDir, err := repos.CacheDir(r.RepoID)
+		if err != nil || !repos.IsCloned(cacheDir) {
+			continue
+		}
+		manifest, err := index.LoadManifest(repos.IndexDir(cacheDir))
+		if err != nil || len(manifest.Entries) == 0 {
+			continue
+		}
+		if drift := manifest.MismatchCount(fingerprint); drift > 0 {
+			result.RepoIndexDrift = append(result.RepoIndexDrift, query.RepoIndexDriftInfo{
+				RepoID:     r.RepoID,
+				DriftCount: drift,
+				EntryCount: len(manifest.Entries),
+			})
+		}
+	}
 }
 
 // indexDir returns the index directory rooted at the discovered .sdd dir.
@@ -128,6 +165,19 @@ func indexDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(sddDir, "index"), nil
+}
+
+// crossRepoEmbedder builds the embedder for a cross-repo search: the
+// user-global embedding config defines the one vector space every selected
+// index shares, so it wins over the project-local block; with no global
+// embedding configured, the local resolution applies (and member indexes
+// build under that fingerprint instead).
+func crossRepoEmbedder(cmd *cli.Command) (llm.Embedder, error) {
+	gcfg, err := repos.LoadConfig()
+	if err == nil && gcfg.Embedding.Provider != "" {
+		return embed.New(gcfg.Embedding)
+	}
+	return buildEmbedder(cmd)
 }
 
 // buildEmbedder constructs the configured embedder, or returns nil when
@@ -296,6 +346,14 @@ func searchCmd() *cli.Command {
 				Name:  "max-citations",
 				Usage: "Maximum citations per entry (default 3) — 0 for entry headers only (no snippets), 1 for one-line-per-entry, higher to surface multiple matching chunks",
 			},
+			&cli.StringSliceFlag{
+				Name:  "repo",
+				Usage: "Also search a connected repo by its repo-id (repeatable, additive to the local graph)",
+			},
+			&cli.BoolFlag{
+				Name:  "all-repos",
+				Usage: "Also search every connected repo",
+			},
 		),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			terms := cmd.StringSlice("term")
@@ -303,6 +361,9 @@ func searchCmd() *cli.Command {
 			if len(terms) == 0 && phrase == "" {
 				return fmt.Errorf("at least one of --term or --query is required")
 			}
+			repoSelection := cmd.StringSlice("repo")
+			allRepos := cmd.Bool("all-repos")
+			crossRepo := allRepos || len(repoSelection) > 0
 
 			g, err := loadGraph(cmd)
 			if err != nil {
@@ -323,7 +384,11 @@ func searchCmd() *cli.Command {
 			)
 			needsVector := phrase != ""
 			if needsVector {
-				emb, err = buildEmbedder(cmd)
+				if crossRepo {
+					emb, err = crossRepoEmbedder(cmd)
+				} else {
+					emb, err = buildEmbedder(cmd)
+				}
 				if err != nil {
 					return err
 				}
@@ -403,6 +468,8 @@ func searchCmd() *cli.Command {
 				IncludeSuperseded:    cmd.Bool("include-superseded"),
 				Limit:                int(cmd.Int("limit")),
 				MaxCitationsPerEntry: maxCitations,
+				Repos:                repoSelection,
+				AllRepos:             allRepos,
 			}
 
 			// Lazy-fill (when vector search needs a warm index) then query.
@@ -427,6 +494,20 @@ func searchCmd() *cli.Command {
 					if err := ih.LazyFill(ctx, lazy); err != nil {
 						return nil, err
 					}
+				}
+				if crossRepo {
+					// Side effects first (cache freshen + member index fill,
+					// the cross-repo analog of the local lazy-fill above),
+					// then the pure cross-graph read.
+					reader, err := newReadFinder()
+					if err != nil {
+						return nil, err
+					}
+					h := handlers.New(handlers.Options{Reader: reader})
+					if err := h.PrepareCrossRepoSearch(ctx, sq, emb); err != nil {
+						return nil, err
+					}
+					return finders.MultiSearch(ctx, finder, sq)
 				}
 				return finder.Search(ctx, sq)
 			}
