@@ -150,7 +150,7 @@ func newFixtureEnv(t *testing.T) *fixtureEnv {
 		t.Fatal(err)
 	}
 
-	env.engine = New(reg, fixtureGraph(t))
+	env.engine = New(reg, StaticGraphs{Graph: fixtureGraph(t)})
 	env.spec = spec
 	env.sink = &memorySink{}
 	ts := time.Date(2026, 7, 2, 23, 0, 0, 0, time.UTC)

@@ -19,7 +19,7 @@ func (h *Handler) StartWIP(ctx context.Context, cmd *command.StartWIPCmd) error 
 		return fmt.Errorf("invalid command: %w", err)
 	}
 
-	g, err := h.reader.LoadGraph(h.graphDir)
+	g, err := h.reader.CurrentGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph: %w", err)
 	}

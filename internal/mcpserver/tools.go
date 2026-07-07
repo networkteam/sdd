@@ -402,12 +402,8 @@ func (s *Server) newShellSession() (*shellSession, error) {
 		ss.close()
 		return nil, err
 	}
-	graph, err := s.finder.LoadGraph(s.graphDir)
-	if err != nil {
-		ss.close()
-		return nil, fmt.Errorf("loading graph: %v", err)
-	}
-	ss.engine = engine.New(registry, graph)
+	ss.graphs = s.finder.NewGraphSource(s.graphDir)
+	ss.engine = engine.New(registry, ss.graphs)
 	ss.sess = ss.engine.NewSession(id, participant, engine.NewWriterSink(logFile))
 	return ss, nil
 }
@@ -476,9 +472,11 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 		return nil, ServeResult{}, err
 	}
 	ss.touch(time.Now())
-	if err := s.refreshGraph(ss); err != nil {
-		return nil, ServeResult{}, err
-	}
+	// Drop the memo so this advance loads fresh — it picks up writes from other
+	// connections or the CLI since the last advance. Cheap and idempotent;
+	// unlike the old refresh, forgetting it can only stale orientation, never
+	// gate a write on a stale snapshot (the write path re-invalidates itself).
+	ss.graphs.Invalidate()
 
 	spec, err := s.loadProcedure(ss, args.Canonical)
 	if err != nil {
@@ -538,9 +536,9 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 		return nil, ServeResult{}, toolError("report is required: state fields per the served report_schema, or a chooser answer {chooser, choice, userWords?, fields?}")
 	}
 	ss.touch(time.Now())
-	if err := s.refreshGraph(ss); err != nil {
-		return nil, ServeResult{}, err
-	}
+	// Fresh load for this advance; see startProcedure for why this is safe as a
+	// plain memo-drop rather than the old hand-maintained refresh.
+	ss.graphs.Invalidate()
 	if err := applyLabel(ss, args.Label); err != nil {
 		return nil, ServeResult{}, err
 	}
@@ -796,11 +794,8 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 	if err != nil {
 		return nil, ResumeSessionResult{}, err
 	}
-	graph, err := s.finder.LoadGraph(s.graphDir)
-	if err != nil {
-		return nil, ResumeSessionResult{}, fmt.Errorf("loading graph: %v", err)
-	}
-	ss.engine = engine.New(registry, graph)
+	ss.graphs = s.finder.NewGraphSource(s.graphDir)
+	ss.engine = engine.New(registry, ss.graphs)
 
 	resolve := func(canonical string) (*engine.Spec, error) {
 		return s.loadProcedure(ss, canonical)
@@ -957,7 +952,7 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	if s.searcher == nil {
 		return nil, SearchResult{}, toolError("search is not configured on this server")
 	}
-	graph, err := s.finder.LoadGraph(s.graphDir)
+	graph, err := s.finder.CurrentGraph(s.graphDir)
 	if err != nil {
 		return nil, SearchResult{}, toolError("loading graph: %v", err)
 	}
@@ -1023,7 +1018,7 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if strings.TrimSpace(args.Layout) == "" {
 		return nil, ViewResult{}, toolError("layout is required")
 	}
-	graph, err := s.finder.LoadGraph(s.graphDir)
+	graph, err := s.finder.CurrentGraph(s.graphDir)
 	if err != nil {
 		return nil, ViewResult{}, toolError("loading graph: %v", err)
 	}
@@ -1038,7 +1033,7 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
 	}
-	graph, err := s.finder.LoadGraph(s.graphDir)
+	graph, err := s.finder.CurrentGraph(s.graphDir)
 	if err != nil {
 		return nil, ShowResult{}, toolError("loading graph: %v", err)
 	}
@@ -1063,7 +1058,7 @@ func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, a
 	if args.ID == "" {
 		return nil, ReadAttachmentResult{}, toolError("id is required")
 	}
-	graph, err := s.finder.LoadGraph(s.graphDir)
+	graph, err := s.finder.CurrentGraph(s.graphDir)
 	if err != nil {
 		return nil, ReadAttachmentResult{}, toolError("loading graph: %v", err)
 	}
@@ -1210,14 +1205,17 @@ func (s *Server) framingBlock(ms *mcp.ServerSession, ss *shellSession) string {
 }
 
 // renderFraming renders the session framing, cached per graph value — the
-// graph reloads on every advance call, so the cache mainly spares re-renders
-// within one response (a resume rehydrating several serves).
+// source memoizes within one advance, so the cache mainly spares re-renders
+// within one response (a resume rehydrating several serves). The pointer key
+// still invalidates correctly: a reload after Invalidate hands back a new graph
+// pointer, missing the cache and re-rendering.
 func (s *Server) renderFraming(ss *shellSession) string {
-	if ss.engine != nil && ss.framingGraph == ss.engine.Graph && ss.framingText != "" {
+	graph, err := ss.graphs.Current()
+	if err == nil && ss.framingGraph == graph && ss.framingText != "" {
 		return ss.framingText
 	}
 	var sb strings.Builder
-	if info, err := s.finder.Info(query.InfoQuery{}); err == nil {
+	if info, ierr := s.finder.Info(query.InfoQuery{}); ierr == nil {
 		fmt.Fprintf(&sb, "Local participant: %s\n", info.LocalParticipant)
 		if info.Language != "" {
 			fmt.Fprintf(&sb, "Language: %s\n", info.Language)
@@ -1225,12 +1223,18 @@ func (s *Server) renderFraming(ss *shellSession) string {
 		fmt.Fprintf(&sb, "Search: %s\n\n", info.Search)
 	}
 	text := sb.String()
+	if err != nil {
+		// The graph is unavailable — degrade to the info header and don't cache,
+		// so a later successful load re-renders. In practice a load failure has
+		// already surfaced on the advance that produced this serve.
+		return text
+	}
 	// A failed view render degrades to the info header — framing is
 	// orientation, not a gate.
-	if framing, err := s.renderView(ss.engine.Graph, framingLayout); err == nil {
+	if framing, verr := s.renderView(graph, framingLayout); verr == nil {
 		text += framing
 	}
-	ss.framingGraph = ss.engine.Graph
+	ss.framingGraph = graph
 	ss.framingText = text
 	return text
 }
@@ -1239,10 +1243,14 @@ func (s *Server) renderFraming(ss *shellSession) string {
 // spec against the session's registry. The not-found error lists move
 // canonicals only — shells enter through the door, not this path.
 func (s *Server) loadProcedure(ss *shellSession, canonical string) (*engine.Spec, error) {
-	entry := ss.engine.Graph.ResolveProcedure(canonical)
+	graph, err := ss.graphs.Current()
+	if err != nil {
+		return nil, fmt.Errorf("loading graph: %w", err)
+	}
+	entry := graph.ResolveProcedure(canonical)
 	if entry == nil {
 		available := make([]string, 0)
-		for _, chain := range ss.engine.Graph.ProcedureChains() {
+		for _, chain := range graph.ProcedureChains() {
 			if chain.Head != nil && chain.Head.Canonical != "" && !chain.Head.IsShellProcedure() && !chain.Head.IsTaskProcedure() {
 				available = append(available, chain.Head.Canonical)
 			}

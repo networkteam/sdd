@@ -307,7 +307,7 @@ func loadGraph(cmd *cli.Command) (*model.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	return f.LoadGraph(dir)
+	return f.CurrentGraph(dir)
 }
 
 func infoCmd() *cli.Command {

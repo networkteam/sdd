@@ -117,7 +117,10 @@ type Serve struct {
 // evalGuard evaluates a guard against the registry, returning the verdict
 // and the failing predicates for diagnostics.
 func (s *Session) evalGuard(inst *Instance, g *GuardExpr) (bool, []FailedPredicate, error) {
-	ctx := s.funcContext(inst)
+	ctx, err := s.funcContext(inst)
+	if err != nil {
+		return false, nil, err
+	}
 	ok, err := g.Eval(func(name string) (bool, error) {
 		p, found := s.engine.Registry.Predicate(name)
 		if !found {
@@ -157,9 +160,15 @@ func (s *Session) evalGuard(inst *Instance, g *GuardExpr) (bool, []FailedPredica
 }
 
 // funcContext builds the Context registry functions run against at the
-// instance's current position.
-func (s *Session) funcContext(inst *Instance) *Context {
-	return &Context{Store: inst.Store, Graph: s.engine.Graph, Step: inst.Step, Reads: s.reads}
+// instance's current position, resolving the current graph through the
+// engine's provider. Reading can fail (a disk load error surfaces here rather
+// than through a mutable field poked from outside); callers propagate it.
+func (s *Session) funcContext(inst *Instance) (*Context, error) {
+	graph, err := s.engine.Graphs.Current()
+	if err != nil {
+		return nil, fmt.Errorf("resolving current graph: %w", err)
+	}
+	return &Context{Store: inst.Store, Graph: graph, Step: inst.Step, Reads: s.reads}, nil
 }
 
 // cascade advances gate steps until something stops them — a failing
@@ -275,9 +284,12 @@ func (s *Session) runCommand(inst *Instance, name string) error {
 	if !ok {
 		return fmt.Errorf("instance %s: %q is not a registered command", inst.ID, name)
 	}
-	ctx := s.funcContext(inst)
+	ctx, err := s.funcContext(inst)
+	if err != nil {
+		return err
+	}
 	inst.Store.beginJournal()
-	err := cmd.Fn(ctx)
+	err = cmd.Fn(ctx)
 	writes := inst.Store.drainJournal()
 	if err != nil {
 		return fmt.Errorf("command %q at step %s: %w", name, inst.Step, err)
@@ -287,6 +299,13 @@ func (s *Session) runCommand(inst *Instance, name string) error {
 		"fn":     name,
 		"writes": writes,
 	})
+	// A command that mutates the graph invalidates the provider so later reads
+	// in the same advance — the fidelity review of a just-written entry — see
+	// the write. Freshness is driven by the command's own declaration, not a
+	// separate refresh call a new write command could forget.
+	if cmd.MutatesGraph {
+		s.engine.Graphs.Invalidate()
+	}
 	return nil
 }
 
@@ -506,20 +525,26 @@ func (s *Session) renderUnit(inst *Instance, step *Step) (string, error) {
 	}
 
 	tmplCtx := inst.Store.TemplateContext()
-	for _, inj := range step.Inject {
-		q, found := s.engine.Registry.Query(inj.Fn)
-		if !found {
-			return "", fmt.Errorf("step %s: inject fn %q is not a registered query", step.ID, inj.Fn)
-		}
-		args, err := s.renderInjectArgs(inst, inj.Args)
+	if len(step.Inject) > 0 {
+		fctx, err := s.funcContext(inst)
 		if err != nil {
-			return "", fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
+			return "", fmt.Errorf("step %s: %w", step.ID, err)
 		}
-		result, err := q.Fn(s.funcContext(inst), args)
-		if err != nil {
-			return "", fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
+		for _, inj := range step.Inject {
+			q, found := s.engine.Registry.Query(inj.Fn)
+			if !found {
+				return "", fmt.Errorf("step %s: inject fn %q is not a registered query", step.ID, inj.Fn)
+			}
+			args, err := s.renderInjectArgs(inst, inj.Args)
+			if err != nil {
+				return "", fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
+			}
+			result, err := q.Fn(fctx, args)
+			if err != nil {
+				return "", fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
+			}
+			tmplCtx[inj.Fn] = result
 		}
-		tmplCtx[inj.Fn] = result
 	}
 
 	tmpl, err := template.New(unitName).Option("missingkey=zero").Parse(unit)

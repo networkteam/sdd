@@ -79,6 +79,12 @@ type Query struct {
 type Command struct {
 	Doc FuncDoc
 	Fn  CommandFunc
+	// MutatesGraph declares that running this command changes the on-disk graph
+	// (a new entry, a rewritten summary). The engine invalidates the graph
+	// provider after such a command so later reads in the same advance reload
+	// and see the write — post-write freshness driven by the command's own
+	// declaration, replacing the shell's hand-maintained refresh calls.
+	MutatesGraph bool
 }
 
 // Registry is the closed set of Go functions a procedure spec may name. All

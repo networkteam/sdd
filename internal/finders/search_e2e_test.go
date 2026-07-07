@@ -168,7 +168,7 @@ func (s *e2eSetup) lazyFill(t *testing.T) {
 // s-tac-qtz for the full mechanism.
 func (s *e2eSetup) loadGraph(t *testing.T) *model.Graph {
 	t.Helper()
-	full, err := s.reader.LoadGraph(s.graphDir)
+	full, err := s.reader.CurrentGraph(s.graphDir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -130,7 +130,7 @@ func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 
 	logger := slogutils.FromContext(ctx)
 
-	g, err := h.reader.LoadGraph(h.graphDir)
+	g, err := h.reader.CurrentGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph: %w", err)
 	}

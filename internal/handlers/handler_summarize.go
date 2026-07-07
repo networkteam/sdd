@@ -28,7 +28,7 @@ import (
 // When cmd.ExplicitText is set, the LLM is bypassed entirely: the supplied
 // text is written as the summary on a single named entry.
 func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) error {
-	graph, err := h.reader.LoadGraph(h.graphDir)
+	graph, err := h.reader.CurrentGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph: %w", err)
 	}

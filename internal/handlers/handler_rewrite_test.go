@@ -20,7 +20,7 @@ type graphReader struct {
 	loadErr error
 }
 
-func (r *graphReader) LoadGraph(dir string) (*model.Graph, error) {
+func (r *graphReader) CurrentGraph(dir string) (*model.Graph, error) {
 	if r.loadErr != nil {
 		return nil, r.loadErr
 	}

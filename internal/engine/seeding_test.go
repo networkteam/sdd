@@ -94,7 +94,7 @@ func newSeedEnv(t *testing.T) *seedEnv {
 	if err != nil {
 		t.Fatalf("loading child spec: %v", err)
 	}
-	eng := New(reg, model.NewGraph([]*model.Entry{anchor}))
+	eng := New(reg, StaticGraphs{Graph: model.NewGraph([]*model.Entry{anchor})})
 	sink := &memorySink{}
 	ts := time.Date(2026, 7, 5, 1, 0, 0, 0, time.UTC)
 	sess := eng.NewSession("s_seed", "christopher", sink, WithClock(func() time.Time {

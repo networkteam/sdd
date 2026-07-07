@@ -217,7 +217,8 @@ func (s *Server) registerWriteCommands(r *engine.Registry, ss *shellSession) err
 			Reads:  []string{"body", "entryKind", "layer", "refs", "topics", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "preflightOverride"},
 			Writes: []string{"entryId", "findings"},
 		},
-		Fn: func(ctx *engine.Context) error { return s.runNewEntry(ctx, ss) },
+		MutatesGraph: true,
+		Fn:           func(ctx *engine.Context) error { return s.runNewEntry(ctx, ss) },
 	}); err != nil {
 		return err
 	}
@@ -228,6 +229,7 @@ func (s *Server) registerWriteCommands(r *engine.Registry, ss *shellSession) err
 			Doc:   "Writes the user-supplied corrected summary onto the entry named by entryId.",
 			Reads: []string{"entryId", "correctedSummary"},
 		},
+		MutatesGraph: true,
 		Fn: func(ctx *engine.Context) error {
 			id, ok := storeString(ctx.Store, "entryId")
 			if !ok {
@@ -237,13 +239,10 @@ func (s *Server) registerWriteCommands(r *engine.Registry, ss *shellSession) err
 			if !ok {
 				return fmt.Errorf("replaceSummary: correctedSummary is not set")
 			}
-			if err := s.handler.Summarize(context.Background(), &command.SummarizeCmd{
+			return s.handler.Summarize(context.Background(), &command.SummarizeCmd{
 				EntryIDs:     []string{id},
 				ExplicitText: &text,
-			}); err != nil {
-				return err
-			}
-			return s.refreshGraph(ss)
+			})
 		},
 	})
 }
@@ -426,7 +425,10 @@ func (s *Server) runNewEntry(ctx *engine.Context, ss *shellSession) error {
 	if ss.sess != nil {
 		ss.sess.LogRead("newEntry", []string{createdID}, nil)
 	}
-	return s.refreshGraph(ss)
+	// Graph freshness is not this command's concern: the engine invalidates the
+	// source after any MutatesGraph command, so the fidelity-review read below
+	// reloads and sees this entry.
+	return nil
 }
 
 // materializeAttachments resolves attachment handles from the session's
@@ -452,17 +454,6 @@ func (s *Server) materializeAttachments(store *engine.Store, ss *shellSession) (
 		attachments = append(attachments, command.Attachment{Source: source, Target: h})
 	}
 	return attachments, nil
-}
-
-// refreshGraph reloads the graph into the session's engine so later guard
-// evaluations and queries see the write.
-func (s *Server) refreshGraph(ss *shellSession) error {
-	graph, err := s.finder.LoadGraph(s.graphDir)
-	if err != nil {
-		return fmt.Errorf("reloading graph: %w", err)
-	}
-	ss.engine.Graph = graph
-	return nil
 }
 
 // resolveParticipant picks the acting participant: the store's first

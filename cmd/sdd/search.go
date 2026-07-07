@@ -189,7 +189,7 @@ func indexCmd() *cli.Command {
 			// progress total and decides whether to show a transient view at
 			// all — a fully warm index does no work, so skip the program and
 			// its alt-screen flash.
-			g, err := reader.LoadGraph(graphDir)
+			g, err := reader.CurrentGraph(graphDir)
 			if err != nil {
 				return err
 			}

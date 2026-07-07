@@ -258,7 +258,7 @@ func viewCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			g, err := f.LoadGraph(dir)
+			g, err := f.CurrentGraph(dir)
 			if err != nil {
 				return err
 			}

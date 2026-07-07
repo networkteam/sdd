@@ -13,7 +13,7 @@ import (
 // LintFix applies mechanical fixes to graph entries: loads the graph,
 // identifies fixable issues, patches files in place, and commits.
 func (h *Handler) LintFix(ctx context.Context, cmd *command.LintFixCmd) error {
-	graph, err := h.reader.LoadGraph(h.graphDir)
+	graph, err := h.reader.CurrentGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph: %w", err)
 	}

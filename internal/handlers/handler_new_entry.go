@@ -71,7 +71,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	}
 
 	// Load graph and validate entry against it.
-	graph, err := h.reader.LoadGraph(h.graphDir)
+	graph, err := h.reader.CurrentGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph for validation: %w", err)
 	}

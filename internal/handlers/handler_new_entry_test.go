@@ -24,7 +24,7 @@ type fakeReader struct {
 	graph           *model.Graph
 }
 
-func (f *fakeReader) LoadGraph(_ string) (*model.Graph, error) {
+func (f *fakeReader) CurrentGraph(_ string) (*model.Graph, error) {
 	if f.graph != nil {
 		return f.graph, nil
 	}

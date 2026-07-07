@@ -22,7 +22,11 @@ import (
 // so consumers can substitute fakes in tests — standard "accept interfaces,
 // return structs" Go pattern. *finders.Finder satisfies this interface.
 type Reader interface {
-	LoadGraph(dir string) (*model.Graph, error)
+	// CurrentGraph returns the current graph through the read-side GraphSource
+	// seam (a fresh source per call — per-command lifetime, no retained cache).
+	// Handlers route through it rather than loading directly so cross-repo
+	// assembly reaches the write path for free at the one seam.
+	CurrentGraph(dir string) (*model.Graph, error)
 	LoadWIPMarkers(graphDir string) ([]*model.WIPMarker, error)
 	Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error)
 	SkillStatus(ctx context.Context, q query.SkillStatusQuery) (*query.SkillStatusResult, error)

@@ -14,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/networkteam/sdd/internal/engine"
+	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -30,13 +31,20 @@ type shellSession struct {
 	sess    *engine.Session
 	logFile *os.File
 
+	// graphs is the session's read-side graph seam — the finder-owned source
+	// the engine reads through and the shell serves framing from. It memoizes
+	// across one advance and is invalidated after a write (in the engine, keyed
+	// on the write command's declaration) and at each advance entry, replacing
+	// the mutable engine field the shell used to reassign by hand.
+	graphs *finders.GraphSource
+
 	// shellInstance is the session's base (shell-class) procedure instance —
 	// the resident junction free dialogue pends on, where every move lands
 	// when it ends. Set by the session door and re-derived on resume.
 	shellInstance string
 
 	// framingGraph/framingText cache the rendered session framing per graph
-	// value — the graph reloads per advance call, so the cache mainly spares
+	// value — the source memoizes within one advance, so the cache mainly spares
 	// re-renders within one response (resume rehydrating several serves).
 	// Served-once memory lives on the server, keyed to the connection.
 	framingGraph *model.Graph

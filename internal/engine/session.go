@@ -124,18 +124,41 @@ func ReadEvents(r io.Reader) ([]Event, error) {
 	return events, nil
 }
 
-// Engine executes procedure instances against a graph and a registry. It is
-// pure Go over data — shells (MCP, webapp) sit on top; side-effectful
-// commands come in through the registry with their own dependencies.
-type Engine struct {
-	Registry *Registry
-	Graph    *model.Graph
+// Graphs is the engine's read-through to the current graph. The read side owns
+// loading and freshness (a finders.GraphSource); the engine only reads through
+// this value — Current returns the current graph (memoized by the source),
+// Invalidate drops that memo after a graph write so the next read reloads.
+// Declared here as an interface so the engine takes no finders import.
+type Graphs interface {
+	Current() (*model.Graph, error)
+	Invalidate()
 }
 
-// New creates an engine.
-func New(registry *Registry, graph *model.Graph) *Engine {
-	return &Engine{Registry: registry, Graph: graph}
+// Engine executes procedure instances against a graph provider and a registry.
+// It is pure Go over data — shells (MCP, webapp) sit on top; side-effectful
+// commands come in through the registry with their own dependencies. The
+// graph is not held as a mutable field: the engine reads it through Graphs, so
+// ownership of "what the current graph is" stays on the read side.
+type Engine struct {
+	Registry *Registry
+	Graphs   Graphs
 }
+
+// New creates an engine reading the current graph through graphs.
+func New(registry *Registry, graphs Graphs) *Engine {
+	return &Engine{Registry: registry, Graphs: graphs}
+}
+
+// StaticGraphs is a Graphs backed by a fixed in-memory graph — for tests and
+// callers with no reload need. Invalidate is a no-op: there is nothing behind
+// the value to re-read.
+type StaticGraphs struct{ Graph *model.Graph }
+
+// Current returns the fixed graph.
+func (s StaticGraphs) Current() (*model.Graph, error) { return s.Graph, nil }
+
+// Invalidate is a no-op for a static graph.
+func (s StaticGraphs) Invalidate() {}
 
 // Session is one dialogue session: N procedure instances interleaved
 // serially, one append-only event log. Per-participant; the shell owns file

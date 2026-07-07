@@ -50,7 +50,7 @@ func newShellEnv(t *testing.T) *shellEnv {
 	}
 	env.spec = spec
 
-	engine := New(reg, procGraph(t))
+	engine := New(reg, StaticGraphs{Graph: procGraph(t)})
 	ts := time.Date(2026, 7, 4, 10, 0, 0, 0, time.UTC)
 	env.session = engine.NewSession("s_shell", "christopher", &memorySink{}, WithClock(func() time.Time {
 		ts = ts.Add(time.Second)

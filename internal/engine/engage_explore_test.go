@@ -169,7 +169,7 @@ func newProcEnv(t *testing.T, canonical string) *procEnv {
 	}
 	env.spec = spec
 
-	engine := New(reg, procGraph(t))
+	engine := New(reg, StaticGraphs{Graph: procGraph(t)})
 	ts := time.Date(2026, 7, 3, 19, 30, 0, 0, time.UTC)
 	env.session = engine.NewSession("s_proc", "christopher", &memorySink{}, WithClock(func() time.Time {
 		ts = ts.Add(time.Second)

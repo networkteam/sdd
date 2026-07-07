@@ -29,7 +29,7 @@ func (h *Handler) RewriteEntry(ctx context.Context, cmd *command.RewriteEntryCmd
 
 	logger := slogutils.FromContext(ctx)
 
-	graph, err := h.reader.LoadGraph(h.graphDir)
+	graph, err := h.reader.CurrentGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph: %w", err)
 	}
