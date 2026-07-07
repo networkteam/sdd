@@ -270,6 +270,27 @@ func TestParseRefFlags_ObjectForm(t *testing.T) {
 	}
 }
 
+func TestParseRefFlags_CrossRepo(t *testing.T) {
+	// A well-formed cross-repo ref (<repo-id>:<entry-id>) is accepted with
+	// syntactic validation of both parts; malformed forms are rejected.
+	got, err := parseRefFlags([]string{`{"id":"github.com/networkteam/other:20260601-120000-s-tac-abc","kind":"grounded-in"}`})
+	if err != nil {
+		t.Fatalf("parseRefFlags: %v", err)
+	}
+	if got[0].ID != "github.com/networkteam/other:20260601-120000-s-tac-abc" {
+		t.Errorf("cross-repo ref ID mutated: %q", got[0].ID)
+	}
+	for _, id := range []string{
+		"nohost:20260601-120000-s-tac-abc",
+		"github.com/networkteam/other:s-tac-abc",
+	} {
+		spec := `{"id":"` + id + `","kind":"grounded-in"}`
+		if _, err := parseRefFlags([]string{spec}); err == nil {
+			t.Errorf("parseRefFlags(%q): want rejection of malformed cross-repo ref", id)
+		}
+	}
+}
+
 func TestParseRefFlags_LegacyKindRejected(t *testing.T) {
 	// AC 1: grounds and evidence are not capturable — the read-layer alias maps
 	// them on disk, but a new capture must use grounded-in. Reject with the

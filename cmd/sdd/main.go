@@ -2231,6 +2231,11 @@ func parseRefFlags(specs []string) ([]model.Ref, error) {
 		if !model.IsCapturableRefKind(k) {
 			return nil, fmt.Errorf("--refs[%d]: invalid kind %q (expected one of: %s)", i, raw.Kind, refKindsForUsage())
 		}
+		if model.IsCrossRepoID(raw.ID) {
+			if err := model.ValidateCrossRepoID(raw.ID); err != nil {
+				return nil, fmt.Errorf("--refs[%d]: %w", i, err)
+			}
+		}
 		out = append(out, model.Ref{ID: raw.ID, Kind: k, Desc: raw.Desc})
 	}
 	return out, nil

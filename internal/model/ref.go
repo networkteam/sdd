@@ -79,6 +79,16 @@ func IsCapturableRefKind(k RefKind) bool {
 	return refKinds[k] && k != RefKindUnknown
 }
 
+// IsForwardClassRefKind reports whether k belongs to the forward class —
+// kinds whose target is an entry this work created or that waits on this
+// entry (surfaces, required-by). The capture-time resolve-or-block
+// invariant (d-cpt-uh0) exempts them: a backward-pointing ref targets an
+// entry that must already exist, while a forward-class target may
+// legitimately be absent at validation time.
+func IsForwardClassRefKind(k RefKind) bool {
+	return k == RefKindSurfaces || k == RefKindRequiredBy
+}
+
 // RefKindValues returns the capturable kind vocabulary in display order.
 // Used to render the closed set in error messages and documentation.
 func RefKindValues() []RefKind {

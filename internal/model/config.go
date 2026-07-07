@@ -60,6 +60,12 @@ type Config struct {
 	LLM       LLMConfig       `yaml:"llm,omitempty"`
 	Embedding EmbeddingConfig `yaml:"embedding,omitempty"`
 	Sync      SyncConfig      `yaml:"sync,omitempty"`
+	// RepoID is the repo's canonical URL-shaped identity (host/path, e.g.
+	// github.com/networkteam/sdd) used as the prefix of cross-repo
+	// references into this graph. Auto-derived from the git remote by
+	// `sdd init` and committed in .sdd/config.yaml — identical for every
+	// user, never user-chosen. Empty for local-only repos.
+	RepoID string `yaml:"repo_id,omitempty"`
 	// Participant is the canonical name used for entry authorship when
 	// --participants / --participant is omitted at capture time. Lives in
 	// .sdd/config.local.yaml (gitignored) because the same person may use
@@ -266,6 +272,9 @@ func MergeConfig(base, overlay *Config) *Config {
 	if overlay.GraphDir != "" {
 		out.GraphDir = overlay.GraphDir
 	}
+	if overlay.RepoID != "" {
+		out.RepoID = overlay.RepoID
+	}
 	if overlay.Participant != "" {
 		out.Participant = overlay.Participant
 	}
@@ -399,6 +408,15 @@ func FormatConfig(cfg Config) string {
 	if graphDir == "" {
 		graphDir = DefaultGraphDir
 	}
+	repoIDBlock := "# Canonical repo identity for cross-repo references — URL-shaped\n" +
+		"# (host/path), auto-derived from the git remote by `sdd init` and\n" +
+		"# identical for every user. Other graphs reference entries here as\n" +
+		"# <repo_id>:<entry-id>. Empty means local-only (no remote identity).\n"
+	if cfg.RepoID != "" {
+		repoIDBlock += "repo_id: " + cfg.RepoID + "\n"
+	} else {
+		repoIDBlock += "# repo_id: github.com/org/repo\n"
+	}
 	languageBlock := "# Graph language — locale code for the language captured entries are\n" +
 		"# authored in. Empty means English (default). The /sdd skill reads the\n" +
 		"# matching references/vocabulary-<locale>.md when rendering to users.\n"
@@ -435,6 +453,8 @@ func FormatConfig(cfg Config) string {
 		"\n" +
 		"# Graph directory relative to repository root.\n" +
 		"graph_dir: " + graphDir + "\n" +
+		"\n" +
+		repoIDBlock +
 		"\n" +
 		languageBlock +
 		"\n" +

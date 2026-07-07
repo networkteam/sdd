@@ -94,6 +94,58 @@ func TestTopicsKnown(t *testing.T) {
 	}
 }
 
+func refsFixtureStore(t *testing.T) *Store {
+	t.Helper()
+	entry := specFixture(t, `state:
+    refs: {type: list<ref>, desc: refs}
+    closes: {type: list<entry-id>, desc: closes}
+steps:
+    - id: only
+      collect: ["refs?", "closes?"]
+      transitions:
+          - when: refsResolve
+            to: end(completed)
+`, "")
+	spec, err := ParseSpec(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewStore(spec)
+}
+
+func TestRefsResolveCrossRepo(t *testing.T) {
+	graph := predicateGraph(t)
+	store := refsFixtureStore(t)
+	ctx := &Context{Store: store, Graph: graph}
+
+	// A syntactically valid cross-repo ref passes the gate without local
+	// resolution; a malformed one blocks.
+	if _, err := store.WriteState(map[string]any{"refs": []any{
+		map[string]any{"id": "github.com/networkteam/other:20260601-120000-s-tac-abc", "kind": "grounded-in"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if !evalPredicate(t, "refsResolve", ctx) {
+		t.Error("syntactically valid cross-repo ref should pass the resolve gate")
+	}
+
+	// A malformed cross-repo ref is rejected by the typed store before any
+	// gate runs.
+	if _, err := store.WriteState(map[string]any{"refs": []any{
+		map[string]any{"id": "nohost:20260601-120000-s-tac-abc", "kind": "grounded-in"},
+	}}); err == nil {
+		t.Error("malformed cross-repo ref must be rejected at store write")
+	}
+
+	// Lifecycle fields get no cross-repo carve-out: entry-id typed fields
+	// reject the colon form outright.
+	if _, err := store.WriteState(map[string]any{
+		"closes": []any{"github.com/networkteam/other:20260601-120000-s-tac-abc"},
+	}); err == nil {
+		t.Error("cross-repo ID in closes must be rejected at store write")
+	}
+}
+
 func TestParticipantsCanonical(t *testing.T) {
 	store := predicateFixtureStore(t)
 	ctx := &Context{Store: store, Graph: predicateGraph(t)}
