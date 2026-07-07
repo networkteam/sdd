@@ -280,7 +280,7 @@ func (s *Server) registerWipCommands(r *engine.Registry, ss *shellSession) error
 		return err
 	}
 
-	return r.RegisterCommand(engine.Command{
+	if err := r.RegisterCommand(engine.Command{
 		Doc: engine.FuncDoc{
 			Name:   "wipDone",
 			Doc:    "Removes the WIP marker named by the store's wipMarker field.",
@@ -297,6 +297,29 @@ func (s *Server) registerWipCommands(r *engine.Registry, ss *shellSession) error
 			}
 			ctx.Store.WriteEngine("wipMarker", nil)
 			return nil
+		},
+	}); err != nil {
+		return err
+	}
+
+	// wipRemove removes a marker the agent identified by ID — groom's path
+	// for an orphaned marker, where no wipStart ran this session to write
+	// wipMarker. It reads a report-supplied staleMarker so the field can be
+	// declared as state and collected: wipDone's wipMarker cannot, since it
+	// is an engine-written field the spec loader forbids declaring. Same
+	// FinishWIP removal path; no state-colliding writes, so nothing to clear.
+	return r.RegisterCommand(engine.Command{
+		Doc: engine.FuncDoc{
+			Name:  "wipRemove",
+			Doc:   "Removes the WIP marker named by the store's staleMarker field (groom's orphaned-marker cleanup).",
+			Reads: []string{"staleMarker"},
+		},
+		Fn: func(ctx *engine.Context) error {
+			markerID, ok := storeString(ctx.Store, "staleMarker")
+			if !ok {
+				return fmt.Errorf("wipRemove: staleMarker is not set")
+			}
+			return s.handler.FinishWIP(context.Background(), &command.FinishWIPCmd{MarkerID: markerID})
 		},
 	})
 }

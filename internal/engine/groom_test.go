@@ -90,3 +90,51 @@ func TestGroom_CleanupDeclaresCaptureHandoff(t *testing.T) {
 		t.Errorf("cleanup seed widenReport = %q, want candidates", got)
 	}
 }
+
+// A stale WIP marker is cleared through the wipRemove transition, not a
+// capture: the agent supplies the marker ID as staleMarker, the engine
+// removes it, and the walk loops back for the next candidate. No CLI.
+func TestGroom_RemoveMarkerClearsViaTransition(t *testing.T) {
+	env := newProcEnv(t, "groom")
+
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"candidates": "1. stale WIP marker 20260706-114441-christopher on d-tac-v5f — closed; propose removal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "walk" {
+		t.Fatalf("reported candidates should reach walk, got %q", sv.Step)
+	}
+
+	sv, err = env.session.Answer(sv.Instance, "walk", "removeMarker",
+		map[string]any{"staleMarker": "20260706-114441-christopher"}, "yes, clear it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "walk" {
+		t.Fatalf("removeMarker should loop back to walk, got %q", sv.Step)
+	}
+
+	found := false
+	for _, m := range env.wipMarkers {
+		if m == "remove:20260706-114441-christopher" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("wipRemove should have removed the marker, recorded %v", env.wipMarkers)
+	}
+
+	sv, err = env.session.Answer(sv.Instance, "walk", "conclude", nil, "that's all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Status != StatusCompleted {
+		t.Fatalf("conclude should complete, got %s at %q", sv.Status, sv.Step)
+	}
+}
