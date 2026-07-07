@@ -556,6 +556,10 @@ func newCmd() *cli.Command {
 				Name:  "skip-preflight",
 				Usage: "Skip pre-flight validation (entry is annotated with preflight: skipped)",
 			},
+			&cli.StringFlag{
+				Name:  "summary",
+				Usage: "Store this summary verbatim, skipping LLM summary generation",
+			},
 			&cli.BoolFlag{
 				Name:  "dry-run",
 				Usage: "Run validation and pre-flight only, without writing or committing the entry",
@@ -701,6 +705,7 @@ func newCmd() *cli.Command {
 				Involvement:      involvement,
 				Attachments:      atts,
 				SkipPreflight:    cmd.Bool("skip-preflight"),
+				Summary:          strings.TrimSpace(cmd.String("summary")),
 				DryRun:           cmd.Bool("dry-run"),
 				PreflightModel:   cmd.String("preflight-model"),
 				PreflightTimeout: resolveTimeout(cmd, "preflight-timeout"),

@@ -92,6 +92,12 @@ type NewEntryCmd struct {
 	PreflightTimeout time.Duration
 	PreflightModel   string
 
+	// Summary supplies the entry's stored summary verbatim, skipping LLM
+	// generation entirely. For callers that already hold a faithful
+	// summary — or environments without a reachable LLM. Empty means
+	// "generate via the configured runner".
+	Summary string
+
 	// OnNewEntry is invoked with the new entry's ID and the LLM-generated
 	// summary on successful creation. Summary is empty when the LLM call
 	// failed or was skipped (dry-run path returns before invoking). Not

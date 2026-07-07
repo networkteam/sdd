@@ -141,7 +141,8 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 
 	var sumResult *llm.SummarizeResult
 
-	if !cmd.DryRun && h.llmRunner != nil {
+	// A caller-supplied summary is taken verbatim — no LLM call at all.
+	if !cmd.DryRun && h.llmRunner != nil && cmd.Summary == "" {
 		g.Go(func() error {
 			sctx, scancel := context.WithTimeout(gctx, 60*time.Second)
 			defer scancel()
@@ -185,8 +186,11 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		return nil
 	}
 
-	// Apply summary from the concurrent goroutine.
-	if sumResult != nil {
+	// Apply the caller-supplied summary, or the one from the concurrent
+	// generation goroutine.
+	if cmd.Summary != "" {
+		entry.Summary = cmd.Summary
+	} else if sumResult != nil {
 		entry.Summary = sumResult.Summary
 	}
 

@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/networkteam/slogutils"
 
@@ -14,48 +16,77 @@ import (
 	"github.com/networkteam/sdd/internal/repos"
 )
 
-// RepoAdd executes a RepoAddCmd: clone the target into its cache location,
-// verify the repo declares the identity the URL derives, and register the
-// connection in the user-global config. The clone runs before registration
-// so a failed verification leaves the config untouched.
+// RepoAdd executes a RepoAddCmd: clone the target, establish its canonical
+// identity from the repo_id it declares in its committed config, and
+// register the connection in the user-global config. When the clone URL
+// itself derives an identity (ssh/https forms), the declared value must
+// match it — that cross-check catches pointing at a fork or mirror under
+// the wrong name. A URL with no host/path form (a local path, an offline
+// mirror) skips the cross-check and trusts the declared identity, which is
+// canonical by design. The clone runs before registration so a failed
+// verification leaves the config untouched.
 func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("invalid command: %w", err)
-	}
-
-	repoID, err := model.DeriveRepoID(cmd.CloneURL)
-	if err != nil {
-		return fmt.Errorf("deriving repo identity: %w", err)
 	}
 
 	cfg, err := repos.LoadConfig()
 	if err != nil {
 		return err
 	}
-	if _, exists := cfg.Connected(repoID); exists {
-		return fmt.Errorf("repo %q is already connected", repoID)
-	}
 
-	cacheDir, err := repos.CacheDir(repoID)
+	// Clone into a staging location under the cache root first — the
+	// canonical identity (and so the final cache path) is only known once
+	// the clone's declared config is readable.
+	root, err := repos.CacheRoot()
 	if err != nil {
 		return err
 	}
-	repo := repos.ConnectedRepo{RepoID: repoID, CloneURL: cmd.CloneURL}
-	if _, err := repos.EnsureCloned(ctx, repo, cacheDir); err != nil {
+	staging, err := os.MkdirTemp(root, ".adding-*")
+	if err != nil {
+		if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
+			return fmt.Errorf("creating cache root: %w", mkErr)
+		}
+		if staging, err = os.MkdirTemp(root, ".adding-*"); err != nil {
+			return err
+		}
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	cloneDir := filepath.Join(staging, "clone")
+	repo := repos.ConnectedRepo{CloneURL: cmd.CloneURL}
+	if _, err := repos.EnsureCloned(ctx, repo, cloneDir); err != nil {
 		return err
 	}
 
-	// The connection is only valid when the target itself declares the
-	// identity we register it under — that keeps repo_id canonical across
-	// every user rather than a local nickname.
-	declared, err := repos.DeclaredRepoID(cacheDir)
+	declared, err := repos.DeclaredRepoID(cloneDir)
 	if err != nil {
 		return err
 	}
-	if declared != repoID {
-		return fmt.Errorf("repo at %s declares repo_id %q, but its clone URL derives %q — the declared identity is canonical; check the URL", cmd.CloneURL, declared, repoID)
+	if err := model.ValidateRepoID(declared); err != nil {
+		return fmt.Errorf("repo at %s declares invalid repo_id %q: %w", cmd.CloneURL, declared, err)
+	}
+	if derived, derr := model.DeriveRepoID(cmd.CloneURL); derr == nil && derived != declared {
+		return fmt.Errorf("repo at %s declares repo_id %q, but its clone URL derives %q — the declared identity is canonical; check the URL", cmd.CloneURL, declared, derived)
+	}
+	if _, exists := cfg.Connected(declared); exists {
+		return fmt.Errorf("repo %q is already connected", declared)
 	}
 
+	cacheDir, err := repos.CacheDir(declared)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(cacheDir), 0o755); err != nil {
+		return fmt.Errorf("creating cache dir: %w", err)
+	}
+	if err := os.RemoveAll(cacheDir); err != nil {
+		return fmt.Errorf("clearing stale cache at %s: %w", cacheDir, err)
+	}
+	if err := os.Rename(cloneDir, cacheDir); err != nil {
+		return fmt.Errorf("moving clone into cache: %w", err)
+	}
+
+	repo.RepoID = declared
 	if err := cfg.AddRepo(repo); err != nil {
 		return err
 	}
@@ -63,7 +94,7 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 		return err
 	}
 	if cmd.OnAdded != nil {
-		cmd.OnAdded(repoID, cacheDir)
+		cmd.OnAdded(declared, cacheDir)
 	}
 	return nil
 }
