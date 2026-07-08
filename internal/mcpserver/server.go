@@ -37,6 +37,7 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 )
 
 // Searcher runs a search against the graph. *finders.SearchFinder satisfies
@@ -63,6 +64,10 @@ type Options struct {
 	// (read_attachment) so they can read files directly instead of paging.
 	LocalClient bool
 	Version     string
+	// Repos is the pure read surface over the connected repos, used to
+	// resolve cross-repo selections on read tools. Nil disables cross-repo
+	// selection (repo-selecting calls fail loud).
+	Repos *repos.Registry
 }
 
 // Server wires the MCP protocol surface to the engine and the SDD read and
@@ -76,6 +81,7 @@ type Server struct {
 	graphDir string
 	local    bool
 	version  string
+	repos    *repos.Registry
 	sessions *sessionStore
 	// docsRegistry answers the registry tool: function docs are identical
 	// across per-session registries, so one throwaway instance serves them.
@@ -114,6 +120,7 @@ func New(opts Options) (*Server, error) {
 		graphDir:     opts.GraphDir,
 		local:        opts.LocalClient,
 		version:      opts.Version,
+		repos:        opts.Repos,
 		sessions:     newSessionStore(opts.SessionsDir),
 		servedBlocks: map[*mcp.ServerSession]map[[sha256.Size]byte]bool{},
 	}

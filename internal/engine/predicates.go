@@ -269,6 +269,16 @@ func refsResolve(ctx *Context) (bool, error) {
 	}
 	if refs, ok := ctx.Store.Get("refs"); ok {
 		for _, r := range asRefs(refs) {
+			// A cross-repo ref passes this gate on syntactic validity alone:
+			// real resolution runs at capture time against the cached remote
+			// graph, never against the local one. Lifecycle fields below get
+			// no such carve-out — closes/supersedes never cross the boundary.
+			if model.IsCrossRepoID(r.ID) {
+				if model.ValidateCrossRepoID(r.ID) != nil {
+					return false, nil
+				}
+				continue
+			}
 			if !resolves(r.ID) {
 				return false, nil
 			}
@@ -300,6 +310,12 @@ func uninspectedRefs(ctx *Context) []string {
 			return
 		}
 		seen[id] = true
+		// Cross-repo targets live in another graph and cannot be served from
+		// this session's reads; their verification is capture-time resolution
+		// against the cached remote graph, not the inspection discipline.
+		if model.IsCrossRepoID(id) {
+			return
+		}
 		if ctx.Reads[id] != ReadFull {
 			missing = append(missing, id)
 		}

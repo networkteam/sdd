@@ -7,14 +7,22 @@ type LintQuery struct {
 	Graph *model.Graph
 }
 
+// IndexLintQuery captures intent to surface search-index health: the
+// resolved embedding config (flag/config merging is the shell's job) and
+// the local index location. Processed by Finder.IndexLint into the
+// index-side fields of a LintResult.
+type IndexLintQuery struct {
+	Embedding model.EmbeddingConfig
+	IndexDir  string
+}
+
 // LintResult is the structured output of a LintQuery: every entry that has
 // at least one warning, plus the total warning count for convenience.
 //
 // Index-side fields (IndexConfigured, IndexEntryCount, IndexDriftCount,
-// IndexFingerprint) are populated by the CLI lint action when an
-// embedding provider is configured — the finder itself stays pure-graph.
-// They surface the search index's health alongside graph health so a
-// single `sdd lint` run reports both.
+// IndexFingerprint, RepoIndexDrift) are populated by Finder.IndexLint when
+// an embedding provider is configured. They surface the search index's
+// health alongside graph health so a single `sdd lint` run reports both.
 type LintResult struct {
 	Entries     []*model.Entry
 	TotalIssues int
@@ -34,4 +42,18 @@ type LintResult struct {
 	// the lint output so the user can see what the index is being
 	// compared against.
 	IndexFingerprint string
+
+	// RepoIndexDrift lists connected repos whose cache index holds entries
+	// embedded under a fingerprint other than the shared (global) embedder.
+	// A drifted repo re-embeds on the next cross-graph search; lint
+	// surfaces it so the cost isn't a surprise. Populated by the CLI lint
+	// action alongside the local index fields.
+	RepoIndexDrift []RepoIndexDriftInfo
+}
+
+// RepoIndexDriftInfo names one connected repo's index drift.
+type RepoIndexDriftInfo struct {
+	RepoID     string
+	DriftCount int
+	EntryCount int
 }

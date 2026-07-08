@@ -62,6 +62,13 @@ type SearchQuery struct {
 	// at the CLI boundary via cmd.IsSet, so the struct field carries literal
 	// intent and programmatic callers must set the cap they want.
 	MaxCitationsPerEntry int
+
+	// Repos selects connected repos to search in addition to the local
+	// graph (additive, repeatable at the CLI as --repo). AllRepos selects
+	// every connected repo. The orchestration layer resolves the selection
+	// into per-repo search members; these fields carry the caller's intent.
+	Repos    []string
+	AllRepos bool
 }
 
 // Mode resolves the SearchQuery's input shape to a SearchMode.
@@ -113,6 +120,18 @@ type SearchEntry struct {
 	Entry     *model.Entry
 	Score     float32
 	Citations []Citation
+	// RepoID names the connected repo a cross-graph hit came from; empty
+	// for local hits. Presenters render remote IDs with this prefix.
+	RepoID string
+}
+
+// DisplayID is the identity a presenter renders: repo-prefixed for a
+// cross-graph hit, bare for local ones.
+func (e SearchEntry) DisplayID() string {
+	if e.RepoID != "" {
+		return e.RepoID + ":" + e.Entry.ID
+	}
+	return e.Entry.ID
 }
 
 // Citation returns the entry's primary citation — the best-scoring

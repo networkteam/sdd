@@ -1214,3 +1214,97 @@ func appendToFile(t *testing.T, path, suffix string) {
 		t.Fatalf("append to %s: %v", path, err)
 	}
 }
+
+// TestInit_RepoIDDerivation covers repo_id recording: fresh init derives it
+// from the remote URL, an existing config that predates the field gets an
+// upsert, and a recorded value is never overwritten.
+func TestInit_RepoIDDerivation(t *testing.T) {
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+	base := &command.InitCmd{
+		BinaryVersion: "v0.2.0",
+		Targets:       []model.AgentTarget{model.AgentClaude},
+		Scope:         model.ScopeProject,
+	}
+
+	t.Run("fresh init derives and records", func(t *testing.T) {
+		tmp := t.TempDir()
+		cmd := *base
+		cmd.RepoRoot = tmp
+		cmd.RemoteURL = "git@github.com:networkteam/other.git"
+		var written string
+		cmd.OnRepoIDWritten = func(id string) { written = id }
+		if err := h.Init(context.Background(), &cmd); err != nil {
+			t.Fatal(err)
+		}
+		if written != "github.com/networkteam/other" {
+			t.Errorf("OnRepoIDWritten = %q", written)
+		}
+		data, err := os.ReadFile(filepath.Join(tmp, ".sdd/config.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := model.ParseConfig(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.RepoID != "github.com/networkteam/other" {
+			t.Errorf("recorded repo_id = %q", cfg.RepoID)
+		}
+	})
+
+	t.Run("no remote stays local-only", func(t *testing.T) {
+		tmp := t.TempDir()
+		cmd := *base
+		cmd.RepoRoot = tmp
+		if err := h.Init(context.Background(), &cmd); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(filepath.Join(tmp, ".sdd/config.yaml"))
+		cfg, err := model.ParseConfig(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.RepoID != "" {
+			t.Errorf("repo_id = %q, want empty for local-only", cfg.RepoID)
+		}
+	})
+
+	t.Run("upgrade upserts absent field, preserves recorded value", func(t *testing.T) {
+		tmp := t.TempDir()
+		cmd := *base
+		cmd.RepoRoot = tmp
+		if err := h.Init(context.Background(), &cmd); err != nil {
+			t.Fatal(err)
+		}
+
+		// Re-init with a remote: the pre-field config gains repo_id.
+		cmd2 := *base
+		cmd2.RepoRoot = tmp
+		cmd2.RemoteURL = "https://github.com/networkteam/other.git"
+		var written string
+		cmd2.OnRepoIDWritten = func(id string) { written = id }
+		if err := h.Init(context.Background(), &cmd2); err != nil {
+			t.Fatal(err)
+		}
+		if written != "github.com/networkteam/other" {
+			t.Errorf("upgrade OnRepoIDWritten = %q", written)
+		}
+
+		// A third init with a different remote must not overwrite.
+		cmd3 := *base
+		cmd3.RepoRoot = tmp
+		cmd3.RemoteURL = "https://example.com/team/moved.git"
+		cmd3.OnRepoIDWritten = func(id string) { t.Errorf("recorded repo_id overwritten with %q", id) }
+		if err := h.Init(context.Background(), &cmd3); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(filepath.Join(tmp, ".sdd/config.yaml"))
+		cfg, err := model.ParseConfig(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.RepoID != "github.com/networkteam/other" {
+			t.Errorf("repo_id after re-init = %q", cfg.RepoID)
+		}
+	})
+}

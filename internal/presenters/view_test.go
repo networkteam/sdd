@@ -312,6 +312,38 @@ func TestRenderView_AsListExpandRefs_SubLineShapes(t *testing.T) {
 	}
 }
 
+func TestRenderView_AsListExpandRefs_CrossRepoUnresolved(t *testing.T) {
+	// A cross-repo ref sub-line carries the full prefixed ID and the
+	// bracketed unresolved marker in place of a status segment.
+	parent := entry("20260101-100000-d-tac-par",
+		withKind(model.KindPlan),
+		withParticipants("Christopher"),
+		withSummary("Parent plan"))
+	g := model.NewGraph([]*model.Entry{parent})
+
+	result := &query.ViewResult{
+		Graph: g,
+		Sections: []query.SectionResult{{
+			Render: "as-list",
+			Data: model.FlatList{
+				Entries: []*model.Entry{parent},
+				RefExpansions: [][]model.RefExpansion{{
+					{Kind: model.RefKindGroundedIn, ID: "github.com/networkteam/other:20260101-090000-d-cpt-rem", UnresolvedRepo: "github.com/networkteam/other", Desc: "remote basis"},
+				}},
+			},
+		}},
+	}
+
+	got := renderView(result)
+	want := "" +
+		"  20260101-100000-d-tac-par tactical plan decision (Christopher) {status: active} Parent plan\n" +
+		"    → grounded-in github.com/networkteam/other:20260101-090000-d-cpt-rem [unresolved: repo github.com/networkteam/other]: \"remote basis\"\n"
+
+	if got != want {
+		t.Errorf("expand(refs) cross-repo render mismatch:\n  got:  %q\n  want: %q", got, want)
+	}
+}
+
 func TestRenderView_AsListExpandRefs_DoneTargetOmitsStatus(t *testing.T) {
 	// A ref pointing at a done signal (terminal, StatusNone) renders without
 	// a status segment — matching how done signals render on every surface.

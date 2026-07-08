@@ -828,3 +828,89 @@ func TestMechanical_SupersedeSettledBranch_Allowed(t *testing.T) {
 		}
 	}
 }
+
+// Cross-repo resolve-or-block (d-cpt-uh0): a backward-class cross-repo ref
+// must resolve in the target repo's cached graph or capture blocks at high
+// severity; forward-class kinds are exempt.
+
+func TestMechanical_CrossRepoRef_UnconnectedRepoBlocks(t *testing.T) {
+	graph := model.NewGraph(nil)
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindGap,
+		Content: "observation grounded in a remote entry",
+		Refs: []model.Ref{
+			{ID: "github.com/networkteam/other:20260601-120000-s-tac-abc", Kind: model.RefKindGroundedIn},
+		},
+	}
+	got := mechanicalPreflight(proposed, graph)
+	found := false
+	for _, f := range got {
+		if f.Category == "cross-repo-ref-unresolved" && f.Severity == query.SeverityHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected cross-repo-ref-unresolved high finding, got %+v", got)
+	}
+}
+
+func TestMechanical_CrossRepoRef_ForwardClassExempt(t *testing.T) {
+	graph := model.NewGraph(nil)
+	proposed := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindGap,
+		Content: "work that surfaced a remote entry",
+		Refs: []model.Ref{
+			{ID: "github.com/networkteam/other:20260601-120000-s-tac-abc", Kind: model.RefKindSurfaces},
+			{ID: "github.com/networkteam/other:20260601-130000-d-tac-def", Kind: model.RefKindRequiredBy},
+		},
+	}
+	for _, f := range mechanicalPreflight(proposed, graph) {
+		if f.Category == "cross-repo-ref-unresolved" {
+			t.Errorf("forward-class cross-repo refs must be exempt, got %+v", f)
+		}
+	}
+}
+
+func TestMechanical_CrossRepoRef_ResolverOutcomes(t *testing.T) {
+	entry := &model.Entry{
+		Type:    model.TypeSignal,
+		Layer:   model.LayerTactical,
+		Kind:    model.KindGap,
+		Content: "observation",
+		Refs: []model.Ref{
+			{ID: "github.com/networkteam/other:20260601-120000-s-tac-abc", Kind: model.RefKindGroundedIn},
+		},
+	}
+
+	resolved := func(repoID, entryID string) crossRepoRefResolution {
+		if repoID != "github.com/networkteam/other" || entryID != "20260601-120000-s-tac-abc" {
+			t.Errorf("resolver got (%q, %q)", repoID, entryID)
+		}
+		return crossRepoEntryResolved
+	}
+	if got := crossRepoResolutionFindings(entry, resolved); len(got) != 0 {
+		t.Errorf("resolved target must produce no findings, got %+v", got)
+	}
+
+	missing := func(string, string) crossRepoRefResolution { return crossRepoEntryMissing }
+	got := crossRepoResolutionFindings(entry, missing)
+	if len(got) != 1 || got[0].Severity != query.SeverityHigh {
+		t.Fatalf("missing entry must produce one high finding, got %+v", got)
+	}
+	if !strings.Contains(got[0].Observation, "absent from repo") {
+		t.Errorf("missing-entry finding should name the absence, got %q", got[0].Observation)
+	}
+
+	unavailable := func(string, string) crossRepoRefResolution { return crossRepoRepoUnavailable }
+	got = crossRepoResolutionFindings(entry, unavailable)
+	if len(got) != 1 || got[0].Severity != query.SeverityHigh {
+		t.Fatalf("unavailable repo must produce one high finding, got %+v", got)
+	}
+	if !strings.Contains(got[0].Observation, "not connected") {
+		t.Errorf("unavailable-repo finding should name the unconnected repo, got %q", got[0].Observation)
+	}
+}

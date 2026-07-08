@@ -5,7 +5,13 @@ import "sort"
 // ShowTreeItem represents an entry at a specific depth in a show tree.
 // Depth 0 is the primary entry. Depth 1+ entries are summary-only.
 type ShowTreeItem struct {
-	Entry         *Entry
+	Entry *Entry
+	// CrossRepoID is the verbatim <repo-id>:<entry-id> when this node points
+	// across the repo boundary. While the target's graph is not available
+	// locally, Entry stays nil and the node renders unresolved; a resolved
+	// remote node carries both — the remote Entry plus the prefixed ID the
+	// renderer displays.
+	CrossRepoID   string
 	Depth         int
 	Relations     []string       // e.g. ["refs"], ["refs", "closes"], ["refd-by"]
 	RefKind       RefKind        // kind of the refs edge linking parent to this entry (empty when no refs relation or no kind metadata)
@@ -16,6 +22,19 @@ type ShowTreeItem struct {
 	Truncated     []TruncatedRef // children hidden at depth boundary
 	Status        Status         // derived lifecycle status, computed at build so renderers stay pure
 	SupersedePath []string       // resolved origin→head trail when superseded; nil otherwise
+}
+
+// NodeID is the identifier a renderer displays and dedup keys on: the
+// prefixed cross-repo form when the node crosses the boundary, else the
+// entry's own ID.
+func (it ShowTreeItem) NodeID() string {
+	if it.CrossRepoID != "" {
+		return it.CrossRepoID
+	}
+	if it.Entry != nil {
+		return it.Entry.ID
+	}
+	return ""
 }
 
 // TruncatedRef describes a child entry hidden at the depth boundary.
@@ -32,7 +51,11 @@ type TruncatedRef struct {
 // computed during the build so presenters consume precomputed values and stay
 // pure — no graph traversal at render time.
 type ShowTree struct {
-	Primary              *Entry
+	Primary *Entry
+	// PrimaryID is the display identity: bare for local and embedded
+	// entries, repo-prefixed (<repo-id>:<entry-id>) for a member graph's
+	// entry shown across the boundary.
+	PrimaryID            string
 	PrimaryStatus        Status
 	PrimarySupersedePath []string
 	PrimaryTopics        []TopicPath
@@ -45,41 +68,50 @@ type ShowTree struct {
 // and future-primary dedup (primaries). A depth of 0 skips that direction
 // entirely. Both directions use per-direction visited sets. The rendered map is
 // updated with newly-shown entries.
+//
+// The primary ID may be cross-repo (<repo-id>:<entry-id>): the tree is then
+// built within the owning member graph, every node carrying that graph's
+// repo prefix, and further cross-repo edges hop graphs the same way. Dedup
+// keys are graph-qualified (nodeKeyFor) — the (repo-id, entry-id) pair in
+// colon form — except embedded entries, which dedup by bare ID so exactly
+// one copy ever surfaces.
 func (g *Graph) BuildShowTree(id string, upDepth, downDepth int, rendered, primaries map[string]bool) *ShowTree {
-	e := g.ByID[id]
-	if e == nil {
+	e, owner, ok := g.ResolveAcross(id)
+	if !ok {
 		return nil
 	}
+	key := owner.nodeKeyFor(e)
 
 	// Upstream: expand primary's children (refs/closes/supersedes) directly.
 	// The primary itself is rendered separately by the presenter.
 	var upstream []ShowTreeItem
 	if upDepth > 0 {
-		upVisited := map[string]bool{id: true} // mark primary visited to prevent cycles back to it
+		upVisited := map[string]bool{key: true} // mark primary visited to prevent cycles back to it
 		for _, child := range upstreamChildren(e) {
-			upstream = append(upstream, g.buildUpstream(child.id, 1, child.relations, child.refKind, child.refDesc, upDepth, upVisited, rendered, primaries)...)
+			upstream = append(upstream, owner.buildUpstream(child.id, 1, child.relations, child.refKind, child.refDesc, upDepth, upVisited, rendered, primaries)...)
 		}
 	}
 
 	var downstream []ShowTreeItem
 	if downDepth > 0 {
-		downVisited := map[string]bool{id: true}
-		for _, child := range g.downstreamChildren(id) {
-			downstream = append(downstream, g.buildDownstream(child.id, 1, child.relations, child.refKind, child.refDesc, downDepth, downVisited, rendered, primaries)...)
+		downVisited := map[string]bool{key: true}
+		for _, child := range owner.downstreamChildren(e.ID) {
+			downstream = append(downstream, owner.buildDownstream(child.id, 1, child.relations, child.refKind, child.refDesc, downDepth, downVisited, rendered, primaries)...)
 		}
 	}
 
 	// Mark items from this tree as rendered for cross-group dedup.
 	markRendered(upstream, rendered)
 	markRendered(downstream, rendered)
-	rendered[id] = true
+	rendered[key] = true
 
-	status, supersedePath := g.itemStatus(e)
+	status, supersedePath := owner.QualifiedItemStatus(e)
 	return &ShowTree{
 		Primary:              e,
+		PrimaryID:            key,
 		PrimaryStatus:        status,
 		PrimarySupersedePath: supersedePath,
-		PrimaryTopics:        g.EffectiveTopics(e),
+		PrimaryTopics:        owner.EffectiveTopics(e),
 		Upstream:             upstream,
 		Downstream:           downstream,
 	}
@@ -88,7 +120,7 @@ func (g *Graph) BuildShowTree(id string, upDepth, downDepth int, rendered, prima
 func markRendered(items []ShowTreeItem, rendered map[string]bool) {
 	for i := range items {
 		if !items[i].ShownAbove && !items[i].ShownBelow {
-			rendered[items[i].Entry.ID] = true
+			rendered[items[i].NodeID()] = true
 		}
 	}
 }
@@ -220,13 +252,53 @@ func (g *Graph) itemStatus(e *Entry) (Status, []string) {
 	return status, nil
 }
 
+// QualifiedItemStatus is itemStatus with the status target and supersede
+// trail qualified for display outside the owning graph: a member graph's
+// closing/superseding entries render repo-prefixed so the reader can place
+// them. Head-walks themselves always ran within the owning graph — this
+// only prefixes the resulting IDs.
+func (g *Graph) QualifiedItemStatus(e *Entry) (Status, []string) {
+	status, path := g.itemStatus(e)
+	if g.repoPrefix == "" {
+		return status, path
+	}
+	if status.By != "" {
+		status.By = g.qualifyID(status.By)
+	}
+	for i, id := range path {
+		path[i] = g.qualifyID(id)
+	}
+	return status, path
+}
+
 // buildUpstream walks the upstream reference chain in DFS pre-order with
-// depth limit and summary-only rendering at depth > 0.
-func (g *Graph) buildUpstream(id string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
-	e, ok := g.ByID[id]
+// depth limit and summary-only rendering at depth > 0. The walk hops graphs
+// at cross-repo edges: the edge resolves in the owning member graph and the
+// recursion continues there, so remote chains traverse fully with each
+// node qualified by its graph's repo prefix. An unresolvable cross-repo
+// edge (repo not connected or entry absent) renders as an unresolved leaf.
+func (g *Graph) buildUpstream(edgeID string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
+	e, owner, ok := g.ResolveAcross(edgeID)
 	if !ok {
+		if IsCrossRepoID(edgeID) {
+			item := ShowTreeItem{
+				CrossRepoID: edgeID,
+				Depth:       depth,
+				Relations:   relations,
+				RefKind:     refKind,
+				RefDesc:     refDesc,
+				SummaryOnly: depth > 0,
+			}
+			if rendered[edgeID] || visited[edgeID] {
+				item.ShownAbove = true
+				return []ShowTreeItem{item}
+			}
+			visited[edgeID] = true
+			return []ShowTreeItem{item}
+		}
 		return nil
 	}
+	key := owner.nodeKeyFor(e)
 
 	item := ShowTreeItem{
 		Entry:       e,
@@ -236,41 +308,49 @@ func (g *Graph) buildUpstream(id string, depth int, relations []string, refKind 
 		RefDesc:     refDesc,
 		SummaryOnly: depth > 0,
 	}
-	item.Status, item.SupersedePath = g.itemStatus(e)
+	if key != e.ID {
+		item.CrossRepoID = key
+	}
+	item.Status, item.SupersedePath = owner.QualifiedItemStatus(e)
 
-	if rendered[id] {
+	if rendered[key] {
 		item.ShownAbove = true
 		return []ShowTreeItem{item}
 	}
-	if primaries[id] && depth > 0 {
+	if primaries[key] && depth > 0 {
 		item.ShownBelow = true
 		return []ShowTreeItem{item}
 	}
-	if visited[id] {
+	if visited[key] {
 		item.ShownAbove = true
 		return []ShowTreeItem{item}
 	}
-	visited[id] = true
+	visited[key] = true
 
 	children := upstreamChildren(e)
 	if depth >= maxDepth && len(children) > 0 {
-		item.Truncated = g.unvisitedRefs(children, visited, rendered)
+		item.Truncated = owner.unvisitedRefs(children, visited, rendered)
 		return []ShowTreeItem{item}
 	}
 
 	result := []ShowTreeItem{item}
 	for _, child := range children {
-		result = append(result, g.buildUpstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, visited, rendered, primaries)...)
+		result = append(result, owner.buildUpstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, visited, rendered, primaries)...)
 	}
 	return result
 }
 
-// buildDownstream walks the downstream graph in DFS pre-order with depth limit.
-func (g *Graph) buildDownstream(id string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
-	e, ok := g.ByID[id]
+// buildDownstream walks the downstream graph in DFS pre-order with depth
+// limit. Downstream edges come from per-graph reverse indexes, which never
+// hold cross-repo IDs (cross-graph backlinks are out of scope) — but a
+// remote primary's within-graph downstream traverses its member graph the
+// same way upstream does.
+func (g *Graph) buildDownstream(edgeID string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
+	e, owner, ok := g.ResolveAcross(edgeID)
 	if !ok {
 		return nil
 	}
+	key := owner.nodeKeyFor(e)
 
 	item := ShowTreeItem{
 		Entry:       e,
@@ -280,45 +360,52 @@ func (g *Graph) buildDownstream(id string, depth int, relations []string, refKin
 		RefDesc:     refDesc,
 		SummaryOnly: true,
 	}
-	item.Status, item.SupersedePath = g.itemStatus(e)
+	if key != e.ID {
+		item.CrossRepoID = key
+	}
+	item.Status, item.SupersedePath = owner.QualifiedItemStatus(e)
 
-	if rendered[id] {
+	if rendered[key] {
 		item.ShownAbove = true
 		return []ShowTreeItem{item}
 	}
-	if primaries[id] && depth > 0 {
+	if primaries[key] && depth > 0 {
 		item.ShownBelow = true
 		return []ShowTreeItem{item}
 	}
-	if visited[id] {
+	if visited[key] {
 		item.ShownAbove = true
 		return []ShowTreeItem{item}
 	}
-	visited[id] = true
+	visited[key] = true
 
-	children := g.downstreamChildren(id)
+	children := owner.downstreamChildren(e.ID)
 	if depth >= maxDepth && len(children) > 0 {
-		item.Truncated = g.unvisitedRefs(children, visited, rendered)
+		item.Truncated = owner.unvisitedRefs(children, visited, rendered)
 		return []ShowTreeItem{item}
 	}
 
 	result := []ShowTreeItem{item}
 	for _, child := range children {
-		result = append(result, g.buildDownstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, visited, rendered, primaries)...)
+		result = append(result, owner.buildDownstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, visited, rendered, primaries)...)
 	}
 	return result
 }
 
 // unvisitedRefs returns truncated refs for children not already visited/rendered.
+// Child IDs are graph-qualified so a truncation line names targets a reader
+// can follow from outside the owning graph.
 func (g *Graph) unvisitedRefs(children []childEdge, visited, rendered map[string]bool) []TruncatedRef {
 	var refs []TruncatedRef
 	for _, c := range children {
-		if !visited[c.id] && !rendered[c.id] {
-			ref := TruncatedRef{ID: c.id, Relations: c.relations, RefKind: c.refKind, RefDesc: c.refDesc}
-			if e, ok := g.ByID[c.id]; ok {
-				ref.Kind = e.Kind
-			}
-			refs = append(refs, ref)
+		key := c.id
+		var kind Kind
+		if e, owner, ok := g.ResolveAcross(c.id); ok {
+			key = owner.nodeKeyFor(e)
+			kind = e.Kind
+		}
+		if !visited[key] && !rendered[key] {
+			refs = append(refs, TruncatedRef{ID: key, Relations: c.relations, Kind: kind, RefKind: c.refKind, RefDesc: c.refDesc})
 		}
 	}
 	return refs

@@ -55,7 +55,7 @@ func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		fmt.Fprintln(w, "# upstream")
 		fmt.Fprintln(w)
 		for _, item := range g.Upstream {
-			renderTreeItem(w, item, g.Primary.ID)
+			renderTreeItem(w, item, primaryDisplayID(g))
 		}
 	}
 
@@ -64,9 +64,19 @@ func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		fmt.Fprintln(w, "# downstream")
 		fmt.Fprintln(w)
 		for _, item := range g.Downstream {
-			renderTreeItem(w, item, g.Primary.ID)
+			renderTreeItem(w, item, primaryDisplayID(g))
 		}
 	}
+}
+
+// primaryDisplayID is the primary's display identity — the repo-prefixed
+// form for a cross-repo primary. Falls back to the bare entry ID for
+// callers that construct groups without setting PrimaryID.
+func primaryDisplayID(g query.ShowGroup) string {
+	if g.PrimaryID != "" {
+		return g.PrimaryID
+	}
+	return g.Primary.ID
 }
 
 // showEnvelope is the YAML frontmatter envelope for the primary entry. It
@@ -99,7 +109,7 @@ type showEnvelope struct {
 func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 	e := g.Primary
 	env := showEnvelope{
-		ID:           e.ID,
+		ID:           primaryDisplayID(g),
 		Type:         e.TypeLabel(),
 		Layer:        e.LayerLabel(),
 		Kind:         string(e.Kind),
@@ -142,7 +152,7 @@ func renderTreeItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 	line.WriteString("- ")
 	line.WriteString(treeVerb(item))
 	line.WriteString(" ")
-	line.WriteString(item.Entry.ID)
+	line.WriteString(item.NodeID())
 	if qual := treeQualifier(item); qual != "" {
 		line.WriteString(" ")
 		line.WriteString(qual)
@@ -170,8 +180,12 @@ func renderTreeItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 // treeQualifier is the parenthesized `(<kind>, <status>)` slot for a tree
 // node. Empty parts collapse so a node with no derived status renders
 // `(<kind>)` and a legacy entry with neither renders no parens at all —
-// never a bare `()` or a leading-comma `(, …)`.
+// never a bare `()` or a leading-comma `(, …)`. An unresolved cross-repo
+// node takes the bracketed unresolved marker in this slot instead.
 func treeQualifier(item model.ShowTreeItem) string {
+	if repo := unresolvedRepo(item); repo != "" {
+		return "[unresolved: repo " + repo + "]"
+	}
 	kind := entryKindLabel(item.Entry)
 	status := formatStatusTrailValue(item.Status, item.SupersedePath)
 	switch {
@@ -189,17 +203,30 @@ func treeQualifier(item model.ShowTreeItem) string {
 // treeSentence is the trailing micro-summary for a node. Dedup markers take the
 // slot when the node was already shown (or is a later primary); otherwise it's
 // the entry's first sentence — from the stored summary when present, else the
-// body — derived at render time without touching the stored summary.
+// body — derived at render time without touching the stored summary. An
+// unresolved cross-repo node has no entry to summarize.
 func treeSentence(item model.ShowTreeItem, primaryID string) string {
 	switch {
-	case item.ShownAbove && item.Entry.ID == primaryID:
+	case item.ShownAbove && item.NodeID() == primaryID:
 		return "(this entry)"
 	case item.ShownAbove:
 		return "(see above)"
 	case item.ShownBelow:
 		return "(see below)"
+	case item.Entry == nil:
+		return ""
 	}
 	return item.Entry.FirstSummarySentence()
+}
+
+// unresolvedRepo returns the target repo-id when the node is a cross-repo
+// reference whose graph is not available locally, else "".
+func unresolvedRepo(item model.ShowTreeItem) string {
+	if item.Entry != nil || item.CrossRepoID == "" {
+		return ""
+	}
+	repo, _, _ := model.SplitCrossRepoID(item.CrossRepoID)
+	return repo
 }
 
 // treeVerb is the leading relation word for a tree node. A refs/refd-by edge

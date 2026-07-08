@@ -51,4 +51,8 @@ func renderIndexLint(w io.Writer, result *query.LintResult) {
 	} else if result.IndexEntryCount > 0 {
 		fmt.Fprintln(w, "  no fingerprint drift")
 	}
+	for _, drift := range result.RepoIndexDrift {
+		fmt.Fprintf(w, "  ⚠ repo %s: %d of %d cached entries indexed under a different fingerprint than the global embedder — the next cross-graph search re-embeds them\n",
+			drift.RepoID, drift.DriftCount, drift.EntryCount)
+	}
 }

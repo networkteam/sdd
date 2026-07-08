@@ -92,34 +92,6 @@ func embeddingFlags() []cli.Flag {
 	}
 }
 
-// populateIndexLint fills the index-side fields on a LintResult when an
-// embedding provider is configured. Loading the manifest and building an
-// embedder are both pure operations against config — no graph mutation.
-// Errors degrade silently to "index not configured" so a missing
-// dependency in lint shouldn't block graph-side validation.
-func populateIndexLint(cmd *cli.Command, result *query.LintResult) {
-	cfg := resolveEmbeddingConfig(cmd)
-	if cfg.Provider == "" {
-		return
-	}
-	emb, err := embed.New(cfg)
-	if err != nil {
-		return
-	}
-	idxDir, err := indexDir()
-	if err != nil {
-		return
-	}
-	manifest, err := index.LoadManifest(idxDir)
-	if err != nil {
-		return
-	}
-	result.IndexConfigured = true
-	result.IndexFingerprint = emb.Fingerprint()
-	result.IndexEntryCount = len(manifest.Entries)
-	result.IndexDriftCount = manifest.MismatchCount(emb.Fingerprint())
-}
-
 // indexDir returns the index directory rooted at the discovered .sdd dir.
 // Returns ("", err) when no .sdd is found.
 func indexDir() (string, error) {
@@ -128,6 +100,20 @@ func indexDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(sddDir, "index"), nil
+}
+
+// crossRepoEmbedder builds the embedder for a cross-repo search: the
+// user-global embedding config defines the one vector space every selected
+// index shares, so it wins over the project-local block; with no global
+// embedding configured, the local resolution applies (and member indexes
+// build under that fingerprint instead).
+func crossRepoEmbedder(cmd *cli.Command) (llm.Embedder, error) {
+	if reg, _, err := defaultRepos(); err == nil {
+		if gcfg, err := reg.Load(); err == nil && gcfg.Embedding.Provider != "" {
+			return embed.New(gcfg.Embedding)
+		}
+	}
+	return buildEmbedder(cmd)
 }
 
 // buildEmbedder constructs the configured embedder, or returns nil when
@@ -296,6 +282,14 @@ func searchCmd() *cli.Command {
 				Name:  "max-citations",
 				Usage: "Maximum citations per entry (default 3) — 0 for entry headers only (no snippets), 1 for one-line-per-entry, higher to surface multiple matching chunks",
 			},
+			&cli.StringSliceFlag{
+				Name:  "repo",
+				Usage: "Also search a connected repo by its repo-id (repeatable, additive to the local graph)",
+			},
+			&cli.BoolFlag{
+				Name:  "all-repos",
+				Usage: "Also search every connected repo",
+			},
 		),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			terms := cmd.StringSlice("term")
@@ -303,6 +297,9 @@ func searchCmd() *cli.Command {
 			if len(terms) == 0 && phrase == "" {
 				return fmt.Errorf("at least one of --term or --query is required")
 			}
+			repoSelection := cmd.StringSlice("repo")
+			allRepos := cmd.Bool("all-repos")
+			crossRepo := allRepos || len(repoSelection) > 0
 
 			g, err := loadGraph(cmd)
 			if err != nil {
@@ -323,7 +320,11 @@ func searchCmd() *cli.Command {
 			)
 			needsVector := phrase != ""
 			if needsVector {
-				emb, err = buildEmbedder(cmd)
+				if crossRepo {
+					emb, err = crossRepoEmbedder(cmd)
+				} else {
+					emb, err = buildEmbedder(cmd)
+				}
 				if err != nil {
 					return err
 				}
@@ -360,10 +361,15 @@ func searchCmd() *cli.Command {
 				willFill = pending > 0
 			}
 
+			reg, mgr, err := defaultRepos()
+			if err != nil {
+				return err
+			}
 			finder := finders.NewSearchFinder(finders.SearchFinderOptions{
 				GraphDir:   graphDir,
 				Embedder:   emb,
 				IndexStore: idxStore,
+				Repos:      reg,
 			})
 
 			var typ model.EntryType
@@ -403,6 +409,8 @@ func searchCmd() *cli.Command {
 				IncludeSuperseded:    cmd.Bool("include-superseded"),
 				Limit:                int(cmd.Int("limit")),
 				MaxCitationsPerEntry: maxCitations,
+				Repos:                repoSelection,
+				AllRepos:             allRepos,
 			}
 
 			// Lazy-fill (when vector search needs a warm index) then query.
@@ -427,6 +435,20 @@ func searchCmd() *cli.Command {
 					if err := ih.LazyFill(ctx, lazy); err != nil {
 						return nil, err
 					}
+				}
+				if crossRepo {
+					// Side effects first (cache freshen + member index fill,
+					// the cross-repo analog of the local lazy-fill above),
+					// then the pure cross-graph read.
+					reader, err := newReadFinder()
+					if err != nil {
+						return nil, err
+					}
+					h := handlers.New(handlers.Options{Reader: reader, Repos: mgr})
+					if err := h.PrepareCrossRepoSearch(ctx, sq, emb); err != nil {
+						return nil, err
+					}
+					return finders.MultiSearch(ctx, finder, sq)
 				}
 				return finder.Search(ctx, sq)
 			}

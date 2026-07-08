@@ -40,6 +40,11 @@ import (
 //     live head of a chain, not an entry that already has an active successor
 //     (which would create a fork). Settled branches — the existing successor
 //     has closed — are exempt.
+//   - cross-repo-ref-unresolved (d-cpt-uh0): a backward-class cross-repo ref
+//     must resolve in the target repo's cached graph or capture blocks;
+//     forward-class kinds (surfaces, required-by) are exempt. Local ref
+//     resolution is enforced even earlier — a dangling local ref hard-blocks
+//     at write-time validation before pre-flight runs.
 //
 // Severity is strictly binary: SeverityHigh or absent. Mechanical checks
 // never emit medium or low; partial coverage is never "kind-of an actor".
@@ -53,6 +58,7 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph) []query.Finding
 	findings = append(findings, refKindFindings(entry)...)
 	findings = append(findings, refKindApplicabilityFindings(entry, graph)...)
 	findings = append(findings, supersedeForkFindings(entry, graph)...)
+	findings = append(findings, crossRepoResolutionFindings(entry, graphCrossRepoResolver(graph))...)
 
 	if entry.IsActor() {
 		findings = append(findings, actorWriteOnceFindings(entry, graph)...)
@@ -105,11 +111,14 @@ func refKindFindings(entry *model.Entry) []query.Finding {
 func refKindApplicabilityFindings(entry *model.Entry, graph *model.Graph) []query.Finding {
 	var findings []query.Finding
 	for i, r := range entry.Refs {
-		target, ok := graph.ByID[r.ID]
+		// Cross-repo targets resolve through the cached member graph, whose
+		// derivation classifies them; unresolvable targets are skipped
+		// (owned by ref resolution / resolve-or-block).
+		target, owner, ok := graph.ResolveAcross(r.ID)
 		if !ok {
 			continue
 		}
-		status := graph.DerivedStatus(target)
+		status := owner.DerivedStatus(target)
 		class := model.ClassifyRefTarget(target, status)
 		cell, ok := model.RefKindApplicability(r.Kind, class)
 		if !ok || cell.Applicable {
@@ -128,6 +137,87 @@ func refKindApplicabilityFindings(entry *model.Entry, graph *model.Graph) []quer
 			Category:    "ref-kind-inapplicable",
 			Observation: obs,
 		})
+	}
+	return findings
+}
+
+// crossRepoRefResolution reports how a cross-repo ref target resolved
+// against the connected-repos machinery.
+type crossRepoRefResolution int
+
+const (
+	// crossRepoRepoUnavailable: the target repo is not connected or its
+	// cache cannot be read — resolution is impossible.
+	crossRepoRepoUnavailable crossRepoRefResolution = iota
+	// crossRepoEntryMissing: the repo's cached graph is available (fetched
+	// fresh on miss) but does not contain the entry on its default branch.
+	crossRepoEntryMissing
+	// crossRepoEntryResolved: the target entry exists in the cached graph.
+	crossRepoEntryResolved
+)
+
+// crossRepoRefResolver resolves a cross-repo target against the cached
+// remote graph. nil means no repo is resolvable.
+type crossRepoRefResolver func(repoID, entryID string) crossRepoRefResolution
+
+// graphCrossRepoResolver resolves through the graph's cross-graph assembly
+// (the MultiGraph the GraphSource attached): member graphs load lazily from
+// the connected-repos caches. Fetch-on-miss is the write handler's job —
+// it refreshes caches for referenced repos before pre-flight runs, so this
+// resolver reads the live cache state.
+func graphCrossRepoResolver(graph *model.Graph) crossRepoRefResolver {
+	return func(repoID, entryID string) crossRepoRefResolution {
+		member, err := graph.MemberGraph(repoID)
+		if err != nil || member == nil {
+			return crossRepoRepoUnavailable
+		}
+		if _, ok := member.ByID[entryID]; !ok {
+			return crossRepoEntryMissing
+		}
+		return crossRepoEntryResolved
+	}
+}
+
+// crossRepoResolutionFindings enforces resolve-or-block (d-cpt-uh0) for
+// cross-repo refs: a backward-class ref must resolve in the target repo's
+// cached graph or capture blocks at high severity. Forward-class kinds
+// (surfaces, required-by) are exempt — their target may legitimately be
+// absent. Local refs are not checked here: a dangling local ref already
+// hard-blocks at write-time validation, before pre-flight runs.
+func crossRepoResolutionFindings(entry *model.Entry, resolve crossRepoRefResolver) []query.Finding {
+	var findings []query.Finding
+	for i, r := range entry.Refs {
+		repoID, entryID, ok := model.SplitCrossRepoID(r.ID)
+		if !ok {
+			continue
+		}
+		if model.IsForwardClassRefKind(r.Kind) {
+			continue
+		}
+		if resolve == nil {
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "cross-repo-ref-unresolved",
+				Observation: fmt.Sprintf("refs[%d] (%s): cannot resolve cross-repo ref — repo %q is not connected; a backward-class ref must resolve at capture or be dropped (its clone URL is conventionally https://%s)", i, r.ID, repoID, repoID),
+			})
+			continue
+		}
+		switch resolve(repoID, entryID) {
+		case crossRepoRepoUnavailable:
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "cross-repo-ref-unresolved",
+				Observation: fmt.Sprintf("refs[%d] (%s): cannot resolve cross-repo ref — repo %q is not connected; a backward-class ref must resolve at capture or be dropped (its clone URL is conventionally https://%s)", i, r.ID, repoID, repoID),
+			})
+		case crossRepoEntryMissing:
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "cross-repo-ref-unresolved",
+				Observation: fmt.Sprintf("refs[%d] (%s): entry %s is absent from repo %q's default branch — a backward-class ref must target an entry that exists", i, r.ID, entryID, repoID),
+			})
+		case crossRepoEntryResolved:
+			// resolves — nothing to report
+		}
 	}
 	return findings
 }
