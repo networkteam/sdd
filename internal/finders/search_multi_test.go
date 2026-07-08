@@ -33,13 +33,16 @@ func writeEntryFile(t *testing.T, dir, id, body string) {
 // repo-tagged, and embedded entries surface only from the local side.
 func TestMultiSearchTextAcrossRepos(t *testing.T) {
 	const repoID = "example.com/team/other"
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	loc := repos.Locations{
+		ConfigPath: filepath.Join(t.TempDir(), "config.yaml"),
+		CacheRoot:  t.TempDir(),
+	}
+	reg := repos.NewRegistry(loc)
 
 	localDir := t.TempDir()
 	writeEntryFile(t, localDir, "20260601-120000-s-tac-loc", "A local gap about telemetry pipelines.")
 
-	cacheDir, err := repos.CacheDir(repoID)
+	cacheDir, err := reg.CacheDir(repoID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,17 +56,17 @@ func TestMultiSearchTextAcrossRepos(t *testing.T) {
 	if err := cfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "https://" + repoID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.SaveConfig(cfg); err != nil {
+	if err := repos.SaveConfigTo(loc.ConfigPath, cfg); err != nil {
 		t.Fatal(err)
 	}
 
-	f := New(Options{})
+	f := New(Options{Repos: reg})
 	g, err := f.CurrentGraph(localDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	local := NewSearchFinder(SearchFinderOptions{GraphDir: localDir})
+	local := NewSearchFinder(SearchFinderOptions{GraphDir: localDir, Repos: reg})
 	q := query.SearchQuery{
 		Graph:    g,
 		Terms:    []string{"telemetry"},

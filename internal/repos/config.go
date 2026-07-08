@@ -1,10 +1,12 @@
 // Package repos holds the connected-repos machinery for cross-repo
 // references: the user-global configuration naming which repositories this
 // user is connected to, and the managed read-only clone caches those
-// connections resolve against. Everything here is plain functions — side
-// effects (clone, pull, index builds) are orchestrated by handlers that
-// call into this package and invalidate the read side's GraphSource on
-// completion.
+// connections resolve against. The package reads no ambient state — the
+// config path and cache root arrive as an explicit Locations value, resolved
+// once at the composition root (repos.DefaultLocations for the XDG
+// convention). Pure reads live on Registry; the side-effectful cache
+// lifecycle (clone, pull, config save) lives on Manager, orchestrated by
+// handlers that invalidate the read side's GraphSource on completion.
 package repos
 
 import (
@@ -18,10 +20,49 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-// GlobalConfig is the user-global SDD configuration at
-// ~/.config/sdd/config.yaml (XDG): the connected repos and the single
-// shared embedding config that defines the one vector space cross-graph
-// search merges over. Hand-editable YAML underneath.
+// Locations names the user-global places the connected-repos machinery works
+// against: the config file and the cache root. Resolved once at the
+// composition root and passed down explicitly — tests point both at temp
+// dirs, no environment involved.
+type Locations struct {
+	// ConfigPath is the user-global config file
+	// (default $XDG_CONFIG_HOME/sdd/config.yaml).
+	ConfigPath string
+	// CacheRoot is the base directory for connected-repo clone caches
+	// (default $XDG_CACHE_HOME/sdd).
+	CacheRoot string
+}
+
+// DefaultLocations resolves the conventional locations: the XDG base
+// directories, defaulting to ~/.config and ~/.cache. Implemented against the
+// XDG convention directly (not os.UserConfigDir) so the paths are uniform
+// across platforms and match the documented locations. This is the only
+// place the package touches the environment — called by composition roots,
+// never by library code.
+func DefaultLocations() (Locations, error) {
+	cfgBase := os.Getenv("XDG_CONFIG_HOME")
+	cacheBase := os.Getenv("XDG_CACHE_HOME")
+	if cfgBase == "" || cacheBase == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return Locations{}, fmt.Errorf("resolving home dir: %w", err)
+		}
+		if cfgBase == "" {
+			cfgBase = filepath.Join(home, ".config")
+		}
+		if cacheBase == "" {
+			cacheBase = filepath.Join(home, ".cache")
+		}
+	}
+	return Locations{
+		ConfigPath: filepath.Join(cfgBase, "sdd", "config.yaml"),
+		CacheRoot:  filepath.Join(cacheBase, "sdd"),
+	}, nil
+}
+
+// GlobalConfig is the user-global SDD configuration: the connected repos and
+// the single shared embedding config that defines the one vector space
+// cross-graph search merges over. Hand-editable YAML underneath.
 type GlobalConfig struct {
 	Repos []ConnectedRepo `yaml:"repos,omitempty"`
 	// Embedding is the global embedder every connected repo's index is
@@ -39,33 +80,8 @@ type ConnectedRepo struct {
 	CloneURL string `yaml:"clone_url"`
 }
 
-// ConfigPath resolves the user-global config location: $XDG_CONFIG_HOME/sdd/config.yaml,
-// defaulting to ~/.config/sdd/config.yaml. Implemented against the XDG
-// convention directly (not os.UserConfigDir) so the path is uniform across
-// platforms and matches the documented location.
-func ConfigPath() (string, error) {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolving home dir: %w", err)
-		}
-		base = filepath.Join(home, ".config")
-	}
-	return filepath.Join(base, "sdd", "config.yaml"), nil
-}
-
-// LoadConfig reads the user-global config from the default path. A missing
+// LoadConfigFrom reads a user-global config from an explicit path. A missing
 // file is not an error — it yields an empty config (no connections).
-func LoadConfig() (*GlobalConfig, error) {
-	path, err := ConfigPath()
-	if err != nil {
-		return nil, err
-	}
-	return LoadConfigFrom(path)
-}
-
-// LoadConfigFrom reads a user-global config from an explicit path.
 func LoadConfigFrom(path string) (*GlobalConfig, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -81,17 +97,8 @@ func LoadConfigFrom(path string) (*GlobalConfig, error) {
 	return &cfg, nil
 }
 
-// SaveConfig writes the user-global config to the default path, creating
+// SaveConfigTo writes a user-global config to an explicit path, creating
 // parent directories as needed. 0600 — the embedding block may carry API keys.
-func SaveConfig(cfg *GlobalConfig) error {
-	path, err := ConfigPath()
-	if err != nil {
-		return err
-	}
-	return SaveConfigTo(path, cfg)
-}
-
-// SaveConfigTo writes a user-global config to an explicit path.
 func SaveConfigTo(path string, cfg *GlobalConfig) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
@@ -148,23 +155,19 @@ func (c *GlobalConfig) RemoveRepo(repoID string) bool {
 // set: all=true means every connected repo; an explicitly named repo that
 // is not connected is an error — silent narrowing would misreport
 // coverage. An empty selection resolves to nil.
-func SelectRepoIDs(named []string, all bool) ([]string, error) {
+func (c *GlobalConfig) SelectRepoIDs(named []string, all bool) ([]string, error) {
 	if !all && len(named) == 0 {
 		return nil, nil
 	}
-	cfg, err := LoadConfig()
-	if err != nil {
-		return nil, err
-	}
 	if all {
-		ids := make([]string, 0, len(cfg.Repos))
-		for _, r := range cfg.Repos {
+		ids := make([]string, 0, len(c.Repos))
+		for _, r := range c.Repos {
 			ids = append(ids, r.RepoID)
 		}
 		return ids, nil
 	}
 	for _, id := range named {
-		if _, ok := cfg.Connected(id); !ok {
+		if _, ok := c.Connected(id); !ok {
 			return nil, fmt.Errorf("repo %q is not connected — add it with `sdd repo add <clone-url>`", id)
 		}
 	}

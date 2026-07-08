@@ -12,13 +12,16 @@ import (
 // TestCurrentGraphResolvesConnectedRepo exercises the full seam: a local
 // graph whose entry refs a connected repo, the connection registered in the
 // user-global config, the remote graph present as a cache clone — all
-// resolved through Finder.CurrentGraph's MultiGraph assembly.
+// resolved through Finder.CurrentGraph's MultiGraph assembly. The registry
+// is built over explicit temp locations, the same way the composition root
+// injects it in production.
 func TestCurrentGraphResolvesConnectedRepo(t *testing.T) {
 	const repoID = "example.com/team/other"
-	xdgConfig := t.TempDir()
-	xdgCache := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
-	t.Setenv("XDG_CACHE_HOME", xdgCache)
+	loc := repos.Locations{
+		ConfigPath: filepath.Join(t.TempDir(), "config.yaml"),
+		CacheRoot:  t.TempDir(),
+	}
+	reg := repos.NewRegistry(loc)
 
 	// Local graph: one entry with a cross-repo ref.
 	localDir := t.TempDir()
@@ -32,7 +35,7 @@ func TestCurrentGraphResolvesConnectedRepo(t *testing.T) {
 
 	// Connected-repo cache: a fake clone (a .git marker suffices — the
 	// loader only reads the graph files) with one remote entry.
-	cacheDir, err := repos.CacheDir(repoID)
+	cacheDir, err := reg.CacheDir(repoID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,11 +54,11 @@ func TestCurrentGraphResolvesConnectedRepo(t *testing.T) {
 	if err := cfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "https://" + repoID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.SaveConfig(cfg); err != nil {
+	if err := repos.SaveConfigTo(loc.ConfigPath, cfg); err != nil {
 		t.Fatal(err)
 	}
 
-	f := New(Options{})
+	f := New(Options{Repos: reg})
 	g, err := f.CurrentGraph(localDir)
 	if err != nil {
 		t.Fatal(err)

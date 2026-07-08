@@ -47,21 +47,25 @@ func (f *Finder) NewGraphSource(dir string) *GraphSource {
 }
 
 // memberGraphLoader is the lazy cache→graph read the MultiGraph resolves
-// members through: connected repos come from the user-global config, the
+// members through: connected repos come from the injected Registry, the
 // graph loads from the repo's cache clone. A repo that is not connected or
 // not yet cached resolves to nil (the legitimate unresolved state — the
 // sync handler owns clone/pull); a present cache that fails to load is an
-// error, not a silent gap.
+// error, not a silent gap. A Finder without a Registry resolves nothing —
+// the same honest unresolved state.
 func (f *Finder) memberGraphLoader() func(repoID string) (*model.Graph, error) {
 	return func(repoID string) (*model.Graph, error) {
-		cfg, err := repos.LoadConfig()
+		if f.repos == nil {
+			return nil, nil
+		}
+		cfg, err := f.repos.Load()
 		if err != nil {
 			return nil, err
 		}
 		if _, connected := cfg.Connected(repoID); !connected {
 			return nil, nil
 		}
-		dir, err := repos.CacheDir(repoID)
+		dir, err := f.repos.CacheDir(repoID)
 		if err != nil {
 			return nil, err
 		}

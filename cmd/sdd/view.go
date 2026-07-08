@@ -259,7 +259,11 @@ func viewCmd() *cli.Command {
 				return err
 			}
 
-			repoIDs, err := repos.SelectRepoIDs(cmd.StringSlice("repo"), cmd.Bool("all-repos"))
+			reg, _, err := defaultRepos()
+			if err != nil {
+				return err
+			}
+			repoIDs, err := reg.SelectRepoIDs(cmd.StringSlice("repo"), cmd.Bool("all-repos"))
 			if err != nil {
 				return err
 			}
@@ -298,7 +302,7 @@ func viewCmd() *cli.Command {
 					fmt.Fprintf(os.Stdout, "\n── repo: %s (unavailable) ──\n", repoID)
 					continue
 				}
-				cacheDir, err := repos.CacheDir(repoID)
+				cacheDir, err := reg.CacheDir(repoID)
 				if err != nil {
 					return err
 				}

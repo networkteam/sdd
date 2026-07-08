@@ -14,6 +14,7 @@ import (
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 )
 
 // Reader is the handler-side view of the finder. It bundles every read
@@ -78,6 +79,7 @@ type Handler struct {
 	brancher  Brancher
 	mover     Mover
 	puller    Puller
+	repos     *repos.Manager
 	stderr    io.Writer
 	now       func() time.Time
 }
@@ -92,8 +94,12 @@ type Options struct {
 	Brancher  Brancher
 	Mover     Mover
 	Puller    Puller
-	Stderr    io.Writer
-	Now       func() time.Time
+	// Repos owns the connected-repos side effects (clone, pull, config
+	// writes). Nil means no connected-repos support — repo commands fail
+	// loud, and cross-repo cache freshening is skipped.
+	Repos  *repos.Manager
+	Stderr io.Writer
+	Now    func() time.Time
 }
 
 // New constructs a Handler with the given options.
@@ -107,6 +113,7 @@ func New(opts Options) *Handler {
 		brancher:  opts.Brancher,
 		mover:     opts.Mover,
 		puller:    opts.Puller,
+		repos:     opts.Repos,
 		stderr:    opts.Stderr,
 		now:       opts.Now,
 	}

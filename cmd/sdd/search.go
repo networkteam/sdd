@@ -129,7 +129,11 @@ func populateIndexLint(cmd *cli.Command, result *query.LintResult) {
 // that pending cost visible. Degrades silently like the local index
 // section: lint never blocks on cross-repo machinery being absent.
 func populateRepoIndexLint(result *query.LintResult) {
-	gcfg, err := repos.LoadConfig()
+	reg, _, err := defaultRepos()
+	if err != nil {
+		return
+	}
+	gcfg, err := reg.Load()
 	if err != nil || len(gcfg.Repos) == 0 || gcfg.Embedding.Provider == "" {
 		return
 	}
@@ -139,7 +143,7 @@ func populateRepoIndexLint(result *query.LintResult) {
 	}
 	fingerprint := emb.Fingerprint()
 	for _, r := range gcfg.Repos {
-		cacheDir, err := repos.CacheDir(r.RepoID)
+		cacheDir, err := reg.CacheDir(r.RepoID)
 		if err != nil || !repos.IsCloned(cacheDir) {
 			continue
 		}
@@ -173,9 +177,10 @@ func indexDir() (string, error) {
 // embedding configured, the local resolution applies (and member indexes
 // build under that fingerprint instead).
 func crossRepoEmbedder(cmd *cli.Command) (llm.Embedder, error) {
-	gcfg, err := repos.LoadConfig()
-	if err == nil && gcfg.Embedding.Provider != "" {
-		return embed.New(gcfg.Embedding)
+	if reg, _, err := defaultRepos(); err == nil {
+		if gcfg, err := reg.Load(); err == nil && gcfg.Embedding.Provider != "" {
+			return embed.New(gcfg.Embedding)
+		}
 	}
 	return buildEmbedder(cmd)
 }
@@ -425,10 +430,15 @@ func searchCmd() *cli.Command {
 				willFill = pending > 0
 			}
 
+			reg, mgr, err := defaultRepos()
+			if err != nil {
+				return err
+			}
 			finder := finders.NewSearchFinder(finders.SearchFinderOptions{
 				GraphDir:   graphDir,
 				Embedder:   emb,
 				IndexStore: idxStore,
+				Repos:      reg,
 			})
 
 			var typ model.EntryType
@@ -503,7 +513,7 @@ func searchCmd() *cli.Command {
 					if err != nil {
 						return nil, err
 					}
-					h := handlers.New(handlers.Options{Reader: reader})
+					h := handlers.New(handlers.Options{Reader: reader, Repos: mgr})
 					if err := h.PrepareCrossRepoSearch(ctx, sq, emb); err != nil {
 						return nil, err
 					}

@@ -18,6 +18,7 @@ import (
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/mcpserver"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 )
 
 func serveCmd() *cli.Command {
@@ -58,9 +59,14 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			reg, mgr, err := defaultRepos()
+			if err != nil {
+				return err
+			}
 			finder := finders.New(finders.Options{
 				PreflightRunner: runner,
 				Config:          cfg,
+				Repos:           reg,
 			})
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
@@ -68,9 +74,10 @@ func serveCmd() *cli.Command {
 				Reader:    finder,
 				LLMRunner: runner,
 				Committer: git.CLI{},
+				Repos:     mgr,
 			})
 
-			searcher, vector, err := buildServeSearcher(cmd, dir, finder)
+			searcher, vector, err := buildServeSearcher(cmd, dir, finder, reg, mgr)
 			if err != nil {
 				return err
 			}
@@ -85,6 +92,7 @@ func serveCmd() *cli.Command {
 				SessionsDir:  filepath.Join(sddDir, "sessions"),
 				LocalClient:  transport == "stdio",
 				Version:      version,
+				Repos:        reg,
 			})
 			if err != nil {
 				return err
@@ -115,14 +123,14 @@ func serveCmd() *cli.Command {
 // per-call lazy index fill when an embedding provider is configured, plain
 // text-term search otherwise. Cross-repo selection on the query fans out
 // through the same prepare-then-read split the CLI uses.
-func buildServeSearcher(cmd *cli.Command, graphDir string, reader *finders.Finder) (mcpserver.Searcher, bool, error) {
+func buildServeSearcher(cmd *cli.Command, graphDir string, reader *finders.Finder, reg *repos.Registry, mgr *repos.Manager) (mcpserver.Searcher, bool, error) {
 	emb, err := buildEmbedder(cmd)
 	if err != nil {
 		return nil, false, err
 	}
 	if emb == nil {
-		sf := finders.NewSearchFinder(finders.SearchFinderOptions{GraphDir: graphDir})
-		return lazyFillSearcher{sf: sf, prepare: handlers.New(handlers.Options{Reader: reader})}, false, nil
+		sf := finders.NewSearchFinder(finders.SearchFinderOptions{GraphDir: graphDir, Repos: reg})
+		return lazyFillSearcher{sf: sf, prepare: handlers.New(handlers.Options{Reader: reader, Repos: mgr})}, false, nil
 	}
 	idxDir, err := indexDir()
 	if err != nil {
@@ -136,6 +144,7 @@ func buildServeSearcher(cmd *cli.Command, graphDir string, reader *finders.Finde
 		GraphDir:   graphDir,
 		Embedder:   emb,
 		IndexStore: idxStore,
+		Repos:      reg,
 	})
 	ih := handlers.NewIndexHandler(handlers.IndexHandlerOptions{
 		GraphDir:   graphDir,
@@ -144,7 +153,7 @@ func buildServeSearcher(cmd *cli.Command, graphDir string, reader *finders.Finde
 		IndexStore: idxStore,
 		Reader:     reader,
 	})
-	return lazyFillSearcher{sf: sf, ih: ih, prepare: handlers.New(handlers.Options{Reader: reader}), emb: emb}, true, nil
+	return lazyFillSearcher{sf: sf, ih: ih, prepare: handlers.New(handlers.Options{Reader: reader, Repos: mgr}), emb: emb}, true, nil
 }
 
 // lazyFillSearcher fills missing or stale index entries before a vector

@@ -25,6 +25,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 	"github.com/networkteam/slogutils"
 	"github.com/urfave/cli/v3"
 )
@@ -105,10 +106,28 @@ func newReadFinder() (*finders.Finder, error) {
 	if err != nil {
 		return nil, err
 	}
+	reg, _, err := defaultRepos()
+	if err != nil {
+		return nil, err
+	}
 	return finders.New(finders.Options{
 		PreflightRunner: readOnlyRunner{},
 		Config:          cfg,
+		Repos:           reg,
 	}), nil
+}
+
+// defaultRepos builds the connected-repos dependencies from the XDG default
+// locations — the composition root for every CLI-constructed finder
+// (Registry: pure reads) and handler (Manager: clone/pull/config writes,
+// backed by the exec git adapter).
+func defaultRepos() (*repos.Registry, *repos.Manager, error) {
+	loc, err := repos.DefaultLocations()
+	if err != nil {
+		return nil, nil, err
+	}
+	reg := repos.NewRegistry(loc)
+	return reg, repos.NewManager(reg, git.CLI{}), nil
 }
 
 // loadConfig reads .sdd/config.yaml + config.local.yaml when present.
@@ -675,15 +694,21 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			reg, mgr, err := defaultRepos()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
 				GraphDir: dir,
 				SDDDir:   sddDir,
 				Reader: finders.New(finders.Options{
 					PreflightRunner: runner,
 					Config:          cfg,
+					Repos:           reg,
 				}),
 				LLMRunner: runner,
 				Committer: git.CLI{},
+				Repos:     mgr,
 			})
 
 			return handler.NewEntry(ctx, ncmd)
@@ -928,11 +953,16 @@ func summarizeCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			reg, _, err := defaultRepos()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
 				GraphDir: dir,
 				Reader: finders.New(finders.Options{
 					PreflightRunner: runner,
 					Config:          cfg,
+					Repos:           reg,
 				}),
 				LLMRunner: runner,
 				Committer: git.CLI{},

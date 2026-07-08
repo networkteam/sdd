@@ -7,6 +7,7 @@ package finders
 import (
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/repos"
 )
 
 // Finder holds dependencies and config shared across query methods.
@@ -18,6 +19,7 @@ type Finder struct {
 	preflightRunner llm.Runner
 	cfg             *model.Config
 	gitSyncer       GitSyncer
+	repos           *repos.Registry
 }
 
 // Options configures a new Finder. Zero-valued fields mean "not available"
@@ -27,6 +29,10 @@ type Options struct {
 	PreflightRunner llm.Runner
 	Config          *model.Config
 	GitSyncer       GitSyncer
+	// Repos is the pure read surface over the connected repos — the only
+	// cross-repo capability a finder holds (no clone, no pull). Nil means no
+	// connected-repos support: cross-repo refs stay unresolved.
+	Repos *repos.Registry
 }
 
 // New constructs a Finder with the given options.
@@ -35,6 +41,7 @@ func New(opts Options) *Finder {
 		preflightRunner: opts.PreflightRunner,
 		cfg:             opts.Config,
 		gitSyncer:       opts.GitSyncer,
+		repos:           opts.Repos,
 	}
 }
 

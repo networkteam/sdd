@@ -16,7 +16,6 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
-	"github.com/networkteam/sdd/internal/repos"
 )
 
 // framingLayout renders the session framing injected once per consumer:
@@ -909,6 +908,19 @@ func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, 
 	return nil, StageAttachmentResult{Handle: args.Name}, nil
 }
 
+// selectRepoIDs resolves a cross-repo selection through the injected
+// registry. A selection without wiring is a server construction gap — fail
+// loud, never silently narrow to local-only.
+func (s *Server) selectRepoIDs(named []string, all bool) ([]string, error) {
+	if !all && len(named) == 0 {
+		return nil, nil
+	}
+	if s.repos == nil {
+		return nil, fmt.Errorf("connected-repos support is not wired on this server")
+	}
+	return s.repos.SelectRepoIDs(named, all)
+}
+
 // readHint is the one-line breadcrumb every free read carries while no
 // session is bound: an agent that enters through a pasted entry ID gets its
 // data and the trail to the door. No path through the tool surface avoids a
@@ -1029,7 +1041,7 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if strings.TrimSpace(args.Layout) == "" {
 		return nil, ViewResult{}, toolError("layout is required")
 	}
-	repoIDs, err := repos.SelectRepoIDs(args.Repos, args.AllRepos)
+	repoIDs, err := s.selectRepoIDs(args.Repos, args.AllRepos)
 	if err != nil {
 		return nil, ViewResult{}, toolError("%v", err)
 	}

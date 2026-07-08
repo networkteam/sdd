@@ -38,7 +38,10 @@ func MultiSearch(ctx context.Context, local *SearchFinder, q query.SearchQuery) 
 	}
 	merged := res.Entries
 
-	repoIDs, err := repos.SelectRepoIDs(q.Repos, q.AllRepos)
+	if local.repos == nil {
+		return nil, fmt.Errorf("cross-repo search needs the connected-repos registry — construct the SearchFinder with Repos")
+	}
+	repoIDs, err := local.repos.SelectRepoIDs(q.Repos, q.AllRepos)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +96,7 @@ func searchMember(q query.SearchQuery, repoID string, local *SearchFinder) (*sea
 	if member == nil {
 		return nil, nil
 	}
-	cacheDir, err := repos.CacheDir(repoID)
+	cacheDir, err := local.repos.CacheDir(repoID)
 	if err != nil {
 		return nil, err
 	}

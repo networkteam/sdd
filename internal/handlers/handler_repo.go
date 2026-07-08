@@ -16,6 +16,10 @@ import (
 	"github.com/networkteam/sdd/internal/repos"
 )
 
+// errNoRepos surfaces a repo operation on a handler constructed without the
+// connected-repos manager — a wiring gap, never a user state (fail loud).
+var errNoRepos = fmt.Errorf("connected-repos support is not wired (handler built without Repos)")
+
 // RepoAdd executes a RepoAddCmd: clone the target, establish its canonical
 // identity from the repo_id it declares in its committed config, and
 // register the connection in the user-global config. When the clone URL
@@ -29,8 +33,11 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("invalid command: %w", err)
 	}
+	if h.repos == nil {
+		return errNoRepos
+	}
 
-	cfg, err := repos.LoadConfig()
+	cfg, err := h.repos.Registry().Load()
 	if err != nil {
 		return err
 	}
@@ -38,10 +45,7 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	// Clone into a staging location under the cache root first — the
 	// canonical identity (and so the final cache path) is only known once
 	// the clone's declared config is readable.
-	root, err := repos.CacheRoot()
-	if err != nil {
-		return err
-	}
+	root := h.repos.Registry().CacheRoot()
 	staging, err := os.MkdirTemp(root, ".adding-*")
 	if err != nil {
 		if mkErr := os.MkdirAll(root, 0o755); mkErr != nil {
@@ -54,7 +58,7 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	defer func() { _ = os.RemoveAll(staging) }()
 	cloneDir := filepath.Join(staging, "clone")
 	repo := repos.ConnectedRepo{CloneURL: cmd.CloneURL}
-	if _, err := repos.EnsureCloned(ctx, repo, cloneDir); err != nil {
+	if _, err := h.repos.EnsureCloned(ctx, repo, cloneDir); err != nil {
 		return err
 	}
 
@@ -72,7 +76,7 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 		return fmt.Errorf("repo %q is already connected", declared)
 	}
 
-	cacheDir, err := repos.CacheDir(declared)
+	cacheDir, err := h.repos.Registry().CacheDir(declared)
 	if err != nil {
 		return err
 	}
@@ -90,7 +94,7 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	if err := cfg.AddRepo(repo); err != nil {
 		return err
 	}
-	if err := repos.SaveConfig(cfg); err != nil {
+	if err := h.repos.Save(cfg); err != nil {
 		return err
 	}
 	if cmd.OnAdded != nil {
@@ -105,14 +109,17 @@ func (h *Handler) RepoRemove(ctx context.Context, cmd *command.RepoRemoveCmd) er
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("invalid command: %w", err)
 	}
-	cfg, err := repos.LoadConfig()
+	if h.repos == nil {
+		return errNoRepos
+	}
+	cfg, err := h.repos.Registry().Load()
 	if err != nil {
 		return err
 	}
 	if !cfg.RemoveRepo(cmd.RepoID) {
 		return fmt.Errorf("repo %q is not connected", cmd.RepoID)
 	}
-	if err := repos.SaveConfig(cfg); err != nil {
+	if err := h.repos.Save(cfg); err != nil {
 		return err
 	}
 	if cmd.OnRemoved != nil {
@@ -124,7 +131,10 @@ func (h *Handler) RepoRemove(ctx context.Context, cmd *command.RepoRemoveCmd) er
 // RepoSync executes a RepoSyncCmd: force-pull the named connected repos'
 // caches (all of them when none are named), cloning lazily where absent.
 func (h *Handler) RepoSync(ctx context.Context, cmd *command.RepoSyncCmd) error {
-	cfg, err := repos.LoadConfig()
+	if h.repos == nil {
+		return errNoRepos
+	}
+	cfg, err := h.repos.Registry().Load()
 	if err != nil {
 		return err
 	}
@@ -144,16 +154,16 @@ func (h *Handler) RepoSync(ctx context.Context, cmd *command.RepoSyncCmd) error 
 		if !ok {
 			return fmt.Errorf("repo %q is not connected", repoID)
 		}
-		cacheDir, err := repos.CacheDir(repoID)
+		cacheDir, err := h.repos.Registry().CacheDir(repoID)
 		if err != nil {
 			return err
 		}
-		cloned, err := repos.EnsureCloned(ctx, repo, cacheDir)
+		cloned, err := h.repos.EnsureCloned(ctx, repo, cacheDir)
 		if err != nil {
 			return err
 		}
 		if !cloned {
-			if err := repos.ForcePull(ctx, cacheDir); err != nil {
+			if err := h.repos.ForcePull(ctx, cacheDir); err != nil {
 				return err
 			}
 		}
@@ -202,7 +212,10 @@ func (h *Handler) fetchOnMiss(ctx context.Context, graph *model.Graph, refs []mo
 		return graph
 	}
 
-	cfg, err := repos.LoadConfig()
+	if h.repos == nil {
+		return graph
+	}
+	cfg, err := h.repos.Registry().Load()
 	if err != nil {
 		logger.Warn("fetch-on-miss: loading global config failed", "err", err)
 		return graph
@@ -212,11 +225,11 @@ func (h *Handler) fetchOnMiss(ctx context.Context, graph *model.Graph, refs []mo
 		if _, ok := cfg.Connected(repoID); !ok {
 			continue
 		}
-		cacheDir, err := repos.CacheDir(repoID)
+		cacheDir, err := h.repos.Registry().CacheDir(repoID)
 		if err != nil {
 			continue
 		}
-		if err := repos.ForcePull(ctx, cacheDir); err != nil {
+		if err := h.repos.ForcePull(ctx, cacheDir); err != nil {
 			logger.Warn("fetch-on-miss pull failed", "repo", repoID, "err", err)
 			continue
 		}
@@ -255,7 +268,13 @@ func referencedRepoIDs(refs []model.Ref) []string {
 // one vector space holds across every selected index. The finder read
 // (finders.MultiSearch) then runs pure.
 func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuery, embedder llm.Embedder) error {
-	repoIDs, err := repos.SelectRepoIDs(q.Repos, q.AllRepos)
+	if h.repos == nil {
+		if q.AllRepos || len(q.Repos) > 0 {
+			return errNoRepos
+		}
+		return nil
+	}
+	repoIDs, err := h.repos.Registry().SelectRepoIDs(q.Repos, q.AllRepos)
 	if err != nil || len(repoIDs) == 0 {
 		return err
 	}
@@ -266,7 +285,7 @@ func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuer
 		return nil
 	}
 	for _, repoID := range repoIDs {
-		cacheDir, err := repos.CacheDir(repoID)
+		cacheDir, err := h.repos.Registry().CacheDir(repoID)
 		if err != nil {
 			return err
 		}
@@ -306,7 +325,10 @@ func (h *Handler) EnsureReposFresh(ctx context.Context, repoIDs []string) (chang
 	if len(repoIDs) == 0 {
 		return false, nil
 	}
-	cfg, err := repos.LoadConfig()
+	if h.repos == nil {
+		return false, errNoRepos
+	}
+	cfg, err := h.repos.Registry().Load()
 	if err != nil {
 		return false, err
 	}
@@ -317,11 +339,11 @@ func (h *Handler) EnsureReposFresh(ctx context.Context, repoIDs []string) (chang
 			logger.Debug("repo not connected; skipping cache refresh", "repo", repoID)
 			continue
 		}
-		cacheDir, err := repos.CacheDir(repoID)
+		cacheDir, err := h.repos.Registry().CacheDir(repoID)
 		if err != nil {
 			return changed, err
 		}
-		cloned, err := repos.EnsureCloned(ctx, repo, cacheDir)
+		cloned, err := h.repos.EnsureCloned(ctx, repo, cacheDir)
 		if err != nil {
 			return changed, err
 		}
@@ -329,7 +351,7 @@ func (h *Handler) EnsureReposFresh(ctx context.Context, repoIDs []string) (chang
 			changed = true
 			continue
 		}
-		pulled, err := repos.CooldownPull(ctx, cacheDir, repos.DefaultPullCooldown)
+		pulled, err := h.repos.CooldownPull(ctx, cacheDir, repos.DefaultPullCooldown)
 		if err != nil {
 			return changed, err
 		}

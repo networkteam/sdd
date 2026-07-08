@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/urfave/cli/v3"
 
@@ -28,7 +27,10 @@ func repoCmd() *cli.Command {
 					if cmd.Args().Len() != 1 {
 						return fmt.Errorf("usage: sdd repo add <clone-url>")
 					}
-					h := handlers.New(handlers.Options{Reader: mustReadFinder()})
+					h, err := repoHandler()
+					if err != nil {
+						return err
+					}
 					return h.RepoAdd(ctx, &command.RepoAddCmd{
 						CloneURL: cmd.Args().First(),
 						OnAdded: func(repoID, cacheDir string) {
@@ -42,7 +44,11 @@ func repoCmd() *cli.Command {
 				Name:  "list",
 				Usage: "List connected repos",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					cfg, err := repos.LoadConfig()
+					reg, _, err := defaultRepos()
+					if err != nil {
+						return err
+					}
+					cfg, err := reg.Load()
 					if err != nil {
 						return err
 					}
@@ -52,7 +58,7 @@ func repoCmd() *cli.Command {
 					}
 					for _, r := range cfg.Repos {
 						status := "not cached"
-						if dir, err := repos.CacheDir(r.RepoID); err == nil && repos.IsCloned(dir) {
+						if dir, err := reg.CacheDir(r.RepoID); err == nil && repos.IsCloned(dir) {
 							status = "cached"
 						}
 						fmt.Printf("%s\n  clone_url: %s (%s)\n", r.RepoID, r.CloneURL, status)
@@ -68,7 +74,10 @@ func repoCmd() *cli.Command {
 					if cmd.Args().Len() != 1 {
 						return fmt.Errorf("usage: sdd repo remove <repo-id>")
 					}
-					h := handlers.New(handlers.Options{Reader: mustReadFinder()})
+					h, err := repoHandler()
+					if err != nil {
+						return err
+					}
 					return h.RepoRemove(ctx, &command.RepoRemoveCmd{
 						RepoID: cmd.Args().First(),
 						OnRemoved: func(repoID string) {
@@ -82,7 +91,10 @@ func repoCmd() *cli.Command {
 				Usage:     "Force-pull connected repo caches (all, or the named repos)",
 				ArgsUsage: "[repo-id ...]",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					h := handlers.New(handlers.Options{Reader: mustReadFinder()})
+					h, err := repoHandler()
+					if err != nil {
+						return err
+					}
 					return h.RepoSync(ctx, &command.RepoSyncCmd{
 						RepoIDs: cmd.Args().Slice(),
 						OnSynced: func(repoID string) {
@@ -95,15 +107,19 @@ func repoCmd() *cli.Command {
 	}
 }
 
-// mustReadFinder builds the read finder or exits — repo commands need it
-// only for handler construction, not for graph reads.
-func mustReadFinder() handlers.Reader {
+// repoHandler builds the handler for repo commands: a read finder for
+// handler construction plus the connected-repos manager the repo
+// operations run through.
+func repoHandler() (*handlers.Handler, error) {
 	reader, err := newReadFinder()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		return nil, err
 	}
-	return reader
+	_, mgr, err := defaultRepos()
+	if err != nil {
+		return nil, err
+	}
+	return handlers.New(handlers.Options{Reader: reader, Repos: mgr}), nil
 }
 
 // freshenRepoCaches brings the named connected repos' caches up to date
@@ -112,11 +128,10 @@ func freshenRepoCaches(ctx context.Context, repoIDs []string) error {
 	if len(repoIDs) == 0 {
 		return nil
 	}
-	reader, err := newReadFinder()
+	h, err := repoHandler()
 	if err != nil {
 		return err
 	}
-	h := handlers.New(handlers.Options{Reader: reader})
 	_, err = h.EnsureReposFresh(ctx, repoIDs)
 	return err
 }

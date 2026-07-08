@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -56,25 +57,33 @@ func TestGlobalConfigRoundTrip(t *testing.T) {
 	}
 }
 
-func TestConfigAndCachePathsHonorXDG(t *testing.T) {
+// TestDefaultLocationsHonorXDG covers the one place the package touches the
+// environment: the default-locations constructor composition roots call.
+// Everything else works against an explicit Locations value.
+func TestDefaultLocationsHonorXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-config")
 	t.Setenv("XDG_CACHE_HOME", "/tmp/xdg-cache")
 
-	cfgPath, err := ConfigPath()
+	loc, err := DefaultLocations()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfgPath != "/tmp/xdg-config/sdd/config.yaml" {
-		t.Errorf("ConfigPath = %q", cfgPath)
+	if loc.ConfigPath != "/tmp/xdg-config/sdd/config.yaml" {
+		t.Errorf("ConfigPath = %q", loc.ConfigPath)
 	}
-	dir, err := CacheDir("github.com/networkteam/other")
+	if loc.CacheRoot != "/tmp/xdg-cache/sdd" {
+		t.Errorf("CacheRoot = %q", loc.CacheRoot)
+	}
+
+	reg := NewRegistry(loc)
+	dir, err := reg.CacheDir("github.com/networkteam/other")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if dir != filepath.Join("/tmp/xdg-cache/sdd", "github.com", "networkteam", "other") {
 		t.Errorf("CacheDir = %q", dir)
 	}
-	if _, err := CacheDir("not a repo id"); err == nil {
+	if _, err := reg.CacheDir("not a repo id"); err == nil {
 		t.Error("CacheDir must validate the repo id")
 	}
 }
@@ -120,18 +129,23 @@ func TestCacheLifecycle(t *testing.T) {
 	repoID := "example.com/team/other"
 	upstream := initUpstream(t, repoID)
 
-	cacheDir := filepath.Join(t.TempDir(), "cache", filepath.FromSlash(repoID))
+	loc := Locations{
+		ConfigPath: filepath.Join(t.TempDir(), "config.yaml"),
+		CacheRoot:  filepath.Join(t.TempDir(), "cache"),
+	}
+	mgr := NewManager(NewRegistry(loc), git.CLI{})
+	cacheDir := filepath.Join(loc.CacheRoot, filepath.FromSlash(repoID))
 	repo := ConnectedRepo{RepoID: repoID, CloneURL: upstream}
 	ctx := context.Background()
 
-	cloned, err := EnsureCloned(ctx, repo, cacheDir)
+	cloned, err := mgr.EnsureCloned(ctx, repo, cacheDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !cloned || !IsCloned(cacheDir) {
 		t.Fatal("expected a fresh clone")
 	}
-	if cloned, err = EnsureCloned(ctx, repo, cacheDir); err != nil || cloned {
+	if cloned, err = mgr.EnsureCloned(ctx, repo, cacheDir); err != nil || cloned {
 		t.Fatalf("second EnsureCloned must be a no-op, got cloned=%v err=%v", cloned, err)
 	}
 
@@ -153,7 +167,7 @@ func TestCacheLifecycle(t *testing.T) {
 
 	// Within cooldown: no pull. After the marker ages out: pull runs and
 	// picks up new upstream commits.
-	pulled, err := CooldownPull(ctx, cacheDir, time.Hour)
+	pulled, err := mgr.CooldownPull(ctx, cacheDir, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +188,7 @@ func TestCacheLifecycle(t *testing.T) {
 		t.Fatalf("git commit: %v\n%s", err, out)
 	}
 
-	pulled, err = CooldownPull(ctx, cacheDir, 0)
+	pulled, err = mgr.CooldownPull(ctx, cacheDir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
