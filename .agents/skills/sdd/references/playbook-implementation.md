@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: 9a4da719f904620040cd010e586a6bfdc8b271d93746afb5b883fe68189b8ec5
+    sdd-content-hash: 51dced031b056e88abaac3e061e7d1a759bf66502ec998775e78e2c86671ebe3
     sdd-version: dev
 ---
 # Transition to implementation
@@ -52,9 +52,9 @@ The CLI creates `sdd/<suffix>-<slug>` and checks out; the marker is committed on
 
 Isolated directory; the harness moves the session, git does the plumbing, `sdd wip` tracks the marker. The CLI owns none of it.
 
-**Prerequisites** (once per repo): a `.worktreeinclude` listing gitignored state to carry (`.sdd/config.local.yaml`, `.sdd/index/`), `.claude/worktrees/` in `.gitignore`, and `worktree.baseRef: "head"` in `.claude/settings.json`.
+**Prerequisites** (once per repo): a `.worktreeinclude` listing gitignored state to carry (`.sdd/config.local.yaml`), `.claude/worktrees/` in `.gitignore`, and `worktree.baseRef: "head"` in `.claude/settings.json`. The search index needs no carry-over — it lives in the machine-global store, shared by every worktree.
 
-**Start:** create the marker on the base first, so it is visible there — `sdd wip start <entry-id> --exclusive --participant <name> "<description>"` — then `EnterWorktree(name: "<entry-suffix>")`. The harness creates the worktree under `.claude/worktrees/` and switches the session in; branching from the base (`baseRef: head`) carries the marker along, and `.worktreeinclude` brings the gitignored local state (config + index).
+**Start:** create the marker on the base first, so it is visible there — `sdd wip start <entry-id> --exclusive --participant <name> "<description>"` — then `EnterWorktree(name: "<entry-suffix>")`. The harness creates the worktree under `.claude/worktrees/` and switches the session in; branching from the base (`baseRef: head`) carries the marker along, and `.worktreeinclude` brings the gitignored local config.
 
 **Re-anchor after entering.** `EnterWorktree` moves the session's working directory and git context into the worktree, but the file tools (Read/Edit/Write) take **absolute paths** and don't follow — any path you read *before* entering still points at the base checkout on `main`, and edits to it land there silently (no error, since the base file is real). So: keep pre-entry grounding graph-only (`sdd show`/`sdd search`), read no source you intend to edit until after entering, and re-Read each file at its worktree path before editing — the worktree path is the only valid edit target. The general "prefer absolute paths" habit works against you here: the absolute paths held from before the switch are base paths. For already-decided work, nothing needs reading before entry.
 
@@ -64,6 +64,6 @@ Isolated directory; the harness moves the session, git does the plumbing, `sdd w
 1. `ExitWorktree(action: "keep")` — back to base. Use `keep`, never `remove`: teardown is below, and `ExitWorktree` only removes worktrees it created itself.
 2. `git pull --no-rebase` (merge, never rebase — a rebase rewrites base history and orphans the branch), then `git merge <branch>`. A real merge, not a squash.
 3. `sdd wip done <marker-id>`.
-4. `git worktree remove --force <path>` (path via `git worktree list`; `--force` because the `.worktreeinclude`'d gitignored state leaves the worktree non-clean), then `git branch -d <branch>`.
+4. `git worktree remove --force <path>` (path via `git worktree list`; `--force` because the `.worktreeinclude`'d gitignored config leaves the worktree non-clean), then `git branch -d <branch>`.
 
 `EnterWorktree(name:)` creates a new worktree; `path:` re-enters one. Conclude in a single pass — a mid-conclude background rebase could rewrite base history.
