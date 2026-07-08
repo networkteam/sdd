@@ -7,10 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
@@ -18,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
+	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llm/factory"
@@ -144,58 +143,6 @@ func splitCSV(s string) []string {
 		return nil
 	}
 	return out
-}
-
-// gitCommitterFunc adapts a plain commit function to the handlers.Committer interface.
-type gitCommitterFunc func(message string, paths ...string) error
-
-func (f gitCommitterFunc) Commit(message string, paths ...string) error {
-	return f(message, paths...)
-}
-
-// gitMover is the production handlers.Mover: shells out to `git mv` so the
-// rename is recorded in the git index atomically with the working-tree change.
-type gitMover struct{}
-
-func (gitMover) Move(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return fmt.Errorf("creating destination directory: %w", err)
-	}
-	if out, err := exec.Command("git", "mv", src, dst).CombinedOutput(); err != nil {
-		return fmt.Errorf("git mv %s %s: %s (%w)", src, dst, out, err)
-	}
-	return nil
-}
-
-// gitBrancher is the production handlers.Brancher: shells out to git for
-// checkout, merge-status check, and branch deletion.
-type gitBrancher struct{}
-
-func (gitBrancher) Checkout(branch string, create bool) error {
-	args := []string{"checkout"}
-	if create {
-		args = append(args, "-b")
-	}
-	args = append(args, branch)
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("git checkout: %s (%w)", out, err)
-	}
-	return nil
-}
-
-func (gitBrancher) BranchMerged(branch string) bool {
-	return isBranchMerged(branch)
-}
-
-func (gitBrancher) DeleteBranch(branch string, force bool) error {
-	flag := "-d"
-	if force {
-		flag = "-D"
-	}
-	if out, err := exec.Command("git", "branch", flag, branch).CombinedOutput(); err != nil {
-		return fmt.Errorf("git branch %s: %s (%w)", flag, out, err)
-	}
-	return nil
 }
 
 func main() {
@@ -736,7 +683,7 @@ func newCmd() *cli.Command {
 					Config:          cfg,
 				}),
 				LLMRunner: runner,
-				Committer: gitCommitterFunc(gitCommit),
+				Committer: git.CLI{},
 			})
 
 			return handler.NewEntry(ctx, ncmd)
@@ -826,8 +773,8 @@ func rewriteCmd() *cli.Command {
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
 				Reader:    reader,
-				Committer: gitCommitterFunc(gitCommit),
-				Mover:     gitMover{},
+				Committer: git.CLI{},
+				Mover:     git.CLI{},
 			})
 			return handler.RewriteEntry(ctx, rcmd)
 		}),
@@ -861,7 +808,7 @@ func lintCmd() *cli.Command {
 				handler := handlers.New(handlers.Options{
 					GraphDir:  dir,
 					Reader:    reader,
-					Committer: gitCommitterFunc(gitCommit),
+					Committer: git.CLI{},
 				})
 				if err := handler.LintFix(ctx, fixCmd); err != nil {
 					return err
@@ -988,69 +935,11 @@ func summarizeCmd() *cli.Command {
 					Config:          cfg,
 				}),
 				LLMRunner: runner,
-				Committer: gitCommitterFunc(gitCommit),
+				Committer: git.CLI{},
 			})
 			return handler.Summarize(ctx, sumCmd)
 		}),
 	}
-}
-
-// commitTimeout bounds each git invocation in the auto-commit path. A commit
-// that shells out to an interactive signer (SSH/GPG) would otherwise block
-// indefinitely when sdd runs as a long-lived server; the timeout is a backstop
-// on top of the TTY detach below. See d-tac-zhp.
-const commitTimeout = 30 * time.Second
-
-func gitCommit(message string, filePaths ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), commitTimeout)
-	defer cancel()
-
-	addArgs := append([]string{"add"}, filePaths...)
-	if out, err := runDetachedGit(ctx, addArgs...); err != nil {
-		return fmt.Errorf("git add: %s (%w)", out, err)
-	}
-
-	// Scope the commit to exactly the staged paths with an explicit pathspec.
-	// Without `-- <paths>`, `git commit` records the whole index, sweeping any
-	// pre-staged unrelated work into the CLI's own commit.
-	commitArgs := append([]string{"commit", "-m", message, "--"}, filePaths...)
-	if out, err := runDetachedGit(ctx, commitArgs...); err != nil {
-		return fmt.Errorf("git commit: %s (%w)", out, err)
-	}
-
-	return nil
-}
-
-// runDetachedGit runs a git subprocess detached from any controlling terminal
-// (Setsid starts a new session with no controlling TTY) and bounded by ctx.
-// Detaching is the fix for the auto-commit hang (d-tac-zhp): an interactive
-// signing or credential prompt has no TTY to read from, so it fails immediately
-// instead of suspending the backgrounded process on SIGTTIN. The context
-// timeout is a backstop for any other blocking helper.
-func runDetachedGit(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	out, err := cmd.CombinedOutput()
-	if ctx.Err() == context.DeadlineExceeded {
-		return out, fmt.Errorf("git %s: timed out after %s (a commit signer or credential helper may be blocking on input)", args[0], commitTimeout)
-	}
-	return out, err
-}
-
-func isBranchMerged(branch string) bool {
-	out, err := exec.Command("git", "branch", "--merged").Output()
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		// git branch prefixes: * = current, + = worktree checkout
-		name := strings.TrimLeft(line, " *+")
-		name = strings.TrimSpace(name)
-		if name == branch {
-			return true
-		}
-	}
-	return false
 }
 
 // resolveGraphDir determines the graph directory from the --graph-dir flag
@@ -1128,15 +1017,6 @@ func resolveSDDDir() (string, error) {
 		return "", fmt.Errorf("no .sdd/ directory found; run 'sdd init' first")
 	}
 	return meta.SDDDir(repoRoot), nil
-}
-
-// findRepoRoot returns the git repository root, falling back to cwd.
-func findRepoRoot() (string, error) {
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return os.Getwd()
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 // graphDirPromptModel is a bubbletea model for the graph directory prompt.
@@ -1528,27 +1408,6 @@ func readRecordedSkillScope(sddDir string) model.Scope {
 	return cfg.SkillScope
 }
 
-// gitUserName reads git config user.name, returning an empty string when
-// git is unavailable or the setting isn't configured. Best-effort — used
-// only as a pre-filled default for the sdd init participant prompt.
-func gitUserName() string {
-	out, err := exec.Command("git", "config", "--get", "user.name").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// gitRemoteURL returns the repo's origin remote URL, or "" when no remote
-// is configured — the local-only case for repo_id derivation.
-func gitRemoteURL(repoRoot string) string {
-	out, err := exec.Command("git", "-C", repoRoot, "remote", "get-url", "origin").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // isTerminal returns true if f is attached to an interactive terminal. Uses
 // term.IsTerminal rather than os.FileMode checks because special devices
 // like /dev/null are character devices but not terminals — the distinction
@@ -1658,7 +1517,7 @@ func initCmd() *cli.Command {
 			if cmd.Bool("bump") && model.IsDevVersion(version) {
 				return fmt.Errorf("cannot bump from a dev build, use a released sdd binary")
 			}
-			repoRoot, err := findRepoRoot()
+			repoRoot, err := git.RepoRoot()
 			if err != nil {
 				return fmt.Errorf("finding repo root: %w", err)
 			}
@@ -1765,7 +1624,7 @@ func initCmd() *cli.Command {
 			// aggregated error above; here we only prompt on a TTY.
 			participant := participantFlag
 			if participant == "" && recordedParticipant == "" && isTerminal(os.Stdin) {
-				def := gitUserName()
+				def := git.UserName()
 				prompted, err := promptParticipant(def)
 				if err != nil {
 					return fmt.Errorf("prompt: %w", err)
@@ -1804,7 +1663,7 @@ func initCmd() *cli.Command {
 				Scope:         scope,
 				ScopeExplicit: scopeExplicit,
 				UserHome:      userHome,
-				RemoteURL:     gitRemoteURL(repoRoot),
+				RemoteURL:     git.RemoteURL(repoRoot),
 				Force:         cmd.Bool("force"),
 				Bump:          cmd.Bool("bump"),
 				OnMinimumVersionBumped: func(previous, current string) {
@@ -1869,7 +1728,7 @@ func initCmd() *cli.Command {
 			}
 			handler := handlers.New(handlers.Options{
 				Reader:    reader,
-				Committer: gitCommitterFunc(gitCommit),
+				Committer: git.CLI{},
 			})
 			return handler.Init(ctx, icmd)
 		}),
@@ -1952,8 +1811,8 @@ func wipStartCmd() *cli.Command {
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
 				Reader:    reader,
-				Committer: gitCommitterFunc(gitCommit),
-				Brancher:  gitBrancher{},
+				Committer: git.CLI{},
+				Brancher:  git.CLI{},
 			})
 			return handler.StartWIP(ctx, startCmd)
 		}),
@@ -2007,36 +1866,12 @@ func wipDoneCmd() *cli.Command {
 			handler := handlers.New(handlers.Options{
 				GraphDir:  dir,
 				Reader:    reader,
-				Committer: gitCommitterFunc(gitRemoveAndCommit),
-				Brancher:  gitBrancher{},
+				Committer: git.RemovalCommitter{},
+				Brancher:  git.CLI{},
 			})
 			return handler.FinishWIP(ctx, doneCmd)
 		}),
 	}
-}
-
-// gitRemoveAndCommit stages the deletion of the given paths and commits.
-// Used by FinishWIP — the marker file has already been removed from disk
-// when this runs, so we use `git rm --cached` (or `git add` as fallback)
-// to stage the deletion before committing.
-func gitRemoveAndCommit(message string, paths ...string) error {
-	for _, p := range paths {
-		rm := exec.Command("git", "rm", "--cached", "-f", p)
-		if out, err := rm.CombinedOutput(); err != nil {
-			add := exec.Command("git", "add", p)
-			if out2, err2 := add.CombinedOutput(); err2 != nil {
-				return fmt.Errorf("git stage: %s (%v); fallback %s (%w)", out, err, out2, err2)
-			}
-		}
-	}
-	// Scope to the given paths (see gitCommit) so an unrelated staged index
-	// isn't swept into the WIP-marker removal commit.
-	commitArgs := append([]string{"commit", "-m", message, "--"}, paths...)
-	commit := exec.Command("git", commitArgs...)
-	if out, err := commit.CombinedOutput(); err != nil {
-		return fmt.Errorf("git commit: %s (%w)", out, err)
-	}
-	return nil
 }
 
 func wipListCmd() *cli.Command {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
+	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/llm"
@@ -66,7 +67,7 @@ func serveCmd() *cli.Command {
 				SDDDir:    sddDir,
 				Reader:    finder,
 				LLMRunner: runner,
-				Committer: gitCommitterFunc(gitCommit),
+				Committer: git.CLI{},
 			})
 
 			searcher, vector, err := buildServeSearcher(cmd, dir, finder)
