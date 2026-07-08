@@ -137,12 +137,24 @@ func (h *IndexHandler) LazyFill(ctx context.Context, cmd *command.LazyFillIndexC
 func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 	onPlanned func(int), onBatchStart func([]string, int), onIndexed func(string, int), onSkipped func(string), onComplete func(int, int)) error {
 
-	logger := slogutils.FromContext(ctx)
-
 	g, err := h.reader.CurrentGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph: %w", err)
 	}
+
+	// The whole write session — manifest read, skip pass, embedding,
+	// upserts, manifest saves — runs under the store's exclusive lock so
+	// concurrent writers (a CLI build racing the MCP server's lazy-fill)
+	// serialize instead of interleaving chromem's per-document files.
+	return h.indexStore.WriteSession(ctx, func() error {
+		return h.indexEntriesLocked(ctx, g, force, onPlanned, onBatchStart, onIndexed, onSkipped, onComplete)
+	})
+}
+
+func (h *IndexHandler) indexEntriesLocked(ctx context.Context, g *model.Graph, force bool,
+	onPlanned func(int), onBatchStart func([]string, int), onIndexed func(string, int), onSkipped func(string), onComplete func(int, int)) error {
+
+	logger := slogutils.FromContext(ctx)
 
 	manifest, err := index.LoadManifest(h.indexDir)
 	if err != nil {

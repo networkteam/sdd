@@ -200,8 +200,8 @@ func TestCacheLifecycle(t *testing.T) {
 		t.Errorf("pull did not fetch the new entry: %v", err)
 	}
 
-	if IndexDir(cacheDir) != filepath.Join(cacheDir, ".index") {
-		t.Errorf("IndexDir = %q", IndexDir(cacheDir))
+	if LegacyIndexDir(cacheDir) != filepath.Join(cacheDir, ".index") {
+		t.Errorf("LegacyIndexDir = %q", LegacyIndexDir(cacheDir))
 	}
 }
 

@@ -91,15 +91,15 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 	}
 
 	// .gitignore should contain the tmp directory, local config file (so API
-	// keys stored locally don't get committed), the per-participant search
-	// index (machine-local, embedder-fingerprint dependent), and the
-	// LLM/embedding stats sink (machine-local per-call metrics).
+	// keys stored locally don't get committed), and the LLM/embedding stats
+	// sink (machine-local per-call metrics). The search index lives in the
+	// machine-global store, never in the tree — no entry for it.
 	gitignore := filepath.Join(tmp, ".gitignore")
 	data, err = os.ReadFile(gitignore)
 	if err != nil {
 		t.Fatalf("read .gitignore: %v", err)
 	}
-	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/index/", ".sdd/stats/"} {
+	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf(".gitignore missing %q, got:\n%s", want, data)
 		}
@@ -325,7 +325,7 @@ func TestInit_GitignoreIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .gitignore: %v", err)
 	}
-	for _, entry := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/index/", ".sdd/stats/"} {
+	for _, entry := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/"} {
 		count := strings.Count(string(data), entry)
 		if count != 1 {
 			t.Errorf("%q appears %d times in .gitignore; want exactly 1\n%s", entry, count, data)

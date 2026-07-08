@@ -14,8 +14,10 @@ import (
 	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/command"
+	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 )
 
 // Init executes an InitCmd. The operation is idempotent:
@@ -224,8 +226,11 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 
 	// Housekeeping applied on every init (idempotent — ensureGitignoreEntries
 	// skips entries already present). Covers fresh checkouts and upgrades
-	// where a new entry has been added to the required set.
-	gitignoreEntries := []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/index/", ".sdd/stats/", ".sdd/sessions/"}
+	// where a new entry has been added to the required set. The index no
+	// longer lives in the tree (machine-global store, d-tac-nhx), so its
+	// gitignore entry is not emitted anymore; existing entries are harmless
+	// and left alone.
+	gitignoreEntries := []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/", ".sdd/sessions/"}
 	gitignoreAdded, err := ensureGitignoreEntries(gitignorePath, gitignoreEntries)
 	if err != nil {
 		log.Warn("could not update .gitignore", "path", gitignorePath, "err", err)
@@ -234,6 +239,17 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		if cmd.OnGitignoreUpdated != nil {
 			cmd.OnGitignoreUpdated(gitignorePath)
 		}
+	}
+
+	// Migrate legacy indexes into the machine-global store: the in-tree
+	// .sdd/index and, for connected repos, the clone cache's .index — both
+	// predate the store. Move-if-absent, never clobber: when a store already
+	// exists for the same (repo-key, fingerprint) the legacy dir stays where
+	// it is (merging is deliberately out of scope) and the callback reports
+	// it as skippable. init is the post-clone / post-update contract, which
+	// makes it the migration surface.
+	if err := h.migrateLegacyIndexes(cmd, sddDir, configPath); err != nil {
+		return err
 	}
 
 	// Scaffold the AGENTS.md / CLAUDE.md instruction bridge when a non-Claude
@@ -855,4 +871,57 @@ func cleanOldGraphDirGitignore(graphDir string) error {
 	}
 
 	return os.WriteFile(path, []byte(out.String()), 0o644)
+}
+
+// migrateLegacyIndexes moves pre-store index builds into the machine-global
+// store: the local .sdd/index (keyed by the repo's committed repo_id, else
+// its root path) and each connected repo's clone-cache .index (keyed by its
+// repo_id). Skipped silently when the handler has no connected-repos
+// manager (tests, minimal wiring) — there is no cache root to migrate into.
+func (h *Handler) migrateLegacyIndexes(cmd *command.InitCmd, sddDir, configPath string) error {
+	if h.repos == nil {
+		return nil
+	}
+	cacheRoot := h.repos.Registry().CacheRoot()
+
+	legacyLocal := filepath.Join(sddDir, "index")
+	if _, err := os.Stat(legacyLocal); err == nil {
+		repoID := ""
+		if data, err := os.ReadFile(configPath); err == nil {
+			if cfgFile, err := model.ParseConfig(data); err == nil {
+				repoID = cfgFile.RepoID
+			}
+		}
+		key := index.RepoKey(repoID, filepath.Dir(sddDir))
+		target, moved, err := index.MigrateDir(legacyLocal, cacheRoot, key)
+		if err != nil {
+			return fmt.Errorf("migrating local index into the machine-global store: %w", err)
+		}
+		if target != "" && cmd.OnIndexMigrated != nil {
+			cmd.OnIndexMigrated(legacyLocal, target, moved)
+		}
+	}
+
+	gcfg, err := h.repos.Registry().Load()
+	if err != nil {
+		return err
+	}
+	for _, r := range gcfg.Repos {
+		cacheDir, err := h.repos.Registry().CacheDir(r.RepoID)
+		if err != nil {
+			continue
+		}
+		legacy := repos.LegacyIndexDir(cacheDir)
+		if _, err := os.Stat(legacy); err != nil {
+			continue
+		}
+		target, moved, err := index.MigrateDir(legacy, cacheRoot, r.RepoID)
+		if err != nil {
+			return fmt.Errorf("migrating cache index for %s: %w", r.RepoID, err)
+		}
+		if target != "" && cmd.OnIndexMigrated != nil {
+			cmd.OnIndexMigrated(legacy, target, moved)
+		}
+	}
+	return nil
 }

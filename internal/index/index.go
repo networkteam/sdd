@@ -87,6 +87,11 @@ type Index struct {
 //
 // On a fresh directory, both subdirs are created. The collection is named
 // CollectionName and is auto-created on first open.
+//
+// The load phase holds the store's shared lock so a reader never decodes
+// half-written documents from a concurrent write session; the lock is
+// released before Open returns — queries run on the in-memory copy, and
+// mutation goes through WriteSession's exclusive lock.
 func Open(indexDir string) (*Index, error) {
 	if indexDir == "" {
 		return nil, errors.New("index dir is required")
@@ -95,6 +100,12 @@ func Open(indexDir string) (*Index, error) {
 	if err := os.MkdirAll(chromemDir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating index dir: %w", err)
 	}
+
+	l := lockFile(indexDir)
+	if _, err := l.TryRLockContext(context.Background(), lockRetryInterval); err != nil {
+		return nil, fmt.Errorf("acquiring index read lock at %s: %w", indexDir, err)
+	}
+	defer func() { _ = l.Unlock() }()
 
 	db, err := chromem.NewPersistentDB(chromemDir, false)
 	if err != nil {

@@ -132,7 +132,7 @@ func buildServeSearcher(cmd *cli.Command, graphDir string, reader *finders.Finde
 		sf := finders.NewSearchFinder(finders.SearchFinderOptions{GraphDir: graphDir, Repos: reg})
 		return lazyFillSearcher{sf: sf, prepare: handlers.New(handlers.Options{Reader: reader, Repos: mgr})}, false, nil
 	}
-	idxDir, err := indexDir()
+	idxDir, err := resolveIndexStore(emb)
 	if err != nil {
 		return nil, false, err
 	}

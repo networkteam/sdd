@@ -21,6 +21,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 )
 
 // resolveEmbeddingConfig builds the effective EmbeddingConfig by merging
@@ -96,14 +97,30 @@ func embeddingFlags() []cli.Flag {
 	}
 }
 
-// indexDir returns the index directory rooted at the discovered .sdd dir.
-// Returns ("", err) when no .sdd is found.
-func indexDir() (string, error) {
+// resolveIndexStore resolves the machine-global index store for the current
+// repo under the given embedder: <cacheRoot>/index/<repo-key>/<fp-hash>.
+// The repo key is the committed repo_id when declared — shared by the
+// checkout, its worktrees, and the connected-repo cache — else a hash of
+// the repo root. Returns ("", err) when no .sdd is found.
+func resolveIndexStore(emb llm.Embedder) (string, error) {
 	sddDir, err := resolveSDDDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(sddDir, "index"), nil
+	cfg, err := loadConfig()
+	if err != nil {
+		return "", err
+	}
+	repoID := ""
+	if cfg != nil {
+		repoID = cfg.RepoID
+	}
+	loc, err := repos.DefaultLocations()
+	if err != nil {
+		return "", err
+	}
+	key := index.RepoKey(repoID, filepath.Dir(sddDir))
+	return index.StoreDir(loc.CacheRoot, key, emb.Fingerprint()), nil
 }
 
 // crossRepoEmbedder builds the embedder for a cross-repo search: the
@@ -165,7 +182,7 @@ func indexCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			idxDir, err := indexDir()
+			idxDir, err := resolveIndexStore(emb)
 			if err != nil {
 				return err
 			}
@@ -346,7 +363,7 @@ func searchCmd() *cli.Command {
 				if emb == nil {
 					return fmt.Errorf("vector search requires an embedding provider — set embedding.provider in .sdd/config.local.yaml")
 				}
-				idxDir, err := indexDir()
+				idxDir, err := resolveIndexStore(emb)
 				if err != nil {
 					return err
 				}

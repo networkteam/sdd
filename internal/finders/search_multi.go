@@ -106,7 +106,10 @@ func searchMember(q query.SearchQuery, repoID string, local *SearchFinder) (*sea
 	}
 	var store *index.Index
 	if q.Phrase != "" && local.embedder != nil {
-		store, err = index.Open(repos.IndexDir(cacheDir))
+		// The member index is the same machine-global store the repo's own
+		// checkout uses — keyed by (repo-id, fingerprint), embedded once.
+		storeDir := index.StoreDir(local.repos.CacheRoot(), repoID, local.embedder.Fingerprint())
+		store, err = index.Open(storeDir)
 		if err != nil {
 			return nil, fmt.Errorf("opening index for %s: %w", repoID, err)
 		}

@@ -19,6 +19,7 @@ import (
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llm/embed"
 	"github.com/networkteam/sdd/internal/llm/factory"
 	"github.com/networkteam/sdd/internal/llmstats"
 	"github.com/networkteam/sdd/internal/meta"
@@ -901,13 +902,19 @@ func lintCmd() *cli.Command {
 				return err
 			}
 			// Index health rides along when an embedding provider is
-			// configured; a missing .sdd (no index dir) degrades to the
-			// graph-only report, matching the finder's silent posture.
+			// configured; a store that can't be resolved (no .sdd, no
+			// embedder) degrades to the graph-only report, matching the
+			// finder's silent posture.
 			embCfg, err := resolveEmbeddingConfig(cmd)
 			if err != nil {
 				return err
 			}
-			idxDir, _ := indexDir()
+			var idxDir string
+			if embCfg.Provider != "" {
+				if emb, err := embed.New(embCfg); err == nil {
+					idxDir, _ = resolveIndexStore(emb)
+				}
+			}
 			f.IndexLint(query.IndexLintQuery{
 				Embedding: embCfg,
 				IndexDir:  idxDir,
@@ -1813,15 +1820,27 @@ func initCmd() *cli.Command {
 				OnAgentSkillsPruned: func(result command.AgentPruneResult) {
 					presenters.RenderInitPrune(os.Stdout, result)
 				},
+				OnIndexMigrated: func(legacyDir, storeDir string, moved bool) {
+					if moved {
+						fmt.Printf("  index migrated: %s → %s\n", legacyDir, storeDir)
+						return
+					}
+					fmt.Printf("  index store already exists at %s — the legacy copy at %s is unused and can be removed\n", storeDir, legacyDir)
+				},
 			}
 
 			reader, err := newReadFinder()
 			if err != nil {
 				return err
 			}
+			_, mgr, err := defaultRepos()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
 				Reader:    reader,
 				Committer: git.CLI{},
+				Repos:     mgr,
 			})
 			if err := handler.Init(ctx, icmd); err != nil {
 				return err

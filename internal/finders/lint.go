@@ -79,7 +79,7 @@ func (f *Finder) repoIndexLint(result *query.LintResult) {
 		if err != nil || !repos.IsCloned(cacheDir) {
 			continue
 		}
-		manifest, err := index.LoadManifest(repos.IndexDir(cacheDir))
+		manifest, err := index.LoadManifest(index.StoreDir(f.repos.CacheRoot(), r.RepoID, fingerprint))
 		if err != nil || len(manifest.Entries) == 0 {
 			continue
 		}

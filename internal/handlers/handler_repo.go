@@ -363,7 +363,9 @@ func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuer
 		if err != nil {
 			return err
 		}
-		idxDir := repos.IndexDir(cacheDir)
+		// One machine-global store per (repo-id, fingerprint): the same
+		// index the repo's own checkout would use, embedded once.
+		idxDir := index.StoreDir(h.repos.Registry().CacheRoot(), repoID, embedder.Fingerprint())
 		store, err := index.Open(idxDir)
 		if err != nil {
 			return fmt.Errorf("opening index for %s: %w", repoID, err)

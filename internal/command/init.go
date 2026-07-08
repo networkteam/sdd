@@ -107,6 +107,13 @@ type InitCmd struct {
 	// OnGitignoreUpdated fires after .gitignore is updated with .sdd/tmp/.
 	OnGitignoreUpdated func(gitignorePath string)
 
+	// OnIndexMigrated fires per legacy index dir (in-tree .sdd/index or a
+	// clone cache's .index) the init pass handled: moved=true when it was
+	// moved into the machine-global store at storeDir, moved=false when a
+	// store already existed there and the legacy dir was left in place for
+	// manual removal (never clobbered, never merged).
+	OnIndexMigrated func(legacyDir, storeDir string, moved bool)
+
 	// --- Always-fire callbacks (both initial and repeat runs) ---
 
 	// OnMetaWritten fires when .sdd/meta.json is created. Does not fire

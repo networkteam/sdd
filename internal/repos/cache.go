@@ -59,10 +59,10 @@ func GraphDir(dir string) (string, error) {
 	return filepath.Join(dir, filepath.FromSlash(graphDir)), nil
 }
 
-// IndexDir is the per-repo search index location inside the cache. Distinct
-// from the local repo's .sdd/index/ — the cache worktree is otherwise
-// untouched.
-func IndexDir(dir string) string {
+// LegacyIndexDir is the pre-store per-repo index location inside a clone
+// cache (<cache>/.index) — kept only so `sdd init` can migrate an existing
+// build into the machine-global store. Nothing writes here anymore.
+func LegacyIndexDir(dir string) string {
 	return filepath.Join(dir, ".index")
 }
 
