@@ -13,7 +13,6 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
-	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/slogutils"
@@ -66,7 +65,7 @@ func runSyncCheck(ctx context.Context) {
 		// is the normal state for `sdd --help` and for the first `sdd init`.
 		return
 	}
-	cfg, err := meta.ReadConfig(sddDir)
+	cfg, err := loadConfig()
 	if err != nil {
 		logger.Debug("sync check: config unreadable", "err", err)
 		return

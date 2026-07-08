@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,5 +202,64 @@ func TestCacheLifecycle(t *testing.T) {
 
 	if IndexDir(cacheDir) != filepath.Join(cacheDir, ".index") {
 		t.Errorf("IndexDir = %q", IndexDir(cacheDir))
+	}
+}
+
+// The user-global config carries the shared BaseConfig settings inline —
+// participant, llm, embedding, sync — next to its own repos list, and
+// rejects keys that belong to a per-repo file (fail-loud, never a silent
+// drop: the exact failure the cross-repo outer validation surfaced).
+func TestGlobalConfigBaseSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := "participant: Christopher\nllm:\n  provider: ollama\n  model: llama3.1:70b\nembedding:\n  provider: ollama\nrepos:\n  - repo_id: github.com/networkteam/other\n    clone_url: git@github.com:networkteam/other.git\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfigFrom(path)
+	if err != nil {
+		t.Fatalf("LoadConfigFrom: %v", err)
+	}
+	if cfg.Participant != "Christopher" {
+		t.Errorf("Participant = %q, want Christopher", cfg.Participant)
+	}
+	if cfg.LLM.Provider != "ollama" || cfg.LLM.Model != "llama3.1:70b" {
+		t.Errorf("LLM not decoded: %+v", cfg.LLM)
+	}
+	if cfg.Embedding.Provider != "ollama" {
+		t.Errorf("Embedding not decoded: %+v", cfg.Embedding)
+	}
+	if len(cfg.Repos) != 1 || cfg.Repos[0].RepoID != "github.com/networkteam/other" {
+		t.Errorf("Repos not decoded: %+v", cfg.Repos)
+	}
+}
+
+func TestGlobalConfigRejectsUnknownAndPerRepoKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		key  string
+	}{
+		{"per-repo-only key", "repo_id: github.com/org/repo\n", "repo_id"},
+		{"per-repo graph_dir", "graph_dir: .sdd/graph\n", "graph_dir"},
+		{"arbitrary unknown", "bogus: 1\n", "bogus"},
+		{"nested unknown", "llm:\n  bogus_nested: 1\n", "bogus_nested"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadConfigFrom(path)
+			if err == nil {
+				t.Fatalf("key %q must be rejected", tc.key)
+			}
+			if !strings.Contains(err.Error(), tc.key) {
+				t.Errorf("error should name key %q, got: %v", tc.key, err)
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Errorf("error should name the file, got: %v", err)
+			}
+		})
 	}
 }

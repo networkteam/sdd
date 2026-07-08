@@ -94,7 +94,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		if err := os.MkdirAll(sddDir, 0o755); err != nil {
 			return fmt.Errorf("creating %s: %w", sddDir, err)
 		}
-		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.Config{GraphDir: graphDir, RepoID: derivedRepoID, Language: cmd.Language, SkillScope: effectiveScope, SupportedAgents: effectiveAgents})), 0o644); err != nil {
+		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.PerRepoConfig{GraphDir: graphDir, RepoID: derivedRepoID, Language: cmd.Language, SkillScope: effectiveScope, SupportedAgents: effectiveAgents})), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", configPath, err)
 		}
 		touched = append(touched, configPath)

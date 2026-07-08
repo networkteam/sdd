@@ -27,9 +27,13 @@ import (
 // .sdd/config.yaml + .sdd/config.local.yaml and applying CLI flag
 // overrides. Mirrors resolveLLMConfig — same precedence rules, same
 // IsSet check so unset flags don't clobber config defaults.
-func resolveEmbeddingConfig(cmd *cli.Command) model.EmbeddingConfig {
+func resolveEmbeddingConfig(cmd *cli.Command) (model.EmbeddingConfig, error) {
 	var cfg model.EmbeddingConfig
-	if fileCfg, err := loadConfig(); err == nil && fileCfg != nil {
+	fileCfg, err := loadConfig()
+	if err != nil {
+		return cfg, err
+	}
+	if fileCfg != nil {
 		cfg = fileCfg.Embedding
 	}
 	if cmd.IsSet("embedding-provider") {
@@ -53,7 +57,7 @@ func resolveEmbeddingConfig(cmd *cli.Command) model.EmbeddingConfig {
 	if cmd.IsSet("embedding-rate-limit-rps") {
 		cfg.RateLimitRPS = cmd.Float("embedding-rate-limit-rps")
 	}
-	return cfg
+	return cfg, nil
 }
 
 // embeddingFlags returns the CLI flag set used by both `sdd index` and
@@ -108,10 +112,18 @@ func indexDir() (string, error) {
 // embedding configured, the local resolution applies (and member indexes
 // build under that fingerprint instead).
 func crossRepoEmbedder(cmd *cli.Command) (llm.Embedder, error) {
-	if reg, _, err := defaultRepos(); err == nil {
-		if gcfg, err := reg.Load(); err == nil && gcfg.Embedding.Provider != "" {
-			return embed.New(gcfg.Embedding)
-		}
+	reg, _, err := defaultRepos()
+	if err != nil {
+		return nil, err
+	}
+	gcfg, err := reg.Load()
+	if err != nil {
+		// A broken global config must surface, not silently fall back to
+		// the local embedder (which would build in a different vector space).
+		return nil, err
+	}
+	if gcfg.Embedding.Provider != "" {
+		return embed.New(gcfg.Embedding)
 	}
 	return buildEmbedder(cmd)
 }
@@ -120,7 +132,10 @@ func crossRepoEmbedder(cmd *cli.Command) (llm.Embedder, error) {
 // no provider is configured. Errors only on misconfiguration (unknown
 // provider, missing required fields).
 func buildEmbedder(cmd *cli.Command) (llm.Embedder, error) {
-	cfg := resolveEmbeddingConfig(cmd)
+	cfg, err := resolveEmbeddingConfig(cmd)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.Provider == "" {
 		return nil, nil
 	}

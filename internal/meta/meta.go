@@ -4,6 +4,7 @@
 package meta
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -41,9 +42,10 @@ func SDDDir(repoRoot string) string {
 
 // ReadConfig reads and parses .sdd/config.yaml from the given .sdd directory,
 // then overlays any .sdd/config.local.yaml present. Returns nil config with
-// nil error if neither file exists. The local file is gitignored and carries
-// per-machine overrides (API keys, Ollama endpoint, participant name).
-func ReadConfig(sddDir string) (*model.Config, error) {
+// nil error if neither file exists. The local file is gitignored, parses as
+// the same PerRepoConfig schema, and carries genuinely machine-specific
+// overrides (API keys, endpoints).
+func ReadConfig(sddDir string) (*model.PerRepoConfig, error) {
 	base, err := readConfigFile(filepath.Join(sddDir, "config.yaml"))
 	if err != nil {
 		return nil, err
@@ -58,7 +60,27 @@ func ReadConfig(sddDir string) (*model.Config, error) {
 	return model.MergeConfig(base, overlay), nil
 }
 
-func readConfigFile(path string) (*model.Config, error) {
+// ResolveConfig builds the effective per-repo config from the full overlay:
+// the user-global base settings under the committed .sdd/config.yaml under
+// .sdd/config.local.yaml. CLI flags apply on top at the call site. Returns
+// nil (no config) only when the global base is empty and neither per-repo
+// file exists — with global settings present, a repo without config files
+// still resolves to them.
+func ResolveConfig(global model.BaseConfig, sddDir string) (*model.PerRepoConfig, error) {
+	fileCfg, err := ReadConfig(sddDir)
+	if err != nil {
+		return nil, err
+	}
+	if fileCfg == nil {
+		if global.IsZero() {
+			return nil, nil
+		}
+		return &model.PerRepoConfig{BaseConfig: global}, nil
+	}
+	return model.MergeConfig(&model.PerRepoConfig{BaseConfig: global}, fileCfg), nil
+}
+
+func readConfigFile(path string) (*model.PerRepoConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -66,13 +88,19 @@ func readConfigFile(path string) (*model.Config, error) {
 		}
 		return nil, err
 	}
-	return model.ParseConfig(data)
+	cfg, err := model.ParseConfig(data)
+	if err != nil {
+		// The path names which file carries the offense — the parse error
+		// itself already names the key and line.
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return cfg, nil
 }
 
 // ResolveGraphDir returns the absolute graph directory path from a config
 // and the repo root (parent of .sdd/). If cfg is nil or GraphDir is empty,
 // falls back to model.DefaultGraphDir.
-func ResolveGraphDir(repoRoot string, cfg *model.Config) string {
+func ResolveGraphDir(repoRoot string, cfg *model.PerRepoConfig) string {
 	graphDir := model.DefaultGraphDir
 	if cfg != nil && cfg.GraphDir != "" {
 		graphDir = cfg.GraphDir

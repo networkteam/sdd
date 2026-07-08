@@ -51,7 +51,7 @@ func (f *fakeGitSyncer) MergeTreePredict(context.Context, string, string) ([]str
 	return f.conflicts, f.mergeTreeErr
 }
 
-func newSyncFinder(t *testing.T, gs GitSyncer, cfg *model.Config) (*Finder, string) {
+func newSyncFinder(t *testing.T, gs GitSyncer, cfg *model.PerRepoConfig) (*Finder, string) {
 	t.Helper()
 	sddDir := t.TempDir()
 	f := New(Options{Config: cfg, GitSyncer: gs})
@@ -83,7 +83,7 @@ func TestSyncStatus_NotInRepoYieldsNoRepo(t *testing.T) {
 
 func TestSyncStatus_RespectsCooldownWithin(t *testing.T) {
 	gs := &fakeGitSyncer{inRepo: true, hasRemote: true, upstream: "origin/main"}
-	f, sddDir := newSyncFinder(t, gs, &model.Config{Sync: model.SyncConfig{Cooldown: "1h"}})
+	f, sddDir := newSyncFinder(t, gs, &model.PerRepoConfig{BaseConfig: model.BaseConfig{Sync: model.SyncConfig{Cooldown: "1h"}}})
 
 	// Stamp a recent fetch.
 	if err := meta.TouchLastFetch(sddDir); err != nil {
@@ -246,7 +246,7 @@ func TestSyncStatus_ConflictPredictedWhenDiverged(t *testing.T) {
 
 func TestSyncStatus_CooldownBypassedWhenFlagUnset(t *testing.T) {
 	gs := &fakeGitSyncer{inRepo: true, hasRemote: true, upstream: "origin/main", remoteAhead: 1}
-	f, sddDir := newSyncFinder(t, gs, &model.Config{Sync: model.SyncConfig{Cooldown: "1h"}})
+	f, sddDir := newSyncFinder(t, gs, &model.PerRepoConfig{BaseConfig: model.BaseConfig{Sync: model.SyncConfig{Cooldown: "1h"}}})
 
 	// Stamp a recent fetch — but RespectCooldown=false should ignore it.
 	if err := meta.TouchLastFetch(sddDir); err != nil {

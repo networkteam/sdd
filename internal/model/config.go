@@ -1,7 +1,11 @@
 package model
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"reflect"
 	"strings"
 	"time"
 
@@ -50,31 +54,54 @@ const (
 	DefaultSyncCooldown = "15m"
 )
 
-// Config represents the contents of .sdd/config.yaml (shared, committed) or
-// .sdd/config.local.yaml (gitignored, per-machine). Both files unmarshal into
-// the same struct; the local file overlays the shared file via MergeConfig.
-// Empty / zero-valued fields in the local file mean "inherit from shared",
-// so any subset of fields can appear in either file.
-type Config struct {
-	GraphDir  string          `yaml:"graph_dir,omitempty"`
+// BaseConfig holds the shared user/machine settings every config location
+// can carry: preferences that follow the user or the machine, not the
+// repository. It is embedded inline by both PerRepoConfig and the user-global
+// config, so the same keys are settable once globally and overridable per
+// repo (d-cpt-6cq's unified overlay). Effective resolution order: global
+// base, then the committed .sdd/config.yaml, then .sdd/config.local.yaml,
+// then CLI flags.
+type BaseConfig struct {
 	LLM       LLMConfig       `yaml:"llm,omitempty"`
 	Embedding EmbeddingConfig `yaml:"embedding,omitempty"`
 	Sync      SyncConfig      `yaml:"sync,omitempty"`
+	// Participant is the canonical name used for entry authorship when
+	// --participants / --participant is omitted at capture time. Typically
+	// set once in the user-global config; a per-repo override covers a
+	// project where the same person deliberately uses another spelling.
+	Participant string `yaml:"participant,omitempty"`
+}
+
+// IsZero reports whether no base setting is set. Resolution uses it to
+// distinguish "no global settings at all" from an empty overlay layer.
+func (b BaseConfig) IsZero() bool {
+	return reflect.DeepEqual(b, BaseConfig{})
+}
+
+// PerRepoConfig represents the contents of .sdd/config.yaml (shared,
+// committed) or .sdd/config.local.yaml (gitignored, per-machine overrides).
+// Both files unmarshal into the same struct; the local file overlays the
+// shared file via MergeConfig. Empty / zero-valued fields in the local file
+// mean "inherit", so any subset of fields can appear in either file. The
+// repository's own fields exist only on this schema — never on the
+// user-global config — so a misplaced repo_id is a parse error, not a
+// silently inherited default.
+type PerRepoConfig struct {
+	BaseConfig `yaml:",inline"`
+
+	GraphDir string `yaml:"graph_dir,omitempty"`
 	// RepoID is the repo's canonical URL-shaped identity (host/path, e.g.
 	// github.com/networkteam/sdd) used as the prefix of cross-repo
 	// references into this graph. Auto-derived from the git remote by
 	// `sdd init` and committed in .sdd/config.yaml — identical for every
 	// user, never user-chosen. Empty for local-only repos.
 	RepoID string `yaml:"repo_id,omitempty"`
-	// Participant is the canonical name used for entry authorship when
-	// --participants / --participant is omitted at capture time. Lives in
-	// .sdd/config.local.yaml (gitignored) because the same person may use
-	// different spellings across projects.
-	Participant string `yaml:"participant,omitempty"`
 	// Language is a locale code (e.g. "de", "en", "de-DE") that governs the
 	// graph's authored language. Captured entries are written in this
 	// language; the /sdd skill renders translated vocabulary to users via
-	// bundled translation references. Empty means English (default).
+	// bundled translation references. Empty means English (default). A
+	// property of the repository (all contributors author in it), which is
+	// why it is not part of the shared BaseConfig overlay.
 	Language string `yaml:"language,omitempty"`
 	// SkillScope records where the project's skills were installed: user
 	// (~/.claude/skills/) or project (.claude/skills/). `sdd init` writes
@@ -89,6 +116,12 @@ type Config struct {
 	// agent reads only its own dir. Chosen via multi-select on first run.
 	// Empty means the pre-multi-agent default (Claude alone).
 	SupportedAgents []AgentTarget `yaml:"supported_agents,omitempty"`
+	// Dependencies is the committed, directed list of repo_ids this graph
+	// references — declared the way go.mod declares modules, so a fresh
+	// clone carries what it needs connected. How this machine reaches each
+	// dependency (clone URL, cache) is per-user and lives in the global
+	// config's repos list, never here.
+	Dependencies []string `yaml:"dependencies,omitempty"`
 }
 
 // SyncConfig governs background sync awareness: the auto-fetch cooldown and
@@ -104,8 +137,10 @@ type SyncConfig struct {
 // EmbeddingConfig holds settings for the search index's embedding provider.
 // Decoupled from LLMConfig (chat / summary) so a participant can run a
 // local Ollama embedder while still using a remote chat provider, and
-// vice versa. Lives in `.sdd/config.local.yaml` because indexes are
-// per-participant (see d-tac-lqr's storage decision).
+// vice versa. Typically set once in the user-global config: cross-repo
+// search fuses per-repo indexes under one shared embedder, so a per-repo
+// override leaves that shared vector space (lint flags the fingerprint
+// mismatch) — possible, but a choice with consequences.
 type EmbeddingConfig struct {
 	// Provider names the embedder transport: "openai" (OpenAI-compatible
 	// /v1/embeddings) or "ollama" (/api/embeddings). Empty disables vector
@@ -247,36 +282,66 @@ func (rc RetryConfig) Resolved() (maxAttempts int, baseDelay, maxDelay time.Dura
 	return maxAttempts, baseDelay, maxDelay, nil
 }
 
-// ParseConfig unmarshals YAML bytes into a Config struct. Empty input is
-// valid and yields a zero-valued Config.
-func ParseConfig(data []byte) (*Config, error) {
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+// ParseConfig unmarshals YAML bytes into a PerRepoConfig. Empty input is
+// valid and yields a zero-valued config. Unknown keys are an error, never a
+// silent drop — a misplaced setting must surface at load time (d-cpt-6cq's
+// fail-loud rule), and the strict decoder covers nested blocks too.
+func ParseConfig(data []byte) (*PerRepoConfig, error) {
+	var cfg PerRepoConfig
+	if err := StrictUnmarshalYAML(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 	return &cfg, nil
 }
 
-// MergeConfig returns a new Config with fields from overlay overriding base
-// wherever the overlay value is non-empty/non-zero. APIKeys are merged
-// key-by-key so overlay entries replace individual providers without
-// clobbering the full map. A nil overlay returns a copy of base.
-func MergeConfig(base, overlay *Config) *Config {
+// StrictUnmarshalYAML decodes YAML with unknown-key rejection (recursing
+// into nested structs; map-typed fields keep accepting arbitrary keys).
+// Empty input decodes to the zero value. Exported so every config location —
+// per-repo and user-global — shares one definition of strictness.
+func StrictUnmarshalYAML(data []byte, out any) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(out); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// MergeBaseConfig returns base with the non-empty/non-zero fields of overlay
+// applied. APIKeys merge key-by-key so overlay entries replace individual
+// providers without clobbering the full map.
+func MergeBaseConfig(base, overlay BaseConfig) BaseConfig {
+	out := base
+	if overlay.Participant != "" {
+		out.Participant = overlay.Participant
+	}
+	out.LLM = mergeLLMConfig(base.LLM, overlay.LLM)
+	out.Embedding = mergeEmbeddingConfig(base.Embedding, overlay.Embedding)
+	out.Sync = mergeSyncConfig(base.Sync, overlay.Sync)
+	return out
+}
+
+// MergeConfig returns a new PerRepoConfig with fields from overlay overriding
+// base wherever the overlay value is non-empty/non-zero. A nil overlay
+// returns a copy of base. Used for every adjacent layer pair of the overlay:
+// global base under committed config, committed config under local overrides.
+func MergeConfig(base, overlay *PerRepoConfig) *PerRepoConfig {
 	if base == nil {
-		base = &Config{}
+		base = &PerRepoConfig{}
 	}
 	out := *base
 	if overlay == nil {
 		return &out
 	}
+	out.BaseConfig = MergeBaseConfig(base.BaseConfig, overlay.BaseConfig)
 	if overlay.GraphDir != "" {
 		out.GraphDir = overlay.GraphDir
 	}
 	if overlay.RepoID != "" {
 		out.RepoID = overlay.RepoID
-	}
-	if overlay.Participant != "" {
-		out.Participant = overlay.Participant
 	}
 	if overlay.Language != "" {
 		out.Language = overlay.Language
@@ -287,9 +352,9 @@ func MergeConfig(base, overlay *Config) *Config {
 	if len(overlay.SupportedAgents) > 0 {
 		out.SupportedAgents = overlay.SupportedAgents
 	}
-	out.LLM = mergeLLMConfig(base.LLM, overlay.LLM)
-	out.Embedding = mergeEmbeddingConfig(base.Embedding, overlay.Embedding)
-	out.Sync = mergeSyncConfig(base.Sync, overlay.Sync)
+	if len(overlay.Dependencies) > 0 {
+		out.Dependencies = overlay.Dependencies
+	}
 	return &out
 }
 
@@ -403,7 +468,7 @@ func mergeRetryConfig(base, overlay RetryConfig) RetryConfig {
 // dir. If cfg.Language is set, the locale is written as an active
 // `language: <code>` entry. Otherwise a commented hint is emitted instead so
 // the option stays discoverable in the file.
-func FormatConfig(cfg Config) string {
+func FormatConfig(cfg PerRepoConfig) string {
 	graphDir := cfg.GraphDir
 	if graphDir == "" {
 		graphDir = DefaultGraphDir
@@ -477,7 +542,7 @@ func FormatConfig(cfg Config) string {
 
 // ResolveSyncCooldown returns the effective cooldown duration from cfg,
 // falling back to DefaultSyncCooldown on empty or unparseable values.
-func ResolveSyncCooldown(cfg *Config) time.Duration {
+func ResolveSyncCooldown(cfg *PerRepoConfig) time.Duration {
 	raw := ""
 	if cfg != nil {
 		raw = cfg.Sync.Cooldown

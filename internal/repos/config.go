@@ -60,16 +60,23 @@ func DefaultLocations() (Locations, error) {
 	}, nil
 }
 
-// GlobalConfig is the user-global SDD configuration: the connected repos and
-// the single shared embedding config that defines the one vector space
-// cross-graph search merges over. Hand-editable YAML underneath.
+// GlobalConfig is the user-global SDD configuration. It embeds the shared
+// user/machine settings (model.BaseConfig — participant, llm, embedding,
+// sync) that seed the config overlay for every repo on this machine; its
+// embedding config doubles as the global embedder every connected repo's
+// index is built with — one vector space so cosine scores are comparable
+// across repos (a repo indexed under a different fingerprint is excluded
+// from cross-graph search and flagged by lint). Hand-editable YAML
+// underneath; per-repo-only fields (repo_id above all) do not exist on this
+// schema, so a misplaced one is a parse error.
 type GlobalConfig struct {
+	model.BaseConfig `yaml:",inline"`
+
+	// Repos is the per-user resolution of connected repositories: for each
+	// repo_id, how this machine reaches it (clone URL, homedir cache). The
+	// committed per-repo `dependencies` list declares what a graph needs;
+	// this list resolves how — which is why it is global-only.
 	Repos []ConnectedRepo `yaml:"repos,omitempty"`
-	// Embedding is the global embedder every connected repo's index is
-	// built with — one vector space so cosine scores are comparable across
-	// repos. A repo indexed under a different fingerprint is excluded from
-	// cross-graph search and flagged by lint.
-	Embedding model.EmbeddingConfig `yaml:"embedding,omitempty"`
 }
 
 // ConnectedRepo names one connection: the canonical repo identity and the
@@ -81,7 +88,9 @@ type ConnectedRepo struct {
 }
 
 // LoadConfigFrom reads a user-global config from an explicit path. A missing
-// file is not an error — it yields an empty config (no connections).
+// file is not an error — it yields an empty config (no connections). Unknown
+// keys are an error: a setting placed in the wrong file must surface at load
+// time, never be silently dropped (d-cpt-6cq's fail-loud rule).
 func LoadConfigFrom(path string) (*GlobalConfig, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -91,7 +100,7 @@ func LoadConfigFrom(path string) (*GlobalConfig, error) {
 		return nil, fmt.Errorf("reading global config %s: %w", path, err)
 	}
 	var cfg GlobalConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := model.StrictUnmarshalYAML(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing global config %s: %w", path, err)
 	}
 	return &cfg, nil

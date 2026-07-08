@@ -17,7 +17,7 @@ import (
 // degrade gracefully.
 type Finder struct {
 	preflightRunner llm.Runner
-	cfg             *model.Config
+	cfg             *model.PerRepoConfig
 	gitSyncer       GitSyncer
 	repos           *repos.Registry
 }
@@ -27,7 +27,7 @@ type Finder struct {
 // than failing.
 type Options struct {
 	PreflightRunner llm.Runner
-	Config          *model.Config
+	Config          *model.PerRepoConfig
 	GitSyncer       GitSyncer
 	// Repos is the pure read surface over the connected repos — the only
 	// cross-repo capability a finder holds (no clone, no pull). Nil means no

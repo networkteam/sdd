@@ -34,18 +34,22 @@ import (
 // Default "dev" applies to local `go build` and `go run`.
 var version = "dev"
 
-// resolveLLMConfig builds the effective LLMConfig for a command by merging
-// .sdd/config.yaml + .sdd/config.local.yaml and applying CLI flag overrides.
-// Missing .sdd/ or missing config files yield a zero-value config — the
-// factory supplies defaults (claude-cli provider, default model). Flags that
-// were not explicitly set by the user are skipped so defaults from file
-// config remain in effect.
-func resolveLLMConfig(cmd *cli.Command) model.LLMConfig {
+// resolveLLMConfig builds the effective LLMConfig for a command from the
+// config overlay (user-global base, then .sdd/config.yaml, then
+// .sdd/config.local.yaml) and applies CLI flag overrides. Missing config
+// yields a zero-value config — the factory supplies defaults (claude-cli
+// provider, default model). Flags that were not explicitly set by the user
+// are skipped so defaults from file config remain in effect. A parse failure
+// in any config layer propagates — broken config must not silently run on
+// defaults.
+func resolveLLMConfig(cmd *cli.Command) (model.LLMConfig, error) {
 	var cfg model.LLMConfig
-	if sddDir, err := resolveSDDDir(); err == nil {
-		if fileCfg, err := meta.ReadConfig(sddDir); err == nil && fileCfg != nil {
-			cfg = fileCfg.LLM
-		}
+	fileCfg, err := loadConfig()
+	if err != nil {
+		return cfg, err
+	}
+	if fileCfg != nil {
+		cfg = fileCfg.LLM
 	}
 	if cmd.IsSet("provider") {
 		cfg.Provider = cmd.String("provider")
@@ -60,30 +64,37 @@ func resolveLLMConfig(cmd *cli.Command) model.LLMConfig {
 	if cmd.IsSet("concurrency") {
 		cfg.Concurrency = int(cmd.Int("concurrency"))
 	}
-	return cfg
+	return cfg, nil
 }
 
 // newRunner builds a llm.Runner from the resolved LLMConfig. Errors surface
-// misconfiguration (unknown provider, missing API key) at CLI entry so
-// failures are visible before graph work begins.
+// misconfiguration (unknown provider, missing API key, broken config file)
+// at CLI entry so failures are visible before graph work begins.
 func newRunner(cmd *cli.Command) (llm.Runner, error) {
-	return factory.New(resolveLLMConfig(cmd))
+	cfg, err := resolveLLMConfig(cmd)
+	if err != nil {
+		return nil, err
+	}
+	return factory.New(cfg)
 }
 
 // resolveTimeout returns the per-call LLM timeout for the given flag name,
 // preferring the user's explicit --<flag> over the llm.timeout field in
 // config. Falls back to the flag's default Value when neither is set.
-func resolveTimeout(cmd *cli.Command, flagName string) time.Duration {
+func resolveTimeout(cmd *cli.Command, flagName string) (time.Duration, error) {
 	if cmd.IsSet(flagName) {
-		return cmd.Duration(flagName)
+		return cmd.Duration(flagName), nil
 	}
-	cfg := resolveLLMConfig(cmd)
+	cfg, err := resolveLLMConfig(cmd)
+	if err != nil {
+		return 0, err
+	}
 	if cfg.Timeout != "" {
 		if d, err := time.ParseDuration(cfg.Timeout); err == nil && d > 0 {
-			return d
+			return d, nil
 		}
 	}
-	return cmd.Duration(flagName)
+	return cmd.Duration(flagName), nil
 }
 
 // readOnlyRunner satisfies llm.Runner but always errors on Run. Used by
@@ -130,17 +141,48 @@ func defaultRepos() (*repos.Registry, *repos.Manager, error) {
 	return reg, repos.NewManager(reg, git.CLI{}), nil
 }
 
-// loadConfig reads .sdd/config.yaml + config.local.yaml when present.
-// Returns (nil, nil) when the CWD is outside an sdd repo or no config
-// files exist — both are legitimate "no config" states. Returns (nil,
-// err) when discovery succeeded but parsing failed, so callers can
-// fail hard on broken config.
-func loadConfig() (*model.Config, error) {
+// loadConfig resolves the effective config overlay: the user-global base
+// settings (participant, llm, embedding, sync) under .sdd/config.yaml under
+// .sdd/config.local.yaml. Returns (nil, nil) when no layer exists — outside
+// an sdd repo with no global settings, or inside one with no config files
+// and no global settings; both are legitimate "no config" states. Returns
+// (nil, err) when any layer fails to parse, so callers fail hard on broken
+// config instead of silently running on defaults.
+func loadConfig() (*model.PerRepoConfig, error) {
+	loc, err := repos.DefaultLocations()
+	if err != nil {
+		return nil, err
+	}
+	global, err := repos.LoadConfigFrom(loc.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
 	sddDir, err := resolveSDDDir()
 	if err != nil {
-		return nil, nil
+		// Outside an sdd repo the global settings still apply (they are
+		// the user's, not a repo's).
+		if global.IsZero() {
+			return nil, nil
+		}
+		return &model.PerRepoConfig{BaseConfig: global.BaseConfig}, nil
 	}
-	return meta.ReadConfig(sddDir)
+	return meta.ResolveConfig(global.BaseConfig, sddDir)
+}
+
+// resolveConfigAt mirrors loadConfig for an explicit .sdd dir — `sdd init`
+// may target a root other than the cwd, and its readiness checks must see
+// the same overlay every other command resolves (a participant set globally
+// counts as configured).
+func resolveConfigAt(sddDir string) (*model.PerRepoConfig, error) {
+	loc, err := repos.DefaultLocations()
+	if err != nil {
+		return nil, err
+	}
+	global, err := repos.LoadConfigFrom(loc.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	return meta.ResolveConfig(global.BaseConfig, sddDir)
 }
 
 // splitCSV returns the comma-split fields of s with each element trimmed of
@@ -648,6 +690,10 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			preflightTimeout, err := resolveTimeout(cmd, "preflight-timeout")
+			if err != nil {
+				return err
+			}
 
 			ncmd := &command.NewEntryCmd{
 				Type:             typ,
@@ -674,7 +720,7 @@ func newCmd() *cli.Command {
 				Summary:          strings.TrimSpace(cmd.String("summary")),
 				DryRun:           cmd.Bool("dry-run"),
 				PreflightModel:   cmd.String("preflight-model"),
-				PreflightTimeout: resolveTimeout(cmd, "preflight-timeout"),
+				PreflightTimeout: preflightTimeout,
 				OnNewEntry: func(id, summary string) {
 					fmt.Println(id + ".md")
 					if rel, err := model.IDToRelPath(id); err == nil {
@@ -856,9 +902,13 @@ func lintCmd() *cli.Command {
 			// Index health rides along when an embedding provider is
 			// configured; a missing .sdd (no index dir) degrades to the
 			// graph-only report, matching the finder's silent posture.
+			embCfg, err := resolveEmbeddingConfig(cmd)
+			if err != nil {
+				return err
+			}
 			idxDir, _ := indexDir()
 			f.IndexLint(query.IndexLintQuery{
-				Embedding: resolveEmbeddingConfig(cmd),
+				Embedding: embCfg,
 				IndexDir:  idxDir,
 			}, result)
 			presenters.RenderLint(os.Stdout, result, g)
@@ -933,11 +983,15 @@ func summarizeCmd() *cli.Command {
 				explicitText = &value
 			}
 
+			summarizeTimeout, err := resolveTimeout(cmd, "timeout")
+			if err != nil {
+				return err
+			}
 			sumCmd := &command.SummarizeCmd{
 				EntryIDs:     ids,
 				Force:        cmd.Bool("force"),
 				Model:        cmd.String("model"),
-				Timeout:      resolveTimeout(cmd, "timeout"),
+				Timeout:      summarizeTimeout,
 				Concurrency:  int(cmd.Int("concurrency")),
 				ExplicitText: explicitText,
 				OnSummarized: func(id, summary string) {
@@ -1016,9 +1070,9 @@ func resolveParticipantsFlag(flagValue, sddDir string) ([]string, error) {
 	if flagValue != "" {
 		return splitCSV(flagValue), nil
 	}
-	cfg, err := meta.ReadConfig(sddDir)
+	cfg, err := resolveConfigAt(sddDir)
 	if err != nil {
-		return nil, fmt.Errorf("reading .sdd/config.local.yaml: %w", err)
+		return nil, fmt.Errorf("resolving config: %w", err)
 	}
 	if cfg == nil || cfg.Participant == "" {
 		return nil, fmt.Errorf("no participant configured; run `sdd init` or pass --participants")
@@ -1032,9 +1086,9 @@ func resolveParticipantFlag(flagValue, sddDir string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
 	}
-	cfg, err := meta.ReadConfig(sddDir)
+	cfg, err := resolveConfigAt(sddDir)
 	if err != nil {
-		return "", fmt.Errorf("reading .sdd/config.local.yaml: %w", err)
+		return "", fmt.Errorf("resolving config: %w", err)
 	}
 	if cfg == nil || cfg.Participant == "" {
 		return "", fmt.Errorf("no participant configured; run `sdd init` or pass --participant")
@@ -1409,16 +1463,15 @@ func promptAgents() ([]model.AgentTarget, error) {
 // output mode would suppress it here too; the call site is the right
 // place to attach that branch when those flags land.
 func warnIfParticipantMissing() {
-	sddDir, err := resolveSDDDir()
-	if err != nil {
+	if _, err := resolveSDDDir(); err != nil {
 		return
 	}
-	cfg, err := meta.ReadConfig(sddDir)
+	cfg, err := loadConfig()
 	if err != nil {
 		return
 	}
 	if cfg == nil || strings.TrimSpace(cfg.Participant) == "" {
-		fmt.Fprintln(os.Stderr, "sdd: no local participant configured — run `sdd init` to set one")
+		fmt.Fprintln(os.Stderr, "sdd: no participant configured — run `sdd init` to set one")
 	}
 }
 
@@ -1578,9 +1631,11 @@ func initCmd() *cli.Command {
 			if sddExists {
 				recordedScope = readRecordedSkillScope(sddDir)
 			}
-			var existingMerged *model.Config
+			var existingMerged *model.PerRepoConfig
 			if sddExists {
-				existingMerged, _ = meta.ReadConfig(sddDir)
+				// Overlay-aware: a participant configured globally counts
+				// as configured, so init does not demand a per-repo one.
+				existingMerged, _ = resolveConfigAt(sddDir)
 			}
 			recordedParticipant := ""
 			if existingMerged != nil {

@@ -1,31 +1,32 @@
 package model
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestMergeConfig_EmptyOverlayPreservesBase(t *testing.T) {
-	base := &Config{
-		GraphDir: ".sdd/graph",
-		LLM: LLMConfig{
+	base := &PerRepoConfig{
+		BaseConfig: BaseConfig{LLM: LLMConfig{
 			Provider:    "claude-cli",
 			Model:       "claude-haiku-4-5-20251001",
 			Concurrency: 4,
-		},
+		}},
+		GraphDir: ".sdd/graph",
 	}
-	got := MergeConfig(base, &Config{})
+	got := MergeConfig(base, &PerRepoConfig{})
 	if got.GraphDir != ".sdd/graph" || got.LLM.Provider != "claude-cli" || got.LLM.Concurrency != 4 {
 		t.Errorf("empty overlay should preserve base, got %+v", got)
 	}
 }
 
 func TestMergeConfig_NonEmptyOverlayOverrides(t *testing.T) {
-	base := &Config{
-		LLM: LLMConfig{Provider: "claude-cli", Model: "claude-haiku-4-5-20251001", Concurrency: 4},
+	base := &PerRepoConfig{
+		BaseConfig: BaseConfig{LLM: LLMConfig{Provider: "claude-cli", Model: "claude-haiku-4-5-20251001", Concurrency: 4}},
 	}
-	overlay := &Config{
-		LLM: LLMConfig{Provider: "ollama", Model: "llama3.1:70b"},
+	overlay := &PerRepoConfig{
+		BaseConfig: BaseConfig{LLM: LLMConfig{Provider: "ollama", Model: "llama3.1:70b"}},
 	}
 	got := MergeConfig(base, overlay)
 	if got.LLM.Provider != "ollama" {
@@ -40,11 +41,11 @@ func TestMergeConfig_NonEmptyOverlayOverrides(t *testing.T) {
 }
 
 func TestMergeConfig_APIKeysMerge(t *testing.T) {
-	base := &Config{
-		LLM: LLMConfig{APIKeys: map[string]string{"anthropic": "base-key", "openai": "base-openai"}},
+	base := &PerRepoConfig{
+		BaseConfig: BaseConfig{LLM: LLMConfig{APIKeys: map[string]string{"anthropic": "base-key", "openai": "base-openai"}}},
 	}
-	overlay := &Config{
-		LLM: LLMConfig{APIKeys: map[string]string{"anthropic": "local-key", "ollama": "local-ollama"}},
+	overlay := &PerRepoConfig{
+		BaseConfig: BaseConfig{LLM: LLMConfig{APIKeys: map[string]string{"anthropic": "local-key", "ollama": "local-ollama"}}},
 	}
 	got := MergeConfig(base, overlay)
 	if got.LLM.APIKeys["anthropic"] != "local-key" {
@@ -63,7 +64,7 @@ func TestMergeConfig_APIKeysMerge(t *testing.T) {
 }
 
 func TestMergeConfig_NilOverlay(t *testing.T) {
-	base := &Config{LLM: LLMConfig{Provider: "claude-cli"}}
+	base := &PerRepoConfig{BaseConfig: BaseConfig{LLM: LLMConfig{Provider: "claude-cli"}}}
 	got := MergeConfig(base, nil)
 	if got.LLM.Provider != "claude-cli" {
 		t.Errorf("nil overlay should return copy of base, got %+v", got)
@@ -76,15 +77,15 @@ func TestMergeConfig_NilOverlay(t *testing.T) {
 }
 
 func TestMergeConfig_NilBase(t *testing.T) {
-	got := MergeConfig(nil, &Config{LLM: LLMConfig{Provider: "ollama"}})
+	got := MergeConfig(nil, &PerRepoConfig{BaseConfig: BaseConfig{LLM: LLMConfig{Provider: "ollama"}}})
 	if got == nil || got.LLM.Provider != "ollama" {
 		t.Errorf("nil base with overlay should produce overlay values, got %+v", got)
 	}
 }
 
 func TestMergeConfig_ParticipantOverlay(t *testing.T) {
-	base := &Config{}
-	overlay := &Config{Participant: "Christopher"}
+	base := &PerRepoConfig{}
+	overlay := &PerRepoConfig{BaseConfig: BaseConfig{Participant: "Christopher"}}
 	got := MergeConfig(base, overlay)
 	if got.Participant != "Christopher" {
 		t.Errorf("Participant = %q, want Christopher", got.Participant)
@@ -92,17 +93,110 @@ func TestMergeConfig_ParticipantOverlay(t *testing.T) {
 }
 
 func TestMergeConfig_SyncOverlay(t *testing.T) {
-	base := &Config{Sync: SyncConfig{Cooldown: "5m"}}
-	overlay := &Config{Sync: SyncConfig{Cooldown: "1h"}}
+	base := &PerRepoConfig{BaseConfig: BaseConfig{Sync: SyncConfig{Cooldown: "5m"}}}
+	overlay := &PerRepoConfig{BaseConfig: BaseConfig{Sync: SyncConfig{Cooldown: "1h"}}}
 	got := MergeConfig(base, overlay)
 	if got.Sync.Cooldown != "1h" {
 		t.Errorf("Sync.Cooldown = %q, want 1h", got.Sync.Cooldown)
 	}
 
 	// Empty overlay preserves base.
-	got = MergeConfig(base, &Config{})
+	got = MergeConfig(base, &PerRepoConfig{})
 	if got.Sync.Cooldown != "5m" {
 		t.Errorf("empty overlay should preserve base Sync.Cooldown = %q", got.Sync.Cooldown)
+	}
+}
+
+func TestMergeConfig_DependenciesOverlay(t *testing.T) {
+	base := &PerRepoConfig{Dependencies: []string{"github.com/org/one"}}
+	got := MergeConfig(base, &PerRepoConfig{})
+	if len(got.Dependencies) != 1 || got.Dependencies[0] != "github.com/org/one" {
+		t.Errorf("empty overlay should preserve dependencies, got %v", got.Dependencies)
+	}
+	got = MergeConfig(base, &PerRepoConfig{Dependencies: []string{"github.com/org/two"}})
+	if len(got.Dependencies) != 1 || got.Dependencies[0] != "github.com/org/two" {
+		t.Errorf("overlay should replace dependencies, got %v", got.Dependencies)
+	}
+}
+
+func TestMergeBaseConfig_LayersCompose(t *testing.T) {
+	global := BaseConfig{
+		Participant: "Christopher",
+		LLM:         LLMConfig{Provider: "claude-cli", Model: "global-model"},
+		Embedding:   EmbeddingConfig{Provider: "ollama", Model: "nomic-embed-text"},
+	}
+	repo := BaseConfig{LLM: LLMConfig{Model: "repo-model"}}
+	got := MergeBaseConfig(global, repo)
+	if got.Participant != "Christopher" {
+		t.Errorf("Participant should survive from global, got %q", got.Participant)
+	}
+	if got.LLM.Provider != "claude-cli" || got.LLM.Model != "repo-model" {
+		t.Errorf("repo overlay should override only what it sets, got %+v", got.LLM)
+	}
+	if got.Embedding.Provider != "ollama" {
+		t.Errorf("Embedding should survive from global, got %+v", got.Embedding)
+	}
+}
+
+// ParseConfig must accept base settings inline at the top level of a per-repo
+// file — the same keys the user-global config carries — next to the
+// repo-owned fields.
+func TestParseConfig_InlineBaseFields(t *testing.T) {
+	cfg, err := ParseConfig([]byte("participant: Christopher\ngraph_dir: .sdd/graph\nllm:\n  provider: ollama\ndependencies:\n  - github.com/org/dep\n"))
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if cfg.Participant != "Christopher" || cfg.GraphDir != ".sdd/graph" || cfg.LLM.Provider != "ollama" {
+		t.Errorf("inline base fields not decoded: %+v", cfg)
+	}
+	if len(cfg.Dependencies) != 1 || cfg.Dependencies[0] != "github.com/org/dep" {
+		t.Errorf("dependencies not decoded: %v", cfg.Dependencies)
+	}
+}
+
+func TestParseConfig_EmptyInput(t *testing.T) {
+	cfg, err := ParseConfig(nil)
+	if err != nil {
+		t.Fatalf("empty input should be valid, got %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("empty input should yield zero config, got nil")
+	}
+}
+
+// Unknown keys fail loud — top-level and nested alike — naming the key, so a
+// misplaced setting surfaces instead of being silently dropped.
+func TestParseConfig_UnknownKeyFails(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		key  string
+	}{
+		{"top-level unknown", "participant: x\nbogus_key: 1\n", "bogus_key"},
+		{"nested unknown", "llm:\n  provider: ollama\n  bogus_nested: 1\n", "bogus_nested"},
+		{"global-only key misplaced", "repos:\n  - repo_id: a/b\n", "repos"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseConfig([]byte(tc.yaml))
+			if err == nil {
+				t.Fatalf("unknown key %q should fail", tc.key)
+			}
+			if !strings.Contains(err.Error(), tc.key) {
+				t.Errorf("error should name the key %q, got: %v", tc.key, err)
+			}
+		})
+	}
+}
+
+// API-key maps keep accepting arbitrary provider names under strict decoding.
+func TestParseConfig_MapKeysStayOpen(t *testing.T) {
+	cfg, err := ParseConfig([]byte("llm:\n  api_keys:\n    anthropic: k1\n    custom-proxy: k2\n"))
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if cfg.LLM.APIKeys["custom-proxy"] != "k2" {
+		t.Errorf("map keys should stay open, got %+v", cfg.LLM.APIKeys)
 	}
 }
 
@@ -143,10 +237,10 @@ func TestRetryConfig_Resolved(t *testing.T) {
 }
 
 func TestMergeConfig_RetryOverlay(t *testing.T) {
-	base := &Config{LLM: LLMConfig{Retry: RetryConfig{MaxAttempts: 5, BaseDelay: "2s", MaxDelay: "60s"}}}
+	base := &PerRepoConfig{BaseConfig: BaseConfig{LLM: LLMConfig{Retry: RetryConfig{MaxAttempts: 5, BaseDelay: "2s", MaxDelay: "60s"}}}}
 
 	// Overlay overrides only the fields it sets.
-	overlay := &Config{LLM: LLMConfig{Retry: RetryConfig{MaxAttempts: 3}}}
+	overlay := &PerRepoConfig{BaseConfig: BaseConfig{LLM: LLMConfig{Retry: RetryConfig{MaxAttempts: 3}}}}
 	got := MergeConfig(base, overlay)
 	if got.LLM.Retry.MaxAttempts != 3 {
 		t.Errorf("MaxAttempts = %d, want 3 (overridden)", got.LLM.Retry.MaxAttempts)
@@ -156,7 +250,7 @@ func TestMergeConfig_RetryOverlay(t *testing.T) {
 	}
 
 	// Empty overlay preserves base.
-	got = MergeConfig(base, &Config{})
+	got = MergeConfig(base, &PerRepoConfig{})
 	if got.LLM.Retry.MaxAttempts != 5 || got.LLM.Retry.BaseDelay != "2s" {
 		t.Errorf("empty overlay should preserve base retry, got %+v", got.LLM.Retry)
 	}
@@ -165,14 +259,14 @@ func TestMergeConfig_RetryOverlay(t *testing.T) {
 func TestResolveSyncCooldown(t *testing.T) {
 	cases := []struct {
 		name   string
-		cfg    *Config
+		cfg    *PerRepoConfig
 		wantMS int64
 	}{
 		{"nil config uses default", nil, 15 * 60 * 1000},
-		{"empty value uses default", &Config{}, 15 * 60 * 1000},
-		{"valid override", &Config{Sync: SyncConfig{Cooldown: "2m"}}, 2 * 60 * 1000},
-		{"garbage falls back to default", &Config{Sync: SyncConfig{Cooldown: "not-a-duration"}}, 15 * 60 * 1000},
-		{"zero falls back to default", &Config{Sync: SyncConfig{Cooldown: "0s"}}, 15 * 60 * 1000},
+		{"empty value uses default", &PerRepoConfig{}, 15 * 60 * 1000},
+		{"valid override", &PerRepoConfig{BaseConfig: BaseConfig{Sync: SyncConfig{Cooldown: "2m"}}}, 2 * 60 * 1000},
+		{"garbage falls back to default", &PerRepoConfig{BaseConfig: BaseConfig{Sync: SyncConfig{Cooldown: "not-a-duration"}}}, 15 * 60 * 1000},
+		{"zero falls back to default", &PerRepoConfig{BaseConfig: BaseConfig{Sync: SyncConfig{Cooldown: "0s"}}}, 15 * 60 * 1000},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

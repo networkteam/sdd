@@ -69,7 +69,7 @@ func IndexDir(dir string) string {
 // readCachedConfig reads the cached repo's committed .sdd/config.yaml.
 // A missing file returns nil without error — the cache may point at a repo
 // that was never initialized; callers decide whether that matters.
-func readCachedConfig(dir string) (*model.Config, error) {
+func readCachedConfig(dir string) (*model.PerRepoConfig, error) {
 	data, err := os.ReadFile(filepath.Join(dir, model.SDDDirName, "config.yaml"))
 	if os.IsNotExist(err) {
 		return nil, nil

@@ -210,7 +210,7 @@ func newTestServer(t *testing.T, findings []query.Finding, graphDir, sessionsDir
 
 	finder := finders.New(finders.Options{
 		PreflightRunner: stubRunner{},
-		Config:          &model.Config{Participant: "Tester"},
+		Config:          &model.PerRepoConfig{BaseConfig: model.BaseConfig{Participant: "Tester"}},
 	})
 	handler := handlers.New(handlers.Options{
 		GraphDir: graphDir,
@@ -383,7 +383,7 @@ Probe entry %02d: the flux capacitor drill needs observing.
 func languageFinder(lang string) *finders.Finder {
 	return finders.New(finders.Options{
 		PreflightRunner: stubRunner{},
-		Config:          &model.Config{Participant: "Tester", Language: lang},
+		Config:          &model.PerRepoConfig{BaseConfig: model.BaseConfig{Participant: "Tester"}, Language: lang},
 	})
 }
 
