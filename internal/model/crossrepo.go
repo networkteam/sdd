@@ -33,6 +33,20 @@ func IsCrossRepoID(id string) bool {
 	return strings.ContainsRune(id, ':')
 }
 
+// CrossRepoIDs collects the distinct repo IDs named by cross-repo
+// (<repo-id>:<entry-id>) arguments, in first-seen order.
+func CrossRepoIDs(ids []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, id := range ids {
+		if repoID, _, ok := SplitCrossRepoID(id); ok && !seen[repoID] {
+			seen[repoID] = true
+			out = append(out, repoID)
+		}
+	}
+	return out
+}
+
 // ValidateRepoID checks that repoID is URL-shaped: a dotted hostname
 // followed by at least one path segment (host/path, the Go-module
 // convention), each segment limited to letters, digits, '.', '-' and '_'.

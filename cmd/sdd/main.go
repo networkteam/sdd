@@ -433,7 +433,7 @@ func showCmd() *cli.Command {
 
 			// Cross-repo IDs read through the connected-repos caches — bring
 			// those up to date first (lazy clone + cooldown pull), then load.
-			if err := freshenRepoCaches(ctx, crossRepoIDsIn(ids)); err != nil {
+			if err := freshenRepoCaches(ctx, model.CrossRepoIDs(ids)); err != nil {
 				return err
 			}
 

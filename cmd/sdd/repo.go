@@ -9,7 +9,6 @@ import (
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
-	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
 )
 
@@ -105,20 +104,6 @@ func mustReadFinder() handlers.Reader {
 		os.Exit(1)
 	}
 	return reader
-}
-
-// crossRepoIDsIn collects the distinct repo IDs named by cross-repo
-// (<repo-id>:<entry-id>) arguments.
-func crossRepoIDsIn(ids []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, id := range ids {
-		if repoID, _, ok := model.SplitCrossRepoID(id); ok && !seen[repoID] {
-			seen[repoID] = true
-			out = append(out, repoID)
-		}
-	}
-	return out
 }
 
 // freshenRepoCaches brings the named connected repos' caches up to date

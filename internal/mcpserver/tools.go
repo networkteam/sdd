@@ -929,20 +929,6 @@ func (s *Server) logRead(ms *mcp.ServerSession, tool string, full, summary []str
 	}
 }
 
-// crossRepoIDsOf collects the distinct repo IDs named by cross-repo
-// (<repo-id>:<entry-id>) arguments.
-func crossRepoIDsOf(ids []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, id := range ids {
-		if repoID, _, ok := model.SplitCrossRepoID(id); ok && !seen[repoID] {
-			seen[repoID] = true
-			out = append(out, repoID)
-		}
-	}
-	return out
-}
-
 // showReads extracts the read-event ID sets from a show result: primaries
 // render their bodies (full depth), chain items render as summary bullets.
 func showReads(res *query.ShowResult) (full, summary []string) {
@@ -1090,7 +1076,7 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	}
 	// Cross-repo IDs read through the connected-repos caches — freshen the
 	// named repos first (lazy clone + cooldown pull).
-	if repoIDs := crossRepoIDsOf(args.IDs); len(repoIDs) > 0 {
+	if repoIDs := model.CrossRepoIDs(args.IDs); len(repoIDs) > 0 {
 		if _, err := s.handler.EnsureReposFresh(ctx, repoIDs); err != nil {
 			return nil, ShowResult{}, toolError("refreshing repo caches: %v", err)
 		}
