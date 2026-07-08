@@ -853,7 +853,14 @@ func lintCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			populateIndexLint(cmd, result)
+			// Index health rides along when an embedding provider is
+			// configured; a missing .sdd (no index dir) degrades to the
+			// graph-only report, matching the finder's silent posture.
+			idxDir, _ := indexDir()
+			f.IndexLint(query.IndexLintQuery{
+				Embedding: resolveEmbeddingConfig(cmd),
+				IndexDir:  idxDir,
+			}, result)
 			presenters.RenderLint(os.Stdout, result, g)
 			if result.TotalIssues > 0 {
 				return fmt.Errorf("lint found %d issue(s)", result.TotalIssues)

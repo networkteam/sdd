@@ -7,14 +7,22 @@ type LintQuery struct {
 	Graph *model.Graph
 }
 
+// IndexLintQuery captures intent to surface search-index health: the
+// resolved embedding config (flag/config merging is the shell's job) and
+// the local index location. Processed by Finder.IndexLint into the
+// index-side fields of a LintResult.
+type IndexLintQuery struct {
+	Embedding model.EmbeddingConfig
+	IndexDir  string
+}
+
 // LintResult is the structured output of a LintQuery: every entry that has
 // at least one warning, plus the total warning count for convenience.
 //
 // Index-side fields (IndexConfigured, IndexEntryCount, IndexDriftCount,
-// IndexFingerprint) are populated by the CLI lint action when an
-// embedding provider is configured — the finder itself stays pure-graph.
-// They surface the search index's health alongside graph health so a
-// single `sdd lint` run reports both.
+// IndexFingerprint, RepoIndexDrift) are populated by Finder.IndexLint when
+// an embedding provider is configured. They surface the search index's
+// health alongside graph health so a single `sdd lint` run reports both.
 type LintResult struct {
 	Entries     []*model.Entry
 	TotalIssues int

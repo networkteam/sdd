@@ -21,7 +21,6 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
-	"github.com/networkteam/sdd/internal/repos"
 )
 
 // resolveEmbeddingConfig builds the effective EmbeddingConfig by merging
@@ -90,74 +89,6 @@ func embeddingFlags() []cli.Flag {
 			Name:  "embedding-rate-limit-rps",
 			Usage: "Rate limit for remote embedding providers — overrides config",
 		},
-	}
-}
-
-// populateIndexLint fills the index-side fields on a LintResult when an
-// embedding provider is configured. Loading the manifest and building an
-// embedder are both pure operations against config — no graph mutation.
-// Errors degrade silently to "index not configured" so a missing
-// dependency in lint shouldn't block graph-side validation.
-func populateIndexLint(cmd *cli.Command, result *query.LintResult) {
-	cfg := resolveEmbeddingConfig(cmd)
-	if cfg.Provider == "" {
-		return
-	}
-	emb, err := embed.New(cfg)
-	if err != nil {
-		return
-	}
-	idxDir, err := indexDir()
-	if err != nil {
-		return
-	}
-	manifest, err := index.LoadManifest(idxDir)
-	if err != nil {
-		return
-	}
-	result.IndexConfigured = true
-	result.IndexFingerprint = emb.Fingerprint()
-	result.IndexEntryCount = len(manifest.Entries)
-	result.IndexDriftCount = manifest.MismatchCount(emb.Fingerprint())
-
-	populateRepoIndexLint(result)
-}
-
-// populateRepoIndexLint reports connected repos whose cache index was
-// built under a fingerprint other than the shared (global) embedder — a
-// drifted repo re-embeds on the next cross-graph search, and lint makes
-// that pending cost visible. Degrades silently like the local index
-// section: lint never blocks on cross-repo machinery being absent.
-func populateRepoIndexLint(result *query.LintResult) {
-	reg, _, err := defaultRepos()
-	if err != nil {
-		return
-	}
-	gcfg, err := reg.Load()
-	if err != nil || len(gcfg.Repos) == 0 || gcfg.Embedding.Provider == "" {
-		return
-	}
-	emb, err := embed.New(gcfg.Embedding)
-	if err != nil {
-		return
-	}
-	fingerprint := emb.Fingerprint()
-	for _, r := range gcfg.Repos {
-		cacheDir, err := reg.CacheDir(r.RepoID)
-		if err != nil || !repos.IsCloned(cacheDir) {
-			continue
-		}
-		manifest, err := index.LoadManifest(repos.IndexDir(cacheDir))
-		if err != nil || len(manifest.Entries) == 0 {
-			continue
-		}
-		if drift := manifest.MismatchCount(fingerprint); drift > 0 {
-			result.RepoIndexDrift = append(result.RepoIndexDrift, query.RepoIndexDriftInfo{
-				RepoID:     r.RepoID,
-				DriftCount: drift,
-				EntryCount: len(manifest.Entries),
-			})
-		}
 	}
 }
 
