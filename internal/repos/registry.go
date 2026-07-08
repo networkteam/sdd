@@ -29,6 +29,14 @@ func (r *Registry) Load() (*GlobalConfig, error) {
 	return LoadConfigFrom(r.loc.ConfigPath)
 }
 
+// ConfigPath returns the user-global config file path. Exposed for the
+// comment-preserving `sdd config set` upsert, which patches the file bytes
+// in place rather than round-tripping through Save (which would drop
+// comments).
+func (r *Registry) ConfigPath() string {
+	return r.loc.ConfigPath
+}
+
 // CacheRoot is the base directory for connected-repo clone caches.
 func (r *Registry) CacheRoot() string {
 	return r.loc.CacheRoot

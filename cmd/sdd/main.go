@@ -285,6 +285,7 @@ func main() {
 		Commands: []*cli.Command{
 			initCmd(),
 			infoCmd(),
+			configCmd(),
 			showCmd(),
 			viewCmd(),
 			newCmd(),
