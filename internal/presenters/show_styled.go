@@ -57,7 +57,7 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		fmt.Fprintln(w, clrHeading.Render("# upstream"))
 		fmt.Fprintln(w)
 		for _, item := range g.Upstream {
-			renderTreeItemStyled(w, item, g.Primary.ID)
+			renderTreeItemStyled(w, item, primaryDisplayID(g))
 		}
 	}
 	if len(g.Downstream) > 0 {
@@ -65,7 +65,7 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		fmt.Fprintln(w, clrHeading.Render("# downstream"))
 		fmt.Fprintln(w)
 		for _, item := range g.Downstream {
-			renderTreeItemStyled(w, item, g.Primary.ID)
+			renderTreeItemStyled(w, item, primaryDisplayID(g))
 		}
 	}
 }
@@ -220,7 +220,7 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 	if live {
 		line.WriteString(clrRefKind.Render(verb))
 		line.WriteString(" ")
-		line.WriteString(clrID.Render(item.Entry.ID))
+		line.WriteString(clrID.Render(item.NodeID()))
 		if q := styledQualifier(item); q != "" {
 			line.WriteString(" " + q)
 		}
@@ -229,7 +229,7 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 		}
 	} else {
 		// Closed/superseded: recede the whole node, no colour accents.
-		text := verb + " " + item.Entry.ID
+		text := verb + " " + item.NodeID()
 		if qual != "" {
 			text += " " + qual
 		}
@@ -265,6 +265,9 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 // Live nodes never carry an id in the status (active/open/done only), so the
 // words are safe to bold wholesale.
 func styledQualifier(item model.ShowTreeItem) string {
+	if repo := unresolvedRepo(item); repo != "" {
+		return clrFaint.Render("[unresolved: repo " + repo + "]")
+	}
 	kind := entryKindLabel(item.Entry)
 	status := formatStatusTrailValue(item.Status, item.SupersedePath)
 	switch {

@@ -184,6 +184,8 @@ type SearchArgs struct {
 	IncludeSuperseded bool     `json:"include_superseded,omitempty"`
 	Limit             int      `json:"limit,omitempty" jsonschema:"hit cap; default 8"`
 	MaxCitations      *int     `json:"max_citations,omitempty" jsonschema:"citation snippet lines per entry; default 0 = headers only — depth comes from show, not snippets"`
+	Repos             []string `json:"repos,omitempty" jsonschema:"also search these connected repos by repo-id (additive to the local graph)"`
+	AllRepos          bool     `json:"all_repos,omitempty" jsonschema:"also search every connected repo"`
 }
 
 type SearchResult struct {
@@ -192,7 +194,9 @@ type SearchResult struct {
 }
 
 type ViewArgs struct {
-	Layout string `json:"layout" jsonschema:"sdd view layout pipeline, e.g. 'active:as-counts' or 'top(15)'"`
+	Layout   string   `json:"layout" jsonschema:"sdd view layout pipeline, e.g. 'active:as-counts' or 'top(15)'"`
+	Repos    []string `json:"repos,omitempty" jsonschema:"also render the layout over these connected repos' graphs (additive to the local graph)"`
+	AllRepos bool     `json:"all_repos,omitempty" jsonschema:"also render the layout over every connected repo"`
 }
 
 type ViewResult struct {
@@ -904,6 +908,19 @@ func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, 
 	return nil, StageAttachmentResult{Handle: args.Name}, nil
 }
 
+// selectRepoIDs resolves a cross-repo selection through the injected
+// registry. A selection without wiring is a server construction gap — fail
+// loud, never silently narrow to local-only.
+func (s *Server) selectRepoIDs(named []string, all bool) ([]string, error) {
+	if !all && len(named) == 0 {
+		return nil, nil
+	}
+	if s.repos == nil {
+		return nil, fmt.Errorf("connected-repos support is not wired on this server")
+	}
+	return s.repos.SelectRepoIDs(named, all)
+}
+
 // readHint is the one-line breadcrumb every free read carries while no
 // session is bound: an agent that enters through a pasted entry ID gets its
 // data and the trail to the door. No path through the tool surface avoids a
@@ -929,12 +946,16 @@ func (s *Server) logRead(ms *mcp.ServerSession, tool string, full, summary []str
 func showReads(res *query.ShowResult) (full, summary []string) {
 	for _, g := range res.Groups {
 		if g.Primary != nil {
-			full = append(full, g.Primary.ID)
+			if g.PrimaryID != "" {
+				full = append(full, g.PrimaryID)
+			} else {
+				full = append(full, g.Primary.ID)
+			}
 		}
 		for _, items := range [][]model.ShowTreeItem{g.Upstream, g.Downstream} {
 			for _, item := range items {
 				if item.Entry != nil {
-					summary = append(summary, item.Entry.ID)
+					summary = append(summary, item.NodeID())
 				}
 			}
 		}
@@ -972,6 +993,8 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 		IncludeSuperseded:    args.IncludeSuperseded,
 		Limit:                limit,
 		MaxCitationsPerEntry: 0,
+		Repos:                args.Repos,
+		AllRepos:             args.AllRepos,
 	}
 	if args.MaxCitations != nil {
 		sq.MaxCitationsPerEntry = *args.MaxCitations
@@ -1001,7 +1024,7 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	var hits []string
 	for _, e := range res.Entries {
 		if e.Entry != nil {
-			hits = append(hits, e.Entry.ID)
+			hits = append(hits, e.DisplayID())
 		}
 	}
 	s.logRead(req.Session, "search", nil, hits)
@@ -1018,6 +1041,15 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if strings.TrimSpace(args.Layout) == "" {
 		return nil, ViewResult{}, toolError("layout is required")
 	}
+	repoIDs, err := s.selectRepoIDs(args.Repos, args.AllRepos)
+	if err != nil {
+		return nil, ViewResult{}, toolError("%v", err)
+	}
+	if len(repoIDs) > 0 {
+		if _, err := s.handler.EnsureReposFresh(ctx, repoIDs); err != nil {
+			return nil, ViewResult{}, toolError("refreshing repo caches: %v", err)
+		}
+	}
 	graph, err := s.finder.CurrentGraph(s.graphDir)
 	if err != nil {
 		return nil, ViewResult{}, toolError("loading graph: %v", err)
@@ -1026,12 +1058,40 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if err != nil {
 		return nil, ViewResult{}, err
 	}
-	return nil, ViewResult{Sections: out, Hint: s.readHint(req.Session)}, nil
+	// Selected repos render the same layout over their own graphs, each
+	// under a repo heading — entry IDs inside a repo section are scoped by
+	// that heading.
+	var sb strings.Builder
+	sb.WriteString(out)
+	for _, repoID := range repoIDs {
+		member, err := graph.MemberGraph(repoID)
+		if err != nil {
+			return nil, ViewResult{}, toolError("loading graph for %s: %v", repoID, err)
+		}
+		if member == nil {
+			sb.WriteString("\n── repo: " + repoID + " (unavailable) ──\n")
+			continue
+		}
+		mout, err := s.renderView(member, args.Layout)
+		if err != nil {
+			return nil, ViewResult{}, err
+		}
+		sb.WriteString("\n── repo: " + repoID + " ──\n")
+		sb.WriteString(mout)
+	}
+	return nil, ViewResult{Sections: sb.String(), Hint: s.readHint(req.Session)}, nil
 }
 
 func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
+	}
+	// Cross-repo IDs read through the connected-repos caches — freshen the
+	// named repos first (lazy clone + cooldown pull).
+	if repoIDs := model.CrossRepoIDs(args.IDs); len(repoIDs) > 0 {
+		if _, err := s.handler.EnsureReposFresh(ctx, repoIDs); err != nil {
+			return nil, ShowResult{}, toolError("refreshing repo caches: %v", err)
+		}
 	}
 	graph, err := s.finder.CurrentGraph(s.graphDir)
 	if err != nil {

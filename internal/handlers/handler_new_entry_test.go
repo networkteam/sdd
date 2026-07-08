@@ -11,6 +11,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
+	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
@@ -664,5 +665,75 @@ func assertKindAndNoKindSpecificFields(t *testing.T, e *model.Entry, want model.
 	}
 	if e.Actor != "" {
 		t.Errorf("%s should not carry actor, got %q", want, e.Actor)
+	}
+}
+
+// trippingRunner fails the test if the handler makes any LLM call. Used to
+// prove a caller-supplied summary skips generation entirely rather than
+// racing it.
+type trippingRunner struct {
+	t *testing.T
+}
+
+func (r *trippingRunner) Run(_ context.Context, _ llm.Request) (*llm.RunResult, error) {
+	r.t.Error("LLM runner invoked despite a caller-supplied summary")
+	return nil, errors.New("must not be called")
+}
+
+// TestNewEntry_ExplicitSummary_SkipsLLM: a caller-supplied Summary stores
+// verbatim in the written entry and the LLM runner is never consulted.
+func TestNewEntry_ExplicitSummary_SkipsLLM(t *testing.T) {
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	const custom = "A custom summary provided at capture time, no LLM involved."
+	var reportedID, reportedSummary string
+
+	h := handlers.New(handlers.Options{
+		GraphDir:  tmp,
+		SDDDir:    sddDir,
+		Reader:    &fakeReader{},
+		Committer: &recordingCommitter{},
+		LLMRunner: &trippingRunner{t: t},
+		Stderr:    &bytes.Buffer{},
+	})
+
+	cmd := &command.NewEntryCmd{
+		Type:          model.TypeSignal,
+		Layer:         model.LayerTactical,
+		Description:   "exercising the explicit summary path",
+		Summary:       custom,
+		SkipPreflight: true,
+		OnNewEntry: func(id, summary string) {
+			reportedID = id
+			reportedSummary = summary
+		},
+	}
+
+	if err := h.NewEntry(context.Background(), cmd); err != nil {
+		t.Fatalf("NewEntry: %v", err)
+	}
+	if reportedSummary != custom {
+		t.Errorf("OnNewEntry summary = %q, want the verbatim custom summary", reportedSummary)
+	}
+
+	// The written entry's frontmatter carries the summary verbatim.
+	relPath, err := model.IDToRelPath(reportedID)
+	if err != nil {
+		t.Fatalf("IDToRelPath(%s): %v", reportedID, err)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, relPath))
+	if err != nil {
+		t.Fatalf("reading written entry: %v", err)
+	}
+	entry, err := model.ParseEntry(reportedID+".md", string(data))
+	if err != nil {
+		t.Fatalf("parsing written entry: %v", err)
+	}
+	if entry.Summary != custom {
+		t.Errorf("stored summary = %q, want %q", entry.Summary, custom)
 	}
 }

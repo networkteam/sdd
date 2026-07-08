@@ -14,6 +14,7 @@ import (
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/repos"
 )
 
 // SearchFinder is the read-side handler for sdd search. It composes
@@ -25,18 +26,21 @@ import (
 // the IndexHandler's job; this finder consumes the index as-is.
 type SearchFinder struct {
 	graphDir   string
-	embedder   llm.Embedder // nil disables vector and hybrid modes
-	indexStore *index.Index // nil disables vector and hybrid modes
+	embedder   llm.Embedder    // nil disables vector and hybrid modes
+	indexStore *index.Index    // nil disables vector and hybrid modes
+	repos      *repos.Registry // nil disables cross-repo search
 }
 
 // SearchFinderOptions configures NewSearchFinder. GraphDir is required
 // (used by text mode to resolve attachment paths). Embedder + IndexStore
 // are required for vector and hybrid modes; their absence makes those
-// modes return an error.
+// modes return an error. Repos is required for cross-repo search
+// (MultiSearch).
 type SearchFinderOptions struct {
 	GraphDir   string
 	Embedder   llm.Embedder
 	IndexStore *index.Index
+	Repos      *repos.Registry
 }
 
 // NewSearchFinder constructs a SearchFinder.
@@ -45,6 +49,7 @@ func NewSearchFinder(opts SearchFinderOptions) *SearchFinder {
 		graphDir:   opts.GraphDir,
 		embedder:   opts.Embedder,
 		indexStore: opts.IndexStore,
+		repos:      opts.Repos,
 	}
 }
 

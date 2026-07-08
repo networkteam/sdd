@@ -278,14 +278,18 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 	if len(entry.Refs) > 0 {
 		var parts []string
 		for _, ref := range entry.Refs {
-			e, ok := graph.ByID[ref.ID]
+			// A cross-repo ref resolves to the cached remote entry; status,
+			// applicability, and head-walks then reason within the owning
+			// graph. An unresolvable target is skipped here — the mechanical
+			// resolve-or-block check owns that finding.
+			e, owner, ok := graph.ResolveAcross(ref.ID)
 			if !ok {
 				continue
 			}
-			parts = append(parts, formatReferencedEntry(graph, e)+refApplicabilityLines(graph, ref, e))
-			if rr := graph.ResolveRef(ref.ID); rr.IsStale() {
-				if head, ok := graph.ByID[rr.Head()]; ok {
-					parts = append(parts, "(live head of "+ref.ID+")\n"+formatReferencedEntry(graph, head))
+			parts = append(parts, formatReferencedEntry(owner, e)+refApplicabilityLines(owner, ref, e))
+			if rr := owner.ResolveRef(e.ID); rr.IsStale() {
+				if head, ok := owner.ByID[rr.Head()]; ok {
+					parts = append(parts, "(live head of "+ref.ID+")\n"+formatReferencedEntry(owner, head))
 				}
 			}
 		}

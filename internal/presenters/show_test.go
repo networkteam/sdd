@@ -63,6 +63,17 @@ func TestRenderShow_UpstreamChain(t *testing.T) {
 	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}))
 }
 
+func TestRenderShow_CrossRepoRefUnresolved(t *testing.T) {
+	// A cross-repo ref renders as an upstream leaf with the full prefixed ID
+	// and the bracketed unresolved marker; the envelope carries it verbatim.
+	primary := entry("20260410-100200-d-tac-ccc", withContent("Decision grounded in a remote entry"))
+	primary.Refs = []model.Ref{
+		{ID: "github.com/networkteam/other:20260401-090000-d-cpt-rem", Kind: model.RefKindGroundedIn, Desc: "remote basis"},
+	}
+	g := model.NewGraph([]*model.Entry{primary})
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{primary.ID}))
+}
+
 func TestRenderShow_DownstreamWithRelations(t *testing.T) {
 	target := entry("20260410-100000-s-stg-aaa", withContent("Target signal"))
 	refBy := entry("20260410-100100-d-cpt-bbb", withSummary("Decision referencing target"),

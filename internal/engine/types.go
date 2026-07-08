@@ -266,7 +266,13 @@ func refFromMap(m map[string]any) (Ref, error) {
 	id, _ := m["id"].(string)
 	kind, _ := m["kind"].(string)
 	desc, _ := m["desc"].(string)
-	if _, err := model.ParseID(id); err != nil {
+	// A ref may point across the repo boundary (<repo-id>:<entry-id>);
+	// entry-id typed fields (closes, supersedes, anchors) stay local-only.
+	if model.IsCrossRepoID(id) {
+		if err := model.ValidateCrossRepoID(id); err != nil {
+			return Ref{}, fmt.Errorf("ref id: %w", err)
+		}
+	} else if _, err := model.ParseID(id); err != nil {
 		return Ref{}, fmt.Errorf("ref id: not a full entry ID: %w", err)
 	}
 	if !model.IsCapturableRefKind(model.RefKind(kind)) {

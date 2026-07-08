@@ -57,6 +57,10 @@ type RefExpansion struct {
 	Status        Status
 	Desc          string
 	SupersedePath []string
+	// UnresolvedRepo names the target repo of a cross-repo ref whose graph
+	// is not available locally; the presenter renders it as
+	// `[unresolved: repo <id>]` in place of a status segment.
+	UnresolvedRepo string
 }
 
 // Shape implements SectionData.

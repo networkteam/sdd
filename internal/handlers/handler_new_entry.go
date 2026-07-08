@@ -70,11 +70,20 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		return err
 	}
 
+	// Cross-repo refs resolve against the live caches: refresh the
+	// referenced repos before the graph loads (lazy clone + cooldown pull),
+	// then force-fetch once for any backward-class target still missing —
+	// so a just-pushed remote entry doesn't false-block resolve-or-block.
+	if err := h.freshenReferencedRepos(ctx, entry.Refs); err != nil {
+		return err
+	}
+
 	// Load graph and validate entry against it.
 	graph, err := h.reader.CurrentGraph(h.graphDir)
 	if err != nil {
 		return fmt.Errorf("loading graph for validation: %w", err)
 	}
+	graph = h.fetchOnMiss(ctx, graph, entry.Refs)
 
 	// Resolve short-form IDs in refs/closes/supersedes against the graph so
 	// validation and all downstream logic see full IDs.
@@ -132,7 +141,8 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 
 	var sumResult *llm.SummarizeResult
 
-	if !cmd.DryRun && h.llmRunner != nil {
+	// A caller-supplied summary is taken verbatim — no LLM call at all.
+	if !cmd.DryRun && h.llmRunner != nil && cmd.Summary == "" {
 		g.Go(func() error {
 			sctx, scancel := context.WithTimeout(gctx, 60*time.Second)
 			defer scancel()
@@ -176,8 +186,11 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		return nil
 	}
 
-	// Apply summary from the concurrent goroutine.
-	if sumResult != nil {
+	// Apply the caller-supplied summary, or the one from the concurrent
+	// generation goroutine.
+	if cmd.Summary != "" {
+		entry.Summary = cmd.Summary
+	} else if sumResult != nil {
 		entry.Summary = sumResult.Summary
 	}
 

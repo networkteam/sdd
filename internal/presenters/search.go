@@ -44,7 +44,18 @@ func RenderSearch(w io.Writer, result *query.SearchResult, g *model.Graph) {
 
 	maxScore := globalMaxCitationScore(result)
 	for _, se := range result.Entries {
-		EntryLine(w, se.Entry, g)
+		if se.RepoID != "" {
+			// Cross-graph hit: repo-prefixed ID, status derived in the
+			// owning member graph (fall back to g if it went missing
+			// between search and render).
+			owner, _ := g.MemberGraph(se.RepoID)
+			if owner == nil {
+				owner = g
+			}
+			EntryLineDisplay(w, se.Entry, owner, se.DisplayID())
+		} else {
+			EntryLine(w, se.Entry, g)
+		}
 		for _, c := range se.Citations {
 			renderCitation(w, c, maxScore)
 		}

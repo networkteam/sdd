@@ -15,6 +15,38 @@ type Graph struct {
 	ClosedBy     map[string][]string // reverse index: entry ID -> IDs that close it
 	SupersededBy map[string][]string // reverse index: entry ID -> IDs that supersede it
 	graphDir     string
+	// multi back-wires the cross-graph assembly this graph belongs to (nil
+	// for a standalone graph). Set by NewMultiGraph so traversal code
+	// holding any *Graph can resolve cross-repo references.
+	multi *MultiGraph
+	// repoPrefix qualifies this graph's entries on cross-graph surfaces:
+	// "<repo-id>:" for a member graph loaded from a connected repo's cache,
+	// "" for the local graph. Embedded (binary-scoped) entries stay bare
+	// regardless — they are identical in every member graph.
+	repoPrefix string
+}
+
+// nodeKeyFor is the graph-qualified identity of an entry for rendering and
+// cross-graph dedup: a member graph's own entries carry its repo prefix
+// (the (repo-id, entry-id) dedup key in colon form), while embedded entries
+// key by bare ID so exactly one copy ever surfaces.
+func (g *Graph) nodeKeyFor(e *Entry) string {
+	if g.repoPrefix == "" || e.Embedded {
+		return e.ID
+	}
+	return g.repoPrefix + e.ID
+}
+
+// qualifyID prefixes a member-graph entry ID for display outside its graph;
+// embedded entries and local-graph entries stay bare.
+func (g *Graph) qualifyID(id string) string {
+	if g.repoPrefix == "" {
+		return id
+	}
+	if e, ok := g.ByID[id]; ok && e.Embedded {
+		return id
+	}
+	return g.repoPrefix + id
 }
 
 // NewGraph builds a graph from the given entries without touching the filesystem.
@@ -31,15 +63,26 @@ func NewGraph(entries []*Entry) *Graph {
 		g.ByID[e.ID] = e
 	}
 
-	// Build reverse indexes
+	// Build reverse indexes. Cross-repo IDs are excluded: a remote target is
+	// not part of the local reverse index, and lifecycle edges never cross
+	// the repo boundary (validation warns on cross-repo closes/supersedes).
 	for _, e := range entries {
 		for _, ref := range e.Refs {
+			if IsCrossRepoID(ref.ID) {
+				continue
+			}
 			g.RefsTo[ref.ID] = append(g.RefsTo[ref.ID], e.ID)
 		}
 		for _, c := range e.Closes {
+			if IsCrossRepoID(c) {
+				continue
+			}
 			g.ClosedBy[c] = append(g.ClosedBy[c], e.ID)
 		}
 		for _, s := range e.Supersedes {
+			if IsCrossRepoID(s) {
+				continue
+			}
 			g.SupersededBy[s] = append(g.SupersededBy[s], e.ID)
 		}
 	}
@@ -395,6 +438,12 @@ func (g *Graph) ResolveID(input string) (string, error) {
 	if input == "" {
 		return "", nil
 	}
+	// Cross-repo IDs (<repo-id>:<entry-id>) pass through verbatim: short-form
+	// resolution only covers the local graph, and the colon form must never
+	// be misread as a short ID.
+	if IsCrossRepoID(input) {
+		return input, nil
+	}
 	if _, err := ParseID(input); err == nil {
 		return input, nil
 	}
@@ -716,7 +765,7 @@ func validateAliasAmbiguity(g *Graph) {
 // ValidateEntry checks a single entry for integrity issues and populates its Warnings field.
 // Used both at lint time (all entries) and at write time (new entry before commit).
 func ValidateEntry(e *Entry, g *Graph) {
-	validateIDRefs(e, g, "refs", RefIDs(e.Refs))
+	validateRefs(e, g)
 	validateIDRefs(e, g, "closes", e.Closes)
 	validateIDRefs(e, g, "supersedes", e.Supersedes)
 	validateCloses(e, g)
@@ -732,9 +781,56 @@ func ValidateEntry(e *Entry, g *Graph) {
 	validateAttachmentLinks(e)
 }
 
-// validateIDRefs checks that all IDs in the given field are well-formed and exist in the graph.
+// validateRefs checks the refs field with kind awareness. Cross-repo refs
+// are validated syntactically only — both portions must be well-formed, but
+// the target is never dangling-checked against the local graph (resolution
+// happens at capture against the cached remote graph). Dangling detection
+// for local refs honors the forward-class exemption (d-cpt-uh0): a
+// surfaces/required-by target may legitimately be absent at validation time.
+func validateRefs(e *Entry, g *Graph) {
+	for _, ref := range e.Refs {
+		if IsCrossRepoID(ref.ID) {
+			if err := ValidateCrossRepoID(ref.ID); err != nil {
+				e.Warnings = append(e.Warnings, Warning{
+					Field:   "refs",
+					Value:   ref.ID,
+					Message: fmt.Sprintf("malformed cross-repo ref in refs: %v", err),
+				})
+			}
+			continue
+		}
+		if _, err := ParseID(ref.ID); err != nil {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "refs",
+				Value:   ref.ID,
+				Message: fmt.Sprintf("malformed ID in refs: %s", ref.ID),
+			})
+			continue
+		}
+		if _, ok := g.ByID[ref.ID]; !ok && !IsForwardClassRefKind(ref.Kind) {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "refs",
+				Value:   ref.ID,
+				Message: fmt.Sprintf("dangling ref in refs: %s (entry not found)", ref.ID),
+			})
+		}
+	}
+}
+
+// validateIDRefs checks that all IDs in the given field are well-formed and
+// exist in the graph. Used for the lifecycle fields (closes, supersedes),
+// which never cross the repo boundary — a cross-repo ID here is an error in
+// its own right, not a dangling ref.
 func validateIDRefs(e *Entry, g *Graph, field string, ids []string) {
 	for _, id := range ids {
+		if IsCrossRepoID(id) {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   field,
+				Value:   id,
+				Message: fmt.Sprintf("cross-repo ID in %s: lifecycle edges never cross the repo boundary", field),
+			})
+			continue
+		}
 		_, err := ParseID(id)
 		if err != nil {
 			e.Warnings = append(e.Warnings, Warning{
