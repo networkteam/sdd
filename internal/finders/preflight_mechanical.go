@@ -40,6 +40,11 @@ import (
 //     live head of a chain, not an entry that already has an active successor
 //     (which would create a fork). Settled branches — the existing successor
 //     has closed — are exempt.
+//   - cross-repo-dep-undeclared (d-cpt-6cq): every cross-repo ref — forward
+//     and backward class alike — requires its target repo_id to be a
+//     declared dependency of this graph (committed .sdd/config.yaml), which
+//     makes the one-way reference direction structural: a graph that does
+//     not declare a repository cannot capture refs into it.
 //   - cross-repo-ref-unresolved (d-cpt-uh0): a backward-class cross-repo ref
 //     must resolve in the target repo's cached graph or capture blocks;
 //     forward-class kinds (surfaces, required-by) are exempt. Local ref
@@ -48,7 +53,7 @@ import (
 //
 // Severity is strictly binary: SeverityHigh or absent. Mechanical checks
 // never emit medium or low; partial coverage is never "kind-of an actor".
-func mechanicalPreflight(entry *model.Entry, graph *model.Graph) []query.Finding {
+func mechanicalPreflight(entry *model.Entry, graph *model.Graph, declaredDeps []string) []query.Finding {
 	if entry == nil || graph == nil {
 		return nil
 	}
@@ -58,7 +63,7 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph) []query.Finding
 	findings = append(findings, refKindFindings(entry)...)
 	findings = append(findings, refKindApplicabilityFindings(entry, graph)...)
 	findings = append(findings, supersedeForkFindings(entry, graph)...)
-	findings = append(findings, crossRepoResolutionFindings(entry, graphCrossRepoResolver(graph))...)
+	findings = append(findings, crossRepoResolutionFindings(entry, graphCrossRepoResolver(graph), declaredDeps)...)
 
 	if entry.IsActor() {
 		findings = append(findings, actorWriteOnceFindings(entry, graph)...)
@@ -178,17 +183,35 @@ func graphCrossRepoResolver(graph *model.Graph) crossRepoRefResolver {
 	}
 }
 
-// crossRepoResolutionFindings enforces resolve-or-block (d-cpt-uh0) for
-// cross-repo refs: a backward-class ref must resolve in the target repo's
-// cached graph or capture blocks at high severity. Forward-class kinds
-// (surfaces, required-by) are exempt — their target may legitimately be
-// absent. Local refs are not checked here: a dangling local ref already
+// crossRepoResolutionFindings enforces the two cross-repo capture
+// preconditions. First, the declared-dependency rule (d-cpt-6cq): every
+// cross-repo ref — forward and backward class alike — requires its target
+// repo_id to be declared in this graph's committed dependencies, so the
+// one-way direction holds by construction; an undeclared repo blocks
+// without further resolution (declaring it is the fix, and the dependency
+// finding already carries it). Second, resolve-or-block (d-cpt-uh0): a
+// backward-class ref into a declared repo must resolve in its cached graph
+// or capture blocks at high severity. Forward-class kinds (surfaces,
+// required-by) are exempt from resolution — their target may legitimately
+// be absent. Local refs are not checked here: a dangling local ref already
 // hard-blocks at write-time validation, before pre-flight runs.
-func crossRepoResolutionFindings(entry *model.Entry, resolve crossRepoRefResolver) []query.Finding {
+func crossRepoResolutionFindings(entry *model.Entry, resolve crossRepoRefResolver, declaredDeps []string) []query.Finding {
+	declared := make(map[string]bool, len(declaredDeps))
+	for _, d := range declaredDeps {
+		declared[d] = true
+	}
 	var findings []query.Finding
 	for i, r := range entry.Refs {
 		repoID, entryID, ok := model.SplitCrossRepoID(r.ID)
 		if !ok {
+			continue
+		}
+		if !declared[repoID] {
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "cross-repo-dep-undeclared",
+				Observation: fmt.Sprintf("refs[%d] (%s): repo %q is not a declared dependency of this graph — declare it with `sdd repo add <clone-url>` (conventionally https://%s), which records the committed dependency and the per-user connection", i, r.ID, repoID, repoID),
+			})
 			continue
 		}
 		if model.IsForwardClassRefKind(r.Kind) {
@@ -198,7 +221,7 @@ func crossRepoResolutionFindings(entry *model.Entry, resolve crossRepoRefResolve
 			findings = append(findings, query.Finding{
 				Severity:    query.SeverityHigh,
 				Category:    "cross-repo-ref-unresolved",
-				Observation: fmt.Sprintf("refs[%d] (%s): cannot resolve cross-repo ref — repo %q is not connected; a backward-class ref must resolve at capture or be dropped (its clone URL is conventionally https://%s)", i, r.ID, repoID, repoID),
+				Observation: fmt.Sprintf("refs[%d] (%s): cannot resolve cross-repo ref — repo %q is declared but not connected on this machine; run `sdd repo add <clone-url>` (conventionally https://%s)", i, r.ID, repoID, repoID),
 			})
 			continue
 		}
@@ -207,7 +230,7 @@ func crossRepoResolutionFindings(entry *model.Entry, resolve crossRepoRefResolve
 			findings = append(findings, query.Finding{
 				Severity:    query.SeverityHigh,
 				Category:    "cross-repo-ref-unresolved",
-				Observation: fmt.Sprintf("refs[%d] (%s): cannot resolve cross-repo ref — repo %q is not connected; a backward-class ref must resolve at capture or be dropped (its clone URL is conventionally https://%s)", i, r.ID, repoID, repoID),
+				Observation: fmt.Sprintf("refs[%d] (%s): cannot resolve cross-repo ref — repo %q is declared but not connected on this machine; run `sdd repo add <clone-url>` (conventionally https://%s)", i, r.ID, repoID, repoID),
 			})
 		case crossRepoEntryMissing:
 			findings = append(findings, query.Finding{

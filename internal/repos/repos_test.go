@@ -263,3 +263,14 @@ func TestGlobalConfigRejectsUnknownAndPerRepoKeys(t *testing.T) {
 		})
 	}
 }
+
+func TestUnconnectedDependencies(t *testing.T) {
+	cfg := &GlobalConfig{Repos: []ConnectedRepo{{RepoID: "github.com/org/connected", CloneURL: "x"}}}
+	missing := cfg.UnconnectedDependencies([]string{"github.com/org/connected", "github.com/org/missing"})
+	if len(missing) != 1 || missing[0] != "github.com/org/missing" {
+		t.Errorf("UnconnectedDependencies = %v", missing)
+	}
+	if got := cfg.UnconnectedDependencies(nil); got != nil {
+		t.Errorf("no deps should yield nil, got %v", got)
+	}
+}

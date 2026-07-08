@@ -2,9 +2,12 @@ package command
 
 import "fmt"
 
-// RepoAddCmd registers a connected repo: clone its cache, verify the target
-// declares the derived repo_id in its committed config, and record
-// {repo_id, clone_url} in the user-global config.
+// RepoAddCmd connects a repo with two writes: the committed dependency
+// declaration in the current repo's .sdd/config.yaml (what this graph
+// needs — portable, go.mod-style) and the per-user resolution
+// {repo_id, clone_url} in the user-global config (how this machine reaches
+// it). Re-running on an existing connection is the upgrade path that adds a
+// missing declaration.
 type RepoAddCmd struct {
 	// CloneURL is the git URL to clone from (ssh or https — per-user
 	// choice; the derived repo_id is identical either way).
@@ -13,6 +16,12 @@ type RepoAddCmd struct {
 	// OnAdded fires after the connection is registered, carrying the
 	// verified repo identity and the cache location.
 	OnAdded func(repoID, cacheDir string)
+
+	// OnDeclared fires when the dependency declaration is ensured in the
+	// current repo's committed config; alreadyDeclared reports whether it
+	// was present before. Not fired outside an sdd repo (global-only
+	// registration is legitimate — resolution without a dependent graph).
+	OnDeclared func(repoID string, alreadyDeclared bool)
 }
 
 // Validate checks the command's required fields.

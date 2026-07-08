@@ -22,7 +22,7 @@ import (
 // config (see Finder.language). Empty means no language check (English
 // default); a locale code activates the check against description prose.
 func (f *Finder) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
-	findings := mechanicalPreflight(q.Entry, q.Graph)
+	findings := mechanicalPreflight(q.Entry, q.Graph, f.declaredDependencies())
 
 	llmResult, err := llm.Preflight(ctx, f.preflightRunner, q.Entry, q.Graph, f.language())
 	if err != nil {

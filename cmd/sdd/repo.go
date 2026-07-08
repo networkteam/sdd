@@ -37,6 +37,13 @@ func repoCmd() *cli.Command {
 							fmt.Printf("connected %s\n", repoID)
 							fmt.Printf("  cache: %s\n", cacheDir)
 						},
+						OnDeclared: func(repoID string, alreadyDeclared bool) {
+							if alreadyDeclared {
+								fmt.Printf("  dependency already declared in .sdd/config.yaml\n")
+								return
+							}
+							fmt.Printf("  declared dependency in .sdd/config.yaml — commit it so clones know what to connect\n")
+						},
 					})
 				},
 			},
@@ -119,7 +126,13 @@ func repoHandler() (*handlers.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return handlers.New(handlers.Options{Reader: reader, Repos: mgr}), nil
+	// SDDDir is optional: outside a repo the dependency declaration is
+	// skipped and only the global registration happens.
+	sddDir, err := resolveSDDDir()
+	if err != nil {
+		sddDir = ""
+	}
+	return handlers.New(handlers.Options{Reader: reader, Repos: mgr, SDDDir: sddDir}), nil
 }
 
 // freshenRepoCaches brings the named connected repos' caches up to date

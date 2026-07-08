@@ -20,15 +20,20 @@ import (
 // connected-repos manager — a wiring gap, never a user state (fail loud).
 var errNoRepos = fmt.Errorf("connected-repos support is not wired (handler built without Repos)")
 
-// RepoAdd executes a RepoAddCmd: clone the target, establish its canonical
-// identity from the repo_id it declares in its committed config, and
-// register the connection in the user-global config. When the clone URL
-// itself derives an identity (ssh/https forms), the declared value must
-// match it — that cross-check catches pointing at a fork or mirror under
-// the wrong name. A URL with no host/path form (a local path, an offline
-// mirror) skips the cross-check and trusts the declared identity, which is
-// canonical by design. The clone runs before registration so a failed
-// verification leaves the config untouched.
+// RepoAdd executes a RepoAddCmd with its two writes: clone the target,
+// establish its canonical identity from the repo_id it declares in its
+// committed config, register the connection in the user-global config (the
+// per-user resolution), and declare the dependency in the current repo's
+// committed .sdd/config.yaml (the portable record of what this graph
+// needs). When the clone URL itself derives an identity (ssh/https forms),
+// the declared value must match it — that cross-check catches pointing at a
+// fork or mirror under the wrong name. A URL with no host/path form (a
+// local path, an offline mirror) skips the cross-check and trusts the
+// declared identity, which is canonical by design. The clone runs before
+// registration so a failed verification leaves the config untouched.
+// Re-running against an already-connected URL skips the clone and only
+// ensures the declaration — the upgrade path for connections made before
+// dependencies existed.
 func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("invalid command: %w", err)
@@ -40,6 +45,22 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	cfg, err := h.repos.Registry().Load()
 	if err != nil {
 		return err
+	}
+
+	// Already connected under this URL: the resolution half is done — only
+	// ensure the committed declaration. Errors when that too is already in
+	// place, so a true no-op still reads as "nothing to do".
+	for _, existing := range cfg.Repos {
+		if existing.CloneURL == cmd.CloneURL {
+			declared, err := h.declareDependency(existing.RepoID, cmd)
+			if err != nil {
+				return err
+			}
+			if !declared {
+				return fmt.Errorf("repo %q is already connected and declared", existing.RepoID)
+			}
+			return nil
+		}
 	}
 
 	// Clone into a staging location under the cache root first — the
@@ -97,10 +118,56 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	if err := h.repos.Save(cfg); err != nil {
 		return err
 	}
+	if _, err := h.declareDependency(declared, cmd); err != nil {
+		return err
+	}
 	if cmd.OnAdded != nil {
 		cmd.OnAdded(declared, cacheDir)
 	}
 	return nil
+}
+
+// declareDependency ensures repoID is listed in the committed dependencies
+// of the current repo's .sdd/config.yaml, using the comment-preserving
+// sequence upsert. Reports whether the declaration was added (false: it was
+// already there). Outside an sdd repo it is a silent no-op — registering a
+// connection without a dependent graph is legitimate. A graph never depends
+// on itself.
+func (h *Handler) declareDependency(repoID string, cmd *command.RepoAddCmd) (bool, error) {
+	if h.sddDir == "" {
+		return false, nil
+	}
+	path := filepath.Join(h.sddDir, "config.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("reading %s: %w", path, err)
+	}
+	cfgFile, err := model.ParseConfig(data)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", path, err)
+	}
+	if cfgFile.RepoID == repoID {
+		return false, fmt.Errorf("%q is this repo's own identity — a graph cannot depend on itself", repoID)
+	}
+	for _, dep := range cfgFile.Dependencies {
+		if dep == repoID {
+			if cmd.OnDeclared != nil {
+				cmd.OnDeclared(repoID, true)
+			}
+			return false, nil
+		}
+	}
+	patched, err := model.SetYAMLSequence(data, "dependencies", append(cfgFile.Dependencies, repoID))
+	if err != nil {
+		return false, fmt.Errorf("declaring dependency in %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, patched, 0o644); err != nil {
+		return false, fmt.Errorf("writing %s: %w", path, err)
+	}
+	if cmd.OnDeclared != nil {
+		cmd.OnDeclared(repoID, false)
+	}
+	return true, nil
 }
 
 // RepoRemove executes a RepoRemoveCmd, dropping the connection from the

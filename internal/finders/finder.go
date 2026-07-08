@@ -64,3 +64,13 @@ func (f *Finder) language() string {
 	}
 	return f.cfg.Language
 }
+
+// declaredDependencies returns the repo's committed cross-repo dependency
+// declarations, or nil when no config is available. Pre-flight's
+// declared-dependency precondition reasons against this list.
+func (f *Finder) declaredDependencies() []string {
+	if f.cfg == nil {
+		return nil
+	}
+	return f.cfg.Dependencies
+}

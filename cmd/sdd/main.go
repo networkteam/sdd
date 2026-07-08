@@ -1823,8 +1823,35 @@ func initCmd() *cli.Command {
 				Reader:    reader,
 				Committer: git.CLI{},
 			})
-			return handler.Init(ctx, icmd)
+			if err := handler.Init(ctx, icmd); err != nil {
+				return err
+			}
+			notifyUnconnectedDependencies(sddDir)
+			return nil
 		}),
+	}
+}
+
+// notifyUnconnectedDependencies reports declared dependencies that have no
+// connection on this machine — `sdd init` is the post-clone contract, and a
+// connection's clone_url is per-user (never committed), so init can only
+// name what is missing and prompt for the URL. Informational like
+// warnIfParticipantMissing: errors here never fail an init that succeeded.
+func notifyUnconnectedDependencies(sddDir string) {
+	cfg, err := meta.ReadConfig(sddDir)
+	if err != nil || cfg == nil || len(cfg.Dependencies) == 0 {
+		return
+	}
+	reg, _, err := defaultRepos()
+	if err != nil {
+		return
+	}
+	gcfg, err := reg.Load()
+	if err != nil {
+		return
+	}
+	for _, dep := range gcfg.UnconnectedDependencies(cfg.Dependencies) {
+		fmt.Fprintf(os.Stderr, "sdd: declared dependency %s is not connected on this machine — run `sdd repo add <clone-url>` (conventionally https://%s.git)\n", dep, dep)
 	}
 }
 

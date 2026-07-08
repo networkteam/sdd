@@ -160,6 +160,20 @@ func (c *GlobalConfig) RemoveRepo(repoID string) bool {
 	return false
 }
 
+// UnconnectedDependencies returns the declared dependencies (committed
+// repo_ids) that have no connection in this user-global config — the gap
+// `sdd init` reports after a fresh clone, since the clone_url half of a
+// connection is per-user and cannot ride in the committed declaration.
+func (c *GlobalConfig) UnconnectedDependencies(deps []string) []string {
+	var missing []string
+	for _, dep := range deps {
+		if _, ok := c.Connected(dep); !ok {
+			missing = append(missing, dep)
+		}
+	}
+	return missing
+}
+
 // SelectRepoIDs resolves a caller's repo selection against the connected
 // set: all=true means every connected repo; an explicitly named repo that
 // is not connected is an error — silent narrowing would misreport
