@@ -77,6 +77,8 @@ sdd/
 │   ├── model/              # Pure domain types (no I/O, no deps)
 │   ├── presenters/         # View rendering of query results
 │   ├── llm/                # Pre-flight + summarization via LLM
+│   ├── git/                # Git adapter: exec-based implementations of the consumer-defined git interfaces (handlers.Committer/…, finders.GitSyncer, repos.Git)
+│   ├── repos/              # Connected repos for cross-repo refs: Locations (explicit paths), Registry (pure reads → finders), Manager (clone/pull/config writes → handlers)
 │   ├── meta/               # Config resolution
 │   └── bundledskills/      # Skill source of truth (agent-neutral templates), embedded via //go:embed
 │       └── templates/      # Neutral *.md.tmpl skill tree, rendered per agent (sdd, sdd-catchup, sdd-explore, sdd-groom)
