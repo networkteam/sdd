@@ -13,6 +13,13 @@ import (
 	"github.com/networkteam/sdd/internal/repos"
 )
 
+// countingCommitter is the internal-package committer fake for the repo
+// tests (recordingCommitter lives in the external handlers_test package and
+// is not visible here). It records how many commits were made.
+type countingCommitter struct{ calls int }
+
+func (c *countingCommitter) Commit(string, ...string) error { c.calls++; return nil }
+
 // fakeGit is a no-op git for cross-repo cache tests: the cache is seeded
 // pre-cloned on disk, so Clone is never reached and PullFFOnly just counts
 // invocations (the cooldown pull EnsureReposFresh performs on a fresh read).
@@ -173,10 +180,222 @@ func TestBuildConnectedIndexes_FreshensAndFills(t *testing.T) {
 	}
 }
 
+// A forced connected-index fill re-embeds every member entry despite an
+// up-to-date manifest — the repair path `sdd index --repo --force` needs and
+// that a plain lazy fill (which skips converged entries) would not provide.
+func TestBuildConnectedIndexes_ForceRebuildsMembers(t *testing.T) {
+	dir := t.TempDir()
+	loc := repos.Locations{
+		ConfigPath: filepath.Join(dir, "xdg", "sdd", "config.yaml"),
+		CacheRoot:  filepath.Join(dir, "cache"),
+	}
+	const repoID = "github.com/networkteam/other"
+
+	gcfg := &repos.GlobalConfig{}
+	if err := gcfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.SaveConfigTo(loc.ConfigPath, gcfg); err != nil {
+		t.Fatal(err)
+	}
+	reg := repos.NewRegistry(loc)
+	cacheDir, err := reg.CacheDir(repoID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(cacheDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	memberSDD := filepath.Join(cacheDir, ".sdd")
+	if err := os.MkdirAll(memberSDD, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memberSDD, "config.yaml"),
+		[]byte("repo_id: "+repoID+"\ngraph_dir: .sdd/graph\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeEntry(t, filepath.Join(cacheDir, ".sdd", "graph"),
+		"20260101-100000-s-tac-aaa", "## A\nMember entry body.", "Member summary.")
+
+	h := New(Options{Reader: readFinderFor(t), Repos: repos.NewManager(reg, &fakeGit{})})
+	emb := &fakeEmbedder{}
+
+	// First fill populates the member index + manifest.
+	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, emb, &command.BuildConnectedIndexesCmd{}); err != nil {
+		t.Fatalf("initial lazy fill: %v", err)
+	}
+
+	// A second lazy fill over the up-to-date index plans nothing.
+	lazyPlanned := 0
+	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, emb,
+		&command.BuildConnectedIndexesCmd{OnPlanned: func(n int) { lazyPlanned += n }}); err != nil {
+		t.Fatalf("second lazy fill: %v", err)
+	}
+	if lazyPlanned != 0 {
+		t.Errorf("lazy fill over an up-to-date index planned %d chunks, want 0", lazyPlanned)
+	}
+
+	// A forced fill re-embeds every member entry despite the current manifest.
+	forcePlanned := 0
+	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, emb,
+		&command.BuildConnectedIndexesCmd{Force: true, OnPlanned: func(n int) { forcePlanned += n }}); err != nil {
+		t.Fatalf("forced fill: %v", err)
+	}
+	if forcePlanned == 0 {
+		t.Error("forced fill planned 0 chunks — --force did not reach the member index")
+	}
+}
+
 func TestRepoAdd_RejectsSelfDependency(t *testing.T) {
 	h, _ := newRepoTestHandler(t, "repo_id: github.com/networkteam/other\n")
 	err := h.RepoAdd(context.Background(), &command.RepoAddCmd{CloneURL: "git@github.com:networkteam/other.git"})
 	if err == nil || !strings.Contains(err.Error(), "cannot depend on itself") {
 		t.Errorf("self-dependency must be rejected, got %v", err)
+	}
+}
+
+const removeTargetRepoID = "github.com/networkteam/other"
+
+// newRemoveTestHandler seeds a project-scoped handler for repo remove: a
+// committed .sdd/config.yaml (repoConfig) plus a graph dir and a read finder
+// backing the ref-safety scan, with an injected committer to observe commits.
+func newRemoveTestHandler(t *testing.T, repoConfig string, committer Committer) (*Handler, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	sddDir := filepath.Join(dir, ".sdd")
+	graphDir := filepath.Join(sddDir, "graph")
+	if err := os.MkdirAll(graphDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sddDir, "config.yaml"), []byte(repoConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return New(Options{SDDDir: sddDir, GraphDir: graphDir, Reader: readFinderFor(t), Committer: committer}), sddDir, graphDir
+}
+
+// writeCrossRepoRefEntry writes a local entry that references a foreign entry —
+// the kind of ref that makes a dependency unsafe to remove.
+func writeCrossRepoRefEntry(t *testing.T, graphDir, id, foreignRef string) {
+	t.Helper()
+	yyyy, mm, short := id[:4], id[4:6], id[6:]
+	dir := filepath.Join(graphDir, yyyy, mm)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\ntype: signal\nlayer: tactical\nkind: gap\n" +
+		"confidence: medium\nparticipants:\n  - Test\n" +
+		"refs:\n  - id: " + foreignRef + "\n    kind: related\n" +
+		"summary: |-\n  References a foreign entry.\n---\nBody.\n"
+	if err := os.WriteFile(filepath.Join(dir, short+".md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A clean removal — the dependency is declared and nothing references it —
+// drops it from the committed config and commits once.
+func TestRepoRemove_CleanRemoval(t *testing.T) {
+	committer := &countingCommitter{}
+	h, sddDir, graphDir := newRemoveTestHandler(t,
+		"graph_dir: .sdd/graph\ndependencies: ["+removeTargetRepoID+"]\n# keep me\n", committer)
+	writeEntry(t, graphDir, "20260202-100000-s-tac-bbb", "## B\nUnrelated entry.", "Unrelated.")
+
+	var removed []string
+	err := h.RepoRemove(context.Background(), &command.RepoRemoveCmd{
+		RepoID:    removeTargetRepoID,
+		OnRemoved: func(id string) { removed = append(removed, id) },
+	})
+	if err != nil {
+		t.Fatalf("clean removal: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(sddDir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), removeTargetRepoID) {
+		t.Errorf("dependency not removed: %s", data)
+	}
+	if !strings.Contains(string(data), "# keep me") {
+		t.Errorf("comment lost on removal: %s", data)
+	}
+	if committer.calls != 1 {
+		t.Errorf("Committer.Commit called %d times, want 1", committer.calls)
+	}
+	if len(removed) != 1 || removed[0] != removeTargetRepoID {
+		t.Errorf("OnRemoved calls = %v", removed)
+	}
+}
+
+// Removing a repo that is not a declared dependency is an error, and nothing
+// is committed.
+func TestRepoRemove_NotDeclared(t *testing.T) {
+	committer := &countingCommitter{}
+	h, _, _ := newRemoveTestHandler(t, "graph_dir: .sdd/graph\n", committer)
+	err := h.RepoRemove(context.Background(), &command.RepoRemoveCmd{RepoID: removeTargetRepoID})
+	if err == nil || !strings.Contains(err.Error(), "not a declared dependency") {
+		t.Errorf("undeclared removal should error, got %v", err)
+	}
+	if committer.calls != 0 {
+		t.Errorf("Committer.Commit called %d times, want 0", committer.calls)
+	}
+}
+
+// The ref-safety guard refuses to remove a dependency that a local entry still
+// references, names the stranding ref, and leaves the config untouched.
+func TestRepoRemove_RefusesWhenReferenced(t *testing.T) {
+	committer := &countingCommitter{}
+	h, sddDir, graphDir := newRemoveTestHandler(t,
+		"graph_dir: .sdd/graph\ndependencies: ["+removeTargetRepoID+"]\n", committer)
+	foreignRef := removeTargetRepoID + ":20260101-100000-s-tac-aaa"
+	writeCrossRepoRefEntry(t, graphDir, "20260202-100000-s-tac-bbb", foreignRef)
+
+	err := h.RepoRemove(context.Background(), &command.RepoRemoveCmd{RepoID: removeTargetRepoID})
+	if err == nil || !strings.Contains(err.Error(), "refusing to remove") {
+		t.Fatalf("referenced removal should refuse, got %v", err)
+	}
+	if !strings.Contains(err.Error(), foreignRef) {
+		t.Errorf("refusal should name the stranding ref %q, got: %v", foreignRef, err)
+	}
+	data, err := os.ReadFile(filepath.Join(sddDir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), removeTargetRepoID) {
+		t.Errorf("dependency should be unchanged after refusal: %s", data)
+	}
+	if committer.calls != 0 {
+		t.Errorf("Committer.Commit called %d times, want 0", committer.calls)
+	}
+}
+
+// --force removes a still-referenced dependency, firing OnStranded with the
+// refs it orphaned and committing the change.
+func TestRepoRemove_ForceStrandsAndRemoves(t *testing.T) {
+	committer := &countingCommitter{}
+	h, sddDir, graphDir := newRemoveTestHandler(t,
+		"graph_dir: .sdd/graph\ndependencies: ["+removeTargetRepoID+"]\n", committer)
+	foreignRef := removeTargetRepoID + ":20260101-100000-s-tac-aaa"
+	writeCrossRepoRefEntry(t, graphDir, "20260202-100000-s-tac-bbb", foreignRef)
+
+	var stranded []command.StrandedRef
+	err := h.RepoRemove(context.Background(), &command.RepoRemoveCmd{
+		RepoID:     removeTargetRepoID,
+		Force:      true,
+		OnStranded: func(_ string, s []command.StrandedRef) { stranded = s },
+	})
+	if err != nil {
+		t.Fatalf("forced removal: %v", err)
+	}
+	if len(stranded) != 1 || stranded[0].RefID != foreignRef {
+		t.Errorf("OnStranded = %+v, want one ref %q", stranded, foreignRef)
+	}
+	data, err := os.ReadFile(filepath.Join(sddDir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), removeTargetRepoID) {
+		t.Errorf("dependency not removed under --force: %s", data)
+	}
+	if committer.calls != 1 {
+		t.Errorf("Committer.Commit called %d times, want 1", committer.calls)
 	}
 }

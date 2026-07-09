@@ -18,6 +18,12 @@ import "sync"
 type MultiGraph struct {
 	Local *Graph
 
+	// deps is the local graph's declared cross-repo dependencies (repo-ids)
+	// — the bounded scope for bare-ID resolution. Resolution never reaches a
+	// repo outside this set, matching the declared-dependency precondition
+	// that governs which repos a ref may point at.
+	deps []string
+
 	loader func(repoID string) (*Graph, error)
 
 	mu      sync.Mutex
@@ -30,12 +36,33 @@ type memberState struct {
 }
 
 // NewMultiGraph assembles the cross-graph read model around a local graph.
-// The local graph (and every lazily loaded member) gets back-wired so
-// traversal code holding any *Graph can resolve across the boundary.
-func NewMultiGraph(local *Graph, loader func(repoID string) (*Graph, error)) *MultiGraph {
-	m := &MultiGraph{Local: local, loader: loader, members: make(map[string]*memberState)}
+// deps is the local graph's declared cross-repo dependencies (repo-ids), the
+// bounded scope for bare-ID resolution. The local graph (and every lazily
+// loaded member) gets back-wired so traversal code holding any *Graph can
+// resolve across the boundary.
+func NewMultiGraph(local *Graph, deps []string, loader func(repoID string) (*Graph, error)) *MultiGraph {
+	m := &MultiGraph{Local: local, deps: deps, loader: loader, members: make(map[string]*memberState)}
 	local.multi = m
 	return m
+}
+
+// dependencyGraphs returns the loaded member graphs for the declared
+// dependencies that are connected and cached, skipping any that are absent or
+// fail to load — resolution treats an unreachable dependency as contributing
+// no candidates, the same honest unresolved state a read renders.
+func (m *MultiGraph) dependencyGraphs() []*Graph {
+	if m == nil {
+		return nil
+	}
+	var out []*Graph
+	for _, repoID := range m.deps {
+		g, err := m.Member(repoID)
+		if err != nil || g == nil {
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
 }
 
 // Member returns the cached graph for a connected repo, loading it on first

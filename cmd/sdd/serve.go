@@ -123,22 +123,66 @@ func serveCmd() *cli.Command {
 // per-call lazy index fill when an embedding provider is configured, plain
 // text-term search otherwise. Cross-repo selection on the query fans out
 // through the same prepare-then-read split the CLI uses.
+//
+// It builds two vector stacks so the MCP server matches the CLI per mode: a
+// local stack under the local-overlay embedder for local-only queries, and a
+// cross-repo stack under the global-first embedder (crossRepoEmbedder) so a
+// cross-repo query builds and queries the same one (repo-id, fingerprint)
+// vector space the CLI does. When the two embedders coincide (no local
+// override) the local stack is reused for both, so no second index store is
+// opened.
 func buildServeSearcher(cmd *cli.Command, graphDir string, reader *finders.Finder, reg *repos.Registry, mgr *repos.Manager) (mcpserver.Searcher, bool, error) {
-	emb, err := buildEmbedder(cmd)
+	localEmb, err := buildEmbedder(cmd)
 	if err != nil {
 		return nil, false, err
 	}
-	if emb == nil {
-		sf := finders.NewSearchFinder(finders.SearchFinderOptions{GraphDir: graphDir, Repos: reg})
-		return lazyFillSearcher{sf: sf, prepare: handlers.New(handlers.Options{Reader: reader, Repos: mgr})}, false, nil
+	crossEmb, err := crossRepoEmbedder(cmd)
+	if err != nil {
+		return nil, false, err
 	}
+	prepare := handlers.New(handlers.Options{Reader: reader, Repos: mgr})
+
+	// No provider anywhere: text-only. localEmb == nil iff crossEmb == nil
+	// (both are driven by whether any provider resolves), so one finder serves
+	// both local and cross-repo queries.
+	if localEmb == nil {
+		sf := finders.NewSearchFinder(finders.SearchFinderOptions{GraphDir: graphDir, Repos: reg})
+		return lazyFillSearcher{localSF: sf, crossSF: sf, prepare: prepare}, false, nil
+	}
+
+	localSF, localIH, err := buildVectorStack(graphDir, reader, reg, localEmb)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// The cross-repo stack uses the global-first embedder. Reuse the local
+	// stack when the fingerprints match (no local override) — same vector
+	// space, and opening the same store twice would contend on its lock.
+	crossSF, crossIH := localSF, localIH
+	if crossEmb.Fingerprint() != localEmb.Fingerprint() {
+		crossSF, crossIH, err = buildVectorStack(graphDir, reader, reg, crossEmb)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
+	return lazyFillSearcher{
+		localSF: localSF, localIH: localIH,
+		crossSF: crossSF, crossIH: crossIH, crossEmb: crossEmb,
+		prepare: prepare,
+	}, true, nil
+}
+
+// buildVectorStack opens the machine-global index store for emb and returns
+// the (search finder, index handler) pair that reads and lazy-fills it.
+func buildVectorStack(graphDir string, reader *finders.Finder, reg *repos.Registry, emb llm.Embedder) (*finders.SearchFinder, *handlers.IndexHandler, error) {
 	idxDir, err := resolveIndexStore(emb)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
 	}
 	idxStore, err := index.Open(idxDir)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, err
 	}
 	sf := finders.NewSearchFinder(finders.SearchFinderOptions{
 		GraphDir:   graphDir,
@@ -153,31 +197,45 @@ func buildServeSearcher(cmd *cli.Command, graphDir string, reader *finders.Finde
 		IndexStore: idxStore,
 		Reader:     reader,
 	})
-	return lazyFillSearcher{sf: sf, ih: ih, prepare: handlers.New(handlers.Options{Reader: reader, Repos: mgr}), emb: emb}, true, nil
+	return sf, ih, nil
 }
 
 // lazyFillSearcher fills missing or stale index entries before a vector
 // query — the same flow `sdd search` runs, without the TTY progress view.
-// A query selecting connected repos additionally freshens their caches and
+// It holds two stacks: a local-overlay stack for local-only queries and a
+// global-first stack for cross-repo queries, matching the CLI's per-mode
+// embedder resolution so both surfaces share one cross-repo vector space. A
+// query selecting connected repos additionally freshens their caches and
 // member indexes (handler side), then reads via the cross-graph finder.
 type lazyFillSearcher struct {
-	sf      *finders.SearchFinder
-	ih      *handlers.IndexHandler
-	prepare *handlers.Handler
-	emb     llm.Embedder
+	localSF  *finders.SearchFinder
+	localIH  *handlers.IndexHandler
+	crossSF  *finders.SearchFinder
+	crossIH  *handlers.IndexHandler
+	crossEmb llm.Embedder
+	prepare  *handlers.Handler
 }
 
 func (l lazyFillSearcher) Search(ctx context.Context, q query.SearchQuery) (*query.SearchResult, error) {
-	if q.Phrase != "" && l.ih != nil {
-		if err := l.ih.LazyFill(ctx, &command.LazyFillIndexCmd{}); err != nil {
-			return nil, err
-		}
-	}
 	if q.AllRepos || len(q.Repos) > 0 {
-		if err := l.prepare.PrepareCrossRepoSearch(ctx, q, l.emb, nil); err != nil {
+		// Cross-repo: the global-first embedder unifies the local index and
+		// every member index into one (repo-id, fingerprint) vector space, so
+		// the MCP server queries exactly what the CLI's cross-repo path does.
+		if q.Phrase != "" && l.crossIH != nil {
+			if err := l.crossIH.LazyFill(ctx, &command.LazyFillIndexCmd{}); err != nil {
+				return nil, err
+			}
+		}
+		if err := l.prepare.PrepareCrossRepoSearch(ctx, q, l.crossEmb, nil); err != nil {
 			return nil, err
 		}
-		return finders.MultiSearch(ctx, l.sf, q)
+		return finders.MultiSearch(ctx, l.crossSF, q)
 	}
-	return l.sf.Search(ctx, q)
+	// Local-only: the local-overlay embedder.
+	if q.Phrase != "" && l.localIH != nil {
+		if err := l.localIH.LazyFill(ctx, &command.LazyFillIndexCmd{}); err != nil {
+			return nil, err
+		}
+	}
+	return l.localSF.Search(ctx, q)
 }

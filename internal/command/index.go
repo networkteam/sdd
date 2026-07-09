@@ -67,9 +67,16 @@ type LazyFillIndexCmd struct {
 // BuildConnectedIndexesCmd drives progress for filling one or more connected
 // repos' member indexes — the eager `sdd index --repo/--all-repos` path and
 // the fill half of a cross-repo search's prepare step. Each repo's fill is a
-// LazyFill under the shared embedder; the callbacks aggregate across repos
-// (the caller accumulates OnPlanned totals rather than resetting per repo).
+// LazyFill under the shared embedder unless Force is set, in which case every
+// member entry re-embeds; the callbacks aggregate across repos (the caller
+// accumulates OnPlanned totals rather than resetting per repo).
 type BuildConnectedIndexesCmd struct {
+	// Force re-embeds every member entry, mirroring `sdd index --force` for
+	// the local index: it repairs a stale or corrupt connected store rather
+	// than only filling what a lazy reconcile would touch. Search never
+	// forces — only the explicit `sdd index --repo/--all-repos --force` sets it.
+	Force bool
+
 	// OnRepoStart fires before each repo's fill begins, naming the repo
 	// whose member index is about to be reconciled. Optional; lets the
 	// caller label the work in flight per repo.

@@ -4,13 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/urfave/cli/v3"
 
 	"github.com/networkteam/sdd/internal/cliout"
 	clitui "github.com/networkteam/sdd/internal/cliout/tui"
 	"github.com/networkteam/sdd/internal/command"
+	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
+	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/repos"
 )
@@ -54,10 +57,24 @@ func repoCmd() *cli.Command {
 						return struct{}{}, h.RepoAdd(ctx, addCmd)
 					}
 
+					// The already-connected fast path does no clone. Starting the
+					// transient coordinator for that no-op would drain DEC
+					// mode-query escape sequences onto the shell prompt, so gate
+					// the view on a clone actually being needed — the same
+					// "already connected under this URL" test the handler applies.
+					willClone := true
+					if reg, _, rerr := defaultRepos(); rerr == nil {
+						if cfg, lerr := reg.Load(); lerr == nil {
+							if _, connected := cfg.ConnectedByURL(cmd.Args().First()); connected {
+								willClone = false
+							}
+						}
+					}
+
 					// The clone is the long, previously-silent step. On a TTY it
 					// runs under the inline coordinator (spinner + streamed
 					// "cloning" log); off-TTY it stays at the plain slog floor.
-					if cliout.IsInteractive(os.Stderr) {
+					if cliout.IsInteractive(os.Stderr) && willClone {
 						_, err = clitui.Interactive(ctx, transientViewPolicy(),
 							clitui.View{Label: "connecting", StreamLogs: true}, work)
 					} else {
@@ -79,7 +96,7 @@ func repoCmd() *cli.Command {
 						} else {
 							presenters.RenderResultLine(os.Stdout,
 								fmt.Sprintf("declared dependency %s in .sdd/config.yaml", declaredRepoID),
-								"commit it so clones know what to connect")
+								"committed so clones know what to connect")
 						}
 					}
 					return nil
@@ -113,8 +130,14 @@ func repoCmd() *cli.Command {
 			},
 			{
 				Name:      "remove",
-				Usage:     "Disconnect a repo (its cache stays on disk)",
+				Usage:     "Drop a declared cross-repo dependency from .sdd/config.yaml (ref-safety-guarded)",
 				ArgsUsage: "<repo-id>",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "force",
+						Usage: "remove even when local entries still reference the repo, stranding those refs",
+					},
+				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					if cmd.Args().Len() != 1 {
 						return fmt.Errorf("usage: sdd repo remove <repo-id>")
@@ -125,8 +148,15 @@ func repoCmd() *cli.Command {
 					}
 					return h.RepoRemove(ctx, &command.RepoRemoveCmd{
 						RepoID: cmd.Args().First(),
+						Force:  cmd.Bool("force"),
 						OnRemoved: func(repoID string) {
-							fmt.Printf("disconnected %s\n", repoID)
+							fmt.Printf("removed dependency %s from .sdd/config.yaml\n", repoID)
+						},
+						OnStranded: func(repoID string, stranded []command.StrandedRef) {
+							fmt.Fprintf(os.Stderr, "warning: --force stranded %d ref(s) into %s:\n", len(stranded), repoID)
+							for _, s := range stranded {
+								fmt.Fprintf(os.Stderr, "  %s  %s  %s\n", s.EntryID, s.Kind, s.RefID)
+							}
 						},
 					})
 				},
@@ -170,7 +200,20 @@ func repoHandler() (*handlers.Handler, error) {
 	if err != nil {
 		sddDir = ""
 	}
-	return handlers.New(handlers.Options{Reader: reader, Repos: mgr, SDDDir: sddDir}), nil
+	// GraphDir backs the ref-safety scan on repo remove; resolved best-effort
+	// since add/sync run fine outside a repo (where it stays empty).
+	graphDir := ""
+	if sddDir != "" {
+		cfg, _ := meta.ReadConfig(sddDir)
+		graphDir = meta.ResolveGraphDir(filepath.Dir(sddDir), cfg)
+	}
+	return handlers.New(handlers.Options{
+		Reader:    reader,
+		Repos:     mgr,
+		SDDDir:    sddDir,
+		GraphDir:  graphDir,
+		Committer: git.CLI{},
+	}), nil
 }
 
 // freshenRepoCaches brings the named connected repos' caches up to date

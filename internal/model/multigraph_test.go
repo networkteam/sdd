@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -32,7 +33,7 @@ func multiFixture(t *testing.T) (*Graph, *Graph) {
 	succ := entry("20260401-100000-d-cpt-suc", withSupersedes("20260331-080000-d-cpt-old"))
 	member := NewGraph([]*Entry{baseMember, rem, old, succ})
 
-	NewMultiGraph(local, func(repoID string) (*Graph, error) {
+	NewMultiGraph(local, []string{otherRepo}, func(repoID string) (*Graph, error) {
 		if repoID == otherRepo {
 			return member, nil
 		}
@@ -62,9 +63,68 @@ func TestMultiGraph_ResolveAcross(t *testing.T) {
 	}
 }
 
+func TestResolveUnionID(t *testing.T) {
+	local, _ := multiFixture(t)
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"local short id", "d-tac-ccc", "20260410-100200-d-tac-ccc"},
+		{"local full id", "20260410-100200-d-tac-ccc", "20260410-100200-d-tac-ccc"},
+		{"foreign short id expands to prefixed", "d-cpt-rem", otherRepo + ":20260401-090000-d-cpt-rem"},
+		{"foreign unprefixed-full expands to prefixed", "20260401-090000-d-cpt-rem", otherRepo + ":20260401-090000-d-cpt-rem"},
+		// The embedded base entry is present in both local and the member;
+		// it must dedup to the single local instance (bare), not collide.
+		{"embedded entry dedups to local", "s-cpt-bas", "20260301-090000-s-cpt-bas"},
+		// Already-prefixed cross-repo IDs pass through verbatim.
+		{"cross-repo prefixed passthrough", otherRepo + ":20260401-090000-d-cpt-rem", otherRepo + ":20260401-090000-d-cpt-rem"},
+		// Unrecognized / unmatched inputs pass through so the caller's
+		// "not found" surface fires against the original text.
+		{"unknown short id passthrough", "d-tac-zzz", "d-tac-zzz"},
+		{"empty passthrough", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := local.ResolveUnionID(tc.input)
+			if err != nil {
+				t.Fatalf("ResolveUnionID(%q): %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Errorf("ResolveUnionID(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// A short ID matching genuinely distinct entries in the local graph and a
+// dependency is a real ambiguity: resolution refuses (no local-first
+// precedence) and lists the candidates, the local one bare and the foreign one
+// in full prefixed form.
+func TestResolveUnionID_Ambiguity(t *testing.T) {
+	local := NewGraph([]*Entry{entry("20260101-100000-d-tac-dup")})
+	member := NewGraph([]*Entry{entry("20260202-200000-d-tac-dup")})
+	NewMultiGraph(local, []string{otherRepo}, func(repoID string) (*Graph, error) {
+		if repoID == otherRepo {
+			return member, nil
+		}
+		return nil, nil
+	})
+
+	_, err := local.ResolveUnionID("d-tac-dup")
+	if err == nil {
+		t.Fatal("expected ambiguity error for a short ID matching local and a dependency")
+	}
+	if !strings.Contains(err.Error(), "20260101-100000-d-tac-dup") ||
+		!strings.Contains(err.Error(), otherRepo+":20260202-200000-d-tac-dup") {
+		t.Errorf("ambiguity error should list both candidates (local bare, foreign prefixed), got: %v", err)
+	}
+}
+
 func TestMultiGraph_MemberLoadErrorPropagates(t *testing.T) {
 	local := NewGraph([]*Entry{entry("20260410-100200-d-tac-ccc")})
-	NewMultiGraph(local, func(repoID string) (*Graph, error) {
+	NewMultiGraph(local, []string{"example.com/team/broken"}, func(repoID string) (*Graph, error) {
 		return nil, fmt.Errorf("corrupt cache")
 	})
 	if _, err := local.MemberGraph("example.com/team/broken"); err == nil {

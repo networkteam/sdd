@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -304,6 +305,14 @@ func main() {
 	}
 
 	if err := app.Run(context.Background(), os.Args); err != nil {
+		// Ctrl-C during a long operation (e.g. an embed) cancels the work
+		// context. That is user intent, not a failure — report it calmly and
+		// exit with the conventional SIGINT code (130) rather than dumping a
+		// raw "context canceled" error at the generic error exit.
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(os.Stderr, "cancelled.")
+			os.Exit(130)
+		}
 		slog.Error(err.Error())
 		os.Exit(1)
 	}

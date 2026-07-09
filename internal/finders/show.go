@@ -14,7 +14,11 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 		return nil, fmt.Errorf("graph is required")
 	}
 
-	resolved, err := q.Graph.ResolveIDs(q.IDs)
+	// Bare IDs (short or unprefixed-full) resolve across the union of the
+	// local graph and its declared dependencies, so a foreign entry ID handed
+	// to `sdd show` or the `show` MCP tool resolves to its full prefixed form
+	// before the tree build. Both surfaces share this one path.
+	resolved, err := q.Graph.ResolveUnionIDs(q.IDs)
 	if err != nil {
 		return nil, err
 	}
