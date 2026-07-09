@@ -1273,6 +1273,86 @@ func TestUnboundRejectionInlinesParkedSessions(t *testing.T) {
 	}
 }
 
+// TestResumeReorientsCurrentSession drives the post-compaction reach path
+// (s-cpt-h31, d-tac-zm2): a connection that has lost its handles calls
+// resume_session with no session and gets its live position back — every
+// running move at its current step, each with the report schema to continue
+// it (the field the observed thrash had to reconstruct from memory). Passing
+// the connection's own session id behaves identically instead of erroring.
+func TestResumeReorientsCurrentSession(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+
+	// A move is in flight, standing at a step that serves a report schema.
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"canonical": "capture",
+		"params":    map[string]any{"anchor": fixtureGapID, "kind": "gap"},
+		"label":     "mid-flight capture",
+	}, &serve)
+	if len(serve.ReportSchema) == 0 {
+		t.Fatalf("precondition: the capture step should serve a report schema, got %+v", serve)
+	}
+
+	assertReoriented := func(label string, resumed mcpserver.ResumeSessionResult) {
+		t.Helper()
+		if resumed.Session != serve.Session {
+			t.Fatalf("%s: should re-serve the bound session %s, got %s", label, serve.Session, resumed.Session)
+		}
+		var capServe, shellServe *mcpserver.ServeResult
+		for i := range resumed.Open {
+			switch resumed.Open[i].Procedure {
+			case "capture":
+				capServe = &resumed.Open[i]
+			case "user-dialogue":
+				shellServe = &resumed.Open[i]
+			}
+		}
+		if shellServe == nil {
+			t.Fatalf("%s: reorientation should re-serve the shell too, got %+v", label, resumed.Open)
+		}
+		if capServe == nil || capServe.Instance != serve.Instance || capServe.Step != serve.Step {
+			t.Fatalf("%s: reorientation should re-serve the in-flight move at its step, got %+v", label, resumed.Open)
+		}
+		if len(capServe.ReportSchema) == 0 {
+			t.Fatalf("%s: reorientation must return the running move's report schema, got %+v", label, capServe)
+		}
+	}
+
+	// No handle at all — the compacted-agent case.
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{}, &resumed)
+	assertReoriented("no session", resumed)
+
+	// The connection's own session id resolves to the same re-serve.
+	var resumedByID mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{"session": serve.Session}, &resumedByID)
+	assertReoriented("current id", resumedByID)
+}
+
+// TestResumeNoSessionUnboundListsParked: with nothing bound to the
+// connection, a no-session resume_session still bootstraps — the rejection
+// names the parked sessions to resume by handle, the reach path's unbound
+// entry (d-tac-zm2 AC2).
+func TestResumeNoSessionUnboundListsParked(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	openSession(t, cs)
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"canonical": "capture", "label": "parked work"}, &serve)
+
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	msg := callExpectError(t, cs2, "resume_session", map[string]any{})
+	if !strings.Contains(msg, "start_session is the door") {
+		t.Fatalf("unbound no-session resume should point at the door, got %q", msg)
+	}
+	if !strings.Contains(msg, serve.Session) || !strings.Contains(msg, "parked work") {
+		t.Fatalf("unbound no-session resume should inline the parked session, got %q", msg)
+	}
+}
+
 // TestChooserSequenceValidation exercises the trust property over MCP: a
 // chooser cannot be answered before it is pending.
 func TestChooserSequenceValidation(t *testing.T) {

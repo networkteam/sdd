@@ -25,10 +25,17 @@ dialogue should feel, and the moves you can start. All stateful tools
 require a session and point back to this door (one exception: abandon
 tears down a parked session by handle without opening one); the read
 tools (search, view, show, read_attachment, info, registry) are always
-free.`
+free.
+
+If you lose your place mid-work — your context was compacted or summarized
+and you no longer hold your session or instance handles — call
+resume_session with no arguments: it re-serves the session this connection
+is already in, every running move at its current step with the schema to
+continue it.`
 
 const resumeInstructions = `Session resumed: step position and collected evidence persist; the
 open_instances list carries each running instance's current serve — the
 session shell (user-dialogue) among them, carrying the open-threads block.
 Brief the user on where the work stands (procedure, step, goal) before
-continuing, and continue through next.`
+continuing, and continue through next. If you lose your place again later,
+resume_session with no session re-serves this list.`

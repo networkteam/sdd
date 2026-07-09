@@ -151,7 +151,7 @@ type ListSessionsResult struct {
 }
 
 type ResumeSessionArgs struct {
-	Session string `json:"session" jsonschema:"session handle from list_sessions"`
+	Session string `json:"session,omitempty" jsonschema:"a parked session handle (from list_sessions) to switch this connection to; omit to reorient the session this connection is already in"`
 }
 
 type ResumeSessionResult struct {
@@ -310,9 +310,12 @@ func (s *Server) registerTools() {
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "resume_session",
-		Description: "Switch this connection to a parked session: replays its log and returns the current " +
-			"serve for every running instance. Step position and evidence persist across restarts. " +
-			"Leaving the current session ends it when nothing is open, parks it when moves are open.",
+		Description: "Reorient after losing your place in a session — your working context was compacted " +
+			"or summarized mid-session, or you no longer hold your session or instance handles. Call " +
+			"with no session to re-serve the session this connection is already in: its framing plus " +
+			"every running move at its current step, each with the report schema to continue it. Pass a " +
+			"parked session's handle instead (from list_sessions) to switch to and replay a different " +
+			"one; leaving the current session ends it when nothing is open, parks it when moves are open.",
 	}, s.resumeSession)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -753,13 +756,25 @@ func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ L
 func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, args ResumeSessionArgs) (*mcp.CallToolResult, ResumeSessionResult, error) {
 	current, err := s.boundSession(req.Session)
 	if err != nil {
+		// No session bound to this connection: boundSession's error already
+		// names the parked sessions to resume by handle — the bootstrap for a
+		// connection with nothing to reorient back into.
 		return nil, ResumeSessionResult{}, err
 	}
-	if args.Session == "" {
-		return nil, ResumeSessionResult{}, toolError("session is required")
-	}
-	if args.Session == current.id {
-		return nil, ResumeSessionResult{}, toolError("session %s is the one this connection is already in", args.Session)
+	// Reorientation after context loss: an omitted session — or this
+	// connection's own session id — re-serves where we already are, every
+	// running move at its current step with the report schema to continue it,
+	// with no rebind and no leave. A compacted agent has lost its session and
+	// instance handles but not the live server-side session (s-cpt-h31); this
+	// is the reachable, handle-free way back to it. Forget the connection's
+	// served-block memory first so framing and units re-serve in full — the
+	// agent lost them to the compaction, so this is a genuine re-orientation,
+	// not the cheap same-connection reconnect.
+	if args.Session == "" || args.Session == current.id {
+		current.touch(time.Now())
+		s.forgetConnection(req.Session)
+		res, err := s.resumeResult(req.Session, current)
+		return nil, res, err
 	}
 
 	if live := s.sessions.lookupID(args.Session); live != nil && live.logFile != nil {
