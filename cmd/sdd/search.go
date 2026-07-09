@@ -168,9 +168,30 @@ func indexCmd() *cli.Command {
 				Name:  "force",
 				Usage: "Re-embed every entry, even those whose hash and fingerprint match the manifest",
 			},
+			&cli.StringSliceFlag{
+				Name:  "repo",
+				Usage: "Also build a connected repo's index by its repo-id (repeatable) — eager pre-indexing so the first cross-repo search is warm",
+			},
+			&cli.BoolFlag{
+				Name:  "all-repos",
+				Usage: "Also build every connected repo's index",
+			},
 		),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			emb, err := buildEmbedder(cmd)
+			repoSelection := cmd.StringSlice("repo")
+			allRepos := cmd.Bool("all-repos")
+			crossRepo := allRepos || len(repoSelection) > 0
+
+			// Cross-repo pre-indexing must build under the one vector space
+			// every connected index shares (the global embedding config), so
+			// the local index it warms matches what a cross-repo search reads.
+			var emb llm.Embedder
+			var err error
+			if crossRepo {
+				emb, err = crossRepoEmbedder(cmd)
+			} else {
+				emb, err = buildEmbedder(cmd)
+			}
 			if err != nil {
 				return err
 			}
@@ -203,10 +224,10 @@ func indexCmd() *cli.Command {
 				Reader:     reader,
 			})
 
-			// Pre-pass: how many entries need (re-)embedding? This sets the
-			// progress total and decides whether to show a transient view at
-			// all — a fully warm index does no work, so skip the program and
-			// its alt-screen flash.
+			// Pre-pass: does the local index need work? This decides whether to
+			// show a transient view for a local-only build — a fully warm index
+			// does no work, so skip the program and its flash. Cross-repo always
+			// shows the view: member work is only known after caches are fresh.
 			g, err := reader.CurrentGraph(graphDir)
 			if err != nil {
 				return err
@@ -216,33 +237,77 @@ func indexCmd() *cli.Command {
 				return err
 			}
 			force := cmd.Bool("force")
-			total := manifest.PendingCount(entryIDs(g), emb.Fingerprint())
+			localPending := manifest.PendingCount(entryIDs(g), emb.Fingerprint())
 			if force {
-				total = len(g.Entries) // force re-embeds everything
+				localPending = len(g.Entries) // force re-embeds everything
 			}
 
 			start := time.Now()
 			reporter := cliout.NewReporter()
 			reporter.SetUnit("chunks")
+			// The denominator grows as each phase (local, then each connected
+			// repo) reports its planned chunks — member work is discovered only
+			// after its cache is fresh, so an accumulating total is the honest
+			// bar rather than a fabricated up-front figure.
+			runningTotal := 0
+			addPlanned := func(n int) { runningTotal += n; reporter.SetTotal(runningTotal) }
+			var curRepo string
+			setNote := func(ids []string, chunks int) {
+				note := embedNote(ids, chunks)
+				if curRepo != "" {
+					note = curRepo + " · " + note
+				}
+				reporter.SetNote(note)
+			}
 
 			var doneIndexed, doneSkipped int
 			var haveSummary bool
 			buildCmd := &command.BuildIndexCmd{
 				Force:          force,
-				OnPlanned:      func(totalChunks int) { reporter.SetTotal(totalChunks) },
-				OnBatchStart:   func(ids []string, chunks int) { reporter.SetNote(embedNote(ids, chunks)) },
+				OnPlanned:      addPlanned,
+				OnBatchStart:   setNote,
 				OnEntryIndexed: func(_ string, chunks int) { reporter.Add(chunks) },
 				OnComplete: func(indexed, skipped int) {
 					doneIndexed, doneSkipped, haveSummary = indexed, skipped, true
 				},
 			}
+
+			var reg *repos.Registry
+			var mgr *repos.Manager
+			var repoIDs []string
+			if crossRepo {
+				reg, mgr, err = defaultRepos()
+				if err != nil {
+					return err
+				}
+				repoIDs, err = reg.SelectRepoIDs(repoSelection, allRepos)
+				if err != nil {
+					return err
+				}
+			}
+			fill := &command.BuildConnectedIndexesCmd{
+				OnRepoStart:    func(id string) { curRepo = id; reporter.SetNote("indexing " + id) },
+				OnPlanned:      addPlanned,
+				OnBatchStart:   setNote,
+				OnEntryIndexed: func(_ string, chunks int) { reporter.Add(chunks) },
+			}
+
 			work := func(ctx context.Context) (struct{}, error) {
-				return struct{}{}, h.Build(ctx, buildCmd)
+				if err := h.Build(ctx, buildCmd); err != nil {
+					return struct{}{}, err
+				}
+				if crossRepo {
+					connH := handlers.New(handlers.Options{Reader: reader, Repos: mgr})
+					if err := connH.BuildConnectedIndexes(ctx, repoIDs, emb, fill); err != nil {
+						return struct{}{}, err
+					}
+				}
+				return struct{}{}, nil
 			}
 
 			// Indexing logs persist (the per-entry indexed lines scroll above
 			// the footer); on a TTY with work to do, run under the inline view.
-			if cliout.IsInteractive(os.Stderr) && total > 0 {
+			if cliout.IsInteractive(os.Stderr) && (localPending > 0 || crossRepo) {
 				_, err = clitui.Interactive(ctx, transientViewPolicy(),
 					clitui.View{Label: "indexing", Progress: reporter, StreamLogs: true}, work)
 			} else {
@@ -252,9 +317,13 @@ func indexCmd() *cli.Command {
 				return err
 			}
 			if haveSummary { // styled summary to clean stdout, after teardown
+				detail := fmt.Sprintf("(%d skipped) in %s", doneSkipped, time.Since(start).Round(time.Millisecond))
+				if crossRepo {
+					detail = fmt.Sprintf("(%d skipped) + %d connected repo(s) in %s",
+						doneSkipped, len(repoIDs), time.Since(start).Round(time.Millisecond))
+				}
 				presenters.RenderResultLine(os.Stdout,
-					fmt.Sprintf("indexed %d entries", doneIndexed),
-					fmt.Sprintf("(%d skipped) in %s", doneSkipped, time.Since(start).Round(time.Millisecond)))
+					fmt.Sprintf("indexed %d entries", doneIndexed), detail)
 			}
 			return nil
 		},
@@ -446,22 +515,39 @@ func searchCmd() *cli.Command {
 			}
 
 			// Lazy-fill (when vector search needs a warm index) then query.
-			// On a TTY with fill work pending, the inline footer shows
-			// determinate progress and clears before results render — indexing
-			// is transient for search, so its per-entry log lines are not
-			// streamed. Off-TTY (and for agents) the plain path stays quiet at
-			// the Warn floor.
+			// On a TTY with fill work pending — local, or the connected-repo
+			// member builds that were the silent 35-minute hang — the inline
+			// footer shows determinate progress and clears before results
+			// render. Indexing is transient for search, so its per-entry log
+			// lines are not streamed. Off-TTY (and for agents) the plain path
+			// stays quiet at the Warn floor.
+			showView := cliout.IsInteractive(os.Stderr) && (willFill || crossRepo)
 			var reporter *cliout.Reporter
-			if willFill {
+			var addPlanned func(int)
+			var setNote func([]string, int)
+			var curRepo string
+			if showView {
 				reporter = cliout.NewReporter()
 				reporter.SetUnit("chunks")
+				// The denominator grows as each phase (local fill, then each
+				// connected repo) reports its planned chunks — member work is
+				// known only after its cache is fresh.
+				runningTotal := 0
+				addPlanned = func(n int) { runningTotal += n; reporter.SetTotal(runningTotal) }
+				setNote = func(ids []string, chunks int) {
+					note := embedNote(ids, chunks)
+					if curRepo != "" {
+						note = curRepo + " · " + note
+					}
+					reporter.SetNote(note)
+				}
 			}
 			work := func(ctx context.Context) (*query.SearchResult, error) {
 				if needsVector {
 					lazy := &command.LazyFillIndexCmd{}
 					if reporter != nil {
-						lazy.OnPlanned = func(totalChunks int) { reporter.SetTotal(totalChunks) }
-						lazy.OnBatchStart = func(ids []string, chunks int) { reporter.SetNote(embedNote(ids, chunks)) }
+						lazy.OnPlanned = addPlanned
+						lazy.OnBatchStart = setNote
 						lazy.OnEntryIndexed = func(_ string, chunks int) { reporter.Add(chunks) }
 					}
 					if err := ih.LazyFill(ctx, lazy); err != nil {
@@ -477,7 +563,16 @@ func searchCmd() *cli.Command {
 						return nil, err
 					}
 					h := handlers.New(handlers.Options{Reader: reader, Repos: mgr})
-					if err := h.PrepareCrossRepoSearch(ctx, sq, emb); err != nil {
+					var fill *command.BuildConnectedIndexesCmd
+					if reporter != nil {
+						fill = &command.BuildConnectedIndexesCmd{
+							OnRepoStart:    func(id string) { curRepo = id; reporter.SetNote("indexing " + id) },
+							OnPlanned:      addPlanned,
+							OnBatchStart:   setNote,
+							OnEntryIndexed: func(_ string, chunks int) { reporter.Add(chunks) },
+						}
+					}
+					if err := h.PrepareCrossRepoSearch(ctx, sq, emb, fill); err != nil {
 						return nil, err
 					}
 					return finders.MultiSearch(ctx, finder, sq)
@@ -486,8 +581,8 @@ func searchCmd() *cli.Command {
 			}
 
 			var res *query.SearchResult
-			if cliout.IsInteractive(os.Stderr) && willFill {
-				// The footer tracks the lazy-fill (embedding) — that's the work
+			if showView {
+				// The footer tracks the fill (embedding) — that's the work
 				// taking time; the vector query after it is instant. So label it
 				// "indexing", matching what the bar actually measures.
 				res, err = clitui.Interactive(ctx, transientViewPolicy(),

@@ -174,7 +174,7 @@ func (l lazyFillSearcher) Search(ctx context.Context, q query.SearchQuery) (*que
 		}
 	}
 	if q.AllRepos || len(q.Repos) > 0 {
-		if err := l.prepare.PrepareCrossRepoSearch(ctx, q, l.emb); err != nil {
+		if err := l.prepare.PrepareCrossRepoSearch(ctx, q, l.emb, nil); err != nil {
 			return nil, err
 		}
 		return finders.MultiSearch(ctx, l.sf, q)

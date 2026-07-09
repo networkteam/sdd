@@ -63,3 +63,30 @@ type LazyFillIndexCmd struct {
 	// of entries that were re-embedded.
 	OnComplete func(indexed int)
 }
+
+// BuildConnectedIndexesCmd drives progress for filling one or more connected
+// repos' member indexes — the eager `sdd index --repo/--all-repos` path and
+// the fill half of a cross-repo search's prepare step. Each repo's fill is a
+// LazyFill under the shared embedder; the callbacks aggregate across repos
+// (the caller accumulates OnPlanned totals rather than resetting per repo).
+type BuildConnectedIndexesCmd struct {
+	// OnRepoStart fires before each repo's fill begins, naming the repo
+	// whose member index is about to be reconciled. Optional; lets the
+	// caller label the work in flight per repo.
+	OnRepoStart func(repoID string)
+
+	// OnPlanned fires once per repo, after that repo's skip pass, with the
+	// chunk count to embed for it. The caller accumulates these into a
+	// running total — the bar's denominator grows as each repo is reached,
+	// because member work is only known after its cache is fresh.
+	OnPlanned func(chunks int)
+
+	// OnBatchStart mirrors BuildIndexCmd's callback — fired before each
+	// embedding round-trip with the batch's entry IDs and combined chunk
+	// count, naming the work in flight.
+	OnBatchStart func(entryIDs []string, chunkCount int)
+
+	// OnEntryIndexed mirrors BuildIndexCmd's callback — the per-entry chunk
+	// count that advances the bar as work completes.
+	OnEntryIndexed func(entryID string, chunkCount int)
+}

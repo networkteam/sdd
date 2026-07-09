@@ -9,8 +9,17 @@ import (
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/git"
+	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/repos"
 )
+
+// fakeGit is a no-op git for cross-repo cache tests: the cache is seeded
+// pre-cloned on disk, so Clone is never reached and PullFFOnly just counts
+// invocations (the cooldown pull EnsureReposFresh performs on a fresh read).
+type fakeGit struct{ pulls int }
+
+func (f *fakeGit) Clone(context.Context, string, string) error { return nil }
+func (f *fakeGit) PullFFOnly(context.Context, string) error    { f.pulls++; return nil }
 
 // newRepoTestHandler seeds a handler whose global config already holds a
 // connection — the declaration-only path of RepoAdd (no clone involved).
@@ -78,6 +87,89 @@ func TestRepoAdd_DeclaresDependencyForExistingConnection(t *testing.T) {
 	err = h.RepoAdd(context.Background(), &command.RepoAddCmd{CloneURL: "git@github.com:networkteam/other.git"})
 	if err == nil || !strings.Contains(err.Error(), "already connected and declared") {
 		t.Errorf("second add should report nothing to do, got %v", err)
+	}
+}
+
+// BuildConnectedIndexes is the shared spine behind `sdd index --repo` and a
+// cross-repo search's fill step: it freshens the connected caches and fills
+// each member's index under the shared embedder, forwarding progress. This
+// exercises a pre-cloned member end to end — the cooldown pull runs, the
+// member index is written under (repo-id, fingerprint), and the fill
+// callbacks report the repo and its chunks.
+func TestBuildConnectedIndexes_FreshensAndFills(t *testing.T) {
+	dir := t.TempDir()
+	loc := repos.Locations{
+		ConfigPath: filepath.Join(dir, "xdg", "sdd", "config.yaml"),
+		CacheRoot:  filepath.Join(dir, "cache"),
+	}
+	const repoID = "github.com/networkteam/other"
+
+	gcfg := &repos.GlobalConfig{}
+	if err := gcfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repos.SaveConfigTo(loc.ConfigPath, gcfg); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := repos.NewRegistry(loc)
+	cacheDir, err := reg.CacheDir(repoID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed a pre-cloned cache: a .git marker (so IsCloned is true), the
+	// committed config declaring the identity + graph dir, and one entry.
+	if err := os.MkdirAll(filepath.Join(cacheDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	memberSDD := filepath.Join(cacheDir, ".sdd")
+	if err := os.MkdirAll(memberSDD, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memberSDD, "config.yaml"),
+		[]byte("repo_id: "+repoID+"\ngraph_dir: .sdd/graph\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeEntry(t, filepath.Join(cacheDir, ".sdd", "graph"),
+		"20260101-100000-s-tac-aaa", "## A\nMember entry body.", "Member summary.")
+
+	fg := &fakeGit{}
+	h := New(Options{Reader: readFinderFor(t), Repos: repos.NewManager(reg, fg)})
+
+	emb := &fakeEmbedder{}
+	var startedRepos []string
+	planned, indexed := 0, 0
+	fill := &command.BuildConnectedIndexesCmd{
+		OnRepoStart:    func(id string) { startedRepos = append(startedRepos, id) },
+		OnPlanned:      func(n int) { planned += n },
+		OnEntryIndexed: func(_ string, n int) { indexed += n },
+	}
+	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, emb, fill); err != nil {
+		t.Fatalf("BuildConnectedIndexes: %v", err)
+	}
+
+	if fg.pulls != 1 {
+		t.Errorf("expected 1 cooldown pull on a fresh read, got %d", fg.pulls)
+	}
+	if len(startedRepos) != 1 || startedRepos[0] != repoID {
+		t.Errorf("OnRepoStart calls = %v, want [%s]", startedRepos, repoID)
+	}
+	if planned == 0 {
+		t.Error("expected planned chunks > 0")
+	}
+	if indexed != planned {
+		t.Errorf("indexed %d chunks, planned %d — every planned chunk should land", indexed, planned)
+	}
+
+	// The member index lives under the machine-global (repo-id, fingerprint)
+	// store, not inside the cache clone.
+	idxDir := index.StoreDir(loc.CacheRoot, repoID, emb.Fingerprint())
+	manifest, err := index.LoadManifest(idxDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := manifest.Entries["20260101-100000-s-tac-aaa"]; !ok {
+		t.Errorf("member entry missing from index manifest: %+v", manifest.Entries)
 	}
 }
 

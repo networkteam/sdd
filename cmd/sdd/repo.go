@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/networkteam/sdd/internal/cliout"
+	clitui "github.com/networkteam/sdd/internal/cliout/tui"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
+	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/repos"
 )
 
@@ -31,20 +35,54 @@ func repoCmd() *cli.Command {
 					if err != nil {
 						return err
 					}
-					return h.RepoAdd(ctx, &command.RepoAddCmd{
+
+					// Result fields are captured in the callbacks and rendered
+					// after the transient view tears down — printing to stdout
+					// mid-view would corrupt the footer the coordinator owns.
+					var addedRepoID, addedCacheDir, declaredRepoID string
+					var alreadyDeclared, haveAdded, haveDeclared bool
+					addCmd := &command.RepoAddCmd{
 						CloneURL: cmd.Args().First(),
 						OnAdded: func(repoID, cacheDir string) {
-							fmt.Printf("connected %s\n", repoID)
-							fmt.Printf("  cache: %s\n", cacheDir)
+							addedRepoID, addedCacheDir, haveAdded = repoID, cacheDir, true
 						},
-						OnDeclared: func(repoID string, alreadyDeclared bool) {
-							if alreadyDeclared {
-								fmt.Printf("  dependency already declared in .sdd/config.yaml\n")
-								return
-							}
-							fmt.Printf("  declared dependency in .sdd/config.yaml — commit it so clones know what to connect\n")
+						OnDeclared: func(repoID string, already bool) {
+							declaredRepoID, alreadyDeclared, haveDeclared = repoID, already, true
 						},
-					})
+					}
+					work := func(ctx context.Context) (struct{}, error) {
+						return struct{}{}, h.RepoAdd(ctx, addCmd)
+					}
+
+					// The clone is the long, previously-silent step. On a TTY it
+					// runs under the inline coordinator (spinner + streamed
+					// "cloning" log); off-TTY it stays at the plain slog floor.
+					if cliout.IsInteractive(os.Stderr) {
+						_, err = clitui.Interactive(ctx, transientViewPolicy(),
+							clitui.View{Label: "connecting", StreamLogs: true}, work)
+					} else {
+						_, err = work(ctx)
+					}
+					if err != nil {
+						return err
+					}
+
+					if haveAdded {
+						presenters.RenderResultLine(os.Stdout,
+							fmt.Sprintf("connected %s", addedRepoID),
+							fmt.Sprintf("cache: %s", addedCacheDir))
+					}
+					if haveDeclared {
+						if alreadyDeclared {
+							presenters.RenderResultLine(os.Stdout,
+								fmt.Sprintf("dependency %s already declared in .sdd/config.yaml", declaredRepoID), "")
+						} else {
+							presenters.RenderResultLine(os.Stdout,
+								fmt.Sprintf("declared dependency %s in .sdd/config.yaml", declaredRepoID),
+								"commit it so clones know what to connect")
+						}
+					}
+					return nil
 				},
 			},
 			{

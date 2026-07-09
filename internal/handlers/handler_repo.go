@@ -329,12 +329,11 @@ func referencedRepoIDs(refs []model.Ref) []string {
 // PrepareCrossRepoSearch runs the side-effect half of a cross-graph
 // search, mirroring how the local lazy-fill precedes the search finder:
 // resolve the query's repo selection, bring those caches up to date, and —
-// when vector mode is in play — lazy-fill each repo's index with the
-// shared embedder, excluding embedded entries. Entries indexed under a
-// different fingerprint re-embed here rather than excluding the repo, so
-// one vector space holds across every selected index. The finder read
-// (finders.MultiSearch) then runs pure.
-func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuery, embedder llm.Embedder) error {
+// when vector mode is in play — lazy-fill each repo's index with the shared
+// embedder. The finder read (finders.MultiSearch) then runs pure. fill is
+// optional: the CLI passes progress callbacks so the member builds render
+// through the output coordinator; the MCP server passes nil (non-TTY slog).
+func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuery, embedder llm.Embedder, fill *command.BuildConnectedIndexesCmd) error {
 	if h.repos == nil {
 		if q.AllRepos || len(q.Repos) > 0 {
 			return errNoRepos
@@ -345,11 +344,37 @@ func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuer
 	if err != nil || len(repoIDs) == 0 {
 		return err
 	}
+	// Text-only search needs fresh caches but no embedding; the vector path
+	// freshens and fills in one pass through BuildConnectedIndexes.
+	if q.Phrase == "" || embedder == nil {
+		_, err := h.EnsureReposFresh(ctx, repoIDs)
+		return err
+	}
+	return h.BuildConnectedIndexes(ctx, repoIDs, embedder, fill)
+}
+
+// BuildConnectedIndexes freshens the given connected repos' caches and fills
+// each member's index under the shared embedder, excluding embedded entries.
+// Entries indexed under a different fingerprint re-embed here rather than
+// excluding the repo, so one vector space holds across every selected index.
+// It is the shared spine for eager pre-indexing (`sdd index --repo`) and the
+// fill half of a cross-repo search's prepare step. fill's callbacks report
+// progress per repo and aggregate across them; a nil fill runs quiet.
+func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, embedder llm.Embedder, fill *command.BuildConnectedIndexesCmd) error {
+	if h.repos == nil {
+		return errNoRepos
+	}
+	if len(repoIDs) == 0 {
+		return nil
+	}
 	if _, err := h.EnsureReposFresh(ctx, repoIDs); err != nil {
 		return err
 	}
-	if q.Phrase == "" || embedder == nil {
+	if embedder == nil {
 		return nil
+	}
+	if fill == nil {
+		fill = &command.BuildConnectedIndexesCmd{}
 	}
 	for _, repoID := range repoIDs {
 		cacheDir, err := h.repos.Registry().CacheDir(repoID)
@@ -378,7 +403,14 @@ func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuer
 			Reader:          h.reader,
 			ExcludeEmbedded: true,
 		})
-		if err := ih.LazyFill(ctx, &command.LazyFillIndexCmd{}); err != nil {
+		if fill.OnRepoStart != nil {
+			fill.OnRepoStart(repoID)
+		}
+		if err := ih.LazyFill(ctx, &command.LazyFillIndexCmd{
+			OnPlanned:      fill.OnPlanned,
+			OnBatchStart:   fill.OnBatchStart,
+			OnEntryIndexed: fill.OnEntryIndexed,
+		}); err != nil {
 			return fmt.Errorf("indexing %s: %w", repoID, err)
 		}
 	}
