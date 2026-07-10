@@ -321,13 +321,31 @@ sdd search --query "index fingerprint" --all-repos
 sdd view --layout='top(20)' --repo github.com/acme/platform
 ```
 
-Results from every selected graph fuse into one ranked list. Vector search across repos builds and queries every connected index with a **single shared embedder** — the user-global embedding config — so all indexes live in one vector space and rankings stay comparable, regardless of any per-repo embedding override. The first cross-repo search embeds a connected graph on demand, which can be slow; pre-index eagerly with `sdd index --repo <repo-id>` (or `--all-repos`) so it's warm, and `sdd index --repo <repo-id> --force` rebuilds a connected index that has drifted.
+Results from every selected graph fuse into one ranked list. Cross-repo vector search uses your **user-global embedding config** as the single shared embedder, so every connected index lives in one vector space and rankings stay comparable across repos. **Configure your embedding provider at the global layer** for this to work — `sdd config set embedding.provider ...` (see [Configuration](#configuration)). A per-repo embedding override in `.sdd/config.yaml` defines a *different* vector space and is deliberately left out of cross-repo search (`sdd lint` flags the fingerprint mismatch). The first cross-repo search embeds a connected graph on demand, which can be slow; pre-index eagerly with `sdd index --repo <repo-id>` (or `--all-repos`) so it's warm, and `sdd index --repo <repo-id> --force` rebuilds a connected index that has drifted.
 
 **The cache is pushed state.** A connected repo's cache is a clone of the remote's *pushed* branch — not anyone's working tree. So a new entry in a connected repo becomes referenceable only after it's committed **and pushed**, and your cache picks it up on the next `sdd repo sync` (cross-repo `sdd show` and `sdd search` also freshen caches as they run). The same holds in reverse: for others to reference your entries, commit and push them. This is the one non-obvious part of the model — when a cross-repo reference won't resolve, the target is usually just unpushed, or the local cache is stale.
 
 ## Configuration
 
-Project-wide config lives in `.sdd/config.yaml` (committed — graph directory, language, skill scope, and connected-repo [dependencies](#connected-repos)). Per-contributor config lives in `.sdd/config.local.yaml` (gitignored — your participant name, LLM and embedding provider, API keys).
+SDD config is a layered overlay — each layer overrides the one below:
+
+1. **User-global** — `~/.config/sdd/config.yaml` (or `$XDG_CONFIG_HOME/sdd/config.yaml`). Your personal defaults across every SDD project: participant name, LLM and embedding provider, sync cooldown. Set once, apply everywhere.
+2. **Committed project** — `.sdd/config.yaml`, in git. Properties of the repo itself that every contributor shares: graph directory, authoring language, skill scope, supported agents, the repo's own `repo_id`, and connected-repo [dependencies](#connected-repos). It may also carry safe project-wide defaults for the personal settings above.
+3. **Machine-local** — `.sdd/config.local.yaml`, gitignored. Per-machine overrides for this checkout: API keys, a local endpoint, a provider or participant override you don't want committed.
+4. **CLI flags** — per-invocation, highest precedence.
+
+Later layers win: a provider set project-wide overrides your global default, and a machine-local override wins over both. The split is by *whose fact each setting is*: repo-identity fields (`repo_id`, `dependencies`, `graph_dir`, `language`, `supported_agents`) belong in the committed project file and can't be set globally; personal preferences (participant, LLM, embedding, sync) default best at the user-global layer, with the local file for machine-specific overrides. A key placed in the wrong file fails loud — naming the file and key — rather than being silently dropped.
+
+Inspect and edit config with `sdd config`:
+
+```bash
+sdd config                             # effective merged config, with each value's source
+sdd config get llm.model               # a single effective value
+sdd config set llm.provider ollama     # write to the user-global file
+sdd config set --local embedding.api_keys.openai sk-...   # write to .sdd/config.local.yaml
+```
+
+`sdd config set` writes the user-global file by default, or the machine-local file with `--local`. The committed project file is written by `sdd init` (or edited by hand), so a project property change is a reviewed commit. The provider blocks below can live in any of the three files — put shared defaults in the project file, personal defaults global, and keys local.
 
 ### Re-running `sdd init`
 
