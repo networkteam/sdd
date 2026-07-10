@@ -3,7 +3,7 @@ allowed-tools: Read Grep Bash(sdd *)
 compatibility: Designed for OpenAI Codex
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 metadata:
-    sdd-content-hash: 1870280cb5840da0e6dfd3a71ed7b20a1396f2b352c5630b4dfc76e95bbc875d
+    sdd-content-hash: 9d13bc30e49c05613821b8ad47bf9ec302a5e06312e7d8bb04a7f42ccdd9e7a9
     sdd-version: dev
 name: sdd
 ---
@@ -188,6 +188,12 @@ See [CLI reference](references/cli-reference.md) for full command syntax and fla
 - **Intent for directives** (`kind: directive` only): every directive capture **must** carry `--intent` — there is no default, because the value isn't derivable and a default would fabricate it. Pick in the play-back from what the directive *is*: `pending` when it demands follow-up action (the action-on default); `guiding` when it's standing context that shapes later decisions without ever "completing" (surfaced at session start, kept out of the catch-up action lanes); `settled` when it's born-terminal — a deliberate "no action needed" / "keep X as-is" / intake-dismissal that needs no closing edge. A settled directive's body must justify *why* it's terminal (pre-flight emits a medium finding otherwise), and it drops out of active listings like any closed entry — supersede to retire it, never close. Non-directive decision kinds take no intent.
 - **Kind for signals**: Default is gap. Use `--kind done` for completion records (must carry `closes` or `refs`). Use `--kind fact`, `question`, or `insight` when the narrative is unambiguously observational, an open question, or a synthesis. Use `--kind actor` for a first-class participant identity — canonical name in frontmatter, prose covers stable identity facts (affiliation, background, domain expertise) that hold independent of any project frame.
 - **Acceptance criteria for plan decisions**: `--kind plan` decisions must include an `## Acceptance criteria` section in the description (not the attachment) with `- [ ]` checklist items. Each AC is a single verifiable outcome — not an implementation detail. ACs are the contract between plan author, implementing agent, and pre-flight validator. Pre-flight flags a missing AC section on a plan decision as high.
+
+### Reference across repos when reasoning does
+
+When an entry's reasoning genuinely builds on another repo's graph — a shared framework's directive, a platform team's decision — reference it across the boundary rather than re-deriving it or reducing it to a local paraphrase. Cross-repo refs take the `<repo-id>:<entry-id>` form in a `--refs` value; every ref kind may cross, but `--closes` / `--supersedes` stay within-graph (a decision can't retire an entry in another repo).
+
+The target repo must be a **declared dependency** for the ref to resolve — the same resolve-or-block gate that guards local refs. If it isn't connected, offer to `sdd repo add <clone-url>` first; don't connect a repo the user hasn't signalled they want to depend on. Remember a foreign entry is visible only once it's committed *and pushed* (the cache is pushed state, refreshed by `sdd repo sync`). When you have only a short ID for a foreign entry, resolve it with `sdd show <short-id>` — a free read that resolves bare IDs across the local graph and its declared dependencies — and use the full `<repo-id>:<entry-id>` it prints in the `--refs` value. Full mechanics live in [cli-reference → Cross-repo references](references/cli-reference.md).
 
 ### Attachment assessment
 

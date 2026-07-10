@@ -41,7 +41,7 @@ func (f *Finder) NewGraphSource(dir string) *GraphSource {
 		if err != nil {
 			return nil, err
 		}
-		model.NewMultiGraph(g, f.memberGraphLoader())
+		model.NewMultiGraph(g, f.declaredDependencies(), f.memberGraphLoader())
 		return g, nil
 	}}
 }

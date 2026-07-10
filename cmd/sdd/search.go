@@ -285,7 +285,10 @@ func indexCmd() *cli.Command {
 					return err
 				}
 			}
+			// --force reaches connected member stores too, repairing a stale
+			// or corrupt connected index rather than stopping at the local one.
 			fill := &command.BuildConnectedIndexesCmd{
+				Force:          force,
 				OnRepoStart:    func(id string) { curRepo = id; reporter.SetNote("indexing " + id) },
 				OnPlanned:      addPlanned,
 				OnBatchStart:   setNote,
@@ -585,8 +588,16 @@ func searchCmd() *cli.Command {
 				// The footer tracks the fill (embedding) — that's the work
 				// taking time; the vector query after it is instant. So label it
 				// "indexing", matching what the bar actually measures.
-				res, err = clitui.Interactive(ctx, transientViewPolicy(),
-					clitui.View{Label: "indexing", Progress: reporter, StreamLogs: false}, work)
+				view := clitui.View{Label: "indexing", Progress: reporter, StreamLogs: false}
+				if !needsVector {
+					// Text-only cross-repo does no embedding — the work is
+					// freshening connected caches (first-time clone / pull). A
+					// "chunks" bar would be meaningless and "indexing" a lie, so
+					// drop the bar, label it honestly, and stream the "cloning
+					// connected repo" log rather than hiding the wait.
+					view = clitui.View{Label: "fetching repos", StreamLogs: true}
+				}
+				res, err = clitui.Interactive(ctx, transientViewPolicy(), view, work)
 			} else {
 				res, err = work(ctx)
 			}

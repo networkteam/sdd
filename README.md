@@ -116,6 +116,7 @@ The skill loads the graph state and suggests where to start. Everything after th
 - Focus decisions that commit the project's attention to a set of entries for a period, with actors assigned per target
 - A pre-flight validator (LLM based) — reviews a capture before it lands
 - Three-mode search: keyword, semantic (vector search), or a hybrid that fuses both
+- Cross-repo references — connect another graph and reference, search, and traverse across repository boundaries
 - Composable views — filter, rank, and render the graph to make it accessible for the agent
 - Mining external material — transcripts, articles, meeting notes — into the graph through dialogue
 - Multilingual graph authoring, with translated SDD vocabulary in the skill
@@ -293,9 +294,58 @@ German (`de`) is the only bundled locale today.
 
 **Contributing a locale upstream** — drop the file into `internal/bundledskills/claude/sdd/references/` and submit a PR.
 
+## Connected repos
+
+Reasoning doesn't always stay in one repo. A service's decision might build on a platform team's directive; a project might ground its choices in a shared framework graph. SDD lets an entry reference across repository boundaries, so that reasoning connects instead of being silently re-derived or reduced to a local paraphrase.
+
+**Repo identity.** Each graph has a canonical, URL-shaped identity — its `repo_id` (e.g. `github.com/acme/platform`), derived from the origin remote and recorded in `.sdd/config.yaml` at `sdd init` time. A cross-repo reference is written as `<repo-id>:<entry-id>`: the target repo's identity, then the entry within it.
+
+**Connecting a repo.** To reference another graph, connect it once:
+
+```bash
+sdd repo add https://github.com/acme/platform.git
+```
+
+This clones the repo's graph into a local cache, verifies the `repo_id` it declares, registers the connection, and records a committed **dependency** — a `dependencies:` entry in your `.sdd/config.yaml`, like a `go.mod` line. The dependency is the portable, shared record of what your graph reaches into; the connection (where the cache lives on your machine) stays per-contributor. `sdd repo add` commits the dependency declaration for you, so a colleague who clones your repo knows what to connect.
+
+- `sdd repo list` — the repos you've connected, and whether each is cached.
+- `sdd repo sync [repo-id ...]` — refresh connected caches to their latest pushed state (all repos, or the named ones).
+- `sdd repo remove <repo-id>` — drop a dependency from `.sdd/config.yaml`. It refuses when any entry in your graph still references that repo (removing it would strand those references); `--force` overrides and names each reference it would strand. Removal is project-scoped — it leaves the local cache in place.
+
+**Referencing across repos.** With a repo connected, refer to its entries by full ID (`github.com/acme/platform:20260709-...-d-cpt-abc`) or by a **bare ID** — a short form (`d-cpt-abc`) or an unprefixed full ID — which SDD resolves across the union of your local graph and its declared dependencies. A bare ID that matches exactly one entry resolves; a genuine collision across repos is reported with the candidates so you can disambiguate. `sdd show d-cpt-abc` resolves and displays a connected repo's entry the same way it does a local one. References stored on an entry are always written in full `<repo-id>:<entry-id>` form, so the committed graph stays explicit and portable. A cross-repo reference must resolve to a declared dependency when it's captured — the same resolve-or-block rule that guards local references — and `sdd lint` re-checks it afterward as a standing invariant.
+
+**Searching across repos.** `sdd search` and `sdd view` reach connected graphs with `--repo <repo-id>` (repeatable) or `--all-repos`:
+
+```bash
+sdd search --query "index fingerprint" --all-repos
+sdd view --layout='top(20)' --repo github.com/acme/platform
+```
+
+Results from every selected graph fuse into one ranked list. Cross-repo vector search uses your **user-global embedding config** as the single shared embedder, so every connected index lives in one vector space and rankings stay comparable across repos. **Configure your embedding provider at the global layer** for this to work — `sdd config set embedding.provider ...` (see [Configuration](#configuration)). A per-repo embedding override in `.sdd/config.yaml` defines a *different* vector space and is deliberately left out of cross-repo search (`sdd lint` flags the fingerprint mismatch). The first cross-repo search embeds a connected graph on demand, which can be slow; pre-index eagerly with `sdd index --repo <repo-id>` (or `--all-repos`) so it's warm, and `sdd index --repo <repo-id> --force` rebuilds a connected index that has drifted.
+
+**The cache is pushed state.** A connected repo's cache is a clone of the remote's *pushed* branch — not anyone's working tree. So a new entry in a connected repo becomes referenceable only after it's committed **and pushed**, and your cache picks it up on the next `sdd repo sync` (cross-repo `sdd show` and `sdd search` also freshen caches as they run). The same holds in reverse: for others to reference your entries, commit and push them. This is the one non-obvious part of the model — when a cross-repo reference won't resolve, the target is usually just unpushed, or the local cache is stale.
+
 ## Configuration
 
-Project-wide config lives in `.sdd/config.yaml` (committed — graph directory, language, skill scope). Per-contributor config lives in `.sdd/config.local.yaml` (gitignored — your participant name, LLM and embedding provider, API keys).
+SDD config is a layered overlay — each layer overrides the one below:
+
+1. **User-global** — `~/.config/sdd/config.yaml` (or `$XDG_CONFIG_HOME/sdd/config.yaml`). Your personal defaults across every SDD project: participant name, LLM and embedding provider, sync cooldown. Set once, apply everywhere.
+2. **Committed project** — `.sdd/config.yaml`, in git. Properties of the repo itself that every contributor shares: graph directory, authoring language, skill scope, supported agents, the repo's own `repo_id`, and connected-repo [dependencies](#connected-repos). It may also carry safe project-wide defaults for the personal settings above.
+3. **Machine-local** — `.sdd/config.local.yaml`, gitignored. Per-machine overrides for this checkout: API keys, a local endpoint, a provider or participant override you don't want committed.
+4. **CLI flags** — per-invocation, highest precedence.
+
+Later layers win: a provider set project-wide overrides your global default, and a machine-local override wins over both. The split is by *whose fact each setting is*: repo-identity fields (`repo_id`, `dependencies`, `graph_dir`, `language`, `supported_agents`) belong in the committed project file and can't be set globally; personal preferences (participant, LLM, embedding, sync) default best at the user-global layer, with the local file for machine-specific overrides. A key placed in the wrong file fails loud — naming the file and key — rather than being silently dropped.
+
+Inspect and edit config with `sdd config`:
+
+```bash
+sdd config                             # effective merged config, with each value's source
+sdd config get llm.model               # a single effective value
+sdd config set llm.provider ollama     # write to the user-global file
+sdd config set --local embedding.api_keys.openai sk-...   # write to .sdd/config.local.yaml
+```
+
+`sdd config set` writes the user-global file by default, or the machine-local file with `--local`. The committed project file is written by `sdd init` (or edited by hand), so a project property change is a reviewed commit. The provider blocks below can live in any of the three files — put shared defaults in the project file, personal defaults global, and keys local.
 
 ### Re-running `sdd init`
 
@@ -413,9 +463,10 @@ Bare `sdd view` prints the macro vocabulary and filter primitives.
 sdd search --term importer                     # keyword (live grep)
 sdd search --query "variants and references"   # semantic (vector)
 sdd search --term importer --query "variants"  # hybrid (RRF fusion)
+sdd search --query "variants" --all-repos      # fan out across connected repos
 ```
 
-Vector and hybrid modes require an embedding provider — see [Embedding provider](#embedding-provider-vector-search) above.
+Vector and hybrid modes require an embedding provider — see [Embedding provider](#embedding-provider-vector-search) above. `--repo`/`--all-repos` reach connected graphs — see [Connected repos](#connected-repos).
 
 **`sdd show <id>`** — one entry in full, with its upstream and downstream chains:
 
@@ -437,9 +488,10 @@ your-project/
     ├── graph/
     │   ├── YYYY/MM/              # entries, e.g. 08-104102-d-prc-oka.md
     │   └── wip/                  # active WIP markers
-    ├── index/                    # search index (when embedding provider configured)
     └── tmp/                      # scratch files (gitignored)
 ```
+
+The vector index and the connected-repo caches don't live in the project tree — they're per-machine derived state in a content-addressed store under your user cache directory (keyed by repo identity and embedder fingerprint), shared across a repo's checkouts and worktrees and rebuilt on demand. Nothing to commit or clean up by hand.
 
 `sdd init` also installs the Claude Code skills at the agent's skill directory (defaults to `~/.claude/skills/`, or `.claude/skills/` with `--scope project`). Those paths are an implementation detail of the target agent — inspect them if you're curious, but they aren't part of your project's source tree.
 

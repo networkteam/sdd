@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/networkteam/slogutils"
 
@@ -50,17 +52,15 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	// Already connected under this URL: the resolution half is done — only
 	// ensure the committed declaration. Errors when that too is already in
 	// place, so a true no-op still reads as "nothing to do".
-	for _, existing := range cfg.Repos {
-		if existing.CloneURL == cmd.CloneURL {
-			declared, err := h.declareDependency(existing.RepoID, cmd)
-			if err != nil {
-				return err
-			}
-			if !declared {
-				return fmt.Errorf("repo %q is already connected and declared", existing.RepoID)
-			}
-			return nil
+	if existing, ok := cfg.ConnectedByURL(cmd.CloneURL); ok {
+		declared, err := h.declareDependency(existing.RepoID, cmd)
+		if err != nil {
+			return err
 		}
+		if !declared {
+			return fmt.Errorf("repo %q is already connected and declared", existing.RepoID)
+		}
+		return nil
 	}
 
 	// Clone into a staging location under the cache root first — the
@@ -164,35 +164,128 @@ func (h *Handler) declareDependency(repoID string, cmd *command.RepoAddCmd) (boo
 	if err := os.WriteFile(path, patched, 0o644); err != nil {
 		return false, fmt.Errorf("writing %s: %w", path, err)
 	}
+	// Auto-commit the declaration, consistent with sdd init/new/summarize —
+	// the committed dependencies list is a shared, go.mod-style record other
+	// clones read to know what to connect, so it must not linger uncommitted.
+	if h.committer != nil {
+		if err := h.committer.Commit(fmt.Sprintf("sdd: repo add %s", repoID), path); err != nil {
+			return false, fmt.Errorf("committing dependency declaration: %w", err)
+		}
+	}
 	if cmd.OnDeclared != nil {
 		cmd.OnDeclared(repoID, false)
 	}
 	return true, nil
 }
 
-// RepoRemove executes a RepoRemoveCmd, dropping the connection from the
-// user-global config. The cache stays on disk.
+// RepoRemove executes a RepoRemoveCmd: it drops repoID from the committed
+// dependencies of the current repo's .sdd/config.yaml and commits that
+// change. Project-scoped and reference-safety-guarded — it refuses when any
+// local entry still holds a cross-repo ref into the target (dropping the
+// declaration would strand those refs and retroactively break
+// resolve-or-block), unless Force is set, in which case the stranded refs are
+// named through OnStranded before the removal proceeds. The per-user global
+// connection and its cache are left untouched — machine-level teardown is a
+// separate command surface, out of scope here.
 func (h *Handler) RepoRemove(ctx context.Context, cmd *command.RepoRemoveCmd) error {
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("invalid command: %w", err)
 	}
-	if h.repos == nil {
-		return errNoRepos
+	if h.sddDir == "" {
+		return fmt.Errorf("`sdd repo remove` is project-scoped — run it inside an sdd repo to drop a declared dependency")
 	}
-	cfg, err := h.repos.Registry().Load()
+	slogutils.FromContext(ctx).Debug("removing declared dependency", "repo", cmd.RepoID, "force", cmd.Force)
+
+	path := filepath.Join(h.sddDir, "config.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("no .sdd/config.yaml here — nothing to remove")
+		}
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	cfgFile, err := model.ParseConfig(data)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if !slices.Contains(cfgFile.Dependencies, cmd.RepoID) {
+		return fmt.Errorf("repo %q is not a declared dependency in .sdd/config.yaml", cmd.RepoID)
+	}
+
+	// Ref-safety guard: a local entry referencing the target would be
+	// orphaned by dropping the declaration. Refuse unless forced, and name
+	// the refs either way so the block (or the override) is never silent.
+	stranded, err := h.strandedRefs(cmd.RepoID)
 	if err != nil {
 		return err
 	}
-	if !cfg.RemoveRepo(cmd.RepoID) {
-		return fmt.Errorf("repo %q is not connected", cmd.RepoID)
+	if len(stranded) > 0 {
+		if !cmd.Force {
+			return fmt.Errorf("refusing to remove %q: %d local %s still reference it — removal would strand:\n%s\nre-run with --force to remove anyway",
+				cmd.RepoID, len(stranded), pluralEntries(len(stranded)), formatStranded(stranded))
+		}
+		if cmd.OnStranded != nil {
+			cmd.OnStranded(cmd.RepoID, stranded)
+		}
 	}
-	if err := h.repos.Save(cfg); err != nil {
-		return err
+
+	remaining := slices.DeleteFunc(slices.Clone(cfgFile.Dependencies), func(d string) bool { return d == cmd.RepoID })
+	patched, err := model.SetYAMLSequence(data, "dependencies", remaining)
+	if err != nil {
+		return fmt.Errorf("removing dependency from %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, patched, 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if h.committer != nil {
+		if err := h.committer.Commit(fmt.Sprintf("sdd: repo remove %s", cmd.RepoID), path); err != nil {
+			return fmt.Errorf("committing dependency removal: %w", err)
+		}
 	}
 	if cmd.OnRemoved != nil {
 		cmd.OnRemoved(cmd.RepoID)
 	}
 	return nil
+}
+
+// strandedRefs scans the current graph for local entries that hold a
+// cross-repo reference into repoID — the refs a `repo remove` of that
+// dependency would orphan. Cross-repo lifecycle effects (closes, supersedes)
+// are within-graph only, so only Refs can point across the boundary.
+func (h *Handler) strandedRefs(repoID string) ([]command.StrandedRef, error) {
+	if h.reader == nil || h.graphDir == "" {
+		return nil, nil
+	}
+	graph, err := h.reader.CurrentGraph(h.graphDir)
+	if err != nil {
+		return nil, fmt.Errorf("loading graph for ref-safety check: %w", err)
+	}
+	var out []command.StrandedRef
+	for _, e := range graph.Entries {
+		for _, r := range e.Refs {
+			if target, _, ok := model.SplitCrossRepoID(r.ID); ok && target == repoID {
+				out = append(out, command.StrandedRef{EntryID: e.ID, RefID: r.ID, Kind: string(r.Kind)})
+			}
+		}
+	}
+	return out, nil
+}
+
+// formatStranded renders stranded refs as an indented, aligned block for the
+// refusal message and the forced-removal warning.
+func formatStranded(stranded []command.StrandedRef) string {
+	var b strings.Builder
+	for _, s := range stranded {
+		fmt.Fprintf(&b, "  %s  %s  %s\n", s.EntryID, s.Kind, s.RefID)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func pluralEntries(n int) string {
+	if n == 1 {
+		return "entry"
+	}
+	return "entries"
 }
 
 // RepoSync executes a RepoSyncCmd: force-pull the named connected repos'
@@ -359,7 +452,10 @@ func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuer
 // excluding the repo, so one vector space holds across every selected index.
 // It is the shared spine for eager pre-indexing (`sdd index --repo`) and the
 // fill half of a cross-repo search's prepare step. fill's callbacks report
-// progress per repo and aggregate across them; a nil fill runs quiet.
+// progress per repo and aggregate across them; a nil fill runs quiet. When
+// fill.Force is set (only `sdd index --repo/--all-repos --force`), each member
+// store is fully rebuilt rather than lazily reconciled, repairing stale or
+// corrupt connected indexes.
 func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, embedder llm.Embedder, fill *command.BuildConnectedIndexesCmd) error {
 	if h.repos == nil {
 		return errNoRepos
@@ -405,6 +501,19 @@ func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, e
 		})
 		if fill.OnRepoStart != nil {
 			fill.OnRepoStart(repoID)
+		}
+		// Force rebuilds the whole member store (repairing a stale or corrupt
+		// index); the default lazy reconcile only touches what changed.
+		if fill.Force {
+			if err := ih.Build(ctx, &command.BuildIndexCmd{
+				Force:          true,
+				OnPlanned:      fill.OnPlanned,
+				OnBatchStart:   fill.OnBatchStart,
+				OnEntryIndexed: fill.OnEntryIndexed,
+			}); err != nil {
+				return fmt.Errorf("indexing %s: %w", repoID, err)
+			}
+			continue
 		}
 		if err := ih.LazyFill(ctx, &command.LazyFillIndexCmd{
 			OnPlanned:      fill.OnPlanned,

@@ -38,6 +38,8 @@ The `--type`, `--layer`, `--kind` filters (the same filter shape `sdd view` comp
 
 `--limit N` caps the result count (default 10).
 
+**Cross-repo scope.** `--repo <repo-id>` (repeatable) and `--all-repos` widen the search to connected repos, fusing every selected graph's hits into one ranked list. Vector search across repos builds and queries every connected index under the single user-global embedder, so all indexes share one vector space and scores stay comparable. The first cross-repo query embeds a connected graph on demand (slow); `sdd index --repo <repo-id>`/`--all-repos` pre-warms it. See the CLI reference's "Cross-repo references" section for connecting repos and the pushed-state cache model.
+
 ## Instruction templates
 
 Instruction-tuned encoders (Qwen3, E5, Nomic, BGE) want a small instruction or prefix prepended to each input. The framework applies this transparently via two config keys:
@@ -87,7 +89,7 @@ If you switch templates after building, run `sdd index --force` to re-embed eage
 
 ## Lifecycle
 
-Vector mode reads from a per-participant local index at `.sdd/index/` (gitignored). Two ways the index gets populated:
+Vector mode reads from a machine-global index — a content-addressed store keyed by repo identity and embedder fingerprint, outside the working tree and shared across a repo's checkouts and worktrees. Two ways the index gets populated:
 
 - **`sdd index`** — explicit warm-up: builds chunks for every entry on disk. Run once on a fresh clone, after a major batch of new entries, or after changing the embedding model. `--force` re-embeds everything regardless.
 - **Lazy fill** — `sdd search` automatically chunks and embeds entries that are present on disk but missing from (or stale against) the index before the query runs. The first search after a branch switch or new captures may emit a few `lazy-indexed` lines; subsequent searches are fast.

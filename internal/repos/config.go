@@ -132,6 +132,19 @@ func (c *GlobalConfig) Connected(repoID string) (ConnectedRepo, bool) {
 	return ConnectedRepo{}, false
 }
 
+// ConnectedByURL returns the connection whose clone URL matches cloneURL, if
+// any — the `repo add` fast-path check (already connected under this URL),
+// shared by the handler and the CLI's view-gate so both read one definition
+// of "already connected".
+func (c *GlobalConfig) ConnectedByURL(cloneURL string) (ConnectedRepo, bool) {
+	for _, r := range c.Repos {
+		if r.CloneURL == cloneURL {
+			return r, true
+		}
+	}
+	return ConnectedRepo{}, false
+}
+
 // AddRepo registers a connection. A connection with the same repo_id must
 // not already exist — re-registering is a remove + add, never a silent
 // overwrite.

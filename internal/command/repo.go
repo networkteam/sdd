@@ -32,13 +32,40 @@ func (c *RepoAddCmd) Validate() error {
 	return nil
 }
 
-// RepoRemoveCmd drops a connected repo from the user-global config. The
-// cache directory is left on disk (read-only data; a re-add reuses it).
+// RepoRemoveCmd drops a declared cross-repo dependency from the current
+// repo's committed .sdd/config.yaml and commits that change. It is
+// project-scoped and reference-safety-guarded: because entries are immutable,
+// a referenced dependency is permanent, so removal is refused when any entry
+// in this graph still holds a cross-repo ref into the target — dropping the
+// declaration would strand those refs and retroactively break resolve-or-block.
+// The per-user global connection and its on-disk cache are left untouched;
+// machine-level teardown is a separate, future command surface.
 type RepoRemoveCmd struct {
 	RepoID string
 
-	// OnRemoved fires after the connection is dropped.
+	// Force drops the dependency even when local entries still reference the
+	// target, stranding those refs. Required to proceed past the ref-safety
+	// guard; the stranded refs are named through OnStranded, never silently.
+	Force bool
+
+	// OnRemoved fires after the dependency is dropped from the committed
+	// config and the change is committed.
 	OnRemoved func(repoID string)
+
+	// OnStranded fires when Force drops a still-referenced dependency,
+	// carrying the refs the removal stranded so the override stays loud.
+	OnStranded func(repoID string, stranded []StrandedRef)
+}
+
+// StrandedRef names a local entry whose cross-repo reference into a removed
+// dependency is left dangling by a forced `sdd repo remove`.
+type StrandedRef struct {
+	// EntryID is the local entry that holds the reference.
+	EntryID string
+	// RefID is the full cross-repo ref it points at (repo-id:entry-id).
+	RefID string
+	// Kind is the reference kind (e.g. builds-on, grounded-in).
+	Kind string
 }
 
 // Validate checks the command's required fields.

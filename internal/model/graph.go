@@ -501,22 +501,159 @@ func (g *Graph) ResolveIDs(inputs []string) ([]string, error) {
 	return out, nil
 }
 
-// ResolveRefIDs resolves the ID component of each Ref against the graph,
-// preserving Kind and Desc. Used by the new-entry handler so refs flow
-// through the same short-form-to-full-form resolution as bare-ID fields.
+// ResolveRefIDs resolves the ID component of each Ref, preserving Kind and
+// Desc. Refs resolve across the union of the local graph and its declared
+// dependencies (ResolveUnionID): a bare ID matching a foreign entry expands to
+// its full repo-id-prefixed form, so a ref written to an entry is always
+// stored in canonical cross-repo form. Local short IDs still expand to their
+// full local form, and an already-prefixed cross-repo ID passes through.
 func (g *Graph) ResolveRefIDs(refs []Ref) ([]Ref, error) {
 	if len(refs) == 0 {
 		return refs, nil
 	}
 	out := make([]Ref, len(refs))
 	for i, r := range refs {
-		resolved, err := g.ResolveID(r.ID)
+		resolved, err := g.ResolveUnionID(r.ID)
 		if err != nil {
 			return nil, err
 		}
 		out[i] = Ref{ID: resolved, Kind: r.Kind, Desc: r.Desc}
 	}
 	return out, nil
+}
+
+// ResolveUnionID resolves a bare ID (short {type}-{layer}-{suffix} or
+// unprefixed full form) against the flat union of the local graph and its
+// declared dependencies, with no local-first precedence. Exactly one distinct
+// match resolves to its canonical ID (bare for a local entry, full
+// repo-id-prefixed for a foreign one); zero matches pass through unchanged so
+// the caller's "not found" surface fires; more than one is a genuine
+// ambiguity and errors with the candidates listed. An already-prefixed
+// cross-repo ID (<repo-id>:<entry-id>) passes through verbatim — it is already
+// explicit. Framework-shipped entries that appear identically in the local
+// graph and every dependency collapse to their single local instance rather
+// than false-colliding.
+func (g *Graph) ResolveUnionID(input string) (string, error) {
+	if input == "" {
+		return "", nil
+	}
+	if IsCrossRepoID(input) {
+		return input, nil
+	}
+	match := entryIDMatcher(input)
+	if match == nil {
+		// Not a recognizable ID shape — pass through so the caller's
+		// "entry not found" surface fires against the original text.
+		return input, nil
+	}
+	candidates := g.resolveCandidates(match)
+	switch len(candidates) {
+	case 0:
+		return input, nil
+	case 1:
+		return candidates[0].owner.nodeKeyFor(candidates[0].entry), nil
+	default:
+		labels := make([]string, len(candidates))
+		for i, c := range candidates {
+			labels[i] = c.owner.nodeKeyFor(c.entry)
+		}
+		sort.Strings(labels)
+		return "", fmt.Errorf("ambiguous ID %q matches %d entries across the local graph and its dependencies:\n  %s",
+			input, len(candidates), strings.Join(labels, "\n  "))
+	}
+}
+
+// ResolveUnionIDs resolves a slice through ResolveUnionID, stopping on the
+// first ambiguity. Used by read surfaces that accept a typed ID from a user or
+// agent — `sdd show` and the `show` MCP tool.
+func (g *Graph) ResolveUnionIDs(inputs []string) ([]string, error) {
+	if len(inputs) == 0 {
+		return inputs, nil
+	}
+	out := make([]string, len(inputs))
+	for i, in := range inputs {
+		resolved, err := g.ResolveUnionID(in)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = resolved
+	}
+	return out, nil
+}
+
+// resolvedCandidate is one entry matched during union resolution, paired with
+// the graph that owns it (local or a dependency member) so the resolved ID can
+// be qualified correctly.
+type resolvedCandidate struct {
+	entry *Entry
+	owner *Graph
+}
+
+// resolveCandidates gathers the distinct entries matching the predicate across
+// the local graph and its declared-dependency members. Candidates are deduped
+// by full entry ID, preferring the local owner: a framework-shipped entry (the
+// identical full ID merged into every member graph) collapses to its single
+// local instance — so a project-superseded base entry keeps its local status —
+// while entries that merely share a short ID across repos keep distinct full
+// IDs and remain separate candidates, surfacing as an ambiguity.
+func (g *Graph) resolveCandidates(match func(*Entry) bool) []resolvedCandidate {
+	byFullID := map[string]resolvedCandidate{}
+	var order []string
+	collect := func(owner *Graph) {
+		for _, e := range owner.Entries {
+			if !match(e) {
+				continue
+			}
+			existing, seen := byFullID[e.ID]
+			if !seen {
+				byFullID[e.ID] = resolvedCandidate{entry: e, owner: owner}
+				order = append(order, e.ID)
+				continue
+			}
+			// Same full ID already collected — the framework-entry / project
+			// -override case. Prefer the local instance so its local status
+			// (and any project supersession of a base entry) is what resolves.
+			if existing.owner.repoPrefix != "" && owner.repoPrefix == "" {
+				byFullID[e.ID] = resolvedCandidate{entry: e, owner: owner}
+			}
+		}
+	}
+	collect(g)
+	for _, member := range g.multi.dependencyGraphs() {
+		collect(member)
+	}
+	out := make([]resolvedCandidate, 0, len(order))
+	for _, id := range order {
+		out = append(out, byFullID[id])
+	}
+	return out
+}
+
+// entryIDMatcher builds the entry predicate for a bare ID input: an exact
+// full-ID match, or a short {type}-{layer}-{suffix} match. Returns nil when
+// the input is neither shape, so the caller passes it through untouched.
+func entryIDMatcher(input string) func(*Entry) bool {
+	if _, err := ParseID(input); err == nil {
+		return func(e *Entry) bool { return e.ID == input }
+	}
+	parts := strings.SplitN(input, "-", 3)
+	if len(parts) != 3 || parts[2] == "" {
+		return nil
+	}
+	typeCode, layerCode, suffix := parts[0], parts[1], parts[2]
+	if _, ok := TypeFromAbbrev[typeCode]; !ok {
+		return nil
+	}
+	if _, ok := LayerFromAbbrev[layerCode]; !ok {
+		return nil
+	}
+	return func(e *Entry) bool {
+		if TypeAbbrev[e.Type] != typeCode || LayerAbbrev[e.Layer] != layerCode {
+			return false
+		}
+		p, err := ParseID(e.ID)
+		return err == nil && p.Suffix == suffix
+	}
 }
 
 // Lint returns all entries that have validation warnings.

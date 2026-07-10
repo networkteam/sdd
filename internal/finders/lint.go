@@ -20,6 +20,7 @@ func (f *Finder) Lint(q query.LintQuery) (*query.LintResult, error) {
 	}
 
 	validateSummaries(q.Graph)
+	f.validateCrossRepoDeps(q.Graph)
 
 	entries := q.Graph.Lint()
 	total := 0
@@ -88,6 +89,40 @@ func (f *Finder) repoIndexLint(result *query.LintResult) {
 				RepoID:     r.RepoID,
 				DriftCount: drift,
 				EntryCount: len(manifest.Entries),
+			})
+		}
+	}
+}
+
+// validateCrossRepoDeps flags every local entry holding a cross-repo ref
+// whose target repo-id is not in the declared dependencies. This extends the
+// resolve-or-block invariant from a capture-time gate into a standing check:
+// it catches post-capture violations a fresh capture never would — a
+// dependency dropped from .sdd/config.yaml while an entry still references it,
+// or a hand-edited ref prefix. Distinct undeclared repo-ids are reported once
+// per entry so the finding points at the exact entry and repo. Embedded base
+// entries are skipped: they are framework-shipped and never reference a
+// project's declared dependencies.
+func (f *Finder) validateCrossRepoDeps(graph *model.Graph) {
+	declared := make(map[string]bool, len(f.declaredDependencies()))
+	for _, dep := range f.declaredDependencies() {
+		declared[dep] = true
+	}
+	for _, entry := range graph.Entries {
+		if entry.Embedded {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, r := range entry.Refs {
+			repoID, _, ok := model.SplitCrossRepoID(r.ID)
+			if !ok || declared[repoID] || seen[repoID] {
+				continue
+			}
+			seen[repoID] = true
+			entry.Warnings = append(entry.Warnings, model.Warning{
+				Field:   "refs",
+				Value:   repoID,
+				Message: fmt.Sprintf("cross-repo ref into %q, which is not a declared dependency in .sdd/config.yaml — declare it with `sdd repo add`, or the ref is stranded", repoID),
 			})
 		}
 	}

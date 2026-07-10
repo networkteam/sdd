@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: d1b377a84f9855ea2f041c5d19ff17942967db7e0b370f64545164ebe79565d8
+sdd-content-hash: fc9f862a1117260d72b72b4c56ec1cfd09b4702b9e09bd66307d95ef45829656
 sdd-version: dev
 ---
 # sdd search
@@ -41,6 +41,8 @@ The citation tells you **where in the entry** the match landed. Don't treat the 
 The `--type`, `--layer`, `--kind` filters (the same filter shape `sdd view` composes). Compose freely with `--term` / `--query`. Default behavior excludes `{status: superseded-by}` entries from results because superseded near-duplicates pollute clusters; `--include-superseded` overrides when you specifically want history.
 
 `--limit N` caps the result count (default 10).
+
+**Cross-repo scope.** `--repo <repo-id>` (repeatable) and `--all-repos` widen the search to connected repos, fusing every selected graph's hits into one ranked list. Vector search across repos builds and queries every connected index under the single user-global embedder, so all indexes share one vector space and scores stay comparable. The first cross-repo query embeds a connected graph on demand (slow); `sdd index --repo <repo-id>`/`--all-repos` pre-warms it. See the CLI reference's "Cross-repo references" section for connecting repos and the pushed-state cache model.
 
 ## Instruction templates
 
@@ -91,7 +93,7 @@ If you switch templates after building, run `sdd index --force` to re-embed eage
 
 ## Lifecycle
 
-Vector mode reads from a per-participant local index at `.sdd/index/` (gitignored). Two ways the index gets populated:
+Vector mode reads from a machine-global index — a content-addressed store keyed by repo identity and embedder fingerprint, outside the working tree and shared across a repo's checkouts and worktrees. Two ways the index gets populated:
 
 - **`sdd index`** — explicit warm-up: builds chunks for every entry on disk. Run once on a fresh clone, after a major batch of new entries, or after changing the embedding model. `--force` re-embeds everything regardless.
 - **Lazy fill** — `sdd search` automatically chunks and embeds entries that are present on disk but missing from (or stale against) the index before the query runs. The first search after a branch switch or new captures may emit a few `lazy-indexed` lines; subsequent searches are fast.
