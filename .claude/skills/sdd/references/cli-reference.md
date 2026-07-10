@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: 811c581f825abe82c2dd5da8ba1ac7771ac105eb573131278384a1233e70741c
+sdd-content-hash: 908e2569f24cb40ef23f4c46cac00a16596d2c2ceb441068358882a126ed2564
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -7,16 +7,20 @@ sdd-version: dev
 ## Commands
 
 - `sdd info` — session framing only: `Local participant: ...`, `Language: ...` (when configured), `Search: ...`. The session header surface for skill `!`sdd ...`` injections that need the agent to see who's local and which retrieval modes are available; also the bare-`sdd` default command.
-- `sdd view --layout=<spec>` — composable pipeline of primitives (source, filter, transform, aggregate, rank, page, render) with named macros as sugar. The overview surface: `decisions` / `signals` / `aspirations` / `contracts` / `participants` / `insights` / `done` macros render the kind-grouped sections, and mechanical catch-up at scale. Bare `sdd view` prints help with vocabulary tables. See "`sdd view` pipeline" below.
+- `sdd view --layout=<spec>` — composable pipeline of primitives (source, filter, transform, aggregate, rank, page, render) with named macros as sugar. The overview surface: `decisions` / `signals` / `aspirations` / `contracts` / `participants` / `insights` / `done` macros render the kind-grouped sections, and mechanical catch-up at scale. Bare `sdd view` prints help with vocabulary tables. `--repo <repo-id>` (repeatable) / `--all-repos` fan out across connected repos. See "`sdd view` pipeline" below.
 - `sdd show <id>` — full entry plus its upstream (grounding) and downstream (consumers) chains. Both shown by default: upstream depth 2, downstream depth 1.
 - `sdd show <id> [<id2> ...]` — multiple IDs in one call render their entries back to back (handy for comparing a cluster, e.g. the entries a new one will ref)
 - `sdd show <id> --up N --down N` — set the upstream and downstream expansion depths independently. Defaults: `--up 2 --down 1` (downstream fans out faster, so it stays shallower). `0` turns a direction off; `--up 0 --down 0` is the primary entry alone. Increase (e.g. `--up 4 --down 3`) to see more of an entry's surroundings on demand.
 - `sdd new <type> <layer> [flags] <description>` — create entries (output prints the new entry ID, file path, and the LLM-generated summary so the agent can verify fidelity)
 - `sdd summarize <id>` — regenerate the named entry's summary unconditionally (summaries are derived on demand with no staleness tracking). `sdd summarize --all` fills only entries that have no summary yet; add `--force` to regenerate every entry.
 - `sdd summarize <id> --text "<summary>"` — write a user-supplied summary directly, bypassing the LLM. Use `--text -` to read from stdin. Single entry only; rejected with `--all` or multiple IDs.
-- `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, missing summaries). When an embedding provider is configured, also reports the search index's fingerprint and drift count.
-- `sdd index` — warm up the per-participant search index at `.sdd/index/` over every entry on disk. Skips entries whose stored hash and embedder fingerprint match the manifest; `--force` re-embeds everything regardless. Required only on a fresh clone or after deliberate full rebuilds — `sdd search` lazy-fills missing/stale entries on demand.
-- `sdd search [--term <regex>...] [--query <phrase>] [--type d|s] [--layer ...] [--kind ...] [--include-superseded] [--limit N] [--max-citations N]` — three-mode retrieval. `--term` runs text mode (live grep with multi-term AND), `--query` runs vector mode, both flags together run hybrid (RRF fusion). At least one of `--term` / `--query` is required; vector and hybrid require `Search: vector,text` in the `sdd info` header. `--max-citations` caps the snippet sub-lines per entry (default 3); `--max-citations 0` suppresses them entirely, rendering entry headers only — the terse "which entries match, and what topics do they carry" lookup. See [search reference](search.md) for citation reading and mode selection guidance.
+- `sdd lint` — check graph integrity (dangling refs, type mismatches, broken attachment links, missing summaries, and cross-repo references whose target repo isn't a declared dependency). When an embedding provider is configured, also reports the search index's fingerprint and drift count.
+- `sdd index` — warm up the machine-global search index (content-addressed by repo identity and embedder fingerprint, outside the working tree) over every entry on disk. Skips entries whose stored hash and embedder fingerprint match the manifest; `--force` re-embeds everything regardless. `--repo <repo-id>` (repeatable) / `--all-repos` also eagerly build the connected repos' indexes so the first cross-repo search is warm; `--force` reaches those connected indexes too. Required only on a fresh clone or after deliberate rebuilds — `sdd search` lazy-fills missing/stale entries on demand.
+- `sdd search [--term <regex>...] [--query <phrase>] [--type d|s] [--layer ...] [--kind ...] [--repo <repo-id>...] [--all-repos] [--include-superseded] [--limit N] [--max-citations N]` — three-mode retrieval. `--term` runs text mode (live grep with multi-term AND), `--query` runs vector mode, both flags together run hybrid (RRF fusion). At least one of `--term` / `--query` is required; vector and hybrid require `Search: vector,text` in the `sdd info` header. `--repo <repo-id>` (repeatable) / `--all-repos` fan out across connected repos and fuse results into one ranked list (see "Cross-repo references" below). `--max-citations` caps the snippet sub-lines per entry (default 3); `--max-citations 0` suppresses them entirely, rendering entry headers only — the terse "which entries match, and what topics do they carry" lookup. See [search reference](search.md) for citation reading and mode selection guidance.
+- `sdd repo add <clone-url>` — connect another graph for cross-repo references: clone its graph into a machine-local cache, verify its declared `repo_id`, register the connection, and record + commit a `dependencies:` entry in `.sdd/config.yaml`. Re-running for an already-connected URL just ensures the dependency is declared.
+- `sdd repo list` — connected repos and whether each is cached.
+- `sdd repo sync [repo-id ...]` — refresh connected caches to their latest pushed state (all, or the named repos).
+- `sdd repo remove <repo-id>` — drop a dependency from `.sdd/config.yaml` (project-scoped; the cache stays). Refuses when any local entry still references that repo — removal would strand those references — unless `--force`, which removes anyway and names each stranded reference.
 - `sdd wip start <entry-id> --exclusive --participant <name> <description>` — create WIP marker
 - `sdd wip start <entry-id> --branch --exclusive --participant <name> <description>` — create WIP marker, create git branch and check out to it
 - `sdd wip done <marker-id>` — remove WIP marker (deletes branch if merged)
@@ -31,6 +35,15 @@ Every argument that takes an entry ID — positional args on `sdd show`, `sdd su
 - **Short ID** (e.g. `d-prc-oka`, shape `{type}-{layer}-{suffix}`) — human convenience. Resolves to the full ID when the suffix uniquely identifies an entry. Ambiguous short IDs exit non-zero and list all matching full IDs.
 
 Short IDs are fine in user-facing narrative (catch-up tables, grooming summaries, dialogue). Never substitute them for full IDs in CLI calls you construct — a suffix collision would break the call later when the graph grows.
+
+### Cross-repo IDs
+
+When repos are connected (see "Cross-repo references" below), an entry ID can name an entry in another graph:
+
+- **Cross-repo ID** (`<repo-id>:<entry-id>`, e.g. `github.com/acme/platform:20260709-...-d-cpt-abc`) — a target's canonical repo identity, then the entry within it. This is the form stored on disk for any cross-repo reference.
+- **Bare ID across repos** — a short or unprefixed-full ID resolves against the union of the local graph and its declared dependencies, not just the local graph. A unique match resolves; a genuine collision across repos exits non-zero and lists the candidates (the local one bare, foreign ones fully prefixed). This applies wherever a typed ID is resolved — `sdd show` and the `show` MCP tool. Written references always expand to the full `<repo-id>:<entry-id>` form regardless of how you typed them.
+
+When you have only a short ID for a possibly-foreign entry, resolve it with `sdd show <short-id>` (a free read) and use the full ID it prints in any CLI call you construct.
 
 ## `sdd view` pipeline
 
@@ -332,4 +345,14 @@ echo "$PLAN" | sdd new d tac --kind plan --confidence high \
 ```
 
 Use quoted `'EOF'` so markdown content with `$`, backticks, or backslashes is preserved verbatim. For scratch files you do want on disk, `.sdd/tmp/` is gitignored.
+
+## Cross-repo references
+
+References usually stay within one graph. When reasoning genuinely builds on another repo's graph, connect that repo and reference across the boundary instead of re-deriving or paraphrasing it locally.
+
+- **Connect once** with `sdd repo add <clone-url>` — clones the repo's graph into a machine-local cache, verifies the `repo_id` it declares, and records + commits a `dependencies:` entry in `.sdd/config.yaml`. The dependency is the portable record (like `go.mod`); a colleague who clones the repo runs `sdd repo add` for the same URL to connect their own cache.
+- **Reference by cross-repo ID** — `<repo-id>:<entry-id>` in a `--refs` value. Any ref kind may cross the boundary, but lifecycle edges (`--closes`, `--supersedes`) stay within-graph: a decision can't close an entry in another repo.
+- **Declared-dependency precondition** — a cross-repo ref must resolve to a *declared* dependency when captured, the same resolve-or-block gate that guards local refs. If the target repo isn't connected, offer to `sdd repo add` it first (and confirm the target entry is pushed) rather than dropping the connection to a local paraphrase.
+- **The cache is pushed state** — a connected cache is a clone of the remote's pushed branch, not a working tree. A foreign entry resolves only after it's committed *and pushed*; `sdd repo sync` (and cross-repo `sdd show`/`sdd search`) refresh the cache. When a cross-repo ref won't resolve, the target is usually unpushed or the cache is stale.
+- **Search across repos** with `--repo <repo-id>`/`--all-repos` on `sdd search` and `sdd view` — results fuse into one ranked list under a single shared embedder. `sdd index --repo <repo-id>`/`--all-repos` pre-warms a connected index so the first cross-repo search isn't slow.
 
