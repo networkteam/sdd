@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"testing"
 	"time"
 
@@ -158,6 +159,7 @@ func (m *memoryIndex) Nearest(_ context.Context, namespaces []sdd.IndexNamespace
 			hits = append(hits, sdd.ScoredChunkHit{Namespace: namespace, ChunkID: chunk.Chunk.ID, Revision: chunk.Chunk.Revision, ContentHash: chunk.Chunk.ContentHash, Score: score})
 		}
 	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
@@ -193,8 +195,8 @@ func (accessResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectL
 func (accessResolver) ResolveProject(context.Context, sdd.Principal, sdd.ProjectID, sdd.Access) (*sdd.ProjectRuntime, error) {
 	return nil, nil
 }
-func (accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.Snapshot, error) {
-	return &sdd.Snapshot{}, nil
+func (accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+	return nil, nil
 }
 
 func TestAccessResolverConformance(t *testing.T) {

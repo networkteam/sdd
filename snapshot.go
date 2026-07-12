@@ -20,6 +20,7 @@ type Snapshot struct {
 	revision string
 	data     SnapshotData
 	graph    *model.Graph
+	wip      []*model.WIPMarker
 }
 
 func (s *Snapshot) Project() ProjectID {
@@ -43,6 +44,7 @@ type SnapshotData struct {
 	Revision string
 	Config   ProjectConfigDocument
 	Entries  []EntryDocument
+	WIP      []WIPDocument
 }
 
 type ProjectConfigDocument struct {
@@ -57,6 +59,11 @@ type EntryDocument struct {
 	LogicalPath string
 	Frontmatter map[string]any
 	Body        string
+}
+
+type WIPDocument struct {
+	LogicalPath string
+	Content     string
 }
 
 // BuildSnapshot is the single in-memory graph construction path. It validates
@@ -97,11 +104,23 @@ func BuildSnapshot(_ context.Context, data SnapshotData) (*Snapshot, error) {
 			entries = append(entries, entry)
 		}
 	}
+	markers := make([]*model.WIPMarker, 0, len(data.WIP))
+	for _, document := range data.WIP {
+		if !strings.HasPrefix(document.LogicalPath, "wip/") {
+			return nil, fmt.Errorf("sdd: WIP document %q is outside wip/", document.LogicalPath)
+		}
+		marker, err := model.ParseWIPMarker(strings.TrimSuffix(strings.TrimPrefix(document.LogicalPath, "wip/"), ".md")+".md", document.Content)
+		if err != nil {
+			return nil, fmt.Errorf("sdd: parsing WIP document %q: %w", document.LogicalPath, err)
+		}
+		markers = append(markers, marker)
+	}
 	return &Snapshot{
 		project:  data.Project,
 		revision: data.Revision,
 		data:     cloneSnapshotData(data),
 		graph:    model.NewGraph(entries),
+		wip:      markers,
 	}, nil
 }
 
@@ -117,7 +136,7 @@ func LoadSnapshotFS(ctx context.Context, project ProjectID, revision string, fsy
 			return walkErr
 		}
 		if entry.IsDir() {
-			if filename != graphDir && (entry.Name() == "wip" || meta.IsSDDMetaDir(entry)) {
+			if filename != graphDir && meta.IsSDDMetaDir(entry) {
 				return fs.SkipDir
 			}
 			return nil
@@ -129,12 +148,16 @@ func LoadSnapshotFS(ctx context.Context, project ProjectID, revision string, fsy
 		if graphDir == "." {
 			rel = strings.TrimPrefix(filename, "./")
 		}
-		if _, err := model.RelPathToID(rel); err != nil {
-			return nil
-		}
 		raw, err := fs.ReadFile(fsys, filename)
 		if err != nil {
 			return err
+		}
+		if strings.HasPrefix(rel, "wip/") {
+			data.WIP = append(data.WIP, WIPDocument{LogicalPath: rel, Content: string(raw)})
+			return nil
+		}
+		if _, err := model.RelPathToID(rel); err != nil {
+			return nil
 		}
 		document, err := parseEntryDocument(rel, raw)
 		if err != nil {
@@ -175,6 +198,7 @@ func cloneSnapshotData(data SnapshotData) SnapshotData {
 		clone.Entries[i] = document
 		clone.Entries[i].Frontmatter = cloneMap(document.Frontmatter)
 	}
+	clone.WIP = append([]WIPDocument(nil), data.WIP...)
 	return clone
 }
 

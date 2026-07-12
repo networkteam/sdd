@@ -10,14 +10,17 @@ type ProjectRuntime struct {
 }
 
 type ProjectRuntimeOptions struct {
-	Project     ProjectRef
-	Graph       GraphStore
-	Sessions    SessionStore
-	StagedBlobs StagedBlobStore
-	Embeddings  EmbeddingExecutor
-	SearchIndex SearchIndexStore
-	LLM         LLMExecutor
-	Finalizers  []MutationFinalizer
+	Project      ProjectRef
+	Participant  string
+	Language     string
+	Dependencies []string
+	Graph        GraphStore
+	Sessions     SessionStore
+	StagedBlobs  StagedBlobStore
+	Embeddings   EmbeddingExecutor
+	SearchIndex  SearchIndexStore
+	LLM          LLMExecutor
+	Finalizers   []MutationFinalizer
 }
 
 func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {

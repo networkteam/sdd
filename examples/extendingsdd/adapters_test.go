@@ -90,8 +90,8 @@ func (accessResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectL
 func (r accessResolver) ResolveProject(context.Context, sdd.Principal, sdd.ProjectID, sdd.Access) (*sdd.ProjectRuntime, error) {
 	return r.runtime, nil
 }
-func (accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.Snapshot, error) {
-	return &sdd.Snapshot{}, nil
+func (r accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+	return r.runtime, nil
 }
 
 type finalizer struct{}

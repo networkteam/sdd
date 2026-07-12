@@ -18,17 +18,17 @@ import (
 //
 // Sourcing dispatches on the first `source(<name>)` call in the section
 // (default `graph` when absent): graph sections walk q.Graph through the
-// filter chain; wip sections call f.LoadWIPMarkers(q.GraphDir) to get a
-// disjoint data set rendered by as-wip-list. The two paths share the
+// filter chain; wip sections use q.WIPMarkers, falling back to
+// f.LoadWIPMarkers(q.GraphDir), as a disjoint data set rendered by
+// as-wip-list. The two paths share the
 // section-walking shell but apply distinct primitive vocabularies; cross-
 // path mixing (e.g. kind() over wip markers) errors with a source-aware
 // message.
 //
-// WIP markers are loaded once when any section in the layout uses
-// source(wip), then the same slice is handed to every wip section in the
-// layout — disk read amortises across sections. A nil GraphDir with a
-// source(wip) layout errors at section evaluation; non-wip layouts ignore
-// GraphDir entirely.
+// WIP markers are resolved once when any section in the layout uses
+// source(wip), then the same slice is handed to every wip section. A nil
+// marker slice and empty GraphDir errors at section evaluation; non-wip
+// layouts ignore both inputs.
 //
 // Unknown function names return an error listing the valid set so users
 // (and future-slice tests) get a clear signal.
@@ -43,13 +43,16 @@ func (f *Finder) View(q query.ViewQuery) (*query.ViewResult, error) {
 	// fast with a single clear message.
 	var wipMarkers []*model.WIPMarker
 	if layoutHasWipSource(q.Layout) {
-		if q.GraphDir == "" {
+		if q.WIPMarkers != nil {
+			wipMarkers = q.WIPMarkers
+		} else if q.GraphDir == "" {
 			return nil, fmt.Errorf("layout uses source(wip) but graph directory is not configured")
-		}
-		var err error
-		wipMarkers, err = f.LoadWIPMarkers(q.GraphDir)
-		if err != nil {
-			return nil, fmt.Errorf("loading wip markers: %w", err)
+		} else {
+			var err error
+			wipMarkers, err = f.LoadWIPMarkers(q.GraphDir)
+			if err != nil {
+				return nil, fmt.Errorf("loading wip markers: %w", err)
+			}
 		}
 	}
 

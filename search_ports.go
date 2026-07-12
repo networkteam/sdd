@@ -8,9 +8,17 @@ type EmbeddingSpec struct {
 }
 
 type EmbeddingInput struct {
-	ID   string
-	Text string
+	ID      string
+	Text    string
+	Purpose EmbeddingPurpose
 }
+
+type EmbeddingPurpose string
+
+const (
+	EmbeddingDocument EmbeddingPurpose = "document"
+	EmbeddingQuery    EmbeddingPurpose = "query"
+)
 
 type EmbeddingVector struct {
 	ID     string

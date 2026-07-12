@@ -73,5 +73,5 @@ type AccessResolver interface {
 	ResolvePrincipal(context.Context, RequestIdentity) (Principal, error)
 	ListProjects(context.Context, Principal) (ProjectList, error)
 	ResolveProject(context.Context, Principal, ProjectID, Access) (*ProjectRuntime, error)
-	ResolveDependency(context.Context, Principal, ProjectID, string) (*Snapshot, error)
+	ResolveDependency(context.Context, Principal, ProjectID, string) (*ProjectRuntime, error)
 }
