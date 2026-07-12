@@ -1,6 +1,9 @@
 package sdd
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // ProjectRuntime is the concrete SDD application for one project. Its
 // behavior moves behind this facade in Slice 4; Slice 2 freezes construction
@@ -21,6 +24,7 @@ type ProjectRuntimeOptions struct {
 	SearchIndex  SearchIndexStore
 	LLM          LLMExecutor
 	Finalizers   []MutationFinalizer
+	Now          func() time.Time
 }
 
 func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
@@ -41,6 +45,9 @@ func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
 	}
 	if options.LLM == nil {
 		return nil, fmt.Errorf("sdd: LLMExecutor is required")
+	}
+	if options.Now == nil {
+		options.Now = time.Now
 	}
 	return &ProjectRuntime{options: options}, nil
 }

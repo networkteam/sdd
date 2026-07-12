@@ -1,6 +1,11 @@
 package sdd
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+var ErrSessionNotFound = errors.New("sdd: session not found")
 
 type ErrorCode string
 
@@ -27,6 +32,7 @@ type ApplicationError struct {
 	ApplyState ApplyState
 	Revision   string
 	Version    uint32
+	Holder     *SessionHolder
 	Cause      error
 }
 

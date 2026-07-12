@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/gofrs/flock"
 )
 
 // FilesystemSessionStore persists each session as append-only JSONL. Events
@@ -39,6 +41,11 @@ func (s *FilesystemSessionStore) Create(_ context.Context, metadata SessionMetad
 	if err != nil {
 		return StoredSession{}, err
 	}
+	lock, err := s.lock(metadata.ID)
+	if err != nil {
+		return StoredSession{}, err
+	}
+	defer unlockFile(lock)
 	if _, err := os.Stat(filename); err == nil {
 		return StoredSession{}, &ApplicationError{Code: ErrorSessionConflict, Message: "session already exists"}
 	} else if !os.IsNotExist(err) {
@@ -62,6 +69,11 @@ func (s *FilesystemSessionStore) Create(_ context.Context, metadata SessionMetad
 func (s *FilesystemSessionStore) Load(_ context.Context, id SessionID) (StoredSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lock(id)
+	if err != nil {
+		return StoredSession{}, err
+	}
+	defer unlockFile(lock)
 	return s.loadLocked(id)
 }
 
@@ -72,6 +84,9 @@ func (s *FilesystemSessionStore) loadLocked(id SessionID) (StoredSession, error)
 	}
 	file, err := os.Open(filename)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return StoredSession{}, fmt.Errorf("%w: %s", ErrSessionNotFound, id)
+		}
 		return StoredSession{}, err
 	}
 	defer func() { _ = file.Close() }()
@@ -116,7 +131,12 @@ func (s *FilesystemSessionStore) List(_ context.Context, filter SessionFilter) (
 			continue
 		}
 		id := SessionID(strings.TrimSuffix(entry.Name(), ".jsonl"))
+		lock, err := s.lock(id)
+		if err != nil {
+			return nil, err
+		}
 		stored, err := s.loadLocked(id)
+		unlockFile(lock)
 		if err != nil {
 			return nil, err
 		}
@@ -135,6 +155,11 @@ func (s *FilesystemSessionStore) List(_ context.Context, filter SessionFilter) (
 func (s *FilesystemSessionStore) Append(_ context.Context, id SessionID, expectedVersion uint64, appendData SessionAppend) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lock(id)
+	if err != nil {
+		return 0, err
+	}
+	defer unlockFile(lock)
 	stored, err := s.loadLocked(id)
 	if err != nil {
 		return 0, err
@@ -167,6 +192,24 @@ func (s *FilesystemSessionStore) Append(_ context.Context, id SessionID, expecte
 		return 0, err
 	}
 	return stored.Version, nil
+}
+
+func (s *FilesystemSessionStore) lock(id SessionID) (*flock.Flock, error) {
+	filename, err := s.filename(id)
+	if err != nil {
+		return nil, err
+	}
+	lock := flock.New(filename + ".lock")
+	if err := lock.Lock(); err != nil {
+		return nil, err
+	}
+	return lock, nil
+}
+
+func unlockFile(lock *flock.Flock) {
+	if lock != nil {
+		_ = lock.Unlock()
+	}
 }
 
 func (s *FilesystemSessionStore) filename(id SessionID) (string, error) {

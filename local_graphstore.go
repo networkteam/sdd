@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gofrs/flock"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -27,12 +29,12 @@ type FilesystemGraphStore struct {
 	project ProjectID
 	dir     string
 	mu      sync.Mutex
-	applied map[string]filesystemApplyRecord
 }
 
 type filesystemApplyRecord struct {
-	digest string
-	result ApplyResult
+	Digest           string      `json:"digest"`
+	ExpectedRevision string      `json:"expected_revision"`
+	Result           ApplyResult `json:"result"`
 }
 
 func NewFilesystemGraphStore(options FilesystemGraphStoreOptions) (*FilesystemGraphStore, error) {
@@ -45,16 +47,23 @@ func NewFilesystemGraphStore(options FilesystemGraphStoreOptions) (*FilesystemGr
 	if err := os.MkdirAll(options.GraphDir, 0o755); err != nil {
 		return nil, fmt.Errorf("sdd: creating filesystem graph directory: %w", err)
 	}
+	if err := os.MkdirAll(filepath.Join(options.GraphDir, ".sdd-runtime", "applied"), 0o755); err != nil {
+		return nil, fmt.Errorf("sdd: creating graph runtime directory: %w", err)
+	}
 	return &FilesystemGraphStore{
 		project: options.Project,
 		dir:     options.GraphDir,
-		applied: make(map[string]filesystemApplyRecord),
 	}, nil
 }
 
 func (s *FilesystemGraphStore) Current(ctx context.Context) (*Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlockFile(lock)
 	return s.currentLocked(ctx)
 }
 
@@ -69,11 +78,21 @@ func (s *FilesystemGraphStore) currentLocked(ctx context.Context) (*Snapshot, er
 func (s *FilesystemGraphStore) Apply(ctx context.Context, expectedRevision string, batch MutationBatch, blobs StagedBlobReader) (ApplyResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if prior, ok := s.applied[batch.ID]; ok {
-		if prior.digest != batch.Digest {
+	lock, err := s.lock()
+	if err != nil {
+		return ApplyResult{State: MutationNotApplied}, err
+	}
+	defer unlockFile(lock)
+	if prior, ok, err := s.loadApplyRecord(batch.ID); err != nil {
+		return ApplyResult{State: MutationUnknown}, err
+	} else if ok {
+		if prior.Digest != batch.Digest {
 			return ApplyResult{State: MutationNotApplied}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "mutation ID reused with a different digest"}
 		}
-		return prior.result, nil
+		if prior.Result.State == MutationUnknown {
+			return s.reconcileRecord(prior)
+		}
+		return prior.Result, nil
 	}
 	currentRevision, err := graphDirectoryRevision(s.dir)
 	if err != nil {
@@ -88,6 +107,10 @@ func (s *FilesystemGraphStore) Apply(ctx context.Context, expectedRevision strin
 	}
 	if batch.ID == "" || batch.Digest == "" || batch.Digest != wantDigest {
 		return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "mutation batch digest mismatch"}
+	}
+	record := filesystemApplyRecord{Digest: batch.Digest, ExpectedRevision: expectedRevision, Result: ApplyResult{State: MutationUnknown, Revision: currentRevision}}
+	if err := s.persistApplyRecord(batch.ID, record); err != nil {
+		return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, err
 	}
 
 	type preparedFile struct {
@@ -172,24 +195,42 @@ func (s *FilesystemGraphStore) Apply(ctx context.Context, expectedRevision strin
 		return ApplyResult{State: MutationUnknown}, err
 	}
 	result := ApplyResult{State: MutationApplied, Revision: newRevision}
-	s.applied[batch.ID] = filesystemApplyRecord{digest: batch.Digest, result: result}
+	record.Result = result
+	if err := s.persistApplyRecord(batch.ID, record); err != nil {
+		return ApplyResult{State: MutationUnknown, Revision: newRevision}, err
+	}
 	return result, nil
 }
 
 func (s *FilesystemGraphStore) Reconcile(_ context.Context, mutationID, batchDigest string) (ApplyResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	record, ok := s.applied[mutationID]
+	lock, err := s.lock()
+	if err != nil {
+		return ApplyResult{State: MutationUnknown}, err
+	}
+	defer unlockFile(lock)
+	record, ok, err := s.loadApplyRecord(mutationID)
+	if err != nil {
+		return ApplyResult{State: MutationUnknown}, err
+	}
 	if !ok {
 		return ApplyResult{State: MutationUnknown}, nil
 	}
-	if record.digest != batchDigest {
+	if record.Digest != batchDigest {
 		return ApplyResult{State: MutationUnknown}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "mutation digest does not match recorded apply"}
 	}
-	return record.result, nil
+	return s.reconcileRecord(record)
 }
 
 func (s *FilesystemGraphStore) ReadAttachmentPage(_ context.Context, entryID, filename string, offset int64, maxBytes int) (AttachmentPage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lock()
+	if err != nil {
+		return AttachmentPage{}, err
+	}
+	defer unlockFile(lock)
 	if offset < 0 || maxBytes <= 0 {
 		return AttachmentPage{}, fmt.Errorf("sdd: invalid attachment page range")
 	}
@@ -219,6 +260,62 @@ func (s *FilesystemGraphStore) ReadAttachmentPage(_ context.Context, entryID, fi
 	}, nil
 }
 
+func (s *FilesystemGraphStore) lock() (*flock.Flock, error) {
+	lock := flock.New(filepath.Join(s.dir, ".sdd-runtime", "graph.lock"))
+	if err := lock.Lock(); err != nil {
+		return nil, err
+	}
+	return lock, nil
+}
+
+func (s *FilesystemGraphStore) applyRecordPath(id string) (string, error) {
+	if id == "" || filepath.Base(id) != id || strings.ContainsAny(id, `/\\`) {
+		return "", fmt.Errorf("sdd: invalid mutation ID %q", id)
+	}
+	return filepath.Join(s.dir, ".sdd-runtime", "applied", id+".json"), nil
+}
+
+func (s *FilesystemGraphStore) loadApplyRecord(id string) (filesystemApplyRecord, bool, error) {
+	filename, err := s.applyRecordPath(id)
+	if err != nil {
+		return filesystemApplyRecord{}, false, err
+	}
+	raw, err := os.ReadFile(filename)
+	if os.IsNotExist(err) {
+		return filesystemApplyRecord{}, false, nil
+	}
+	if err != nil {
+		return filesystemApplyRecord{}, false, err
+	}
+	var record filesystemApplyRecord
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return filesystemApplyRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func (s *FilesystemGraphStore) persistApplyRecord(id string, record filesystemApplyRecord) error {
+	filename, err := s.applyRecordPath(id)
+	if err != nil {
+		return err
+	}
+	return writeJSONAtomic(filename, record)
+}
+
+func (s *FilesystemGraphStore) reconcileRecord(record filesystemApplyRecord) (ApplyResult, error) {
+	if record.Result.State != MutationUnknown {
+		return record.Result, nil
+	}
+	revision, err := graphDirectoryRevision(s.dir)
+	if err != nil {
+		return ApplyResult{State: MutationUnknown}, err
+	}
+	if revision == record.ExpectedRevision {
+		return ApplyResult{State: MutationNotApplied, Revision: revision}, nil
+	}
+	return ApplyResult{State: MutationUnknown, Revision: revision}, nil
+}
+
 func graphDirectoryRevision(dir string) (string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(filename string, entry fs.DirEntry, err error) error {
@@ -227,6 +324,9 @@ func graphDirectoryRevision(dir string) (string, error) {
 				return nil
 			}
 			return err
+		}
+		if entry.IsDir() && entry.Name() == ".sdd-runtime" {
+			return filepath.SkipDir
 		}
 		if !entry.IsDir() {
 			files = append(files, filename)

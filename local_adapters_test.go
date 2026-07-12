@@ -231,3 +231,25 @@ func TestSessionHolderMetadataRoundTrips(t *testing.T) {
 		t.Fatalf("holder did not round trip: %+v", loaded)
 	}
 }
+
+func TestFilesystemSessionStoreCASFencesIndependentInstances(t *testing.T) {
+	dir := t.TempDir()
+	first, err := sdd.NewFilesystemSessionStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := sdd.NewFilesystemSessionStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := first.Create(t.Context(), sdd.SessionMetadata{ID: "shared", Subject: "christopher", Project: "example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Append(t.Context(), "shared", created.Version, sdd.SessionAppend{Events: []sdd.StoredEvent{{CodecVersion: 1, Code: "one"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.Append(t.Context(), "shared", created.Version, sdd.SessionAppend{Events: []sdd.StoredEvent{{CodecVersion: 1, Code: "two"}}}); errorCode(err) != sdd.ErrorSessionConflict {
+		t.Fatalf("independent stale append error = %v", err)
+	}
+}

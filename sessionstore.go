@@ -11,13 +11,21 @@ type SessionID string
 // SessionMetadata is structured routing and ownership data. Dialogue events
 // remain opaque to the store.
 type SessionMetadata struct {
-	ID          SessionID
-	Subject     string
-	Project     ProjectID
-	Participant string
-	Label       string
-	Holder      *SessionHolder
-	UpdatedAt   time.Time
+	CodecVersion  uint32
+	ID            SessionID
+	Subject       string
+	Project       ProjectID
+	Participant   string
+	Label         string
+	Holder        *SessionHolder
+	HolderHistory []SessionHolderRecord
+	UpdatedAt     time.Time
+}
+
+type SessionHolderRecord struct {
+	Holder  SessionHolder
+	EndedAt time.Time
+	Reason  string
 }
 
 type SessionHolder struct {

@@ -121,10 +121,7 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 	if err != nil {
 		return SearchResult{}, err
 	}
-	filter, err := publicGraphFilter(request)
-	if err != nil {
-		return SearchResult{}, err
-	}
+	filter := publicGraphFilter(request)
 	q := query.SearchQuery{
 		Graph: snapshot.graph, Terms: request.Terms, Phrase: request.Phrase, Filter: filter,
 		IncludeSuperseded: request.IncludeSuperseded, Limit: request.Limit, MaxCitationsPerEntry: request.MaxCitations,
@@ -324,7 +321,7 @@ func dependencyUnavailable() error {
 	return &ApplicationError{Code: ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
 
-func publicGraphFilter(request SearchRequest) (model.GraphFilter, error) {
+func publicGraphFilter(request SearchRequest) model.GraphFilter {
 	filter := model.GraphFilter{}
 	if request.Type != "" {
 		filter.Type = model.EntryType(request.Type)
@@ -339,7 +336,7 @@ func publicGraphFilter(request SearchRequest) (model.GraphFilter, error) {
 	if request.Kind != "" {
 		filter.Kind = model.Kind(request.Kind)
 	}
-	return filter, nil
+	return filter
 }
 
 func publicProcedureSignature(head *model.Entry) string {
