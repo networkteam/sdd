@@ -2,6 +2,7 @@ package mcpserver_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -456,6 +457,31 @@ func TestToolSurfaceMatchesSpec(t *testing.T) {
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tool surface diverges from spec:\n got %v\nwant %v", got, want)
+	}
+}
+
+// TestToolContractSnapshot freezes the complete public MCP contract before it
+// moves packages: names, descriptions, annotations, and input/output schemas.
+// Semantic replay remains covered by TestCaptureProcedureLoop and
+// TestEmbeddedCaptureProcedure; this hash catches accidental schema drift that
+// their typed calls would otherwise tolerate.
+func TestToolContractSnapshot(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+
+	res, err := cs.ListTools(t.Context(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Slice(res.Tools, func(i, j int) bool { return res.Tools[i].Name < res.Tools[j].Name })
+	encoded, err := json.Marshal(res.Tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
+	const want = "4888dd6f1f2978ff89bb4a4b08bd6e6862dc643731b3fb194c58ca1883b3af76"
+	if got != want {
+		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
 }
 
