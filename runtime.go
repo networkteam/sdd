@@ -1,0 +1,50 @@
+package sdd
+
+import "fmt"
+
+// ProjectRuntime is the concrete SDD application for one project. Its
+// behavior moves behind this facade in Slice 4; Slice 2 freezes construction
+// and infrastructure ownership only.
+type ProjectRuntime struct {
+	options ProjectRuntimeOptions
+}
+
+type ProjectRuntimeOptions struct {
+	Project     ProjectRef
+	Graph       GraphStore
+	Sessions    SessionStore
+	StagedBlobs StagedBlobStore
+	Embeddings  EmbeddingExecutor
+	SearchIndex SearchIndexStore
+	LLM         LLMExecutor
+	Finalizers  []MutationFinalizer
+}
+
+func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
+	if options.Project.ID == "" {
+		return nil, fmt.Errorf("sdd: project ID is required")
+	}
+	if options.Graph == nil {
+		return nil, fmt.Errorf("sdd: GraphStore is required")
+	}
+	if options.Sessions == nil {
+		return nil, fmt.Errorf("sdd: SessionStore is required")
+	}
+	if options.StagedBlobs == nil {
+		return nil, fmt.Errorf("sdd: StagedBlobStore is required")
+	}
+	if (options.Embeddings == nil) != (options.SearchIndex == nil) {
+		return nil, fmt.Errorf("sdd: EmbeddingExecutor and SearchIndexStore must be configured together")
+	}
+	if options.LLM == nil {
+		return nil, fmt.Errorf("sdd: LLMExecutor is required")
+	}
+	return &ProjectRuntime{options: options}, nil
+}
+
+func (r *ProjectRuntime) Project() ProjectRef {
+	if r == nil {
+		return ProjectRef{}
+	}
+	return r.options.Project
+}
