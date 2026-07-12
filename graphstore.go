@@ -2,6 +2,9 @@ package sdd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"io"
 )
 
@@ -89,4 +92,16 @@ type AttachmentPage struct {
 // StagedBlobReader limits Apply to the blobs named by its prepared batch.
 type StagedBlobReader interface {
 	Open(context.Context, string) (io.ReadCloser, error)
+}
+
+// MutationBatchDigest returns the SDD-owned digest over a storage-neutral
+// batch. The Digest field itself is excluded.
+func MutationBatchDigest(batch MutationBatch) (string, error) {
+	batch.Digest = ""
+	encoded, err := json.Marshal(batch)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }

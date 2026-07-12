@@ -1,5 +1,17 @@
 package sdd
 
+import (
+	"context"
+	"fmt"
+	"io/fs"
+	"strings"
+
+	"github.com/networkteam/sdd/internal/baseprocedures"
+	"github.com/networkteam/sdd/internal/meta"
+	"github.com/networkteam/sdd/internal/model"
+	"gopkg.in/yaml.v3"
+)
+
 // Snapshot is an immutable, validated SDD graph snapshot. Its indexed model
 // remains private; structured and filesystem stores both enter through
 // SnapshotData in the implementation slice.
@@ -7,6 +19,7 @@ type Snapshot struct {
 	project  ProjectID
 	revision string
 	data     SnapshotData
+	graph    *model.Graph
 }
 
 func (s *Snapshot) Project() ProjectID {
@@ -44,4 +57,134 @@ type EntryDocument struct {
 	LogicalPath string
 	Frontmatter map[string]any
 	Body        string
+}
+
+// BuildSnapshot is the single in-memory graph construction path. It validates
+// canonical documents, joins embedded base procedures, and constructs the
+// private indexed model without requiring a filesystem.
+func BuildSnapshot(_ context.Context, data SnapshotData) (*Snapshot, error) {
+	if data.Project == "" {
+		return nil, fmt.Errorf("sdd: snapshot project is required")
+	}
+	if data.Revision == "" {
+		return nil, fmt.Errorf("sdd: snapshot revision is required")
+	}
+	entries := make([]*model.Entry, 0, len(data.Entries))
+	onDisk := make(map[string]bool, len(data.Entries))
+	for _, document := range data.Entries {
+		id, err := model.RelPathToID(document.LogicalPath)
+		if err != nil {
+			return nil, fmt.Errorf("sdd: entry document %q: %w", document.LogicalPath, err)
+		}
+		frontmatter, err := yaml.Marshal(document.Frontmatter)
+		if err != nil {
+			return nil, fmt.Errorf("sdd: encoding frontmatter for %s: %w", id, err)
+		}
+		content := "---\n" + string(frontmatter) + "---\n\n" + document.Body
+		entry, err := model.ParseEntry(id+".md", content)
+		if err != nil {
+			return nil, fmt.Errorf("sdd: parsing entry document %q: %w", document.LogicalPath, err)
+		}
+		entries = append(entries, entry)
+		onDisk[entry.ID] = true
+	}
+	base, err := baseprocedures.Entries()
+	if err != nil {
+		return nil, fmt.Errorf("sdd: loading base procedures: %w", err)
+	}
+	for _, entry := range base {
+		if !onDisk[entry.ID] {
+			entries = append(entries, entry)
+		}
+	}
+	return &Snapshot{
+		project:  data.Project,
+		revision: data.Revision,
+		data:     cloneSnapshotData(data),
+		graph:    model.NewGraph(entries),
+	}, nil
+}
+
+// LoadSnapshotFS parses canonical filesystem documents into SnapshotData and
+// delegates all validation and indexing to BuildSnapshot.
+func LoadSnapshotFS(ctx context.Context, project ProjectID, revision string, fsys fs.FS, graphDir string) (*Snapshot, error) {
+	if graphDir == "" {
+		graphDir = "."
+	}
+	data := SnapshotData{Project: project, Revision: revision}
+	err := fs.WalkDir(fsys, graphDir, func(filename string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if filename != graphDir && (entry.Name() == "wip" || meta.IsSDDMetaDir(entry)) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), ".md") {
+			return nil
+		}
+		rel := strings.TrimPrefix(filename, strings.TrimSuffix(graphDir, "/")+"/")
+		if graphDir == "." {
+			rel = strings.TrimPrefix(filename, "./")
+		}
+		if _, err := model.RelPathToID(rel); err != nil {
+			return nil
+		}
+		raw, err := fs.ReadFile(fsys, filename)
+		if err != nil {
+			return err
+		}
+		document, err := parseEntryDocument(rel, raw)
+		if err != nil {
+			return fmt.Errorf("sdd: parsing %s: %w", filename, err)
+		}
+		data.Entries = append(data.Entries, document)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sdd: walking graph documents: %w", err)
+	}
+	return BuildSnapshot(ctx, data)
+}
+
+func parseEntryDocument(logicalPath string, raw []byte) (EntryDocument, error) {
+	text := string(raw)
+	if !strings.HasPrefix(text, "---\n") {
+		return EntryDocument{}, fmt.Errorf("missing YAML frontmatter")
+	}
+	end := strings.Index(text[4:], "\n---")
+	if end < 0 {
+		return EntryDocument{}, fmt.Errorf("unterminated YAML frontmatter")
+	}
+	end += 4
+	var frontmatter map[string]any
+	if err := yaml.Unmarshal([]byte(text[4:end]), &frontmatter); err != nil {
+		return EntryDocument{}, err
+	}
+	body := strings.TrimPrefix(text[end+4:], "\n")
+	return EntryDocument{LogicalPath: logicalPath, Frontmatter: frontmatter, Body: strings.TrimSpace(body)}, nil
+}
+
+func cloneSnapshotData(data SnapshotData) SnapshotData {
+	clone := data
+	clone.Config.Fields = cloneMap(data.Config.Fields)
+	clone.Entries = make([]EntryDocument, len(data.Entries))
+	for i, document := range data.Entries {
+		clone.Entries[i] = document
+		clone.Entries[i].Frontmatter = cloneMap(document.Frontmatter)
+	}
+	return clone
+}
+
+func cloneMap(input map[string]any) map[string]any {
+	if input == nil {
+		return nil
+	}
+	output := make(map[string]any, len(input))
+	for key, value := range input {
+		output[key] = value
+	}
+	return output
 }
