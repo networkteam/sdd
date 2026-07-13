@@ -2,23 +2,26 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/networkteam/sdd/internal/command"
-	"github.com/networkteam/sdd/internal/finders"
-	"github.com/networkteam/sdd/internal/git"
-	"github.com/networkteam/sdd/internal/handlers"
-	"github.com/networkteam/sdd/internal/index"
+	sdd "github.com/networkteam/sdd/application"
+	gitadapter "github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/llm"
-	"github.com/networkteam/sdd/internal/mcpserver"
-	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
+	localadapter "github.com/networkteam/sdd/local"
+	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
 
 func serveCmd() *cli.Command {
@@ -59,40 +62,29 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			reg, mgr, err := defaultRepos()
+			reg, _, err := defaultRepos()
 			if err != nil {
 				return err
 			}
-			finder := finders.New(finders.Options{
-				PreflightRunner: runner,
-				Config:          cfg,
-				Repos:           reg,
-			})
-			handler := handlers.New(handlers.Options{
-				GraphDir:  dir,
-				SDDDir:    sddDir,
-				Reader:    finder,
-				LLMRunner: runner,
-				Committer: git.CLI{},
-				Repos:     mgr,
-			})
-
-			searcher, vector, err := buildServeSearcher(cmd, dir, finder, reg, mgr)
+			application, project, identity, err := buildLocalApplication(ctx, cmd, dir, sddDir, cfg, reg, runner)
 			if err != nil {
 				return err
 			}
 
 			transport := cmd.String("transport")
 			srv, err := mcpserver.New(mcpserver.Options{
-				Handler:      handler,
-				Finder:       finder,
-				Searcher:     searcher,
-				VectorSearch: vector,
-				GraphDir:     dir,
-				SessionsDir:  filepath.Join(sddDir, "sessions"),
-				LocalClient:  transport == "stdio",
-				Version:      version,
-				Repos:        reg,
+				Application:   application,
+				Project:       project,
+				LocalIdentity: identity,
+				LocalClient:   transport == "stdio",
+				LocalAttachmentPath: func(entryID, filename string) (string, error) {
+					attachDir, pathErr := sdd.AttachmentDirRelPath(entryID)
+					if pathErr != nil {
+						return "", pathErr
+					}
+					return filepath.Abs(filepath.Join(dir, attachDir, filename))
+				},
+				Version: version,
 			})
 			if err != nil {
 				return err
@@ -111,7 +103,7 @@ func serveCmd() *cli.Command {
 				}
 				addr := cmd.String("addr")
 				fmt.Fprintf(os.Stderr, "sdd serve: listening on http://%s (bearer token required)\n", addr)
-				return srv.RunHTTP(ctx, addr, token)
+				return runLocalHTTP(ctx, addr, token, srv)
 			default:
 				return fmt.Errorf("invalid transport %q: use stdio or http", cmd.String("transport"))
 			}
@@ -119,123 +111,295 @@ func serveCmd() *cli.Command {
 	}
 }
 
-// buildServeSearcher wires ground-tool retrieval: vector search with
-// per-call lazy index fill when an embedding provider is configured, plain
-// text-term search otherwise. Cross-repo selection on the query fans out
-// through the same prepare-then-read split the CLI uses.
-//
-// It builds two vector stacks so the MCP server matches the CLI per mode: a
-// local stack under the local-overlay embedder for local-only queries, and a
-// cross-repo stack under the global-first embedder (crossRepoEmbedder) so a
-// cross-repo query builds and queries the same one (repo-id, fingerprint)
-// vector space the CLI does. When the two embedders coincide (no local
-// override) the local stack is reused for both, so no second index store is
-// opened.
-func buildServeSearcher(cmd *cli.Command, graphDir string, reader *finders.Finder, reg *repos.Registry, mgr *repos.Manager) (mcpserver.Searcher, bool, error) {
-	localEmb, err := buildEmbedder(cmd)
-	if err != nil {
-		return nil, false, err
+func runLocalHTTP(ctx context.Context, addr, token string, app *mcpserver.Server) error {
+	httpServer := &http.Server{
+		Addr:    addr,
+		Handler: localBearerAuth(token, app.Handler()),
+		BaseContext: func(net.Listener) context.Context {
+			return context.WithoutCancel(ctx)
+		},
 	}
-	crossEmb, err := crossRepoEmbedder(cmd)
-	if err != nil {
-		return nil, false, err
-	}
-	prepare := handlers.New(handlers.Options{Reader: reader, Repos: mgr})
+	errCh := make(chan error, 1)
+	go func() { errCh <- httpServer.ListenAndServe() }()
 
-	// No provider anywhere: text-only. localEmb == nil iff crossEmb == nil
-	// (both are driven by whether any provider resolves), so one finder serves
-	// both local and cross-repo queries.
-	if localEmb == nil {
-		sf := finders.NewSearchFinder(finders.SearchFinderOptions{GraphDir: graphDir, Repos: reg})
-		return lazyFillSearcher{localSF: sf, crossSF: sf, prepare: prepare}, false, nil
-	}
-
-	localSF, localIH, err := buildVectorStack(graphDir, reader, reg, localEmb)
-	if err != nil {
-		return nil, false, err
-	}
-
-	// The cross-repo stack uses the global-first embedder. Reuse the local
-	// stack when the fingerprints match (no local override) — same vector
-	// space, and opening the same store twice would contend on its lock.
-	crossSF, crossIH := localSF, localIH
-	if crossEmb.Fingerprint() != localEmb.Fingerprint() {
-		crossSF, crossIH, err = buildVectorStack(graphDir, reader, reg, crossEmb)
-		if err != nil {
-			return nil, false, err
+	select {
+	case <-ctx.Done():
+		return shutdownLocalHTTP(httpServer, app)
+	case err := <-errCh:
+		shutdownErr := shutdownMCPApp(app)
+		if errors.Is(err, http.ErrServerClosed) {
+			return shutdownErr
 		}
+		return errors.Join(err, shutdownErr)
 	}
-
-	return lazyFillSearcher{
-		localSF: localSF, localIH: localIH,
-		crossSF: crossSF, crossIH: crossIH, crossEmb: crossEmb,
-		prepare: prepare,
-	}, true, nil
 }
 
-// buildVectorStack opens the machine-global index store for emb and returns
-// the (search finder, index handler) pair that reads and lazy-fills it.
-func buildVectorStack(graphDir string, reader *finders.Finder, reg *repos.Registry, emb llm.Embedder) (*finders.SearchFinder, *handlers.IndexHandler, error) {
-	idxDir, err := resolveIndexStore(emb)
-	if err != nil {
-		return nil, nil, err
-	}
-	idxStore, err := index.Open(idxDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	sf := finders.NewSearchFinder(finders.SearchFinderOptions{
-		GraphDir:   graphDir,
-		Embedder:   emb,
-		IndexStore: idxStore,
-		Repos:      reg,
-	})
-	ih := handlers.NewIndexHandler(handlers.IndexHandlerOptions{
-		GraphDir:   graphDir,
-		IndexDir:   idxDir,
-		Embedder:   emb,
-		IndexStore: idxStore,
-		Reader:     reader,
-	})
-	return sf, ih, nil
-}
+func shutdownLocalHTTP(httpServer *http.Server, app *mcpserver.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	results := make(chan error, 2)
+	go func() { results <- httpServer.Shutdown(ctx) }()
+	go func() { results <- app.Shutdown(ctx) }()
 
-// lazyFillSearcher fills missing or stale index entries before a vector
-// query — the same flow `sdd search` runs, without the TTY progress view.
-// It holds two stacks: a local-overlay stack for local-only queries and a
-// global-first stack for cross-repo queries, matching the CLI's per-mode
-// embedder resolution so both surfaces share one cross-repo vector space. A
-// query selecting connected repos additionally freshens their caches and
-// member indexes (handler side), then reads via the cross-graph finder.
-type lazyFillSearcher struct {
-	localSF  *finders.SearchFinder
-	localIH  *handlers.IndexHandler
-	crossSF  *finders.SearchFinder
-	crossIH  *handlers.IndexHandler
-	crossEmb llm.Embedder
-	prepare  *handlers.Handler
-}
-
-func (l lazyFillSearcher) Search(ctx context.Context, q query.SearchQuery) (*query.SearchResult, error) {
-	if q.AllRepos || len(q.Repos) > 0 {
-		// Cross-repo: the global-first embedder unifies the local index and
-		// every member index into one (repo-id, fingerprint) vector space, so
-		// the MCP server queries exactly what the CLI's cross-repo path does.
-		if q.Phrase != "" && l.crossIH != nil {
-			if err := l.crossIH.LazyFill(ctx, &command.LazyFillIndexCmd{}); err != nil {
-				return nil, err
+	var errs []error
+	for range 2 {
+		select {
+		case err := <-results:
+			if err != nil {
+				errs = append(errs, err)
 			}
-		}
-		if err := l.prepare.PrepareCrossRepoSearch(ctx, q, l.crossEmb, nil); err != nil {
-			return nil, err
-		}
-		return finders.MultiSearch(ctx, l.crossSF, q)
-	}
-	// Local-only: the local-overlay embedder.
-	if q.Phrase != "" && l.localIH != nil {
-		if err := l.localIH.LazyFill(ctx, &command.LazyFillIndexCmd{}); err != nil {
-			return nil, err
+		case <-ctx.Done():
+			errs = append(errs, context.Cause(ctx))
+			if err := httpServer.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("force-closing HTTP transport: %w", err))
+			}
+			return errors.Join(errs...)
 		}
 	}
-	return l.localSF.Search(ctx, q)
+	return errors.Join(errs...)
+}
+
+func shutdownMCPApp(app *mcpserver.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return app.Shutdown(ctx)
+}
+
+func localBearerAuth(token string, next http.Handler) http.Handler {
+	expect := "Bearer " + token
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(expect)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type localRuntimeAccess struct {
+	project      sdd.ProjectID
+	participant  string
+	runtime      *sdd.ProjectRuntime
+	dependencies map[string]*sdd.ProjectRuntime
+}
+
+func (a *localRuntimeAccess) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
+	if identity.Subject == "" {
+		return sdd.Principal{}, &sdd.ApplicationError{Code: sdd.ErrorAuthenticationRequired, Message: "request identity is required"}
+	}
+	return sdd.Principal{Subject: identity.Subject, Participant: a.participant}, nil
+}
+
+func (a *localRuntimeAccess) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {
+	return sdd.ProjectList{Projects: []sdd.ProjectSummary{{ProjectRef: a.runtime.Project(), CanRead: true, CanWrite: true, State: sdd.ProjectReady}}}, nil
+}
+
+func (a *localRuntimeAccess) ResolveProject(_ context.Context, _ sdd.Principal, project sdd.ProjectID, _ sdd.Access) (*sdd.ProjectRuntime, error) {
+	if project != a.project {
+		return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "project unavailable"}
+	}
+	return a.runtime, nil
+}
+
+func (a *localRuntimeAccess) ResolveDependency(_ context.Context, _ sdd.Principal, _ sdd.ProjectID, dependency string) (*sdd.ProjectRuntime, error) {
+	runtime := a.dependencies[dependency]
+	if runtime == nil {
+		return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
+	}
+	return runtime, nil
+}
+
+func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddDir string, cfg *model.PerRepoConfig, registry *repos.Registry, runner llm.Runner) (*sdd.Application, sdd.ProjectID, sdd.RequestIdentity, error) {
+	project := sdd.ProjectID("local")
+	displayName := filepath.Base(filepath.Dir(sddDir))
+	participant := ""
+	language := ""
+	var dependencies []string
+	if cfg != nil {
+		if cfg.RepoID != "" {
+			project = sdd.ProjectID(cfg.RepoID)
+		}
+		participant = cfg.Participant
+		language = cfg.Language
+		dependencies = append(dependencies, cfg.Dependencies...)
+	}
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: graphDir})
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	sessions, err := localadapter.NewFilesystemSessionStore(filepath.Join(sddDir, "sessions"))
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(sddDir, "staged-blobs"))
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	executor := sdd.LLMExecutorFuncs{
+		CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
+		ExecuteFunc: func(ctx context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
+			result, err := runner.Run(ctx, llm.Request{SystemPrompt: request.SystemPrompt, UserPrompt: request.Prompt})
+			if err != nil {
+				return sdd.LLMResult{}, err
+			}
+			out := sdd.LLMResult{Output: []byte(result.Text), ExecutorFingerprint: "local", FinishReason: "completed"}
+			if result.Meta != nil {
+				out.Usage.InputTokens = int64(result.Meta.InputTokens)
+				out.Usage.OutputTokens = int64(result.Meta.OutputTokens)
+				if result.Meta.Provider != "" {
+					out.ExecutorFingerprint = result.Meta.Provider
+				}
+			}
+			return out, nil
+		},
+	}
+	localEmbedder, err := buildEmbedder(cmd)
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	crossEmbedder, err := crossRepoEmbedder(cmd)
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	indexStore := localadapter.NewMemorySearchIndexStore()
+	var embeddings sdd.EmbeddingExecutor
+	if localEmbedder != nil {
+		embeddings = publicEmbeddingExecutor(localEmbedder)
+	}
+	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		Project: sdd.ProjectRef{ID: project, DisplayName: displayName}, Language: language,
+		Dependencies: dependencies, Graph: graph, Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, indexStore), LLM: executor,
+		Finalizers: []sdd.MutationFinalizer{localGitFinalizer{graphDir: graphDir, git: gitadapter.CLI{}}},
+	})
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	access := &localRuntimeAccess{project: project, participant: participant, runtime: runtime, dependencies: map[string]*sdd.ProjectRuntime{}}
+	for _, dependency := range dependencies {
+		cacheDir, cacheErr := registry.CacheDir(dependency)
+		if cacheErr != nil {
+			return nil, "", sdd.RequestIdentity{}, cacheErr
+		}
+		memberGraph, graphErr := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: sdd.ProjectID(dependency), GraphDir: filepath.Join(cacheDir, model.DefaultGraphDir)})
+		if graphErr != nil {
+			return nil, "", sdd.RequestIdentity{}, graphErr
+		}
+		member, runtimeErr := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: dependency}, Graph: memberGraph,
+			Sessions: sessions, StagedBlobs: blobs, Embeddings: optionalEmbeddingExecutor(crossEmbedder), SearchIndex: optionalSearchIndex(optionalEmbeddingExecutor(crossEmbedder), indexStore), LLM: executor,
+		})
+		if runtimeErr != nil {
+			return nil, "", sdd.RequestIdentity{}, runtimeErr
+		}
+		access.dependencies[dependency] = member
+	}
+	application, err := sdd.NewApplication(access)
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	identity := sdd.RequestIdentity{Subject: "local"}
+	if _, err := application.Info(ctx, identity, project, sdd.InfoRequest{}); err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	return application, project, identity, nil
+}
+
+type localGitFinalizer struct {
+	graphDir string
+	git      localGit
+}
+
+type localGit interface {
+	Commit(string, ...string) error
+	HasCommitMessage(context.Context, string) (bool, error)
+}
+
+func (localGitFinalizer) Name() string { return "git" }
+
+func (f localGitFinalizer) Finalize(ctx context.Context, mutation sdd.AppliedMutation) error {
+	trailer := "SDD-Mutation: " + mutation.BatchID
+	committed, err := f.git.HasCommitMessage(ctx, trailer)
+	if err != nil {
+		return err
+	}
+	if committed {
+		return nil
+	}
+	seen := map[string]bool{}
+	var paths []string
+	appendPath := func(logical string) {
+		if logical == "" || seen[logical] {
+			return
+		}
+		seen[logical] = true
+		paths = append(paths, filepath.Join(f.graphDir, filepath.FromSlash(logical)))
+	}
+	for _, change := range mutation.Batch.Changes {
+		appendPath(change.LogicalPath)
+	}
+	for _, attachment := range mutation.Batch.Attachments {
+		appendPath(attachment.LogicalPath)
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("git finalizer: mutation %s has no paths", mutation.BatchID)
+	}
+	message := mutation.Batch.Message
+	if message == "" {
+		message = "sdd: apply " + mutation.BatchID
+	}
+	return f.git.Commit(message+"\n\n"+trailer, paths...)
+}
+
+func publicEmbeddingExecutor(embedder llm.Embedder) sdd.EmbeddingExecutor {
+	return sdd.EmbeddingExecutorFuncs{
+		SpecFunc: func(context.Context) (sdd.EmbeddingSpec, error) {
+			return sdd.EmbeddingSpec{Fingerprint: embedder.Fingerprint(), Dimensions: embedder.Dimensions()}, nil
+		},
+		EmbedFunc: func(ctx context.Context, inputs []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
+			result := make([]sdd.EmbeddingVector, len(inputs))
+			for start := 0; start < len(inputs); {
+				purpose := inputs[start].Purpose
+				end := start + 1
+				for end < len(inputs) && inputs[end].Purpose == purpose {
+					end++
+				}
+				texts := make([]string, end-start)
+				for index := start; index < end; index++ {
+					texts[index-start] = inputs[index].Text
+				}
+				var vectors [][]float32
+				var err error
+				if purpose == sdd.EmbeddingQuery {
+					vectors, err = embedder.EmbedQueries(ctx, texts)
+				} else {
+					vectors, err = embedder.EmbedDocuments(ctx, texts)
+				}
+				if err != nil {
+					return nil, err
+				}
+				if len(vectors) != len(texts) {
+					return nil, fmt.Errorf("embedding provider returned %d vectors for %d inputs", len(vectors), len(texts))
+				}
+				for index := start; index < end; index++ {
+					result[index] = sdd.EmbeddingVector{ID: inputs[index].ID, Values: vectors[index-start]}
+				}
+				start = end
+			}
+			return result, nil
+		},
+	}
+}
+
+func optionalEmbeddingExecutor(embedder llm.Embedder) sdd.EmbeddingExecutor {
+	if embedder == nil {
+		return nil
+	}
+	return publicEmbeddingExecutor(embedder)
+}
+
+func optionalSearchIndex(embeddings sdd.EmbeddingExecutor, index sdd.SearchIndexStore) sdd.SearchIndexStore {
+	if embeddings == nil {
+		return nil
+	}
+	return index
 }

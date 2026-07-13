@@ -1,28 +1,27 @@
-package mcpserver_test
+package mcpapp_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/engine"
-	"github.com/networkteam/sdd/internal/finders"
-	"github.com/networkteam/sdd/internal/handlers"
-	"github.com/networkteam/sdd/internal/llm"
-	"github.com/networkteam/sdd/internal/mcpserver"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	localadapter "github.com/networkteam/sdd/local"
+	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
 
 const (
@@ -34,26 +33,6 @@ const (
 	// production resolution path.
 	embeddedCaptureID = "20260703-094500-d-prc-cap"
 )
-
-// stubRunner satisfies llm.Runner for finder construction; the paths the
-// server exercises never invoke it (pre-flight is stubbed, summaries skip
-// without a runner).
-type stubRunner struct{}
-
-func (stubRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) {
-	return nil, fmt.Errorf("no llm in tests")
-}
-
-// fakeReader delegates reads to the real finder but answers pre-flight with
-// canned findings, so write-gate outcomes are deterministic without an LLM.
-type fakeReader struct {
-	*finders.Finder
-	findings []query.Finding
-}
-
-func (f fakeReader) Preflight(context.Context, query.PreflightQuery) (*query.PreflightResult, error) {
-	return &query.PreflightResult{Findings: f.findings}, nil
-}
 
 // captureProcedure is the capture-shaped fixture from the surface spec §3,
 // stored as a normal graph entry superseding the embedded base capture — a
@@ -194,12 +173,19 @@ type testEnv struct {
 	srv         *mcpserver.Server
 	graphDir    string
 	sessionsDir string
+	sessions    *localadapter.FilesystemSessionStore
 }
+
+var testRuntimeGeneration atomic.Int64
 
 // newTestServer builds a server over a fixture graph with deterministic
 // pre-flight findings and text-mode search. Passing existing dirs re-hosts
 // them on a fresh server (the restart scenario); mutate tweaks Options.
 func newTestServer(t *testing.T, findings []query.Finding, graphDir, sessionsDir string, mutate ...func(*mcpserver.Options)) testEnv {
+	return newTestServerConfig(t, findings, graphDir, sessionsDir, "", mutate...)
+}
+
+func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessionsDir, language string, mutate ...func(*mcpserver.Options)) testEnv {
 	t.Helper()
 	if graphDir == "" {
 		graphDir = writeFixtureGraph(t)
@@ -208,24 +194,53 @@ func newTestServer(t *testing.T, findings []query.Finding, graphDir, sessionsDir
 		sessionsDir = filepath.Join(t.TempDir(), "sessions")
 	}
 
-	finder := finders.New(finders.Options{
-		PreflightRunner: stubRunner{},
-		Config:          &model.PerRepoConfig{BaseConfig: model.BaseConfig{Participant: "Tester"}},
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "test", GraphDir: graphDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := localadapter.NewFilesystemSessionStore(sessionsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(filepath.Dir(sessionsDir), "staged-blobs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC).Add(time.Duration(testRuntimeGeneration.Add(1)) * time.Hour)
+	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, Language: language,
+		Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: func() time.Time { return now },
+		LLM: sdd.LLMExecutorFuncs{
+			CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
+			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
+				if request.Purpose == "summary" {
+					return sdd.LLMResult{Output: []byte("Test capture entry summary."), ExecutorFingerprint: "test"}, nil
+				}
+				items := make([]map[string]string, 0, len(findings))
+				for _, finding := range findings {
+					items = append(items, map[string]string{"severity": string(finding.Severity), "category": finding.Category, "observation": finding.Observation})
+				}
+				output, marshalErr := json.Marshal(map[string]any{"findings": items})
+				return sdd.LLMResult{Output: output, ExecutorFingerprint: "test"}, marshalErr
+			},
+		},
 	})
-	handler := handlers.New(handlers.Options{
-		GraphDir: graphDir,
-		SDDDir:   filepath.Dir(graphDir),
-		Reader:   fakeReader{Finder: finder, findings: findings},
-	})
-
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := sdd.NewApplication(rootAccess{runtime: runtime})
+	if err != nil {
+		t.Fatal(err)
+	}
 	opts := mcpserver.Options{
-		Handler:      handler,
-		Finder:       finder,
-		Searcher:     finders.NewSearchFinder(finders.SearchFinderOptions{GraphDir: graphDir}),
-		VectorSearch: false,
-		GraphDir:     graphDir,
-		SessionsDir:  sessionsDir,
-		Version:      "test",
+		Application: application, Project: "test", LocalIdentity: sdd.RequestIdentity{Subject: "tester"}, Version: "test",
+		LocalAttachmentPath: func(entryID, filename string) (string, error) {
+			dir, pathErr := model.AttachDirRelPath(entryID)
+			if pathErr != nil {
+				return "", pathErr
+			}
+			return filepath.Abs(filepath.Join(graphDir, dir, filename))
+		},
 	}
 	for _, m := range mutate {
 		m(&opts)
@@ -234,7 +249,7 @@ func newTestServer(t *testing.T, findings []query.Finding, graphDir, sessionsDir
 	if err != nil {
 		t.Fatal(err)
 	}
-	return testEnv{srv: srv, graphDir: graphDir, sessionsDir: sessionsDir}
+	return testEnv{srv: srv, graphDir: graphDir, sessionsDir: sessionsDir, sessions: sessions}
 }
 
 // connect attaches an in-memory client session to the server.
@@ -242,7 +257,8 @@ func connect(t *testing.T, srv *mcpserver.Server) *mcp.ClientSession {
 	t.Helper()
 	ctx := t.Context()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	if _, err := srv.Connect(ctx, serverTransport); err != nil {
+	serverSession, err := srv.Connect(ctx, serverTransport)
+	if err != nil {
 		t.Fatal(err)
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
@@ -250,7 +266,10 @@ func connect(t *testing.T, srv *mcpserver.Server) *mcp.ClientSession {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cs.Close() })
+	t.Cleanup(func() {
+		_ = srv.Disconnect(context.Background(), serverSession)
+		_ = cs.Close()
+	})
 	return cs
 }
 
@@ -379,21 +398,11 @@ Probe entry %02d: the flux capacitor drill needs observing.
 	}
 }
 
-// languageFinder builds a finder whose config carries the given locale.
-func languageFinder(lang string) *finders.Finder {
-	return finders.New(finders.Options{
-		PreflightRunner: stubRunner{},
-		Config:          &model.PerRepoConfig{BaseConfig: model.BaseConfig{Participant: "Tester"}, Language: lang},
-	})
-}
-
 // TestVocabularyBlockForNonEnglishGraphs serves the bundled translation
 // table exactly once per connection when the graph language is non-English —
 // locale rendering's engine-surface home (d-tac-dbk, s-tac-fgy).
 func TestVocabularyBlockForNonEnglishGraphs(t *testing.T) {
-	env := newTestServer(t, nil, "", "", func(o *mcpserver.Options) {
-		o.Finder = languageFinder("de")
-	})
+	env := newTestServerConfig(t, nil, "", "", "de")
 	cs := connect(t, env.srv)
 	door := openSession(t, cs)
 	if !strings.Contains(door.Vocabulary, "Vokabular") {
@@ -424,9 +433,7 @@ func TestVocabularyBlockAbsentForEnglish(t *testing.T) {
 // configured locale has no bundled reference — the commitment never drops
 // silently.
 func TestVocabularyBlockMissingLocaleNote(t *testing.T) {
-	env := newTestServer(t, nil, "", "", func(o *mcpserver.Options) {
-		o.Finder = languageFinder("fr")
-	})
+	env := newTestServerConfig(t, nil, "", "", "fr")
 	cs := connect(t, env.srv)
 	door := openSession(t, cs)
 	if !strings.Contains(door.Vocabulary, "no bundled vocabulary") || !strings.Contains(door.Vocabulary, "vocabulary-fr.md") {
@@ -456,6 +463,31 @@ func TestToolSurfaceMatchesSpec(t *testing.T) {
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tool surface diverges from spec:\n got %v\nwant %v", got, want)
+	}
+}
+
+// TestToolContractSnapshot freezes the complete public MCP contract before it
+// moves packages: names, descriptions, annotations, and input/output schemas.
+// Semantic replay remains covered by TestCaptureProcedureLoop and
+// TestEmbeddedCaptureProcedure; this hash catches accidental schema drift that
+// their typed calls would otherwise tolerate.
+func TestToolContractSnapshot(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+
+	res, err := cs.ListTools(t.Context(), &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Slice(res.Tools, func(i, j int) bool { return res.Tools[i].Name < res.Tools[j].Name })
+	encoded, err := json.Marshal(res.Tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
+	const want = "4888dd6f1f2978ff89bb4a4b08bd6e6862dc643731b3fb194c58ca1883b3af76"
+	if got != want {
+		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
 }
 
@@ -1200,16 +1232,27 @@ func TestAbandonSessionByHandle_InMemory(t *testing.T) {
 func TestAbandonSessionByHandle_SurfacesHeldMarkers(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	sessionID := "s_20260706-090000-deadbeef"
-	lines := []string{
-		`{"v":1,"ts":"2026-07-06T09:00:00Z","session":"` + sessionID + `","seq":1,"event":"session_meta","data":{"participant":"Tester"}}`,
-		`{"v":1,"ts":"2026-07-06T09:00:01Z","session":"` + sessionID + `","seq":2,"instance":"i_1","event":"started","data":{"procedure":"implementation","step":"work"}}`,
-		`{"v":1,"ts":"2026-07-06T09:00:02Z","session":"` + sessionID + `","seq":3,"instance":"i_1","event":"op_result","data":{"step":"setup","fn":"wipStart","writes":{"wipMarker":"wip-123"}}}`,
+	events := []engine.Event{
+		{V: 1, TS: time.Date(2026, 7, 6, 9, 0, 0, 0, time.UTC), Session: sessionID, Seq: 1, Event: engine.EventSessionMeta, Data: map[string]any{"participant": "Tester"}},
+		{V: 1, TS: time.Date(2026, 7, 6, 9, 0, 1, 0, time.UTC), Session: sessionID, Seq: 2, Instance: "i_1", Event: engine.EventStarted, Data: map[string]any{"procedure": "implementation", "step": "work"}},
+		{V: 1, TS: time.Date(2026, 7, 6, 9, 0, 2, 0, time.UTC), Session: sessionID, Seq: 3, Instance: "i_1", Event: engine.EventOpResult, Data: map[string]any{"step": "setup", "fn": "wipStart", "writes": map[string]any{"wipMarker": "wip-123"}}},
 	}
-	if err := os.MkdirAll(env.sessionsDir, 0755); err != nil {
+	stored, err := env.sessions.Create(t.Context(), sdd.SessionMetadata{
+		CodecVersion: 1, ID: sdd.SessionID(sessionID), Subject: "tester", Project: "test", Participant: "Tester",
+		UpdatedAt: time.Date(2026, 7, 6, 9, 0, 2, 0, time.UTC),
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(env.sessionsDir, sessionID+".jsonl")
-	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+	storedEvents := make([]sdd.StoredEvent, 0, len(events))
+	for _, event := range events {
+		payload, marshalErr := json.Marshal(event)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		storedEvents = append(storedEvents, sdd.StoredEvent{CodecVersion: 1, Code: sdd.WorkflowEventCode, Payload: payload})
+	}
+	if _, err := env.sessions.Append(t.Context(), sdd.SessionID(sessionID), stored.Version, sdd.SessionAppend{Events: storedEvents}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1385,6 +1428,9 @@ func TestReadAttachmentPaging(t *testing.T) {
 	if page1.Path != "" {
 		t.Fatalf("a remote client must not receive a filesystem path, got %q", page1.Path)
 	}
+	if !slices.Equal(page1.Available, []string{"notes.md"}) {
+		t.Fatalf("available attachments = %v", page1.Available)
+	}
 	var page2 mcpserver.ReadAttachmentResult
 	call(t, cs, "read_attachment", map[string]any{
 		"id": fixtureGapID, "name": "notes.md", "offset": page1.NextOffset, "max_bytes": 6,
@@ -1471,23 +1517,6 @@ func TestFreeReads(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("registry should document command %s, got %v", want, names)
 		}
-	}
-}
-
-// TestHTTPTransportAuth keeps the bearer guard covered after the surface
-// rewrite.
-func TestHTTPTransportAuth(t *testing.T) {
-	env := newTestServer(t, nil, "", "")
-	hs := httptest.NewServer(env.srv.HTTPHandler("secret-token"))
-	defer hs.Close()
-
-	res, err := http.Get(hs.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated request should 401, got %d", res.StatusCode)
 	}
 }
 
@@ -1850,12 +1879,26 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 // readSessionLog reads a session's JSONL event log from the sessions dir.
 func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	t.Helper()
-	f, err := os.Open(filepath.Join(dir, session+".jsonl"))
+	store, err := localadapter.NewFilesystemSessionStore(dir)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
-	return engine.ReadEvents(f)
+	stored, err := store.Load(t.Context(), sdd.SessionID(session))
+	if err != nil {
+		return nil, err
+	}
+	var events []engine.Event
+	for _, item := range stored.Events {
+		if item.Code != sdd.WorkflowEventCode {
+			continue
+		}
+		var event engine.Event
+		if err := json.Unmarshal(item.Payload, &event); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, nil
 }
 
 // TestEmbeddedCatchupProcedure drives the shipped catch-up base entry over

@@ -1,0 +1,336 @@
+package application
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/networkteam/sdd/internal/engine"
+	"github.com/networkteam/sdd/internal/query"
+)
+
+func (w *WorkflowSession) buildRegistry() (*engine.Registry, error) {
+	registry := engine.NewRegistry()
+	for _, register := range []func(*engine.Registry) error{
+		w.registerWorkflowQueries,
+		w.registerWorkflowPredicates,
+		w.registerWorkflowWrites,
+		w.registerWorkflowWIP,
+	} {
+		if err := register(registry); err != nil {
+			return nil, err
+		}
+	}
+	return registry, nil
+}
+
+func (w *WorkflowSession) registerWorkflowPredicates(registry *engine.Registry) error {
+	return registry.RegisterPredicate(engine.Predicate{
+		Doc: engine.FuncDoc{Name: "sessionQuiescent", Doc: "Nothing but the session shell is running — no open move instances in this session."},
+		Fn: func(*engine.Context) (bool, error) {
+			for _, instance := range w.session.Instances() {
+				if instance.ID != w.shell && instance.Status == engine.StatusRunning {
+					return false, nil
+				}
+			}
+			return true, nil
+		},
+		FailMessage: "open threads remain — settle each with the user (finish it, abandon it, or park the session)",
+	})
+}
+
+func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) error {
+	if err := registry.RegisterQuery(engine.Query{
+		Doc: engine.FuncDoc{Name: "sessionInfo", Doc: "Session framing: local participant, configured language, available search modes (the sdd info header)."},
+		Fn: func(*engine.Context, map[string]any) (any, error) {
+			info, err := w.app.Info(w.ctx, w.identity, w.project, InfoRequest{})
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"participant": info.Participant, "language": info.Language, "search": info.Search}, nil
+		},
+	}); err != nil {
+		return err
+	}
+	if err := registry.RegisterQuery(engine.Query{
+		Doc: engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store."},
+		Fn: func(_ *engine.Context, args map[string]any) (any, error) {
+			layout, _ := args["layout"].(string)
+			if strings.TrimSpace(layout) == "" {
+				return nil, fmt.Errorf("viewLayout needs arg layout")
+			}
+			result, err := w.app.View(w.ctx, w.identity, w.project, ViewRequest{Layout: layout})
+			if err != nil {
+				return nil, err
+			}
+			return result.Sections, nil
+		},
+	}); err != nil {
+		return err
+	}
+	if err := registry.RegisterQuery(engine.Query{
+		Doc: engine.FuncDoc{Name: "entryChains", Doc: "Entries with upstream/downstream chains for the store's anchor (or targets). Args up, down: expansion depths.", Reads: []string{"anchor", "targets"}},
+		Fn: func(ctx *engine.Context, args map[string]any) (any, error) {
+			var ids []string
+			if id, ok := workflowStoreString(ctx.Store, "anchor"); ok {
+				ids = append(ids, id)
+			}
+			ids = append(ids, workflowStoreStrings(ctx.Store, "targets")...)
+			if len(ids) == 0 {
+				return nil, fmt.Errorf("entryChains: neither anchor nor targets is set in the store")
+			}
+			result, err := w.app.Show(w.ctx, w.identity, w.project, ShowRequest{
+				IDs: ids, UpDepth: workflowIntArg(args, "up", query.DefaultUpDepth), DownDepth: workflowIntArg(args, "down", query.DefaultDownDepth),
+			})
+			if err != nil {
+				return nil, err
+			}
+			w.session.LogRead("inject:entryChains", result.FullIDs, result.SummaryIDs)
+			return result.Entries, nil
+		},
+	}); err != nil {
+		return err
+	}
+	if err := registry.RegisterQuery(engine.Query{
+		Doc: engine.FuncDoc{Name: "procedureList", Doc: "The live playbook moves, one line each: canonical, a compact signature of its accepted start params, and the first sentence of the head entry's summary. Shell-class procedures are excluded — they enter through start_session."},
+		Fn: func(*engine.Context, map[string]any) (any, error) {
+			result, err := w.app.Procedures(w.ctx, w.identity, w.project, ProcedureListRequest{})
+			if err != nil {
+				return nil, err
+			}
+			return result.Procedures, nil
+		},
+	}); err != nil {
+		return err
+	}
+	return registry.RegisterQuery(engine.Query{
+		Doc: engine.FuncDoc{Name: "generatedSummary", Doc: "The stored summary of the entry named by the store's entryId, for fidelity review.", Reads: []string{"entryId"}},
+		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
+			id, ok := workflowStoreString(ctx.Store, "entryId")
+			if !ok {
+				return nil, fmt.Errorf("generatedSummary: entryId is not set — the write gate has not created an entry")
+			}
+			graph, err := w.graphs.Current()
+			if err != nil {
+				return nil, err
+			}
+			entry, ok := graph.ByID[id]
+			if !ok {
+				return nil, fmt.Errorf("generatedSummary: entry %s not found", id)
+			}
+			return entry.Summary, nil
+		},
+	})
+}
+
+func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) error {
+	if err := registry.RegisterCommand(engine.Command{
+		Doc: engine.FuncDoc{
+			Name: "newEntry", Doc: "Creates the entry from the capture state fields (pre-flight inside; staged attachments materialized from handles; a recorded override skips pre-flight, durably logged).",
+			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "preflightOverride"}, Writes: []string{"entryId", "findings"},
+		},
+		MutatesGraph: true,
+		Fn:           w.runWorkflowNewEntry,
+	}); err != nil {
+		return err
+	}
+	return registry.RegisterCommand(engine.Command{
+		Doc:          engine.FuncDoc{Name: "replaceSummary", Doc: "Writes the user-supplied corrected summary onto the entry named by entryId.", Reads: []string{"entryId", "correctedSummary"}},
+		MutatesGraph: true,
+		Fn: func(ctx *engine.Context) error {
+			id, ok := workflowStoreString(ctx.Store, "entryId")
+			if !ok {
+				return fmt.Errorf("replaceSummary: entryId is not set")
+			}
+			text, ok := workflowStoreString(ctx.Store, "correctedSummary")
+			if !ok {
+				return fmt.Errorf("replaceSummary: correctedSummary is not set")
+			}
+			result, err := w.app.ReplaceSummary(w.ctx, w.identity, w.project, w.binding, id, text)
+			if err == nil {
+				w.binding = result.Binding
+			}
+			return err
+		},
+	})
+}
+
+func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
+	if err := registry.RegisterCommand(engine.Command{
+		Doc:          engine.FuncDoc{Name: "wipStart", Doc: "Creates an exclusive WIP marker for the store's anchor entry, described by wipDescription.", Reads: []string{"anchor", "wipDescription", "participants"}, Writes: []string{"wipMarker"}},
+		MutatesGraph: true,
+		Fn: func(ctx *engine.Context) error {
+			anchor, ok := workflowStoreString(ctx.Store, "anchor")
+			if !ok {
+				return fmt.Errorf("wipStart: anchor is not set")
+			}
+			description, _ := workflowStoreString(ctx.Store, "wipDescription")
+			marker, result, err := w.app.StartWIP(w.ctx, w.identity, w.project, w.binding, anchor, description)
+			if err != nil {
+				return err
+			}
+			w.binding = result.Binding
+			ctx.Store.WriteEngine("wipMarker", marker)
+			return nil
+		},
+	}); err != nil {
+		return err
+	}
+	if err := registry.RegisterCommand(engine.Command{
+		Doc:          engine.FuncDoc{Name: "wipDone", Doc: "Removes the WIP marker named by the store's wipMarker field.", Reads: []string{"wipMarker"}, Writes: []string{"wipMarker"}},
+		MutatesGraph: true,
+		Fn: func(ctx *engine.Context) error {
+			marker, ok := workflowStoreString(ctx.Store, "wipMarker")
+			if !ok {
+				return fmt.Errorf("wipDone: wipMarker is not set")
+			}
+			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, marker)
+			if err != nil {
+				return err
+			}
+			w.binding = result.Binding
+			ctx.Store.WriteEngine("wipMarker", nil)
+			return nil
+		},
+	}); err != nil {
+		return err
+	}
+	return registry.RegisterCommand(engine.Command{
+		Doc:          engine.FuncDoc{Name: "wipRemove", Doc: "Removes the WIP marker named by the store's staleMarker field (groom's orphaned-marker cleanup).", Reads: []string{"staleMarker"}},
+		MutatesGraph: true,
+		Fn: func(ctx *engine.Context) error {
+			marker, ok := workflowStoreString(ctx.Store, "staleMarker")
+			if !ok {
+				return fmt.Errorf("wipRemove: staleMarker is not set")
+			}
+			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, marker)
+			if err == nil {
+				w.binding = result.Binding
+			}
+			return err
+		},
+	})
+}
+
+func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
+	entryKind, ok := workflowStoreString(ctx.Store, "entryKind")
+	if !ok {
+		return fmt.Errorf("newEntry: entryKind is not set")
+	}
+	layer, ok := workflowStoreString(ctx.Store, "layer")
+	if !ok {
+		return fmt.Errorf("newEntry: layer is not set")
+	}
+	body, ok := workflowStoreString(ctx.Store, "body")
+	if !ok {
+		return fmt.Errorf("newEntry: body is not set")
+	}
+	draft := EntryDraft{
+		Kind: entryKind, Layer: layer, Body: body, Topics: workflowStoreStrings(ctx.Store, "topics"),
+		Closes: workflowStoreStrings(ctx.Store, "closes"), Supersedes: workflowStoreStrings(ctx.Store, "supersedes"),
+		AttachmentHandles: workflowStoreStrings(ctx.Store, "attachments"), Participants: workflowStoreStrings(ctx.Store, "participants"),
+	}
+	for index, handle := range draft.AttachmentHandles {
+		if blobID, ok := w.staged[handle]; ok {
+			draft.AttachmentHandles[index] = blobID
+		}
+	}
+	draft.Confidence, _ = workflowStoreString(ctx.Store, "confidence")
+	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
+	if override, ok := ctx.Store.Get("preflightOverride"); ok {
+		draft.SkipPreflight, _ = override.(bool)
+	}
+	if value, ok := ctx.Store.Get("refs"); ok {
+		if refs, ok := value.([]any); ok {
+			for _, item := range refs {
+				if ref, ok := item.(engine.Ref); ok {
+					draft.Refs = append(draft.Refs, EntryRef{ID: ref.ID, Kind: ref.Kind, Desc: ref.Desc})
+				}
+			}
+		}
+	}
+	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
+	w.binding = result.Binding
+	findings := make([]query.Finding, 0, len(result.Findings))
+	for _, finding := range result.Findings {
+		findings = append(findings, query.Finding{Severity: query.Severity(finding.Severity), Category: finding.Category, Observation: finding.Observation})
+	}
+	ctx.Store.WriteEngine("findings", findings)
+	if err != nil {
+		return fmt.Errorf("newEntry: %w", err)
+	}
+	for _, finding := range findings {
+		if finding.Severity == query.SeverityHigh {
+			return nil
+		}
+	}
+	ctx.Store.WriteEngine("entryId", result.EntryID)
+	w.session.LogRead("newEntry", []string{result.EntryID}, nil)
+	return nil
+}
+
+func workflowStoreString(store *engine.Store, name string) (string, bool) {
+	value, ok := store.Get(name)
+	if !ok {
+		return "", false
+	}
+	result, ok := value.(string)
+	return result, ok && result != ""
+}
+
+func workflowStoreStrings(store *engine.Store, name string) []string {
+	value, ok := store.Get(name)
+	if !ok {
+		return nil
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok && text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
+}
+
+func workflowIntArg(args map[string]any, name string, fallback int) int {
+	switch value := args[name].(type) {
+	case int:
+		return value
+	case float64:
+		return int(value)
+	default:
+		return fallback
+	}
+}
+
+func WorkflowRegistryDocs(class string) ([]RegistryFunction, error) {
+	switch engine.FuncClass(class) {
+	case "", engine.ClassPredicate, engine.ClassQuery, engine.ClassCommand:
+	default:
+		return nil, fmt.Errorf("unknown registry class %q", class)
+	}
+	registry, err := (&WorkflowSession{}).buildRegistry()
+	if err != nil {
+		return nil, err
+	}
+	docs := registry.Docs(engine.FuncClass(class))
+	result := make([]RegistryFunction, 0, len(docs))
+	for _, doc := range docs {
+		result = append(result, RegistryFunction{
+			Name: doc.Name, Class: string(doc.Class), Doc: doc.Doc,
+			Reads: append([]string(nil), doc.Reads...), Writes: append([]string(nil), doc.Writes...),
+		})
+	}
+	return result, nil
+}
+
+type RegistryFunction struct {
+	Name   string
+	Class  string
+	Doc    string
+	Reads  []string
+	Writes []string
+}

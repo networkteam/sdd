@@ -1,4 +1,4 @@
-package mcpserver
+package mcpapp
 
 // Server-level instructions and the few fixed instruction snippets the shell
 // itself contributes. This is knowledge tier zero — the connection handshake:
