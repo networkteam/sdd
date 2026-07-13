@@ -1,4 +1,4 @@
-package mcpserver_test
+package mcpapp_test
 
 import (
 	"context"
@@ -21,9 +21,9 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/llm"
-	"github.com/networkteam/sdd/internal/mcpserver"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
 
 const (

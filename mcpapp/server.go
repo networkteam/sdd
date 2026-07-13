@@ -15,7 +15,7 @@
 // CQRS conformance: reads go to finders, writes dispatch handler commands
 // from inside registry command closures. State owned here is protocol and
 // session-lifecycle state, not domain state.
-package mcpserver
+package mcpapp
 
 import (
 	"context"

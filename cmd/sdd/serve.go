@@ -16,9 +16,9 @@ import (
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/llm"
-	"github.com/networkteam/sdd/internal/mcpserver"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
+	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
 
 func serveCmd() *cli.Command {

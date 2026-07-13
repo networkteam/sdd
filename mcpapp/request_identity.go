@@ -1,4 +1,4 @@
-package mcpserver
+package mcpapp
 
 import "github.com/modelcontextprotocol/go-sdk/mcp"
 
