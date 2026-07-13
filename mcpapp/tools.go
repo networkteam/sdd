@@ -427,7 +427,9 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 	}
 	ss := &shellSession{id: string(workflow.ID()), participant: "", root: workflow, rootIdentity: identity, lastActivity: time.Now()}
 	prev := s.sessions.bind(req.Session, ss)
-	s.watchDisconnect(req.Session)
+	if err := s.watchDisconnect(req.Session); err != nil {
+		return nil, ServeResult{}, err
+	}
 	if err := s.leaveSession(ctx, prev); err != nil {
 		return nil, ServeResult{}, err
 	}

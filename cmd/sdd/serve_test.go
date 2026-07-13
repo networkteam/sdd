@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,6 +75,22 @@ func TestLocalGitFinalizerCommitsBatchOnce(t *testing.T) {
 	}
 	if len(git.paths) != 1 || !slices.Equal(git.paths[0], want) {
 		t.Fatalf("paths = %v, want %v", git.paths, want)
+	}
+}
+
+func TestLocalHTTPBearerAuth(t *testing.T) {
+	server := httptest.NewServer(localBearerAuth("secret-token", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})))
+	defer server.Close()
+
+	response, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated request should 401, got %d", response.StatusCode)
 	}
 }
 

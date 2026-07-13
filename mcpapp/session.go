@@ -92,8 +92,8 @@ func (st *sessionStore) liveIDs() map[string]bool {
 func (st *sessionStore) connections() []*mcp.ServerSession {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	result := make([]*mcp.ServerSession, 0, len(st.byMCP))
-	for session := range st.byMCP {
+	result := make([]*mcp.ServerSession, 0, len(st.watched))
+	for session := range st.watched {
 		result = append(result, session)
 	}
 	return result

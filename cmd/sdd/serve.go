@@ -2,11 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -97,12 +102,77 @@ func serveCmd() *cli.Command {
 				}
 				addr := cmd.String("addr")
 				fmt.Fprintf(os.Stderr, "sdd serve: listening on http://%s (bearer token required)\n", addr)
-				return srv.RunHTTP(ctx, addr, token)
+				return runLocalHTTP(ctx, addr, token, srv)
 			default:
 				return fmt.Errorf("invalid transport %q: use stdio or http", cmd.String("transport"))
 			}
 		}),
 	}
+}
+
+func runLocalHTTP(ctx context.Context, addr, token string, app *mcpserver.Server) error {
+	httpServer := &http.Server{
+		Addr:    addr,
+		Handler: localBearerAuth(token, app.Handler()),
+		BaseContext: func(net.Listener) context.Context {
+			return context.WithoutCancel(ctx)
+		},
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- httpServer.ListenAndServe() }()
+
+	select {
+	case <-ctx.Done():
+		return shutdownLocalHTTP(httpServer, app)
+	case err := <-errCh:
+		shutdownErr := shutdownMCPApp(app)
+		if errors.Is(err, http.ErrServerClosed) {
+			return shutdownErr
+		}
+		return errors.Join(err, shutdownErr)
+	}
+}
+
+func shutdownLocalHTTP(httpServer *http.Server, app *mcpserver.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	results := make(chan error, 2)
+	go func() { results <- httpServer.Shutdown(ctx) }()
+	go func() { results <- app.Shutdown(ctx) }()
+
+	var errs []error
+	for range 2 {
+		select {
+		case err := <-results:
+			if err != nil {
+				errs = append(errs, err)
+			}
+		case <-ctx.Done():
+			errs = append(errs, context.Cause(ctx))
+			if err := httpServer.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("force-closing HTTP transport: %w", err))
+			}
+			return errors.Join(errs...)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func shutdownMCPApp(app *mcpserver.Server) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return app.Shutdown(ctx)
+}
+
+func localBearerAuth(token string, next http.Handler) http.Handler {
+	expect := "Bearer " + token
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(expect)) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type localRuntimeAccess struct {

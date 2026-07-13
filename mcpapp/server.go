@@ -3,14 +3,10 @@ package mcpapp
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"errors"
 	"fmt"
-	"log/slog"
-	"net"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -57,7 +53,17 @@ type Server struct {
 	// while a fresh consumer always gets full text (d-tac-dbk, s-tac-w3v).
 	servedMu     sync.Mutex
 	servedBlocks map[*mcp.ServerSession]map[[sha256.Size]byte]bool
+
+	lifecycleMu  sync.Mutex
+	closing      bool
+	shutdownCtx  context.Context
+	watchers     sync.WaitGroup
+	lifecycleErr []error
 }
+
+// ErrServerClosing reports that a connection or request arrived after
+// graceful shutdown began.
+var ErrServerClosing = errors.New("mcpapp: server is shutting down")
 
 // New constructs the server and registers the workflow tool surface.
 func New(opts Options) (*Server, error) {
@@ -83,43 +89,61 @@ func New(opts Options) (*Server, error) {
 	}, &mcp.ServerOptions{
 		Instructions: serverInstructions,
 	})
+	s.mcp.AddReceivingMiddleware(s.trackSessionMiddleware)
 	s.registerTools()
 	return s, nil
 }
 
 // RunStdio serves a single local connection over stdin/stdout until the
-// transport closes or ctx is cancelled. The post-run sweep applies the
-// leave rule synchronously — the per-connection watcher goroutine would
-// race process exit on stdio.
+// transport closes or ctx is cancelled, then drains its tracked lifecycle
+// before returning.
 func (s *Server) RunStdio(ctx context.Context) error {
-	err := s.mcp.Run(ctx, &mcp.StdioTransport{})
-	for _, ms := range s.sessions.connections() {
-		s.handleDisconnect(ms)
-	}
-	return err
+	runErr := s.mcp.Run(ctx, &mcp.StdioTransport{})
+	return errors.Join(runErr, s.Shutdown(context.Background()))
 }
 
-// watchDisconnect spawns (once per connection) a goroutine applying the
-// leave rule when the client goes away: a quiescent session auto-ends — a
-// closed tab leaves no corpse — while open moves park for resume.
-func (s *Server) watchDisconnect(ms *mcp.ServerSession) {
-	if !s.sessions.markWatched(ms) {
-		return
+func (s *Server) trackSessionMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if session, ok := req.GetSession().(*mcp.ServerSession); ok {
+			if err := s.watchDisconnect(session); err != nil {
+				return nil, err
+			}
+		}
+		return next(ctx, method, req)
 	}
+}
+
+// watchDisconnect tracks every protocol connection once and applies the leave
+// rule when it closes. The lifecycle mutex serializes WaitGroup.Add with the
+// transition to closing, so Shutdown never races a newly admitted watcher.
+func (s *Server) watchDisconnect(ms *mcp.ServerSession) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closing {
+		return ErrServerClosing
+	}
+	if !s.sessions.markWatched(ms) {
+		return nil
+	}
+	s.watchers.Add(1)
 	go func() {
+		defer s.watchers.Done()
+		// Close is the authoritative, surfaced shutdown operation. Wait only
+		// coordinates its completion and commonly returns the close reason.
 		_ = ms.Wait()
-		s.handleDisconnect(ms)
+		if err := s.handleDisconnect(ms, s.disconnectContext()); err != nil {
+			s.recordLifecycleError(fmt.Errorf("leaving disconnected MCP session %s: %w", ms.ID(), err))
+		}
 	}()
+	return nil
 }
 
 // handleDisconnect unbinds the connection and applies the leave rule to
 // whatever session it held. Idempotent — the watcher and the stdio sweep
 // may both fire.
-func (s *Server) handleDisconnect(ms *mcp.ServerSession) {
+func (s *Server) handleDisconnect(ms *mcp.ServerSession, ctx context.Context) error {
 	s.forgetConnection(ms)
-	if err := s.leaveSession(context.Background(), s.sessions.unbind(ms)); err != nil {
-		slog.Default().Error("mcpserver: leaving disconnected session", "error", err)
-	}
+	return s.leaveSession(ctx, s.sessions.unbind(ms))
 }
 
 // servedBefore reports whether these exact block bytes were already served
@@ -176,48 +200,6 @@ func (s *Server) leaveSession(ctx context.Context, ss *shellSession) error {
 	return nil
 }
 
-// RunHTTP serves streamable HTTP at addr until ctx is cancelled. authToken
-// must be non-empty: every request needs `Authorization: Bearer <token>`.
-// The write path would otherwise be open to anyone who can reach the
-// address — the evaluation setup tunnels it to the public internet.
-func (s *Server) RunHTTP(ctx context.Context, addr, authToken string) error {
-	if authToken == "" {
-		return errors.New("mcpserver: HTTP transport requires an auth token")
-	}
-	httpServer := &http.Server{
-		Addr:    addr,
-		Handler: s.httpHandler(authToken),
-		BaseContext: func(net.Listener) context.Context {
-			return ctx
-		},
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- httpServer.ListenAndServe()
-	}()
-
-	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = httpServer.Shutdown(shutdownCtx)
-		return nil
-	case err := <-errCh:
-		return err
-	}
-}
-
-// HTTPHandler exposes the bearer-guarded MCP handler for tests that drive
-// the server through an httptest.Server instead of a real listener.
-func (s *Server) HTTPHandler(authToken string) http.Handler {
-	return s.httpHandler(authToken)
-}
-
-func (s *Server) httpHandler(authToken string) http.Handler {
-	return bearerAuth(authToken, s.Handler())
-}
-
 // Handler returns the shared Streamable HTTP application without choosing an
 // authentication protocol. External compositions must place authenticated
 // middleware in front of it and populate the SDK's current-request TokenInfo.
@@ -225,21 +207,34 @@ func (s *Server) Handler() http.Handler {
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return s.mcp
 	}, &mcp.StreamableHTTPOptions{
-		// The evaluation setup reaches this server through a tunnel (ngrok)
-		// that forwards to localhost while preserving the public Host
-		// header — the SDK's rebinding protection would 403 every such
-		// request. The mandatory bearer token already refuses anything a
-		// rebound browser request could send, so the Host check adds no
-		// protection here.
+		// Hosts may mount this handler behind a tunnel or reverse proxy that
+		// preserves a public Host while forwarding to localhost. Authentication
+		// is deliberately host-owned and mandatory for such deployments.
 		DisableLocalhostProtection: true,
 	})
-	return mcpHandler
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.isClosing() && r.Header.Get("Mcp-Session-Id") == "" {
+			http.Error(w, ErrServerClosing.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		mcpHandler.ServeHTTP(w, r)
+	})
 }
 
 // Connect attaches the server to an arbitrary transport (in-memory in
 // tests). The returned session ends when the client disconnects.
 func (s *Server) Connect(ctx context.Context, t mcp.Transport) (*mcp.ServerSession, error) {
-	return s.mcp.Connect(ctx, t, nil)
+	if s.isClosing() {
+		return nil, ErrServerClosing
+	}
+	session, err := s.mcp.Connect(ctx, t, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.watchDisconnect(session); err != nil {
+		return nil, errors.Join(err, session.Close())
+	}
+	return session, nil
 }
 
 // Disconnect synchronously applies the session leave rule before closing a
@@ -247,23 +242,72 @@ func (s *Server) Connect(ctx context.Context, t mcp.Transport) (*mcp.ServerSessi
 // prefer it over relying on the asynchronous transport watcher.
 func (s *Server) Disconnect(ctx context.Context, session *mcp.ServerSession) error {
 	s.forgetConnection(session)
-	if err := s.leaveSession(ctx, s.sessions.unbind(session)); err != nil {
-		return err
-	}
-	return session.Close()
+	return errors.Join(s.leaveSession(ctx, s.sessions.unbind(session)), session.Close())
 }
 
-func bearerAuth(token string, next http.Handler) http.Handler {
-	expect := "Bearer " + token
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got := r.Header.Get("Authorization")
-		if subtle.ConstantTimeCompare([]byte(got), []byte(expect)) != 1 {
-			slog.Default().Debug("mcpserver: rejected request without valid bearer token", "remote", r.RemoteAddr)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+// Shutdown stops admitting sessions, closes every tracked MCP connection in
+// parallel, and waits for disconnect cleanup. The context bounds the wait;
+// a host that reaches its deadline should force-close its HTTP transport,
+// which unblocks the remaining session watchers.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("mcpapp: shutdown context is required")
+	}
+	s.lifecycleMu.Lock()
+	s.closing = true
+	s.shutdownCtx = ctx
+	s.lifecycleMu.Unlock()
+
+	for _, session := range s.sessions.connections() {
+		session := session
+		go func() {
+			if err := session.Close(); err != nil {
+				s.recordLifecycleError(fmt.Errorf("closing MCP session %s: %w", session.ID(), err))
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.watchers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return errors.Join(s.lifecycleErrors()...)
+	case <-ctx.Done():
+		return errors.Join(append([]error{context.Cause(ctx)}, s.lifecycleErrors()...)...)
+	}
+}
+
+func (s *Server) isClosing() bool {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return s.closing
+}
+
+func (s *Server) disconnectContext() context.Context {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.shutdownCtx != nil {
+		return s.shutdownCtx
+	}
+	return context.Background()
+}
+
+func (s *Server) recordLifecycleError(err error) {
+	if err == nil {
+		return
+	}
+	s.lifecycleMu.Lock()
+	s.lifecycleErr = append(s.lifecycleErr, err)
+	s.lifecycleMu.Unlock()
+}
+
+func (s *Server) lifecycleErrors() []error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return append([]error(nil), s.lifecycleErr...)
 }
 
 func toolError(format string, args ...any) error {

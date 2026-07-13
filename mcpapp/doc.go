@@ -7,8 +7,8 @@
 // that current request identity into sdd.RequestIdentity and never treats the
 // session's initialization identity as authorization proof.
 //
-// RunStdio and RunHTTP are local convenience hosts. External applications
-// normally use Handler and own transport policy, project routing, storage,
-// LLM, embeddings, search index, and mutation finalizers through public SDD
-// ports.
+// RunStdio is the local process transport. HTTP compositions use Handler,
+// coordinate its lifecycle through Shutdown, and own the listener, transport
+// policy, project routing, storage, LLM, embeddings, search index, and
+// mutation finalizers through public SDD ports.
 package mcpapp

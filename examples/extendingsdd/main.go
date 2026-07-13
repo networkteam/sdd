@@ -8,7 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
@@ -74,7 +76,29 @@ func main() {
 	handler := auth.RequireBearerToken(verify, nil)(server.Handler())
 	addr := env("SDD_EXAMPLE_ADDR", "127.0.0.1:8765")
 	log.Printf("external SDD MCP application listening on http://%s", addr)
-	check(http.ListenAndServe(addr, handler))
+	httpServer := &http.Server{Addr: addr, Handler: handler}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errCh := make(chan error, 1)
+	go func() { errCh <- httpServer.ListenAndServe() }()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		appErr := server.Shutdown(shutdownCtx)
+		httpErr := httpServer.Shutdown(shutdownCtx)
+		if shutdownCtx.Err() != nil {
+			check(errors.Join(appErr, httpErr, httpServer.Close()))
+		}
+		check(errors.Join(appErr, httpErr))
+	case err := <-errCh:
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+		check(errors.Join(err, server.Shutdown(shutdownCtx)))
+	}
 }
 
 func env(name, fallback string) string {

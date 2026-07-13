@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1518,23 +1516,6 @@ func TestFreeReads(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("registry should document command %s, got %v", want, names)
 		}
-	}
-}
-
-// TestHTTPTransportAuth keeps the bearer guard covered after the surface
-// rewrite.
-func TestHTTPTransportAuth(t *testing.T) {
-	env := newTestServer(t, nil, "", "")
-	hs := httptest.NewServer(env.srv.HTTPHandler("secret-token"))
-	defer hs.Close()
-
-	res, err := http.Get(hs.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated request should 401, got %d", res.StatusCode)
 	}
 }
 
