@@ -164,7 +164,7 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 				return fmt.Errorf("wipStart: anchor is not set")
 			}
 			description, _ := workflowStoreString(ctx.Store, "wipDescription")
-			marker, result, err := w.app.StartWIP(w.ctx, w.identity, w.project, w.binding, anchor, description, w.workflowParticipant(ctx.Store))
+			marker, result, err := w.app.StartWIP(w.ctx, w.identity, w.project, w.binding, anchor, description)
 			if err != nil {
 				return err
 			}
@@ -266,16 +266,6 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	ctx.Store.WriteEngine("entryId", result.EntryID)
 	w.session.LogRead("newEntry", []string{result.EntryID}, nil)
 	return nil
-}
-
-func (w *WorkflowSession) workflowParticipant(store *engine.Store) string {
-	if values := workflowStoreStrings(store, "participants"); len(values) > 0 {
-		return values[0]
-	}
-	if w.session != nil && w.session.Participant != "" {
-		return w.session.Participant
-	}
-	return ""
 }
 
 func workflowStoreString(store *engine.Store, name string) (string, bool) {

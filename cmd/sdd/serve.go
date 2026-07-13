@@ -107,6 +107,7 @@ func serveCmd() *cli.Command {
 
 type localRuntimeAccess struct {
 	project      sdd.ProjectID
+	participant  string
 	runtime      *sdd.ProjectRuntime
 	dependencies map[string]*sdd.ProjectRuntime
 }
@@ -115,8 +116,7 @@ func (a *localRuntimeAccess) ResolvePrincipal(_ context.Context, identity sdd.Re
 	if identity.Subject == "" {
 		return sdd.Principal{}, &sdd.ApplicationError{Code: sdd.ErrorAuthenticationRequired, Message: "request identity is required"}
 	}
-	participant, _ := identity.Attributes["participant"].(string)
-	return sdd.Principal{Subject: identity.Subject, Participant: participant}, nil
+	return sdd.Principal{Subject: identity.Subject, Participant: a.participant}, nil
 }
 
 func (a *localRuntimeAccess) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {
@@ -196,14 +196,14 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		embeddings = publicEmbeddingExecutor(localEmbedder)
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: project, DisplayName: displayName}, Participant: participant, Language: language,
+		Project: sdd.ProjectRef{ID: project, DisplayName: displayName}, Language: language,
 		Dependencies: dependencies, Graph: graph, Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, indexStore), LLM: executor,
 		Finalizers: []sdd.MutationFinalizer{localGitFinalizer{graphDir: graphDir, git: gitadapter.CLI{}}},
 	})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	access := &localRuntimeAccess{project: project, runtime: runtime, dependencies: map[string]*sdd.ProjectRuntime{}}
+	access := &localRuntimeAccess{project: project, participant: participant, runtime: runtime, dependencies: map[string]*sdd.ProjectRuntime{}}
 	for _, dependency := range dependencies {
 		cacheDir, cacheErr := registry.CacheDir(dependency)
 		if cacheErr != nil {
@@ -226,7 +226,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	identity := sdd.RequestIdentity{Subject: "local", Attributes: map[string]any{"participant": participant}}
+	identity := sdd.RequestIdentity{Subject: "local"}
 	if _, err := application.Info(ctx, identity, project, sdd.InfoRequest{}); err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}

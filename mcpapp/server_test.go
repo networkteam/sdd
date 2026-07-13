@@ -209,7 +209,7 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	}
 	now := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC).Add(time.Duration(testRuntimeGeneration.Add(1)) * time.Hour)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, Participant: "Tester", Language: language,
+		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, Language: language,
 		Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: func() time.Time { return now },
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },

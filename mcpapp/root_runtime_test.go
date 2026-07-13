@@ -44,8 +44,8 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "root-test", DisplayName: "Root test"}, Participant: "Tester",
-		Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		Project: sdd.ProjectRef{ID: "root-test", DisplayName: "Root test"},
+		Graph:   graph, Sessions: sessions, StagedBlobs: blobs,
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
 			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {

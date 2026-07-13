@@ -13,7 +13,6 @@ type ProjectRuntime struct {
 
 type ProjectRuntimeOptions struct {
 	Project      ProjectRef
-	Participant  string
 	Language     string
 	Dependencies []string
 	Graph        GraphStore

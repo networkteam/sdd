@@ -3,6 +3,7 @@ package sdd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -80,7 +81,9 @@ func (a *Application) ApplyPrepared(ctx context.Context, identity RequestIdentit
 	}
 	version, err := runtime.options.Sessions.Append(ctx, binding.SessionID, stored.Version, SessionAppend{Events: []StoredEvent{intent}})
 	if err != nil {
-		_ = runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID)
+		if releaseErr := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID); releaseErr != nil {
+			return TransitionResult{}, errors.Join(err, fmt.Errorf("releasing staged blob retention after intent append failed: %w", releaseErr))
+		}
 		return TransitionResult{}, err
 	}
 	binding.Version = version

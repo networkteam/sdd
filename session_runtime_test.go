@@ -3,6 +3,7 @@ package sdd_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,9 +13,10 @@ import (
 
 type trackingBlobStore struct {
 	sdd.StagedBlobStore
-	mu       sync.Mutex
-	retained int
-	released int
+	mu         sync.Mutex
+	retained   int
+	released   int
+	releaseErr error
 }
 
 func (s *trackingBlobStore) Retain(ctx context.Context, owner sdd.BlobOwner, id string, blobs []string) error {
@@ -27,8 +29,34 @@ func (s *trackingBlobStore) Retain(ctx context.Context, owner sdd.BlobOwner, id 
 func (s *trackingBlobStore) Release(ctx context.Context, owner sdd.BlobOwner, id string) error {
 	s.mu.Lock()
 	s.released++
+	err := s.releaseErr
 	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	return s.StagedBlobStore.Release(ctx, owner, id)
+}
+
+type toggleAppendSessionStore struct {
+	sdd.SessionStore
+	mu  sync.Mutex
+	err error
+}
+
+func (s *toggleAppendSessionStore) Append(ctx context.Context, id sdd.SessionID, version uint64, append sdd.SessionAppend) (uint64, error) {
+	s.mu.Lock()
+	err := s.err
+	s.mu.Unlock()
+	if err != nil {
+		return 0, err
+	}
+	return s.SessionStore.Append(ctx, id, version, append)
+}
+
+func (s *toggleAppendSessionStore) fail(err error) {
+	s.mu.Lock()
+	s.err = err
+	s.mu.Unlock()
 }
 
 type unknownAfterApplyStore struct{ sdd.GraphStore }
@@ -155,6 +183,46 @@ func TestPreparedTransitionPersistsNotAppliedAndRejectsStaleBinding(t *testing.T
 	other := preparedEntry(t, graph.GraphStore, bound.Binding, "stale-binding", "2026/07/13-052200-s-tac-bnd.md")
 	if _, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, other); errorCode(err) != sdd.ErrorSessionConflict {
 		t.Fatalf("stale binding error = %v", err)
+	}
+}
+
+func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *testing.T) {
+	graph, err := sdd.NewFilesystemGraphStore(sdd.FilesystemGraphStoreOptions{Project: "example", GraphDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseSessions, err := sdd.NewFilesystemSessionStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &toggleAppendSessionStore{SessionStore: baseSessions}
+	baseBlobs, err := sdd.NewFilesystemStagedBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs := &trackingBlobStore{StagedBlobStore: baseBlobs, releaseErr: errors.New("injected release failure")}
+	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		LLM: sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "append-failure", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := preparedEntry(t, graph, bound.Binding, "append-failure", "2026/07/13-053000-s-tac-fai.md")
+	sessions.fail(errors.New("injected intent append failure"))
+
+	_, err = application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	if err == nil || !strings.Contains(err.Error(), "injected intent append failure") || !strings.Contains(err.Error(), "injected release failure") {
+		t.Fatalf("ApplyPrepared error = %v, want both append and release failures", err)
 	}
 }
 

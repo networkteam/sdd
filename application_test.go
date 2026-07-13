@@ -103,8 +103,8 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 		},
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example", DisplayName: "Example"}, Participant: "Christopher",
-		Graph: graph, Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: newMemoryIndex(),
+		Project: sdd.ProjectRef{ID: "example", DisplayName: "Example"},
+		Graph:   graph, Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: newMemoryIndex(),
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
 			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
@@ -123,7 +123,7 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 	identity := sdd.RequestIdentity{Subject: "christopher", Scopes: []string{"project:read"}}
 
 	info, err := application.Info(t.Context(), identity, "", sdd.InfoRequest{})
-	if err != nil || info.Project.ID != "example" || info.Search != "vector,text" {
+	if err != nil || info.Project.ID != "example" || info.Participant != "Christopher" || info.Search != "vector,text" {
 		t.Fatalf("Info = %+v, %v", info, err)
 	}
 	show, err := application.Show(t.Context(), identity, "example", sdd.ShowRequest{IDs: []string{"20260713-030000-s-tac-api"}, UpDepth: 1, DownDepth: 1})

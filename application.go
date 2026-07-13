@@ -32,7 +32,7 @@ func NewApplication(access AccessResolver) (*Application, error) {
 }
 
 func (a *Application) Info(ctx context.Context, identity RequestIdentity, project ProjectID, _ InfoRequest) (InfoResult, error) {
-	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
+	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return InfoResult{}, err
 	}
@@ -40,7 +40,7 @@ func (a *Application) Info(ctx context.Context, identity RequestIdentity, projec
 	if runtime.options.Embeddings != nil && runtime.options.SearchIndex != nil {
 		search = "vector,text"
 	}
-	return InfoResult{Project: runtime.options.Project, Participant: runtime.options.Participant, Language: runtime.options.Language, Search: search}, nil
+	return InfoResult{Project: runtime.options.Project, Participant: principal.Participant, Language: runtime.options.Language, Search: search}, nil
 }
 
 func (a *Application) Vocabulary(ctx context.Context, identity RequestIdentity, project ProjectID) (string, error) {

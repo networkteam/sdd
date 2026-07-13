@@ -114,14 +114,14 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 	}
 	runtimeA, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "project-a", DisplayName: "Project A"}, Dependencies: []string{"project-b"},
-		Participant: "Local A", Graph: storeA, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
+		Graph: storeA, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtimeB, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "project-b", DisplayName: "Project B"}, Participant: "Local B",
-		Graph: storeB, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
+		Project: sdd.ProjectRef{ID: "project-b", DisplayName: "Project B"},
+		Graph:   storeB, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 	reader := sdd.RequestIdentity{Subject: "reader"}
 	carol := sdd.RequestIdentity{Subject: "carol"}
 	infoA, err := application.Info(t.Context(), alice, "project-a", sdd.InfoRequest{})
-	if err != nil || infoA.Project.ID != "project-a" || infoA.Project.DisplayName != "Project A" {
+	if err != nil || infoA.Project.ID != "project-a" || infoA.Project.DisplayName != "Project A" || infoA.Participant != "alice" {
 		t.Fatalf("alice project A info = %+v, %v", infoA, err)
 	}
 	infoB, err := application.Info(t.Context(), bob, "", sdd.InfoRequest{})

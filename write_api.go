@@ -118,12 +118,8 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		Confidence: draft.Confidence, Topics: topics, Time: runtime.options.Now(),
 	}
 	if len(entry.Participants) == 0 {
-		participant := principal.Participant
-		if participant == "" {
-			participant = runtime.options.Participant
-		}
-		if participant != "" {
-			entry.Participants = []string{participant}
+		if principal.Participant != "" {
+			entry.Participants = []string{principal.Participant}
 		}
 	}
 	for _, ref := range draft.Refs {
@@ -240,22 +236,19 @@ func (a *Application) ReplaceSummary(ctx context.Context, identity RequestIdenti
 	return a.applyDocumentMutation(ctx, identity, runtime, binding, mutationID, "sdd: summarize "+entryID+" (manual)", DocumentChange{LogicalPath: filepath.ToSlash(path), CanonicalBytes: canonical})
 }
 
-func (a *Application) StartWIP(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, entryID, description, participant string) (string, MutationResult, error) {
+func (a *Application) StartWIP(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, entryID, description string) (string, MutationResult, error) {
 	principal, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
 	if err != nil {
 		return "", MutationResult{}, err
 	}
-	if participant == "" {
-		participant = principal.Participant
-	}
-	if participant == "" {
-		participant = runtime.options.Participant
+	if principal.Participant == "" {
+		return "", MutationResult{}, fmt.Errorf("sdd: resolved principal participant is required to start WIP")
 	}
 	marker := &model.WIPMarker{
-		ID: model.GenerateWIPMarkerID(participant), Entry: entryID, Participant: participant,
+		ID: model.GenerateWIPMarkerID(principal.Participant), Entry: entryID, Participant: principal.Participant,
 		Exclusive: true, Content: description, Time: runtime.options.Now(),
 	}
-	result, err := a.applyDocumentMutation(ctx, identity, runtime, binding, "wip-start-"+marker.ID, fmt.Sprintf("sdd: wip start %s (%s)", entryID, participant), DocumentChange{
+	result, err := a.applyDocumentMutation(ctx, identity, runtime, binding, "wip-start-"+marker.ID, fmt.Sprintf("sdd: wip start %s (%s)", entryID, principal.Participant), DocumentChange{
 		LogicalPath: filepath.ToSlash(model.WIPMarkerPath(marker.ID)), CanonicalBytes: []byte(model.FormatWIPMarker(marker)),
 	})
 	return marker.ID, result, err

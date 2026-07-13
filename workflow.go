@@ -150,6 +150,9 @@ func (a *Application) OpenWorkflow(ctx context.Context, identity RequestIdentity
 	if err != nil {
 		return nil, nil, err
 	}
+	if strings.TrimSpace(info.Participant) == "" {
+		return nil, nil, fmt.Errorf("sdd: resolved principal participant is required to open a workflow")
+	}
 	id := newWorkflowSessionID(time.Now())
 	bind := BindSessionRequest{
 		SessionID: id, MCPSessionID: request.MCPSessionID, ClientName: request.ClientName,
@@ -337,7 +340,10 @@ func (w *WorkflowSession) Advance(ctx context.Context, identity RequestIdentity,
 	}
 	result := w.publicServe(serve)
 	if serve.Status != engine.StatusRunning && serve.Instance != w.shell {
-		result.Base, _ = w.ServeShell(ctx, identity)
+		result.Base, err = w.ServeShell(ctx, identity)
+		if err != nil {
+			return result, fmt.Errorf("serving session shell after advancing %s: %w", request.Instance, err)
+		}
 	}
 	return result, nil
 }
@@ -394,7 +400,11 @@ func (w *WorkflowSession) Abandon(ctx context.Context, identity RequestIdentity,
 	if err := w.session.Abandon(instance, reason); err != nil {
 		return WorkflowAbandonResult{}, err
 	}
-	result.Base, _ = w.ServeShell(ctx, identity)
+	base, err := w.ServeShell(ctx, identity)
+	if err != nil {
+		return result, fmt.Errorf("serving session shell after abandoning %s: %w", instance, err)
+	}
+	result.Base = base
 	return result, nil
 }
 
@@ -412,7 +422,10 @@ func (w *WorkflowSession) Park(ctx context.Context, identity RequestIdentity, in
 	if err := w.session.Park(instance, note); err != nil {
 		return WorkflowParkResult{}, err
 	}
-	base, _ := w.ServeShell(ctx, identity)
+	base, err := w.ServeShell(ctx, identity)
+	if err != nil {
+		return WorkflowParkResult{Instance: inst.ID, Procedure: inst.Spec.Canonical, Step: inst.Step}, fmt.Errorf("serving session shell after parking %s: %w", instance, err)
+	}
 	return WorkflowParkResult{Instance: inst.ID, Procedure: inst.Spec.Canonical, Step: inst.Step, Base: base}, nil
 }
 
