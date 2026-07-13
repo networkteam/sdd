@@ -3,7 +3,7 @@ package mcpapp
 import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
 )
 
 // requestIdentity is the MCP-shaped authentication material carried by the

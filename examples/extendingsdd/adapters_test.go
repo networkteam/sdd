@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/mcpapp"
 )
 

@@ -16,10 +16,11 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	localadapter "github.com/networkteam/sdd/local"
 	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
 
@@ -172,7 +173,7 @@ type testEnv struct {
 	srv         *mcpserver.Server
 	graphDir    string
 	sessionsDir string
-	sessions    *sdd.FilesystemSessionStore
+	sessions    *localadapter.FilesystemSessionStore
 }
 
 var testRuntimeGeneration atomic.Int64
@@ -193,15 +194,15 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 		sessionsDir = filepath.Join(t.TempDir(), "sessions")
 	}
 
-	graph, err := sdd.NewFilesystemGraphStore(sdd.FilesystemGraphStoreOptions{Project: "test", GraphDir: graphDir})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "test", GraphDir: graphDir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := sdd.NewFilesystemSessionStore(sessionsDir)
+	sessions, err := localadapter.NewFilesystemSessionStore(sessionsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := sdd.NewFilesystemStagedBlobStore(filepath.Join(filepath.Dir(sessionsDir), "staged-blobs"))
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(filepath.Dir(sessionsDir), "staged-blobs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1878,7 +1879,7 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 // readSessionLog reads a session's JSONL event log from the sessions dir.
 func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	t.Helper()
-	store, err := sdd.NewFilesystemSessionStore(dir)
+	store, err := localadapter.NewFilesystemSessionStore(dir)
 	if err != nil {
 		return nil, err
 	}

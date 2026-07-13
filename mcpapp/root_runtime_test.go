@@ -6,8 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/model"
+	localadapter "github.com/networkteam/sdd/local"
 	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
 
@@ -31,15 +32,15 @@ func (rootAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectI
 
 func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 	graphDir := writeFixtureGraph(t)
-	graph, err := sdd.NewFilesystemGraphStore(sdd.FilesystemGraphStoreOptions{Project: "root-test", GraphDir: graphDir})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "root-test", GraphDir: graphDir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := sdd.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := sdd.NewFilesystemStagedBlobStore(t.TempDir())
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

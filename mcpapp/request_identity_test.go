@@ -15,7 +15,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
+	localadapter "github.com/networkteam/sdd/local"
 )
 
 type tokenTransport struct {
@@ -209,15 +210,15 @@ The HTTP identity test anchors its real mutation here.
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	graph, err := sdd.NewFilesystemGraphStore(sdd.FilesystemGraphStoreOptions{Project: "identity-test", GraphDir: graphDir})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "identity-test", GraphDir: graphDir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := sdd.NewFilesystemSessionStore(filepath.Join(t.TempDir(), "sessions"))
+	sessions, err := localadapter.NewFilesystemSessionStore(filepath.Join(t.TempDir(), "sessions"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := sdd.NewFilesystemStagedBlobStore(filepath.Join(t.TempDir(), "blobs"))
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(t.TempDir(), "blobs"))
 	if err != nil {
 		t.Fatal(err)
 	}

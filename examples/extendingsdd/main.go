@@ -15,7 +15,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 
-	"github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
+	localadapter "github.com/networkteam/sdd/local"
 	"github.com/networkteam/sdd/mcpapp"
 )
 
@@ -45,11 +46,11 @@ func (r externalAccess) ResolveDependency(context.Context, sdd.Principal, sdd.Pr
 
 func main() {
 	root := env("SDD_EXAMPLE_DATA", ".example-sdd")
-	graph, err := sdd.NewFilesystemGraphStore(sdd.FilesystemGraphStoreOptions{Project: "example", GraphDir: filepath.Join(root, "graph")})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: filepath.Join(root, "graph")})
 	check(err)
-	sessions, err := sdd.NewFilesystemSessionStore(filepath.Join(root, "sessions"))
+	sessions, err := localadapter.NewFilesystemSessionStore(filepath.Join(root, "sessions"))
 	check(err)
-	blobs, err := sdd.NewFilesystemStagedBlobStore(filepath.Join(root, "staged-blobs"))
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(root, "staged-blobs"))
 	check(err)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example", DisplayName: "External example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs,

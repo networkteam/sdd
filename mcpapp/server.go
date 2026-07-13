@@ -10,7 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
 )
 
 // Options configures a workflow MCP server.

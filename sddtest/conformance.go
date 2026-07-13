@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
 )
 
 type AccessResolverFixture struct {

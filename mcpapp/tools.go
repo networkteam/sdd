@@ -11,9 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/networkteam/sdd"
-	"github.com/networkteam/sdd/internal/engine"
-	"github.com/networkteam/sdd/internal/query"
+	sdd "github.com/networkteam/sdd/application"
 )
 
 // defaultSearchHits caps search responses when the caller sets no limit —
@@ -755,11 +753,11 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	}
 	up := args.Up
 	if up == 0 {
-		up = query.DefaultUpDepth
+		up = sdd.DefaultShowUpDepth
 	}
 	down := args.Down
 	if down == 0 {
-		down = query.DefaultDownDepth
+		down = sdd.DefaultShowDownDepth
 	}
 	result, err := s.app.Show(ctx, s.requestIdentity(req), s.project, sdd.ShowRequest{IDs: args.IDs, UpDepth: up, DownDepth: down})
 	if err != nil {
@@ -838,7 +836,7 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Execution: serve.Execution,
 	}
 	if serve.InstructionUnit != "" && s.servedBefore(req.Session, serve.InstructionUnit) {
-		res.Instructions = engine.ComposeInstructions(fmt.Sprintf("(step %s instructions were served earlier this session — follow them; goal: %s)", serve.Step, serve.Goal), serve.Diagnostics)
+		res.Instructions = serve.ReminderInstructions()
 	}
 	if serve.PendingChooser != nil {
 		chooser := &ChooserResult{Chooser: serve.PendingChooser.Chooser, Kind: string(serve.PendingChooser.Kind)}

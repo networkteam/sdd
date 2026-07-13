@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
 )
 
 const stdioServeHelperEnv = "SDD_STDIO_SERVE_HELPER"

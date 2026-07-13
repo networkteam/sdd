@@ -15,11 +15,12 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	sdd "github.com/networkteam/sdd"
+	sdd "github.com/networkteam/sdd/application"
 	gitadapter "github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
+	localadapter "github.com/networkteam/sdd/local"
 	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
 
@@ -77,7 +78,7 @@ func serveCmd() *cli.Command {
 				LocalIdentity: identity,
 				LocalClient:   transport == "stdio",
 				LocalAttachmentPath: func(entryID, filename string) (string, error) {
-					attachDir, pathErr := model.AttachDirRelPath(entryID)
+					attachDir, pathErr := sdd.AttachmentDirRelPath(entryID)
 					if pathErr != nil {
 						return "", pathErr
 					}
@@ -222,15 +223,15 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		language = cfg.Language
 		dependencies = append(dependencies, cfg.Dependencies...)
 	}
-	graph, err := sdd.NewFilesystemGraphStore(sdd.FilesystemGraphStoreOptions{Project: project, GraphDir: graphDir})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: graphDir})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	sessions, err := sdd.NewFilesystemSessionStore(filepath.Join(sddDir, "sessions"))
+	sessions, err := localadapter.NewFilesystemSessionStore(filepath.Join(sddDir, "sessions"))
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	blobs, err := sdd.NewFilesystemStagedBlobStore(filepath.Join(sddDir, "staged-blobs"))
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(sddDir, "staged-blobs"))
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
@@ -260,7 +261,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	indexStore := sdd.NewMemorySearchIndexStore()
+	indexStore := localadapter.NewMemorySearchIndexStore()
 	var embeddings sdd.EmbeddingExecutor
 	if localEmbedder != nil {
 		embeddings = publicEmbeddingExecutor(localEmbedder)
@@ -279,7 +280,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		if cacheErr != nil {
 			return nil, "", sdd.RequestIdentity{}, cacheErr
 		}
-		memberGraph, graphErr := sdd.NewFilesystemGraphStore(sdd.FilesystemGraphStoreOptions{Project: sdd.ProjectID(dependency), GraphDir: filepath.Join(cacheDir, model.DefaultGraphDir)})
+		memberGraph, graphErr := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: sdd.ProjectID(dependency), GraphDir: filepath.Join(cacheDir, model.DefaultGraphDir)})
 		if graphErr != nil {
 			return nil, "", sdd.RequestIdentity{}, graphErr
 		}

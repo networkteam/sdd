@@ -125,7 +125,7 @@ The skill loads the graph state and suggests where to start. Everything after th
 
 ## Embed SDD in a Go application
 
-The root `github.com/networkteam/sdd` package exposes the protocol-neutral application and infrastructure ports. `github.com/networkteam/sdd/mcpapp` mounts that same application as the shared MCP tool surface; an embedding application keeps ownership of authentication, project authorization, storage, model providers, and HTTP policy.
+`github.com/networkteam/sdd/application` exposes the protocol-neutral runtime and infrastructure ports. `github.com/networkteam/sdd/local` provides optional filesystem and in-memory adapters, while `github.com/networkteam/sdd/mcpapp` mounts the application as the shared MCP handler surface. An embedding application keeps ownership of authentication, project authorization, storage, model providers, HTTP server lifecycle, and deployment policy. The module root is documentation-only; public symbols have one canonical package owner.
 
 See [`examples/extendingsdd`](examples/extendingsdd) for a nested external module that implements the public ports and mounts `mcpapp.Server.Handler()` behind bearer middleware. The reusable adapter conformance suites live in `github.com/networkteam/sdd/sddtest`.
 

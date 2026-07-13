@@ -9,7 +9,7 @@ The composition in `main.go` owns:
 - graph, session, staged-blob, LLM, embedding/index, and finalizer adapters;
 - the HTTP listener and deployment policy.
 
-SDD owns graph semantics, workflow procedures, read rendering, pre-flight and summary behavior, durable transition recovery, and write gates. The composition constructs `sdd.ProjectRuntime`, resolves it through `sdd.AccessResolver`, creates `sdd.Application`, and mounts `mcpapp.Server.Handler()` behind the MCP SDK's bearer middleware.
+SDD owns graph semantics, workflow procedures, read rendering, pre-flight and summary behavior, durable transition recovery, and write gates. The composition imports the canonical `application` contracts and optional `local` adapters, constructs an `application.ProjectRuntime`, resolves it through `application.AccessResolver`, creates `application.Application`, and mounts `mcpapp.Server.Handler()` behind the MCP SDK's bearer middleware.
 
 For local development the module uses `replace github.com/networkteam/sdd => ../..`. A release consumer removes that replacement and pins a published SDD version.
 
