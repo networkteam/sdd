@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd"
+	"github.com/networkteam/sdd/mcpapp"
 )
 
 type graphStore struct{}
@@ -125,5 +127,17 @@ func TestExternalCompositionCompilesAgainstPublicPorts(t *testing.T) {
 	}
 	if runtime.Project().ID != "example" {
 		t.Fatalf("project = %+v", runtime.Project())
+	}
+	application, err := sdd.NewApplication(accessResolver{runtime: runtime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := mcpapp.New(mcpapp.Options{Application: application, Project: "example", Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var handler http.Handler = server.Handler()
+	if handler == nil {
+		t.Fatal("shared HTTP handler is nil")
 	}
 }

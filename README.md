@@ -123,6 +123,12 @@ The skill loads the graph state and suggests where to start. Everything after th
 - Git-native and immutable, with background awareness of remote state
 - A skill covering the common moves: bootstrap, catch up, capture, decide, engage, groom, augment, explore
 
+## Embed SDD in a Go application
+
+The root `github.com/networkteam/sdd` package exposes the protocol-neutral application and infrastructure ports. `github.com/networkteam/sdd/mcpapp` mounts that same application as the shared MCP tool surface; an embedding application keeps ownership of authentication, project authorization, storage, model providers, and HTTP policy.
+
+See [`examples/extendingsdd`](examples/extendingsdd) for a nested external module that implements the public ports and mounts `mcpapp.Server.Handler()` behind bearer middleware. The reusable adapter conformance suites live in `github.com/networkteam/sdd/sddtest`.
+
 ## Where this is heading
 
 Today SDD lives in the terminal and assumes a developer at the keyboard. We want anyone on the project — a designer reviewing a flow, an operator triaging an incident, a business owner weighing a trade-off — to engage the graph directly, through chat, voice, or whatever interface fits their work. Capture should happen inside that work — a finding while testing, a question raised in a meeting — without stepping into a separate mode for it. And AI agents should work autonomously, guided by the decisions and guidelines already in the graph, while humans focus on reviewing what comes back and steering what comes next.

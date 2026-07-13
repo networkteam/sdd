@@ -1,6 +1,3 @@
-// Package mcpapp adapts the protocol-neutral SDD application to MCP. The
-// connecting client supplies reasoning; this package maps tool requests,
-// request identity, served-once presentation, and connection lifecycle.
 package mcpapp
 
 import (

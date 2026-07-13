@@ -1,14 +1,30 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/networkteam/sdd"
 )
+
+const stdioServeHelperEnv = "SDD_STDIO_SERVE_HELPER"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(stdioServeHelperEnv) == "1" {
+		os.Args = []string{"sdd", "--graph-dir", ".sdd/graph", "serve", "--transport", "stdio"}
+		main()
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 type recordingLocalGit struct {
 	committed bool
@@ -57,5 +73,48 @@ func TestLocalGitFinalizerCommitsBatchOnce(t *testing.T) {
 	}
 	if len(git.paths) != 1 || !slices.Equal(git.paths[0], want) {
 		t.Fatalf("paths = %v, want %v", git.paths, want)
+	}
+}
+
+func TestServeStdioTransport(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".sdd", "graph"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".sdd", "config.yaml"), []byte("graph_dir: .sdd/graph\nrepo_id: example.test/stdio-smoke\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".sdd", "config.local.yaml"), []byte("participant: Stdio Smoke\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^$")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		stdioServeHelperEnv+"=1",
+		"XDG_CONFIG_HOME="+filepath.Join(root, "xdg-config"),
+		"XDG_CACHE_HOME="+filepath.Join(root, "xdg-cache"),
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "stdio-smoke", Version: "test"}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		t.Fatalf("connect to stdio server: %v\nstderr:\n%s", err, stderr.String())
+	}
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "info", Arguments: map[string]any{}})
+	if err != nil {
+		_ = session.Close()
+		t.Fatalf("call info over stdio: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if result.IsError {
+		_ = session.Close()
+		t.Fatalf("info returned a tool error: %+v\nstderr:\n%s", result, stderr.String())
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("close stdio session: %v\nstderr:\n%s", err, stderr.String())
 	}
 }
