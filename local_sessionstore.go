@@ -252,8 +252,15 @@ func writeJSONAtomic(filename string, value any) error {
 		_ = temp.Close()
 		return err
 	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(name, filename)
+	if err := os.Rename(name, filename); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(filename))
 }

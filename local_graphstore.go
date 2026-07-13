@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -29,12 +31,34 @@ type FilesystemGraphStore struct {
 	project ProjectID
 	dir     string
 	mu      sync.Mutex
+
+	beforeApplyOperation    func(int) error
+	beforeRollbackOperation func(int) error
 }
 
 type filesystemApplyRecord struct {
-	Digest           string      `json:"digest"`
-	ExpectedRevision string      `json:"expected_revision"`
-	Result           ApplyResult `json:"result"`
+	Digest           string                 `json:"digest"`
+	ExpectedRevision string                 `json:"expected_revision"`
+	Result           ApplyResult            `json:"result"`
+	Transaction      *filesystemTransaction `json:"transaction,omitempty"`
+}
+
+type filesystemTransaction struct {
+	Operations []filesystemOperation `json:"operations"`
+}
+
+type filesystemOperation struct {
+	LogicalPath string              `json:"logical_path"`
+	Before      filesystemFileState `json:"before"`
+	After       filesystemFileState `json:"after"`
+	BackupPath  string              `json:"backup_path,omitempty"`
+	StagedPath  string              `json:"staged_path,omitempty"`
+}
+
+type filesystemFileState struct {
+	Exists bool   `json:"exists"`
+	Digest string `json:"digest,omitempty"`
+	Mode   uint32 `json:"mode,omitempty"`
 }
 
 func NewFilesystemGraphStore(options FilesystemGraphStoreOptions) (*FilesystemGraphStore, error) {
@@ -50,6 +74,9 @@ func NewFilesystemGraphStore(options FilesystemGraphStoreOptions) (*FilesystemGr
 	if err := os.MkdirAll(filepath.Join(options.GraphDir, ".sdd-runtime", "applied"), 0o755); err != nil {
 		return nil, fmt.Errorf("sdd: creating graph runtime directory: %w", err)
 	}
+	if err := os.MkdirAll(filepath.Join(options.GraphDir, ".sdd-runtime", "transactions"), 0o755); err != nil {
+		return nil, fmt.Errorf("sdd: creating graph transaction directory: %w", err)
+	}
 	return &FilesystemGraphStore{
 		project: options.Project,
 		dir:     options.GraphDir,
@@ -64,6 +91,9 @@ func (s *FilesystemGraphStore) Current(ctx context.Context) (*Snapshot, error) {
 		return nil, err
 	}
 	defer unlockFile(lock)
+	if err := s.recoverPendingTransactionsLocked(); err != nil {
+		return nil, err
+	}
 	return s.currentLocked(ctx)
 }
 
@@ -83,6 +113,9 @@ func (s *FilesystemGraphStore) Apply(ctx context.Context, expectedRevision strin
 		return ApplyResult{State: MutationNotApplied}, err
 	}
 	defer unlockFile(lock)
+	if err := s.recoverPendingTransactionsLocked(); err != nil {
+		return ApplyResult{State: MutationUnknown}, err
+	}
 	if prior, ok, err := s.loadApplyRecord(batch.ID); err != nil {
 		return ApplyResult{State: MutationUnknown}, err
 	} else if ok {
@@ -90,7 +123,7 @@ func (s *FilesystemGraphStore) Apply(ctx context.Context, expectedRevision strin
 			return ApplyResult{State: MutationNotApplied}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "mutation ID reused with a different digest"}
 		}
 		if prior.Result.State == MutationUnknown {
-			return s.reconcileRecord(prior)
+			return s.reconcileRecord(batch.ID, prior)
 		}
 		return prior.Result, nil
 	}
@@ -108,87 +141,33 @@ func (s *FilesystemGraphStore) Apply(ctx context.Context, expectedRevision strin
 	if batch.ID == "" || batch.Digest == "" || batch.Digest != wantDigest {
 		return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "mutation batch digest mismatch"}
 	}
-	record := filesystemApplyRecord{Digest: batch.Digest, ExpectedRevision: expectedRevision, Result: ApplyResult{State: MutationUnknown, Revision: currentRevision}}
-	if err := s.persistApplyRecord(batch.ID, record); err != nil {
+	transaction, err := s.prepareTransaction(ctx, batch, blobs)
+	if err != nil {
 		return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, err
 	}
-
-	type preparedFile struct {
-		path string
-		data []byte
+	record := filesystemApplyRecord{
+		Digest: batch.Digest, ExpectedRevision: expectedRevision,
+		Result: ApplyResult{State: MutationUnknown, Revision: currentRevision}, Transaction: transaction,
 	}
-	var writes []preparedFile
-	var deletes []string
-	for _, change := range batch.Changes {
-		target, err := safeGraphPath(s.dir, change.LogicalPath)
-		if err != nil {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, err
-		}
-		if change.Delete {
-			deletes = append(deletes, target)
-			continue
-		}
-		if len(change.CanonicalBytes) == 0 {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, fmt.Errorf("sdd: empty canonical bytes for %s", change.LogicalPath)
-		}
-		writes = append(writes, preparedFile{path: target, data: append([]byte(nil), change.CanonicalBytes...)})
+	if err := s.persistApplyRecord(batch.ID, record); err != nil {
+		cleanupErr := s.removeTransaction(batch.ID)
+		return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, errors.Join(err, cleanupErr)
 	}
-	for _, attachment := range batch.Attachments {
-		if blobs == nil {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, fmt.Errorf("sdd: staged blob reader is required")
+	if err := s.applyTransaction(transaction); err != nil {
+		if rollbackErr := s.rollbackTransaction(transaction); rollbackErr != nil {
+			return ApplyResult{State: MutationUnknown, Revision: currentRevision}, errors.Join(err, fmt.Errorf("rolling back mutation %s: %w", batch.ID, rollbackErr))
 		}
-		target, err := safeGraphPath(s.dir, attachment.LogicalPath)
-		if err != nil {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, err
+		rolledBackRevision, revisionErr := graphDirectoryRevision(s.dir)
+		if revisionErr != nil {
+			return ApplyResult{State: MutationUnknown}, errors.Join(err, revisionErr)
 		}
-		reader, err := blobs.Open(ctx, attachment.BlobID)
-		if err != nil {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, err
+		result := ApplyResult{State: MutationNotApplied, Revision: rolledBackRevision}
+		record.Result = result
+		if persistErr := s.persistApplyRecord(batch.ID, record); persistErr != nil {
+			return ApplyResult{State: MutationUnknown, Revision: rolledBackRevision}, errors.Join(err, persistErr)
 		}
-		data, readErr := io.ReadAll(reader)
-		closeErr := reader.Close()
-		if readErr != nil {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, readErr
-		}
-		if closeErr != nil {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, closeErr
-		}
-		if int64(len(data)) != attachment.Size || !digestMatches(data, attachment.Digest) {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, fmt.Errorf("sdd: staged blob %s does not match prepared facts", attachment.BlobID)
-		}
-		writes = append(writes, preparedFile{path: target, data: data})
-	}
-
-	temps := make([]preparedFile, 0, len(writes))
-	for _, write := range writes {
-		if err := os.MkdirAll(filepath.Dir(write.path), 0o755); err != nil {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, err
-		}
-		temp, err := os.CreateTemp(filepath.Dir(write.path), ".sdd-apply-*")
-		if err != nil {
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, err
-		}
-		name := temp.Name()
-		if _, err := temp.Write(write.data); err != nil {
-			_ = temp.Close()
-			_ = os.Remove(name)
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, err
-		}
-		if err := temp.Close(); err != nil {
-			_ = os.Remove(name)
-			return ApplyResult{State: MutationNotApplied, Revision: currentRevision}, err
-		}
-		temps = append(temps, preparedFile{path: write.path, data: []byte(name)})
-	}
-	for _, temp := range temps {
-		if err := os.Rename(string(temp.data), temp.path); err != nil {
-			return ApplyResult{State: MutationUnknown, Revision: currentRevision}, err
-		}
-	}
-	for _, target := range deletes {
-		if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
-			return ApplyResult{State: MutationUnknown, Revision: currentRevision}, err
-		}
+		cleanupErr := s.removeTransaction(batch.ID)
+		return result, errors.Join(err, cleanupErr)
 	}
 	newRevision, err := graphDirectoryRevision(s.dir)
 	if err != nil {
@@ -199,7 +178,208 @@ func (s *FilesystemGraphStore) Apply(ctx context.Context, expectedRevision strin
 	if err := s.persistApplyRecord(batch.ID, record); err != nil {
 		return ApplyResult{State: MutationUnknown, Revision: newRevision}, err
 	}
-	return result, nil
+	return result, s.removeTransaction(batch.ID)
+}
+
+func (s *FilesystemGraphStore) prepareTransaction(ctx context.Context, batch MutationBatch, blobs StagedBlobReader) (_ *filesystemTransaction, err error) {
+	type plannedOperation struct {
+		logicalPath string
+		after       []byte
+		delete      bool
+	}
+	var planned []plannedOperation
+	seen := map[string]bool{}
+	add := func(logicalPath string, data []byte, deleteFile bool) error {
+		if _, err := canonicalGraphPath(s.dir, logicalPath); err != nil {
+			return err
+		}
+		if seen[logicalPath] {
+			return fmt.Errorf("sdd: mutation contains duplicate graph path %q", logicalPath)
+		}
+		seen[logicalPath] = true
+		if !deleteFile && len(data) == 0 {
+			return fmt.Errorf("sdd: empty canonical bytes for %s", logicalPath)
+		}
+		planned = append(planned, plannedOperation{logicalPath: logicalPath, after: append([]byte(nil), data...), delete: deleteFile})
+		return nil
+	}
+	for _, change := range batch.Changes {
+		if err := add(change.LogicalPath, change.CanonicalBytes, change.Delete); err != nil {
+			return nil, err
+		}
+	}
+	for _, attachment := range batch.Attachments {
+		if blobs == nil {
+			return nil, fmt.Errorf("sdd: staged blob reader is required")
+		}
+		reader, err := blobs.Open(ctx, attachment.BlobID)
+		if err != nil {
+			return nil, err
+		}
+		data, readErr := io.ReadAll(reader)
+		closeErr := reader.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		if int64(len(data)) != attachment.Size || !digestMatches(data, attachment.Digest) {
+			return nil, fmt.Errorf("sdd: staged blob %s does not match prepared facts", attachment.BlobID)
+		}
+		if err := add(attachment.LogicalPath, data, false); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := s.removeTransaction(batch.ID); err != nil {
+		return nil, err
+	}
+	transactionDir, err := s.transactionDir(batch.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(transactionDir, 0o755); err != nil {
+		return nil, err
+	}
+	if err := syncDirectory(filepath.Dir(transactionDir)); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, s.removeTransaction(batch.ID))
+		}
+	}()
+	transaction := &filesystemTransaction{Operations: make([]filesystemOperation, 0, len(planned))}
+	for index, item := range planned {
+		target, err := canonicalGraphPath(s.dir, item.logicalPath)
+		if err != nil {
+			return nil, err
+		}
+		before, beforeBytes, err := readFilesystemState(target)
+		if err != nil {
+			return nil, fmt.Errorf("sdd: reading graph path %s before mutation: %w", item.logicalPath, err)
+		}
+		operation := filesystemOperation{LogicalPath: item.logicalPath, Before: before}
+		if before.Exists {
+			operation.BackupPath = transactionFilePath(batch.ID, "backup", index)
+			backup, err := journalPath(s.dir, operation.BackupPath)
+			if err != nil {
+				return nil, err
+			}
+			if err := writeFileDurable(backup, beforeBytes, fs.FileMode(before.Mode)); err != nil {
+				return nil, err
+			}
+		}
+		if !item.delete {
+			operation.After = filesystemFileState{Exists: true, Digest: filesystemDigest(item.after), Mode: uint32(0o644)}
+			operation.StagedPath = transactionFilePath(batch.ID, "staged", index)
+			staged, err := journalPath(s.dir, operation.StagedPath)
+			if err != nil {
+				return nil, err
+			}
+			if err := writeFileDurable(staged, item.after, 0o644); err != nil {
+				return nil, err
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return nil, err
+		}
+		transaction.Operations = append(transaction.Operations, operation)
+	}
+	if err := syncDirectory(transactionDir); err != nil {
+		return nil, err
+	}
+	return transaction, nil
+}
+
+func (s *FilesystemGraphStore) applyTransaction(transaction *filesystemTransaction) error {
+	if err := s.validateTransactionStates(transaction); err != nil {
+		return err
+	}
+	for index, operation := range transaction.Operations {
+		if s.beforeApplyOperation != nil {
+			if err := s.beforeApplyOperation(index); err != nil {
+				return err
+			}
+		}
+		target, err := canonicalGraphPath(s.dir, operation.LogicalPath)
+		if err != nil {
+			return err
+		}
+		if operation.After.Exists {
+			staged, err := journalPath(s.dir, operation.StagedPath)
+			if err != nil {
+				return err
+			}
+			if err := os.Rename(staged, target); err != nil {
+				return err
+			}
+		} else if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err := syncDirectory(filepath.Dir(target)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *FilesystemGraphStore) rollbackTransaction(transaction *filesystemTransaction) error {
+	if err := s.validateTransactionStates(transaction); err != nil {
+		return err
+	}
+	for index := len(transaction.Operations) - 1; index >= 0; index-- {
+		operation := transaction.Operations[index]
+		if s.beforeRollbackOperation != nil {
+			if err := s.beforeRollbackOperation(index); err != nil {
+				return err
+			}
+		}
+		target, err := canonicalGraphPath(s.dir, operation.LogicalPath)
+		if err != nil {
+			return err
+		}
+		current, _, err := readFilesystemState(target)
+		if err != nil {
+			return err
+		}
+		if sameFilesystemState(current, operation.Before) {
+			continue
+		}
+		if operation.Before.Exists {
+			backup, err := journalPath(s.dir, operation.BackupPath)
+			if err != nil {
+				return err
+			}
+			if err := restoreFile(backup, target, fs.FileMode(operation.Before.Mode)); err != nil {
+				return err
+			}
+		} else if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err := syncDirectory(filepath.Dir(target)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *FilesystemGraphStore) validateTransactionStates(transaction *filesystemTransaction) error {
+	for _, operation := range transaction.Operations {
+		target, err := canonicalGraphPath(s.dir, operation.LogicalPath)
+		if err != nil {
+			return err
+		}
+		current, _, err := readFilesystemState(target)
+		if err != nil {
+			return err
+		}
+		if !sameFilesystemState(current, operation.Before) && !sameFilesystemState(current, operation.After) {
+			return fmt.Errorf("sdd: graph path %s changed outside pending mutation", operation.LogicalPath)
+		}
+	}
+	return nil
 }
 
 func (s *FilesystemGraphStore) Reconcile(_ context.Context, mutationID, batchDigest string) (ApplyResult, error) {
@@ -220,7 +400,7 @@ func (s *FilesystemGraphStore) Reconcile(_ context.Context, mutationID, batchDig
 	if record.Digest != batchDigest {
 		return ApplyResult{State: MutationUnknown}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "mutation digest does not match recorded apply"}
 	}
-	return s.reconcileRecord(record)
+	return s.reconcileRecord(mutationID, record)
 }
 
 func (s *FilesystemGraphStore) ReadAttachmentPage(_ context.Context, entryID, filename string, offset int64, maxBytes int) (AttachmentPage, error) {
@@ -231,6 +411,9 @@ func (s *FilesystemGraphStore) ReadAttachmentPage(_ context.Context, entryID, fi
 		return AttachmentPage{}, err
 	}
 	defer unlockFile(lock)
+	if err := s.recoverPendingTransactionsLocked(); err != nil {
+		return AttachmentPage{}, err
+	}
 	if offset < 0 || maxBytes <= 0 {
 		return AttachmentPage{}, fmt.Errorf("sdd: invalid attachment page range")
 	}
@@ -322,9 +505,24 @@ func (s *FilesystemGraphStore) persistApplyRecord(id string, record filesystemAp
 	return writeJSONAtomic(filename, record)
 }
 
-func (s *FilesystemGraphStore) reconcileRecord(record filesystemApplyRecord) (ApplyResult, error) {
+func (s *FilesystemGraphStore) reconcileRecord(id string, record filesystemApplyRecord) (ApplyResult, error) {
 	if record.Result.State != MutationUnknown {
 		return record.Result, nil
+	}
+	if record.Transaction != nil {
+		if err := s.rollbackTransaction(record.Transaction); err != nil {
+			return ApplyResult{State: MutationUnknown, Revision: record.Result.Revision}, err
+		}
+		revision, err := graphDirectoryRevision(s.dir)
+		if err != nil {
+			return ApplyResult{State: MutationUnknown}, err
+		}
+		result := ApplyResult{State: MutationNotApplied, Revision: revision}
+		record.Result = result
+		if err := s.persistApplyRecord(id, record); err != nil {
+			return ApplyResult{State: MutationUnknown, Revision: revision}, err
+		}
+		return result, s.removeTransaction(id)
 	}
 	revision, err := graphDirectoryRevision(s.dir)
 	if err != nil {
@@ -334,6 +532,31 @@ func (s *FilesystemGraphStore) reconcileRecord(record filesystemApplyRecord) (Ap
 		return ApplyResult{State: MutationNotApplied, Revision: revision}, nil
 	}
 	return ApplyResult{State: MutationUnknown, Revision: revision}, nil
+}
+
+func (s *FilesystemGraphStore) recoverPendingTransactionsLocked() error {
+	dir := filepath.Join(s.dir, ".sdd-runtime", "applied")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		id := strings.TrimSuffix(entry.Name(), ".json")
+		record, ok, err := s.loadApplyRecord(id)
+		if err != nil {
+			return err
+		}
+		if !ok || record.Result.State != MutationUnknown || record.Transaction == nil {
+			continue
+		}
+		if _, err := s.reconcileRecord(id, record); err != nil {
+			return fmt.Errorf("sdd: recovering pending mutation %s: %w", id, err)
+		}
+	}
+	return nil
 }
 
 func graphDirectoryRevision(dir string) (string, error) {
@@ -373,6 +596,139 @@ func graphDirectoryRevision(dir string) (string, error) {
 		_, _ = hash.Write([]byte{0})
 	}
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func (s *FilesystemGraphStore) removeTransaction(id string) error {
+	dir, err := s.transactionDir(id)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(dir))
+}
+
+func (s *FilesystemGraphStore) transactionDir(id string) (string, error) {
+	if _, err := s.applyRecordPath(id); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.dir, ".sdd-runtime", "transactions", id), nil
+}
+
+func transactionFilePath(id, class string, index int) string {
+	return filepath.ToSlash(filepath.Join(".sdd-runtime", "transactions", id, class, fmt.Sprintf("%06d", index)))
+}
+
+func journalPath(root, logicalPath string) (string, error) {
+	if !strings.HasPrefix(logicalPath, ".sdd-runtime/transactions/") {
+		return "", fmt.Errorf("sdd: invalid transaction path %q", logicalPath)
+	}
+	return safeGraphPath(root, logicalPath)
+}
+
+func canonicalGraphPath(root, logicalPath string) (string, error) {
+	if logicalPath == ".sdd-runtime" || strings.HasPrefix(logicalPath, ".sdd-runtime/") {
+		return "", fmt.Errorf("sdd: canonical mutation cannot target runtime path %q", logicalPath)
+	}
+	return safeGraphPath(root, logicalPath)
+}
+
+func readFilesystemState(filename string) (filesystemFileState, []byte, error) {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return filesystemFileState{}, nil, nil
+	}
+	if err != nil {
+		return filesystemFileState{}, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return filesystemFileState{}, nil, fmt.Errorf("not a regular file")
+	}
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return filesystemFileState{}, nil, err
+	}
+	return filesystemFileState{Exists: true, Digest: filesystemDigest(data), Mode: uint32(info.Mode().Perm())}, data, nil
+}
+
+func sameFilesystemState(left, right filesystemFileState) bool {
+	if left.Exists != right.Exists {
+		return false
+	}
+	if !left.Exists {
+		return true
+	}
+	return left.Digest == right.Digest && left.Mode == right.Mode
+}
+
+func filesystemDigest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func writeFileDurable(filename string, data []byte, mode fs.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if err := file.Chmod(mode); err != nil {
+		return errors.Join(err, file.Close())
+	}
+	if _, err := file.Write(data); err != nil {
+		return errors.Join(err, file.Close())
+	}
+	if err := file.Sync(); err != nil {
+		return errors.Join(err, file.Close())
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return syncDirectory(filepath.Dir(filename))
+}
+
+func restoreFile(backup, target string, mode fs.FileMode) error {
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(target), ".sdd-rollback-*")
+	if err != nil {
+		return err
+	}
+	name := temp.Name()
+	defer func() { _ = os.Remove(name) }()
+	if err := temp.Chmod(mode); err != nil {
+		return errors.Join(err, temp.Close())
+	}
+	if _, err := temp.Write(data); err != nil {
+		return errors.Join(err, temp.Close())
+	}
+	if err := temp.Sync(); err != nil {
+		return errors.Join(err, temp.Close())
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, target)
+}
+
+func syncDirectory(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	handle, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = handle.Close() }()
+	return handle.Sync()
 }
 
 func safeGraphPath(root, logicalPath string) (string, error) {

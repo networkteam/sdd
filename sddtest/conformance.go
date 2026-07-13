@@ -66,8 +66,8 @@ func RunGraphStoreTests(t *testing.T, factory func(*testing.T) GraphStoreFixture
 		t.Fatalf("Current revision = %q, want %q", snapshot.Revision(), fixture.InitialRevision)
 	}
 	stale, staleErr := fixture.Store.Apply(t.Context(), fixture.InitialRevision+"-stale", fixture.Batch, fixture.Blobs)
-	if stale.State == sdd.MutationApplied {
-		t.Fatalf("stale Apply reported applied: %+v (error %v)", stale, staleErr)
+	if stale.State != sdd.MutationNotApplied {
+		t.Fatalf("stale Apply = %+v (error %v), want not_applied", stale, staleErr)
 	}
 	applied, err := fixture.Store.Apply(t.Context(), fixture.InitialRevision, fixture.Batch, fixture.Blobs)
 	if err != nil {
