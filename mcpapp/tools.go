@@ -8,31 +8,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/networkteam/sdd"
 	"github.com/networkteam/sdd/internal/engine"
-	"github.com/networkteam/sdd/internal/model"
-	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
 )
-
-// framingLayout renders the session framing injected once per consumer:
-// aspirations, guiding directives, active focus, and participants. Brief
-// rendering plus heat-ranked caps keep the block a few KB — full summaries
-// measured ~21KB, and framing is orientation, not decision material
-// (d-tac-bfc's carve-out of the framing share of s-tac-4hh).
-const framingLayout = `aspirations:rank(heat(exp-14d)):n(8):brief,` +
-	`kind(directive):intent(guiding):active:rank(heat(exp-14d)):n(10):name("Guiding directives"):brief:as-list,` +
-	`focus:brief,` +
-	`participants:brief`
-
-// defaultShellCanonical is the shell procedure start_session opens when the
-// caller names none — the interactive user-dialogue base. Projects override
-// conduct by superseding its chain; future shells (autonomous sessions)
-// enter through the same door with an explicit shell param.
-const defaultShellCanonical = "user-dialogue"
 
 // defaultSearchHits caps search responses when the caller sets no limit —
 // the CLI's `--limit 8` drill behavior, adopted as the MCP default
@@ -364,12 +346,23 @@ func (s *Server) registerTools() {
 // start_session opens. The rejection inlines the parked-sessions list
 // (handle + label), so a fresh-context agent poking at a stale handle gets
 // its bearings in the same round trip (d-tac-dbk).
-func (s *Server) boundSession(ms *mcp.ServerSession) (*shellSession, error) {
-	if ss := s.sessions.bound(ms); ss != nil {
+func (s *Server) boundSession(ctx context.Context, req *mcp.CallToolRequest) (*shellSession, error) {
+	if ss := s.sessions.bound(req.Session); ss != nil {
 		return ss, nil
 	}
 	msg := "no session is open — start_session is the door (reads stay free)"
-	if descs, err := s.sessions.listOpenSessions(); err == nil && len(descs) > 0 {
+	var descs []sessionDescriptor
+	items, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item.HolderLive || len(item.Open) == 0 {
+			continue
+		}
+		descs = append(descs, sessionDescriptor{Session: string(item.Session), Label: item.Label})
+	}
+	if len(descs) > 0 {
 		lines := make([]string, 0, len(descs))
 		for _, d := range descs {
 			line := d.Session
@@ -383,156 +376,85 @@ func (s *Server) boundSession(ms *mcp.ServerSession) (*shellSession, error) {
 	return nil, toolError("%s", msg)
 }
 
-// newShellSession creates a fresh SDD session (log, registry, engine),
-// unbound — the door binds it after the shell procedure started.
-func (s *Server) newShellSession() (*shellSession, error) {
-	now := time.Now()
-	id := newSessionID(now)
-	logFile, err := s.sessions.openLog(id)
-	if err != nil {
-		return nil, err
+func mcpSessionID(session *mcp.ServerSession) string {
+	if session == nil {
+		return "stdio"
 	}
-
-	participant := ""
-	if info, err := s.finder.Info(query.InfoQuery{}); err == nil {
-		participant = info.LocalParticipant
+	if id := session.ID(); id != "" {
+		return id
 	}
-
-	ss := &shellSession{
-		id:           id,
-		participant:  participant,
-		logFile:      logFile,
-		lastActivity: now,
-	}
-	registry, err := s.buildRegistry(ss)
-	if err != nil {
-		ss.close()
-		return nil, err
-	}
-	ss.graphs = s.finder.NewGraphSource(s.graphDir)
-	ss.engine = engine.New(registry, ss.graphs)
-	ss.sess = ss.engine.NewSession(id, participant, engine.NewWriterSink(logFile))
-	return ss, nil
+	return fmt.Sprintf("connection-%p", session)
 }
 
-func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, args StartSessionArgs) (*mcp.CallToolResult, ServeResult, error) {
-	canonical := strings.TrimSpace(args.Shell)
-	if canonical == "" {
-		canonical = defaultShellCanonical
-	}
-
-	// Knocking on an already-open door re-serves the shell's orientation in
-	// full — the "re-servable on demand" half of the tier-one contract. The
-	// connection's served-block memory resets, so units and framing serve
-	// full text again.
-	if ss := s.sessions.bound(req.Session); ss != nil && ss.shellInstance != "" {
-		if inst, ok := ss.sess.Instance(ss.shellInstance); ok && inst.Status == engine.StatusRunning {
-			ss.touch(time.Now())
-			if err := applyLabel(ss, args.Label); err != nil {
-				return nil, ServeResult{}, err
-			}
-			s.forgetConnection(req.Session)
-			serve, err := ss.sess.Serve(ss.shellInstance)
-			if err != nil {
-				return nil, ServeResult{}, err
-			}
-			return nil, s.toServeResult(req.Session, ss, serve), nil
+func mcpClientName(session *mcp.ServerSession) string {
+	if session != nil {
+		if params := session.InitializeParams(); params != nil && params.ClientInfo != nil {
+			return params.ClientInfo.Name
 		}
 	}
+	return ""
+}
 
-	ss, err := s.newShellSession()
+func mcpClientVersion(session *mcp.ServerSession) string {
+	if session != nil {
+		if params := session.InitializeParams(); params != nil && params.ClientInfo != nil {
+			return params.ClientInfo.Version
+		}
+	}
+	return ""
+}
+
+// newShellSession creates a fresh SDD session (log, registry, engine),
+// unbound — the door binds it after the shell procedure started.
+func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, args StartSessionArgs) (*mcp.CallToolResult, ServeResult, error) {
+	identity := s.requestIdentity(req)
+	if current := s.sessions.bound(req.Session); current != nil {
+		serve, err := current.root.Reopen(ctx, identity, args.Label)
+		if err != nil {
+			return nil, ServeResult{}, err
+		}
+		current.rootIdentity = identity
+		s.forgetConnection(req.Session)
+		result, err := s.toRootServeResult(ctx, req, current, serve)
+		return nil, result, err
+	}
+	workflow, serve, err := s.app.OpenWorkflow(ctx, identity, s.project, sdd.WorkflowOpenRequest{
+		MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
+		Shell: args.Shell, Label: args.Label,
+	})
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	spec, err := s.loadProcedure(ss, canonical)
-	if err != nil {
-		ss.close()
-		return nil, ServeResult{}, err
-	}
-	if spec.Class != model.ProcedureClassShell {
-		ss.close()
-		return nil, ServeResult{}, toolError("%q is a move, not a session shell — open the session first, then start it with start_procedure", canonical)
-	}
-	serve, err := ss.sess.Start(spec, nil, "")
-	if err != nil {
-		ss.close()
-		return nil, ServeResult{}, err
-	}
-	ss.shellInstance = serve.Instance
-	// Label lands only now — after the canonical resolved and the shell
-	// started (d-cpt-h99 rider: a rejected start must not label a session).
-	if err := applyLabel(ss, args.Label); err != nil {
-		return nil, ServeResult{}, err
-	}
+	ss := &shellSession{id: string(workflow.ID()), participant: "", root: workflow, rootIdentity: identity, lastActivity: time.Now()}
 	prev := s.sessions.bind(req.Session, ss)
 	s.watchDisconnect(req.Session)
-	s.leaveSession(prev)
-	return nil, s.toServeResult(req.Session, ss, serve), nil
+	if err := s.leaveSession(ctx, prev); err != nil {
+		return nil, ServeResult{}, err
+	}
+	result, err := s.toRootServeResult(ctx, req, ss, serve)
+	return nil, result, err
 }
 
 func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, args StartProcedureArgs) (*mcp.CallToolResult, ServeResult, error) {
 	if strings.TrimSpace(args.Canonical) == "" {
 		return nil, ServeResult{}, toolError("canonical is required")
 	}
-	ss, err := s.boundSession(req.Session)
+	ss, err := s.boundSession(ctx, req)
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	ss.touch(time.Now())
-	// Drop the memo so this advance loads fresh — it picks up writes from other
-	// connections or the CLI since the last advance. Cheap and idempotent;
-	// unlike the old refresh, forgetting it can only stale orientation, never
-	// gate a write on a stale snapshot (the write path re-invalidates itself).
-	ss.graphs.Invalidate()
-
-	spec, err := s.loadProcedure(ss, args.Canonical)
+	identity := s.requestIdentity(req)
+	serve, err := ss.root.Start(ctx, identity, sdd.WorkflowStartRequest{Canonical: args.Canonical, Params: args.Params, Label: args.Label, Parent: args.Parent})
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	if spec.Class == model.ProcedureClassShell {
-		return nil, ServeResult{}, toolError("%q is a session shell — sessions open through start_session, not start_procedure", args.Canonical)
-	}
-	// Label lands only after the canonical resolved (d-cpt-h99 rider): a
-	// rejected start_procedure must not label the session.
-	if err := applyLabel(ss, args.Label); err != nil {
-		return nil, ServeResult{}, err
-	}
-
-	// Moves nest under the session shell by construction — an explicit
-	// parent (a sub-move dispatched from a running move) wins.
-	parent := args.Parent
-	if parent == "" {
-		parent = ss.shellInstance
-	}
-	serve, err := ss.sess.Start(spec, args.Params, parent)
-	if err != nil {
-		return nil, ServeResult{}, err
-	}
-	return nil, s.toServeResult(req.Session, ss, serve), nil
-}
-
-// maxLabelLen caps session labels — a label is a list row, not a summary.
-const maxLabelLen = 120
-
-// applyLabel validates and records an agent-supplied session label. Empty
-// means "no update"; the engine skips appending an unchanged value.
-func applyLabel(ss *shellSession, label string) error {
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return nil
-	}
-	if strings.ContainsAny(label, "\n\r") {
-		return toolError("label must be a single line")
-	}
-	if utf8.RuneCountInString(label) > maxLabelLen {
-		return toolError("label exceeds %d characters — it is a list row, not a summary", maxLabelLen)
-	}
-	ss.sess.SetLabel(label)
-	return nil
+	ss.rootIdentity = identity
+	result, err := s.toRootServeResult(ctx, req, ss, serve)
+	return nil, result, err
 }
 
 func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextArgs) (*mcp.CallToolResult, ServeResult, error) {
-	ss, err := s.boundSession(req.Session)
+	ss, err := s.boundSession(ctx, req)
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
@@ -542,67 +464,14 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 	if len(args.Report) == 0 {
 		return nil, ServeResult{}, toolError("report is required: state fields per the served report_schema, or a chooser answer {chooser, choice, userWords?, fields?}")
 	}
-	ss.touch(time.Now())
-	// Fresh load for this advance; see startProcedure for why this is safe as a
-	// plain memo-drop rather than the old hand-maintained refresh.
-	ss.graphs.Invalidate()
-	if err := applyLabel(ss, args.Label); err != nil {
-		return nil, ServeResult{}, err
-	}
-
-	var serve *engine.Serve
-	if chooser, choice, ok := chooserAnswer(args.Report); ok {
-		fields, _ := args.Report["fields"].(map[string]any)
-		userWords, _ := args.Report["userWords"].(string)
-		serve, err = ss.sess.Answer(args.Instance, chooser, choice, fields, userWords)
-	} else {
-		serve, err = ss.sess.Report(args.Instance, args.Report)
-	}
+	identity := s.requestIdentity(req)
+	serve, err := ss.root.Advance(ctx, identity, sdd.WorkflowAdvanceRequest{Instance: args.Instance, Report: args.Report, Label: args.Label})
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	res := s.toServeResult(req.Session, ss, serve)
-	// A move that ended lands the dialogue back on the session shell's
-	// junction — told on every response, never left to agent memory.
-	if serve.Status != engine.StatusRunning && serve.Instance != ss.shellInstance {
-		res.Base = s.serveShell(req.Session, ss)
-	}
-	return nil, res, nil
-}
-
-// serveShell re-serves the session shell's current position — the landing
-// every ended move returns the dialogue to. Nil when the session has no
-// shell (should not happen behind the door; callers omit the field then).
-func (s *Server) serveShell(ms *mcp.ServerSession, ss *shellSession) *BaseServe {
-	if ss.shellInstance == "" || ss.sess == nil {
-		return nil
-	}
-	serve, err := ss.sess.Serve(ss.shellInstance)
-	if err != nil {
-		return nil
-	}
-	res := s.toServeResult(ms, ss, serve)
-	return &BaseServe{
-		Session:        res.Session,
-		Instance:       res.Instance,
-		Procedure:      res.Procedure,
-		Status:         res.Status,
-		Step:           res.Step,
-		Goal:           res.Goal,
-		Instructions:   res.Instructions,
-		PendingChooser: res.PendingChooser,
-		Framing:        res.Framing,
-		OpenThreads:    res.OpenThreads,
-	}
-}
-
-// chooserAnswer detects the chooser-answer form of a report: an object
-// carrying chooser + choice. The two key names are reserved — no procedure
-// state field may use them (spec authors: name fields otherwise).
-func chooserAnswer(report map[string]any) (chooser, choice string, ok bool) {
-	chooser, hasChooser := report["chooser"].(string)
-	choice, hasChoice := report["choice"].(string)
-	return chooser, choice, hasChooser && hasChoice && chooser != "" && choice != ""
+	ss.rootIdentity = identity
+	result, err := s.toRootServeResult(ctx, req, ss, serve)
+	return nil, result, err
 }
 
 func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
@@ -610,33 +479,30 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 		return nil, AbandonResult{}, toolError("pass exactly one of instance (abandon a move in the bound session) or session (tear down a parked session)")
 	}
 	if args.Session != "" {
-		return s.abandonSession(req, args)
+		return s.abandonSession(ctx, req, args)
 	}
-	ss, err := s.boundSession(req.Session)
+	ss, err := s.boundSession(ctx, req)
 	if err != nil {
 		return nil, AbandonResult{}, err
 	}
-	if args.Instance == ss.shellInstance {
-		return nil, AbandonResult{}, toolError("the session shell concludes through its own junction (answer conclude) — abandon is for moves")
-	}
-	ss.touch(time.Now())
-
-	var held []string
-	if inst, ok := ss.sess.Instance(args.Instance); ok {
-		if marker, present := storeString(inst.Store, "wipMarker"); present {
-			held = append(held, marker)
-		}
-	}
-	if err := ss.sess.Abandon(args.Instance, args.Reason); err != nil {
+	identity := s.requestIdentity(req)
+	result, err := ss.root.Abandon(ctx, identity, args.Instance, args.Reason)
+	if err != nil {
 		return nil, AbandonResult{}, err
 	}
-	res := AbandonResult{Abandoned: true, HeldMarkers: held}
-	if len(held) > 0 {
-		res.Instructions = "The instance holds WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
+	ss.rootIdentity = identity
+	out := AbandonResult{Abandoned: result.Abandoned, HeldMarkers: result.HeldMarkers}
+	if len(out.HeldMarkers) > 0 {
+		out.Instructions = "The instance holds WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
 	}
-	// Abandoning a move lands the dialogue back on the shell junction.
-	res.Base = s.serveShell(req.Session, ss)
-	return nil, res, nil
+	if result.Base != nil {
+		base, err := s.toRootServeResult(ctx, req, ss, result.Base)
+		if err != nil {
+			return nil, AbandonResult{}, err
+		}
+		out.Base = rootBaseServe(base)
+	}
+	return nil, out, nil
 }
 
 // park shelves a running move back to the shell junction: nothing about the
@@ -646,35 +512,31 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 // (d-tac-dbk). Seeded drafts ride the normal dispatch path; park adds no
 // side channel.
 func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkArgs) (*mcp.CallToolResult, ParkResult, error) {
-	ss, err := s.boundSession(req.Session)
+	ss, err := s.boundSession(ctx, req)
 	if err != nil {
 		return nil, ParkResult{}, err
 	}
 	if args.Instance == "" {
 		return nil, ParkResult{}, toolError("instance is required")
 	}
-	if args.Instance == ss.shellInstance {
-		return nil, ParkResult{}, toolError("the session shell is the junction moves park back to — park is for moves")
-	}
-	ss.touch(time.Now())
-
-	inst, ok := ss.sess.Instance(args.Instance)
-	if !ok {
-		return nil, ParkResult{}, toolError("instance %q not found in session", args.Instance)
-	}
-	if err := ss.sess.Park(args.Instance, args.Note); err != nil {
+	identity := s.requestIdentity(req)
+	result, err := ss.root.Park(ctx, identity, args.Instance, args.Note)
+	if err != nil {
 		return nil, ParkResult{}, err
 	}
-	res := ParkResult{
-		Parked:    true,
-		Instance:  inst.ID,
-		Procedure: inst.Spec.Canonical,
-		Step:      inst.Step,
-		Instructions: "The move is parked with its state kept — it stays listed as an open thread " +
-			"and resumes through next. Tell the user it is recorded as open work, not forgotten.",
-		Base: s.serveShell(req.Session, ss),
+	ss.rootIdentity = identity
+	out := ParkResult{
+		Parked: true, Instance: result.Instance, Procedure: result.Procedure, Step: result.Step,
+		Instructions: "The move is parked with its state kept — it stays listed as an open thread and resumes through next. Tell the user it is recorded as open work, not forgotten.",
 	}
-	return nil, res, nil
+	if result.Base != nil {
+		base, err := s.toRootServeResult(ctx, req, ss, result.Base)
+		if err != nil {
+			return nil, ParkResult{}, err
+		}
+		out.Base = rootBaseServe(base)
+	}
+	return nil, out, nil
 }
 
 // abandonSession tears down a parked session by handle: no resume, no
@@ -682,216 +544,104 @@ func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkAr
 // ~28KB framing per session). The response names the label and every
 // discarded thread — nothing vanishes silently. Needs no bound session:
 // teardown is maintenance, not dialogue.
-func (s *Server) abandonSession(req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
+func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
+	identity := s.requestIdentity(req)
 	current := s.sessions.bound(req.Session)
-	if current != nil && current.id == args.Session {
+	if current != nil && current.root.ID() == sdd.SessionID(args.Session) {
 		return nil, AbandonResult{}, toolError("session %s is the one this connection is in — the session shell concludes through its own junction (answer conclude)", args.Session)
 	}
-	if s.sessions.liveIDs()[args.Session] {
-		return nil, AbandonResult{}, toolError("session %s is live on another connection — only parked sessions tear down", args.Session)
+	result, err := s.app.AbandonWorkflowSession(ctx, identity, s.project, sdd.WorkflowResumeRequest{
+		SessionID: sdd.SessionID(args.Session), MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
+	}, args.Reason)
+	if err != nil {
+		return nil, AbandonResult{}, err
 	}
-
-	res := AbandonResult{Abandoned: true, Session: args.Session}
-	if live := s.sessions.lookupID(args.Session); live != nil && live.logFile != nil && live.sess != nil {
-		// Parked in memory: end every running instance through the engine
-		// session, whose log file is already open.
-		res.Label = live.sess.Label
-		for _, inst := range live.sess.Instances() {
-			if inst.Status != engine.StatusRunning {
-				continue
-			}
-			if inst.ID != live.shellInstance {
-				res.DiscardedThreads = append(res.DiscardedThreads, inst.Spec.Canonical+" at "+inst.Step)
-				if marker, ok := storeString(inst.Store, "wipMarker"); ok {
-					res.HeldMarkers = append(res.HeldMarkers, marker)
-				}
-			}
-			if err := live.sess.Abandon(inst.ID, args.Reason); err != nil {
-				return nil, AbandonResult{}, err
-			}
-		}
-		live.close()
-		s.sessions.drop(args.Session)
-	} else {
-		// On disk: append terminal events straight to the log — no replay, so
-		// even a version-skewed session tears down.
-		events, err := s.sessions.readLog(args.Session)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil, AbandonResult{}, toolError("unknown session %q — list_sessions shows what is parked", args.Session)
-			}
-			return nil, AbandonResult{}, err
-		}
-		desc := deriveDescriptor(args.Session, events)
-		res.Label = desc.Label
-		for _, inst := range desc.Open {
-			res.DiscardedThreads = append(res.DiscardedThreads, inst.Procedure+" at "+inst.Step)
-		}
-		running, markers := teardownFold(events)
-		res.HeldMarkers = markers
-		if err := s.sessions.appendAbandons(args.Session, events, running, args.Reason); err != nil {
-			return nil, AbandonResult{}, err
-		}
+	out := AbandonResult{Abandoned: true, Session: string(result.Session), Label: result.Label, HeldMarkers: result.HeldMarkers}
+	for _, instance := range result.Discarded {
+		out.DiscardedThreads = append(out.DiscardedThreads, instance.Procedure+" at "+instance.Step)
 	}
-	if len(res.HeldMarkers) > 0 {
-		res.Instructions = "The discarded threads hold WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
+	if len(out.HeldMarkers) > 0 {
+		out.Instructions = "The discarded threads hold WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
 	}
 	if current != nil {
-		res.Base = s.serveShell(req.Session, current)
+		serve, err := current.root.ServeShell(ctx, identity)
+		if err != nil {
+			return nil, AbandonResult{}, err
+		}
+		if serve != nil {
+			mapped, err := s.toRootServeResult(ctx, req, current, serve)
+			if err != nil {
+				return nil, AbandonResult{}, err
+			}
+			out.Base = rootBaseServe(mapped)
+		}
 	}
-	return nil, res, nil
+	return nil, out, nil
 }
 
 func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ ListSessionsArgs) (*mcp.CallToolResult, ListSessionsResult, error) {
-	if _, err := s.boundSession(req.Session); err != nil {
+	if _, err := s.boundSession(ctx, req); err != nil {
 		return nil, ListSessionsResult{}, err
 	}
-	descs, err := s.sessions.listOpenSessions()
+	items, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
 	if err != nil {
 		return nil, ListSessionsResult{}, err
 	}
-	return nil, ListSessionsResult{Sessions: descs}, nil
+	var result ListSessionsResult
+	for _, item := range items {
+		if item.HolderLive || len(item.Open) == 0 {
+			continue
+		}
+		desc := sessionDescriptor{Session: string(item.Session), Label: item.Label, Participant: item.Participant, Anchor: item.Anchor}
+		if !item.LastActivity.IsZero() {
+			desc.LastActivity = item.LastActivity.Format(time.RFC3339)
+		}
+		for _, instance := range item.Open {
+			desc.Open = append(desc.Open, instanceDescriptor{Instance: instance.Instance, Procedure: instance.Procedure, Step: instance.Step})
+		}
+		result.Sessions = append(result.Sessions, desc)
+	}
+	return nil, result, nil
 }
 
 func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, args ResumeSessionArgs) (*mcp.CallToolResult, ResumeSessionResult, error) {
-	current, err := s.boundSession(req.Session)
+	current, err := s.boundSession(ctx, req)
 	if err != nil {
 		// No session bound to this connection: boundSession's error already
 		// names the parked sessions to resume by handle — the bootstrap for a
 		// connection with nothing to reorient back into.
 		return nil, ResumeSessionResult{}, err
 	}
-	// Reorientation after context loss: an omitted session — or this
-	// connection's own session id — re-serves where we already are, every
-	// running move at its current step with the report schema to continue it,
-	// with no rebind and no leave. A compacted agent has lost its session and
-	// instance handles but not the live server-side session (s-cpt-h31); this
-	// is the reachable, handle-free way back to it. Forget the connection's
-	// served-block memory first so framing and units re-serve in full — the
-	// agent lost them to the compaction, so this is a genuine re-orientation,
-	// not the cheap same-connection reconnect.
-	if args.Session == "" || args.Session == current.id {
-		current.touch(time.Now())
+	identity := s.requestIdentity(req)
+	if args.Session == "" || args.Session == string(current.root.ID()) {
 		s.forgetConnection(req.Session)
-		res, err := s.resumeResult(req.Session, current)
-		return nil, res, err
-	}
-
-	if live := s.sessions.lookupID(args.Session); live != nil && live.logFile != nil {
-		// The session is already in memory. Bound to another connection it
-		// is live, not parked — refuse rather than yanking it over. Parked
-		// in memory, rebind without replaying over the open log; served-once
-		// memory is per connection, so a genuinely new consumer gets full
-		// text while a same-connection switch never re-pays it.
-		if s.sessions.liveIDs()[args.Session] {
-			return nil, ResumeSessionResult{}, toolError("session %s is live on another connection — only parked sessions resume", args.Session)
-		}
-		if err := s.ensureShellInstance(live); err != nil {
+		result, err := current.root.ServeAll(ctx, identity)
+		if err != nil {
 			return nil, ResumeSessionResult{}, err
 		}
-		prev := s.sessions.bind(req.Session, live)
-		s.leaveSession(prev)
-		res, err := s.resumeResult(req.Session, live)
-		return nil, res, err
+		current.rootIdentity = identity
+		mapped, err := s.mapRootResume(ctx, req, current, result)
+		return nil, mapped, err
 	}
-
-	events, err := s.sessions.readLog(args.Session)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, ResumeSessionResult{}, toolError("unknown session %q — list_sessions shows what is resumable", args.Session)
-		}
-		return nil, ResumeSessionResult{}, err
-	}
-	desc := deriveDescriptor(args.Session, events)
-
-	ss := &shellSession{
-		id:           args.Session,
-		participant:  desc.Participant,
-		lastActivity: time.Now(),
-	}
-	registry, err := s.buildRegistry(ss)
+	workflow, result, err := s.app.ResumeWorkflow(ctx, identity, s.project, sdd.WorkflowResumeRequest{
+		SessionID: sdd.SessionID(args.Session), MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
+	})
 	if err != nil {
 		return nil, ResumeSessionResult{}, err
 	}
-	ss.graphs = s.finder.NewGraphSource(s.graphDir)
-	ss.engine = engine.New(registry, ss.graphs)
-
-	resolve := func(canonical string) (*engine.Spec, error) {
-		return s.loadProcedure(ss, canonical)
-	}
-	logFile, err := s.sessions.openLog(args.Session)
-	if err != nil {
-		return nil, ResumeSessionResult{}, err
-	}
-	sess, err := ss.engine.ReplaySession(args.Session, desc.Participant, events, resolve, engine.NewWriterSink(logFile))
-	if err != nil {
-		_ = logFile.Close()
-		return nil, ResumeSessionResult{}, fmt.Errorf("replaying session %s: %v", args.Session, err)
-	}
-	ss.logFile = logFile
-	ss.sess = sess
-	if err := s.ensureShellInstance(ss); err != nil {
-		ss.close()
-		return nil, ResumeSessionResult{}, err
-	}
+	ss := &shellSession{id: string(workflow.ID()), participant: result.Participant, root: workflow, rootIdentity: identity, lastActivity: time.Now()}
 	prev := s.sessions.bind(req.Session, ss)
-	s.leaveSession(prev)
-	res, err := s.resumeResult(req.Session, ss)
-	return nil, res, err
+	if err := s.leaveSession(ctx, prev); err != nil {
+		return nil, ResumeSessionResult{}, err
+	}
+	mapped, err := s.mapRootResume(ctx, req, ss, result)
+	return nil, mapped, err
+
 }
 
 // ensureShellInstance re-derives the session's shell instance after replay
 // or rebind, auto-starting the default shell when none is running — a
 // resumed pre-shell session gains a base to land on (d-tac-bfc).
-func (s *Server) ensureShellInstance(ss *shellSession) error {
-	for _, inst := range ss.sess.Instances() {
-		if inst.Status == engine.StatusRunning && inst.Spec.Class == model.ProcedureClassShell {
-			ss.shellInstance = inst.ID
-			return nil
-		}
-	}
-	ss.shellInstance = ""
-	spec, err := s.loadProcedure(ss, defaultShellCanonical)
-	if err != nil {
-		return fmt.Errorf("auto-starting session shell: %v", err)
-	}
-	serve, err := ss.sess.Start(spec, nil, "")
-	if err != nil {
-		return fmt.Errorf("auto-starting session shell: %v", err)
-	}
-	ss.shellInstance = serve.Instance
-	return nil
-}
-
-func (s *Server) resumeResult(ms *mcp.ServerSession, ss *shellSession) (ResumeSessionResult, error) {
-	res := ResumeSessionResult{
-		Session:      ss.id,
-		Participant:  ss.sess.Participant,
-		Label:        ss.sess.Label,
-		Instructions: resumeInstructions,
-	}
-	// Framing rides the resume result itself, not the per-instance serves —
-	// computed first so the per-serve framing below dedups against it. A
-	// same-connection resume after the door already paid orientation gets
-	// nothing here (s-tac-w3v); a fresh connection gets it in full.
-	res.Framing = s.framingBlock(ms, ss)
-	for _, inst := range ss.sess.Instances() {
-		if inst.Status != engine.StatusRunning {
-			continue
-		}
-		serve, err := ss.sess.Serve(inst.ID)
-		if err != nil {
-			return ResumeSessionResult{}, err
-		}
-		res.Open = append(res.Open, s.toServeResult(ms, ss, serve))
-	}
-	// Open threads need no separate slot: the shell's serve in the Open
-	// list carries the block.
-	for i := range res.Open {
-		res.Open[i].Framing = ""
-	}
-	return res, nil
-}
 
 func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, args StageAttachmentArgs) (*mcp.CallToolResult, StageAttachmentResult, error) {
 	if err := validAttachmentName(args.Name); err != nil {
@@ -900,13 +650,7 @@ func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, 
 	if (args.Content == "") == (args.Path == "") {
 		return nil, StageAttachmentResult{}, toolError("pass exactly one of content or path")
 	}
-	ss, err := s.boundSession(req.Session)
-	if err != nil {
-		return nil, StageAttachmentResult{}, err
-	}
-	ss.touch(time.Now())
-
-	dir, err := s.sessions.stagingDir(ss.id)
+	ss, err := s.boundSession(ctx, req)
 	if err != nil {
 		return nil, StageAttachmentResult{}, err
 	}
@@ -917,23 +661,23 @@ func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, 
 			return nil, StageAttachmentResult{}, toolError("reading %s: %v", args.Path, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, args.Name), content, 0o644); err != nil {
-		return nil, StageAttachmentResult{}, fmt.Errorf("staging attachment: %w", err)
+	identity := s.requestIdentity(req)
+	handle, err := ss.root.StageAttachment(ctx, identity, args.Name, content)
+	if err != nil {
+		return nil, StageAttachmentResult{}, err
 	}
-	return nil, StageAttachmentResult{Handle: args.Name}, nil
+	ss.rootIdentity = identity
+	return nil, StageAttachmentResult{Handle: handle}, nil
 }
 
-// selectRepoIDs resolves a cross-repo selection through the injected
-// registry. A selection without wiring is a server construction gap — fail
-// loud, never silently narrow to local-only.
-func (s *Server) selectRepoIDs(named []string, all bool) ([]string, error) {
-	if !all && len(named) == 0 {
-		return nil, nil
+func validAttachmentName(name string) error {
+	if name == "" {
+		return fmt.Errorf("filename is required")
 	}
-	if s.repos == nil {
-		return nil, fmt.Errorf("connected-repos support is not wired on this server")
+	if filepath.Base(name) != name || strings.ContainsAny(name, `/\\`) {
+		return fmt.Errorf("must be a plain filename")
 	}
-	return s.repos.SelectRepoIDs(named, all)
+	return nil
 }
 
 // readHint is the one-line breadcrumb every free read carries while no
@@ -947,170 +691,65 @@ func (s *Server) readHint(ms *mcp.ServerSession) string {
 	return "no dialogue session is open — start_session is the door; reads stay free"
 }
 
-// logRead records a read event on the calling connection's bound session.
-// Reads stay free and ungated — tracking is logging, not gating (d-tac-dbk);
-// with no session bound there is nothing to log against.
-func (s *Server) logRead(ms *mcp.ServerSession, tool string, full, summary []string) {
-	if ss := s.sessions.bound(ms); ss != nil && ss.sess != nil {
-		ss.sess.LogRead(tool, full, summary)
+func (s *Server) logRootRead(ctx context.Context, req *mcp.CallToolRequest, tool string, full, summary []string) error {
+	ss := s.sessions.bound(req.Session)
+	if ss == nil {
+		return nil
 	}
-}
-
-// showReads extracts the read-event ID sets from a show result: primaries
-// render their bodies (full depth), chain items render as summary bullets.
-func showReads(res *query.ShowResult) (full, summary []string) {
-	for _, g := range res.Groups {
-		if g.Primary != nil {
-			if g.PrimaryID != "" {
-				full = append(full, g.PrimaryID)
-			} else {
-				full = append(full, g.Primary.ID)
-			}
-		}
-		for _, items := range [][]model.ShowTreeItem{g.Upstream, g.Downstream} {
-			for _, item := range items {
-				if item.Entry != nil {
-					summary = append(summary, item.NodeID())
-				}
-			}
-		}
+	identity := s.requestIdentity(req)
+	if err := ss.root.LogRead(ctx, identity, tool, full, summary); err != nil {
+		return err
 	}
-	return full, summary
+	ss.rootIdentity = identity
+	return nil
 }
 
 func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
 	if len(args.Terms) == 0 && args.Query == "" {
 		return nil, SearchResult{}, toolError("pass terms (text mode), query (vector mode), or both (hybrid)")
 	}
-	if args.Query != "" && !s.vector {
-		return nil, SearchResult{}, toolError("query needs a configured embedding provider — this server has text mode only; use terms")
-	}
-	if s.searcher == nil {
-		return nil, SearchResult{}, toolError("search is not configured on this server")
-	}
-	graph, err := s.finder.CurrentGraph(s.graphDir)
-	if err != nil {
-		return nil, SearchResult{}, toolError("loading graph: %v", err)
-	}
-
-	// Drill-serve defaults (d-tac-dbk): header-only, hit-capped — the
-	// measured 26.5KB drill was this tool's response with snippet defaults.
-	// Snippets stay one explicit parameter away; depth flows through show,
-	// where it is logged as inspection.
 	limit := args.Limit
 	if limit == 0 {
 		limit = defaultSearchHits
 	}
-	sq := query.SearchQuery{
-		Graph:                graph,
-		Terms:                args.Terms,
-		Phrase:               args.Query,
-		IncludeSuperseded:    args.IncludeSuperseded,
-		Limit:                limit,
-		MaxCitationsPerEntry: 0,
-		Repos:                args.Repos,
-		AllRepos:             args.AllRepos,
-	}
+	maxCitations := 0
 	if args.MaxCitations != nil {
-		sq.MaxCitationsPerEntry = *args.MaxCitations
+		maxCitations = *args.MaxCitations
 	}
-	if args.Type != "" {
-		t, err := parseEntryType(args.Type)
-		if err != nil {
-			return nil, SearchResult{}, err
-		}
-		sq.Filter.Type = t
-	}
-	if args.Layer != "" {
-		l, err := parseLayer(args.Layer)
-		if err != nil {
-			return nil, SearchResult{}, err
-		}
-		sq.Filter.Layer = l
-	}
-	if args.Kind != "" {
-		sq.Filter.Kind = model.Kind(args.Kind)
-	}
-
-	res, err := s.searcher.Search(ctx, sq)
+	result, err := s.app.Search(ctx, s.requestIdentity(req), s.project, sdd.SearchRequest{
+		Terms: args.Terms, Phrase: args.Query, Type: args.Type, Layer: args.Layer, Kind: args.Kind,
+		IncludeSuperseded: args.IncludeSuperseded, Limit: limit, MaxCitations: maxCitations,
+		Repos: args.Repos, AllRepos: args.AllRepos,
+	})
 	if err != nil {
 		return nil, SearchResult{}, toolError("searching: %v", err)
 	}
-	var hits []string
-	for _, e := range res.Entries {
-		if e.Entry != nil {
-			hits = append(hits, e.DisplayID())
-		}
+	if err := s.logRootRead(ctx, req, "search", nil, result.EntryIDs); err != nil {
+		return nil, SearchResult{}, err
 	}
-	s.logRead(req.Session, "search", nil, hits)
-	var sb strings.Builder
-	presenters.RenderSearch(&sb, res, graph)
-	out := sb.String()
+	out := result.Results
 	if strings.TrimSpace(out) == "" {
 		out = "(no entries matched — try another phrasing, or proceed if the topic is genuinely new)"
 	}
 	return nil, SearchResult{Results: out, Hint: s.readHint(req.Session)}, nil
+
 }
 
 func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewArgs) (*mcp.CallToolResult, ViewResult, error) {
 	if strings.TrimSpace(args.Layout) == "" {
 		return nil, ViewResult{}, toolError("layout is required")
 	}
-	repoIDs, err := s.selectRepoIDs(args.Repos, args.AllRepos)
+	result, err := s.app.View(ctx, s.requestIdentity(req), s.project, sdd.ViewRequest{Layout: args.Layout, Repos: args.Repos, AllRepos: args.AllRepos})
 	if err != nil {
-		return nil, ViewResult{}, toolError("%v", err)
+		return nil, ViewResult{}, toolError("viewing: %v", err)
 	}
-	if len(repoIDs) > 0 {
-		if _, err := s.handler.EnsureReposFresh(ctx, repoIDs); err != nil {
-			return nil, ViewResult{}, toolError("refreshing repo caches: %v", err)
-		}
-	}
-	graph, err := s.finder.CurrentGraph(s.graphDir)
-	if err != nil {
-		return nil, ViewResult{}, toolError("loading graph: %v", err)
-	}
-	out, err := s.renderView(graph, args.Layout)
-	if err != nil {
-		return nil, ViewResult{}, err
-	}
-	// Selected repos render the same layout over their own graphs, each
-	// under a repo heading — entry IDs inside a repo section are scoped by
-	// that heading.
-	var sb strings.Builder
-	sb.WriteString(out)
-	for _, repoID := range repoIDs {
-		member, err := graph.MemberGraph(repoID)
-		if err != nil {
-			return nil, ViewResult{}, toolError("loading graph for %s: %v", repoID, err)
-		}
-		if member == nil {
-			sb.WriteString("\n── repo: " + repoID + " (unavailable) ──\n")
-			continue
-		}
-		mout, err := s.renderView(member, args.Layout)
-		if err != nil {
-			return nil, ViewResult{}, err
-		}
-		sb.WriteString("\n── repo: " + repoID + " ──\n")
-		sb.WriteString(mout)
-	}
-	return nil, ViewResult{Sections: sb.String(), Hint: s.readHint(req.Session)}, nil
+	return nil, ViewResult{Sections: result.Sections, Hint: s.readHint(req.Session)}, nil
+
 }
 
 func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
-	}
-	// Cross-repo IDs read through the connected-repos caches — freshen the
-	// named repos first (lazy clone + cooldown pull).
-	if repoIDs := model.CrossRepoIDs(args.IDs); len(repoIDs) > 0 {
-		if _, err := s.handler.EnsureReposFresh(ctx, repoIDs); err != nil {
-			return nil, ShowResult{}, toolError("refreshing repo caches: %v", err)
-		}
-	}
-	graph, err := s.finder.CurrentGraph(s.graphDir)
-	if err != nil {
-		return nil, ShowResult{}, toolError("loading graph: %v", err)
 	}
 	up := args.Up
 	if up == 0 {
@@ -1120,87 +759,67 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	if down == 0 {
 		down = query.DefaultDownDepth
 	}
-	out, res, err := s.renderShow(graph, args.IDs, up, down)
+	result, err := s.app.Show(ctx, s.requestIdentity(req), s.project, sdd.ShowRequest{IDs: args.IDs, UpDepth: up, DownDepth: down})
 	if err != nil {
 		return nil, ShowResult{}, err
 	}
-	full, summary := showReads(res)
-	s.logRead(req.Session, "show", full, summary)
-	return nil, ShowResult{Entries: out, Hint: s.readHint(req.Session)}, nil
+	if err := s.logRootRead(ctx, req, "show", result.FullIDs, result.SummaryIDs); err != nil {
+		return nil, ShowResult{}, err
+	}
+	return nil, ShowResult{Entries: result.Entries, Hint: s.readHint(req.Session)}, nil
+
 }
 
 func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, args ReadAttachmentArgs) (*mcp.CallToolResult, ReadAttachmentResult, error) {
 	if args.ID == "" {
 		return nil, ReadAttachmentResult{}, toolError("id is required")
 	}
-	graph, err := s.finder.CurrentGraph(s.graphDir)
-	if err != nil {
-		return nil, ReadAttachmentResult{}, toolError("loading graph: %v", err)
+	maxBytes := args.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = 65536
 	}
-	res, err := s.finder.ReadAttachment(query.ReadAttachmentQuery{
-		Graph:    graph,
-		GraphDir: s.graphDir,
-		EntryID:  args.ID,
-		Name:     args.Name,
-		Offset:   args.Offset,
-		MaxBytes: args.MaxBytes,
-	})
+	result, err := s.app.ReadAttachment(ctx, s.requestIdentity(req), s.project, sdd.ReadAttachmentRequest{EntryID: args.ID, Filename: args.Name, Offset: args.Offset, MaxBytes: maxBytes})
 	if err != nil {
 		return nil, ReadAttachmentResult{}, err
 	}
-	// An attachment read is neither a body serve nor a chain bullet — it logs
-	// at summary depth under its own tool name, so the audit trail keeps the
-	// distinction while the inspection gate stays body-strict.
-	s.logRead(req.Session, "read_attachment", nil, []string{args.ID})
-	out := ReadAttachmentResult{
-		Name:       res.Name,
-		Content:    res.Content,
-		Offset:     res.Offset,
-		NextOffset: res.NextOffset,
-		TotalBytes: res.TotalBytes,
-		More:       res.More,
-		Available:  res.Available,
-		Hint:       s.readHint(req.Session),
+	if err := s.logRootRead(ctx, req, "read_attachment", nil, []string{args.ID}); err != nil {
+		return nil, ReadAttachmentResult{}, err
 	}
-	if s.local {
-		out.Path = res.Path
+	page := result.Page
+	output := ReadAttachmentResult{
+		Name: page.Filename, Content: string(page.Content), Offset: page.Offset, NextOffset: page.NextOffset,
+		TotalBytes: page.TotalSize, More: page.More, Available: result.Available, Hint: s.readHint(req.Session),
 	}
-	return nil, out, nil
+	if s.local && s.localAttachmentPath != nil {
+		output.Path, err = s.localAttachmentPath(args.ID, page.Filename)
+		if err != nil {
+			return nil, ReadAttachmentResult{}, err
+		}
+	}
+	return nil, output, nil
+
 }
 
 func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, _ InfoArgs) (*mcp.CallToolResult, InfoResult, error) {
-	info, err := s.finder.Info(query.InfoQuery{})
+	info, err := s.app.Info(ctx, s.requestIdentity(req), s.project, sdd.InfoRequest{})
 	if err != nil {
 		return nil, InfoResult{}, err
 	}
-	return nil, InfoResult{
-		Participant: info.LocalParticipant,
-		Language:    info.Language,
-		Search:      info.Search,
-		Version:     s.version,
-		Hint:        s.readHint(req.Session),
-	}, nil
+	return nil, InfoResult{Participant: info.Participant, Language: info.Language, Search: info.Search, Version: s.version, Hint: s.readHint(req.Session)}, nil
+
 }
 
 func (s *Server) registryDocs(ctx context.Context, req *mcp.CallToolRequest, args RegistryArgs) (*mcp.CallToolResult, RegistryResult, error) {
-	var class engine.FuncClass
-	switch args.Class {
-	case "", string(engine.ClassPredicate), string(engine.ClassQuery), string(engine.ClassCommand):
-		class = engine.FuncClass(args.Class)
-	default:
-		return nil, RegistryResult{}, toolError("unknown class %q: predicate, query, or command", args.Class)
+	docs, err := sdd.WorkflowRegistryDocs(args.Class)
+	if err != nil {
+		return nil, RegistryResult{}, err
 	}
-	res := RegistryResult{Hint: s.readHint(req.Session)}
-	for _, doc := range s.docsRegistry.Docs(class) {
-		res.Functions = append(res.Functions, RegistryFuncResult{
-			Name:   doc.Name,
-			Class:  string(doc.Class),
-			Doc:    doc.Doc,
-			Reads:  doc.Reads,
-			Writes: doc.Writes,
-		})
+	result := RegistryResult{Hint: s.readHint(req.Session)}
+	for _, doc := range docs {
+		result.Functions = append(result.Functions, RegistryFuncResult{Name: doc.Name, Class: doc.Class, Doc: doc.Doc, Reads: doc.Reads, Writes: doc.Writes})
 	}
-	return nil, res, nil
+	return nil, result, nil
+
 }
 
 // --- serve conversion --------------------------------------------------------
@@ -1209,191 +828,125 @@ func (s *Server) registryDocs(ctx context.Context, req *mcp.CallToolRequest, arg
 // served-once memory: full text the first time this connection sees these
 // exact rendered bytes, a one-line stub after — identical bytes stub,
 // changed content always serves in full (d-tac-dbk).
-func (s *Server) toServeResult(ms *mcp.ServerSession, ss *shellSession, serve *engine.Serve) ServeResult {
+
+func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res := ServeResult{
-		Session:      ss.id,
-		Instance:     serve.Instance,
-		Procedure:    serve.Procedure,
-		Status:       string(serve.Status),
-		Step:         serve.Step,
-		Goal:         serve.Goal,
-		Instructions: serve.Instructions,
-		Missing:      serve.Missing,
-		ReportSchema: serve.ReportSchema,
-		Produced:     serve.Produced,
+		Session: string(serve.Session), Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
+		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
+		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Execution: serve.Execution,
 	}
-	if serve.Unit != "" && s.servedBefore(ms, serve.UnitText) {
-		reminder := fmt.Sprintf("(step %s instructions were served earlier this session — follow them; goal: %s)", serve.Step, serve.Goal)
-		res.Instructions = engine.ComposeInstructions(reminder, serve.Diagnostics)
+	if serve.InstructionUnit != "" && s.servedBefore(req.Session, serve.InstructionUnit) {
+		res.Instructions = engine.ComposeInstructions(fmt.Sprintf("(step %s instructions were served earlier this session — follow them; goal: %s)", serve.Step, serve.Goal), serve.Diagnostics)
 	}
-	// Open threads ride the session shell's serves only — the junction the
-	// dialogue stands on. Mid-procedure serves never carry the block.
-	if ss.shellInstance != "" && serve.Instance == ss.shellInstance {
-		res.OpenThreads = s.openThreadsBlock(ms, ss, true)
-	}
-	if serve.Chooser != nil {
-		ch := &ChooserResult{Chooser: serve.Chooser.Chooser, Kind: string(serve.Chooser.Kind)}
-		for _, o := range serve.Chooser.Options {
-			opt := ChooserOptionResult{Choice: o.Choice}
-			for _, cf := range o.Collect {
-				name := cf.Name
-				if cf.Optional {
-					name += "?"
-				}
-				opt.Collect = append(opt.Collect, name)
-			}
-			ch.Options = append(ch.Options, opt)
+	if serve.PendingChooser != nil {
+		chooser := &ChooserResult{Chooser: serve.PendingChooser.Chooser, Kind: string(serve.PendingChooser.Kind)}
+		for _, option := range serve.PendingChooser.Options {
+			chooser.Options = append(chooser.Options, ChooserOptionResult{Choice: option.Choice, Collect: option.Collect})
 		}
-		res.PendingChooser = ch
+		res.PendingChooser = chooser
 	}
-	// A task prefers a disposable forked context — surface the hint so a
-	// harness that automates the fork has a structured signal, not just prose.
-	if inst, ok := ss.sess.Instance(serve.Instance); ok && inst.Spec.Class == model.ProcedureClassTask {
-		res.Execution = executionForkPreferred
+	framing, err := ss.root.Framing(ctx, s.requestIdentity(req))
+	if err != nil {
+		return ServeResult{}, err
 	}
-	res.Framing = s.framingBlock(ms, ss)
-	// The vocabulary block is static per process — the connection pays it
-	// exactly once, on whatever serve it sees first.
-	if s.vocabulary != "" && !s.servedBefore(ms, s.vocabulary) {
-		res.Vocabulary = s.vocabulary
+	if !s.servedBefore(req.Session, framing) {
+		res.Framing = framing
 	}
-	return res
-}
-
-// executionForkPreferred is the execution hint carried on task-class serves:
-// the procedure is best dispatched to a disposable forked context, inline as a
-// paid fallback (d-tac-tlo). Consuming it in harness automation stays deferred.
-const executionForkPreferred = "fork-preferred"
-
-// framingBlock returns the session framing for this serve: the full render
-// the first time this connection sees these exact bytes, empty when
-// unchanged since. Changed content — the graph moved mid-session, a focus
-// was captured — always serves in full; there are no semantic skip rules
-// (d-tac-dbk). Re-orientation on demand goes through start_session, which
-// clears the connection's memory.
-func (s *Server) framingBlock(ms *mcp.ServerSession, ss *shellSession) string {
-	framing := s.renderFraming(ss)
-	if s.servedBefore(ms, framing) {
-		return ""
-	}
-	return framing
-}
-
-// renderFraming renders the session framing, cached per graph value — the
-// source memoizes within one advance, so the cache mainly spares re-renders
-// within one response (a resume rehydrating several serves). The pointer key
-// still invalidates correctly: a reload after Invalidate hands back a new graph
-// pointer, missing the cache and re-rendering.
-func (s *Server) renderFraming(ss *shellSession) string {
-	graph, err := ss.graphs.Current()
-	if err == nil && ss.framingGraph == graph && ss.framingText != "" {
-		return ss.framingText
-	}
-	var sb strings.Builder
-	if info, ierr := s.finder.Info(query.InfoQuery{}); ierr == nil {
-		fmt.Fprintf(&sb, "Local participant: %s\n", info.LocalParticipant)
-		if info.Language != "" {
-			fmt.Fprintf(&sb, "Language: %s\n", info.Language)
+	if ss.root.IsShell(serve.Instance) {
+		res.OpenThreads, err = s.openThreadsRoot(ctx, req, ss)
+		if err != nil {
+			return ServeResult{}, err
 		}
-		fmt.Fprintf(&sb, "Search: %s\n\n", info.Search)
 	}
-	text := sb.String()
+	vocabulary, err := s.app.Vocabulary(ctx, s.requestIdentity(req), s.project)
 	if err != nil {
-		// The graph is unavailable — degrade to the info header and don't cache,
-		// so a later successful load re-renders. In practice a load failure has
-		// already surfaced on the advance that produced this serve.
-		return text
+		return ServeResult{}, err
 	}
-	// A failed view render degrades to the info header — framing is
-	// orientation, not a gate.
-	if framing, verr := s.renderView(graph, framingLayout); verr == nil {
-		text += framing
+	if vocabulary != "" && !s.servedBefore(req.Session, vocabulary) {
+		res.Vocabulary = vocabulary
 	}
-	ss.framingGraph = graph
-	ss.framingText = text
-	return text
-}
-
-// loadProcedure resolves a canonical to its execution head and loads the
-// spec against the session's registry. The not-found error lists move
-// canonicals only — shells enter through the door, not this path.
-func (s *Server) loadProcedure(ss *shellSession, canonical string) (*engine.Spec, error) {
-	graph, err := ss.graphs.Current()
-	if err != nil {
-		return nil, fmt.Errorf("loading graph: %w", err)
-	}
-	entry := graph.ResolveProcedure(canonical)
-	if entry == nil {
-		available := make([]string, 0)
-		for _, chain := range graph.ProcedureChains() {
-			if chain.Head != nil && chain.Head.Canonical != "" && !chain.Head.IsShellProcedure() && !chain.Head.IsTaskProcedure() {
-				available = append(available, chain.Head.Canonical)
-			}
+	if serve.Base != nil {
+		base, err := s.toRootServeResult(ctx, req, ss, serve.Base)
+		if err != nil {
+			return ServeResult{}, err
 		}
-		return nil, toolError("no procedure %q (available: %s)", canonical, strings.Join(available, ", "))
+		res.Base = &BaseServe{
+			Session: base.Session, Instance: base.Instance, Procedure: base.Procedure, Status: base.Status,
+			Step: base.Step, Goal: base.Goal, Instructions: base.Instructions, PendingChooser: base.PendingChooser,
+			Framing: base.Framing, OpenThreads: base.OpenThreads,
+		}
 	}
-	return engine.LoadSpec(entry, ss.engine.Registry)
+	return res, nil
 }
 
-// renderView parses a layout, executes it against the graph, and renders
-// the plain-text result — the same pipeline `sdd view --layout` drives.
-func (s *Server) renderView(graph *model.Graph, layout string) (string, error) {
-	parsed, err := query.ParseLayout(layout)
-	if err != nil {
-		return "", fmt.Errorf("parsing layout %q: %w", layout, err)
+func rootBaseServe(result ServeResult) *BaseServe {
+	return &BaseServe{
+		Session: result.Session, Instance: result.Instance, Procedure: result.Procedure, Status: result.Status,
+		Step: result.Step, Goal: result.Goal, Instructions: result.Instructions, PendingChooser: result.PendingChooser,
+		Framing: result.Framing, OpenThreads: result.OpenThreads,
 	}
-	parsed, err = query.ExpandMacros(parsed)
-	if err != nil {
-		return "", fmt.Errorf("expanding layout %q: %w", layout, err)
+}
+
+func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, source sdd.WorkflowResumeResult) (ResumeSessionResult, error) {
+	result := ResumeSessionResult{
+		Session: string(source.Session), Participant: source.Participant, Label: source.Label,
+		Instructions: resumeInstructions,
 	}
-	res, err := s.finder.View(query.ViewQuery{
-		Graph:    graph,
-		Layout:   parsed,
-		GraphDir: s.graphDir,
-	})
+	framing, err := ss.root.Framing(ctx, s.requestIdentity(req))
+	if err != nil {
+		return ResumeSessionResult{}, err
+	}
+	if !s.servedBefore(req.Session, framing) {
+		result.Framing = framing
+	}
+	for i := range source.Open {
+		mapped, err := s.toRootServeResult(ctx, req, ss, &source.Open[i])
+		if err != nil {
+			return ResumeSessionResult{}, err
+		}
+		mapped.Framing = ""
+		result.Open = append(result.Open, mapped)
+	}
+	return result, nil
+}
+
+func (s *Server) openThreadsRoot(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession) (string, error) {
+	var lines []string
+	for _, instance := range ss.root.OpenInstances() {
+		lines = append(lines, fmt.Sprintf("- (this dialogue) %s: %s at %s", instance.Instance, instance.Procedure, instance.Step))
+	}
+	sessions, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
 	if err != nil {
 		return "", err
 	}
-	var sb strings.Builder
-	presenters.RenderView(&sb, res)
-	return sb.String(), nil
-}
-
-// renderShow renders entries with chains as plain markdown, returning the
-// structured result alongside so callers can log what was served.
-func (s *Server) renderShow(graph *model.Graph, ids []string, up, down int) (string, *query.ShowResult, error) {
-	res, err := s.finder.Show(query.ShowQuery{
-		Graph:     graph,
-		IDs:       ids,
-		UpDepth:   up,
-		DownDepth: down,
-	})
-	if err != nil {
-		return "", nil, err
+	for _, item := range sessions {
+		if item.Session == ss.root.ID() || len(item.Open) == 0 || item.HolderLive {
+			continue
+		}
+		var line strings.Builder
+		fmt.Fprintf(&line, "- %s", item.Session)
+		if item.Label != "" {
+			fmt.Fprintf(&line, " %q", item.Label)
+		}
+		if item.Participant != "" {
+			fmt.Fprintf(&line, " (%s)", item.Participant)
+		}
+		var open []string
+		for _, instance := range item.Open {
+			open = append(open, instance.Procedure+" at "+instance.Step)
+		}
+		fmt.Fprintf(&line, " — open: %s", strings.Join(open, ", "))
+		if !item.LastActivity.IsZero() {
+			fmt.Fprintf(&line, ", last active %s", item.LastActivity.Format(time.RFC3339))
+		}
+		lines = append(lines, line.String())
 	}
-	var sb strings.Builder
-	presenters.RenderShow(&sb, res, presenters.ShowOptions{})
-	return sb.String(), res, nil
-}
-
-func parseEntryType(in string) (model.EntryType, error) {
-	if t, ok := model.TypeFromAbbrev[in]; ok {
-		return t, nil
+	if len(lines) == 0 {
+		return "", nil
 	}
-	t := model.EntryType(in)
-	if _, ok := model.TypeAbbrev[t]; ok {
-		return t, nil
+	header := openThreadsReminder
+	if !s.servedBefore(req.Session, openThreadsIntro) {
+		header = openThreadsIntro
 	}
-	return "", toolError("invalid type %q: use s (signal) or d (decision)", in)
-}
-
-func parseLayer(in string) (model.Layer, error) {
-	if l, ok := model.LayerFromAbbrev[in]; ok {
-		return l, nil
-	}
-	l := model.Layer(in)
-	if _, ok := model.LayerAbbrev[l]; ok {
-		return l, nil
-	}
-	return "", toolError("invalid layer %q: use stg, cpt, tac, ops, or prc", in)
+	return header + "\n" + strings.Join(lines, "\n"), nil
 }

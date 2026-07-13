@@ -39,7 +39,7 @@ func (CLI) Commit(message string, paths ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), commitTimeout)
 	defer cancel()
 
-	addArgs := append([]string{"add"}, paths...)
+	addArgs := append([]string{"add", "--all", "--"}, paths...)
 	if out, err := runDetached(ctx, addArgs...); err != nil {
 		return fmt.Errorf("git add: %s (%w)", out, err)
 	}
@@ -53,6 +53,17 @@ func (CLI) Commit(message string, paths ...string) error {
 	}
 
 	return nil
+}
+
+// HasCommitMessage reports whether any reachable commit contains text. It is
+// used by retryable post-apply finalizers to recognize a commit that landed
+// before its durable finalizer outcome could be recorded.
+func (CLI) HasCommitMessage(ctx context.Context, text string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "git", "log", "--all", "--fixed-strings", "--grep="+text, "--format=%H", "-n", "1").CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git log: %s (%w)", out, err)
+	}
+	return strings.TrimSpace(string(out)) != "", nil
 }
 
 // RemovalCommitter is the handlers.Committer variant for paths already

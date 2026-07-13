@@ -140,7 +140,7 @@ func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRunt
 				continue
 			}
 			outcome := FinalizerOutcome{Name: finalizer.Name(), Succeeded: true}
-			if err := finalizer.Finalize(ctx, AppliedMutation{Project: runtime.options.Project.ID, BatchID: prepared.Batch.ID, Revision: apply.Revision}); err != nil {
+			if err := finalizer.Finalize(ctx, AppliedMutation{Project: runtime.options.Project.ID, BatchID: prepared.Batch.ID, Revision: apply.Revision, Batch: prepared.Batch}); err != nil {
 				outcome.Succeeded = false
 				outcome.Message = err.Error()
 			}

@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-// ProjectRuntime is the concrete SDD application for one project. Its
-// behavior moves behind this facade in Slice 4; Slice 2 freezes construction
-// and infrastructure ownership only.
+// ProjectRuntime owns the immutable ports and project configuration resolved
+// for one application operation.
 type ProjectRuntime struct {
 	options ProjectRuntimeOptions
 }

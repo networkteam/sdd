@@ -238,6 +238,26 @@ func (s *FilesystemGraphStore) ReadAttachmentPage(_ context.Context, entryID, fi
 	if err != nil {
 		return AttachmentPage{}, err
 	}
+	if filename == "" {
+		entries, readErr := os.ReadDir(filepath.Join(s.dir, attachmentDir))
+		if readErr != nil {
+			return AttachmentPage{}, readErr
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				if filename != "" {
+					return AttachmentPage{}, fmt.Errorf("sdd: attachment name is required when entry %s has more than one attachment", entryID)
+				}
+				filename = entry.Name()
+			}
+		}
+		if filename == "" {
+			return AttachmentPage{}, fmt.Errorf("sdd: entry %s has no attachments", entryID)
+		}
+	}
+	if filepath.Base(filename) != filename || strings.ContainsAny(filename, `/\\`) {
+		return AttachmentPage{}, fmt.Errorf("sdd: invalid attachment filename %q", filename)
+	}
 	logicalPath := filepath.ToSlash(filepath.Join(attachmentDir, filename))
 	target, err := safeGraphPath(s.dir, logicalPath)
 	if err != nil {

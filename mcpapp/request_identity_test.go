@@ -4,12 +4,15 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/networkteam/sdd"
 )
 
 type tokenTransport struct {
@@ -138,5 +141,113 @@ func TestStreamableHTTPUsesCurrentRequestIdentity(t *testing.T) {
 	}
 	if got := roundTripper.lastStatus(); got != http.StatusForbidden {
 		t.Fatalf("changed user returned HTTP %d, want 403: %v", got, err)
+	}
+}
+
+type observingAccess struct {
+	runtime *sdd.ProjectRuntime
+	mu      sync.Mutex
+	seen    []sdd.RequestIdentity
+}
+
+func (a *observingAccess) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
+	a.mu.Lock()
+	a.seen = append(a.seen, identity)
+	a.mu.Unlock()
+	return sdd.Principal{Subject: identity.Subject, Participant: "Tester"}, nil
+}
+
+func (a *observingAccess) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {
+	return sdd.ProjectList{Projects: []sdd.ProjectSummary{{ProjectRef: a.runtime.Project(), CanRead: true, CanWrite: true, State: sdd.ProjectReady}}}, nil
+}
+
+func (a *observingAccess) ResolveProject(context.Context, sdd.Principal, sdd.ProjectID, sdd.Access) (*sdd.ProjectRuntime, error) {
+	return a.runtime, nil
+}
+
+func (a *observingAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
+}
+
+func TestStatefulHTTPWorkflowResolvesIdentityPerRequest(t *testing.T) {
+	graph, err := sdd.NewFilesystemGraphStore(sdd.FilesystemGraphStoreOptions{Project: "identity-test", GraphDir: filepath.Join(t.TempDir(), "graph")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := sdd.NewFilesystemSessionStore(filepath.Join(t.TempDir(), "sessions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := sdd.NewFilesystemStagedBlobStore(filepath.Join(t.TempDir(), "blobs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		Project: sdd.ProjectRef{ID: "identity-test", DisplayName: "Identity test"}, Participant: "Tester",
+		Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		LLM: sdd.LLMExecutorFuncs{
+			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
+			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
+				return sdd.LLMResult{Output: []byte(`{"findings":[]}`), ExecutorFingerprint: "test"}, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := &observingAccess{runtime: runtime}
+	application, err := sdd.NewApplication(access)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Options{Application: application, Project: "identity-test", Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := func(_ context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
+		info := &auth.TokenInfo{UserID: "christopher", Expiration: time.Now().Add(time.Hour)}
+		switch token {
+		case "read":
+			info.Scopes = []string{"project:read"}
+			info.Extra = map[string]any{"sentinel": "read-request"}
+		case "write":
+			info.Scopes = []string{"project:read", "project:write"}
+			info.Extra = map[string]any{"sentinel": "write-request"}
+		default:
+			return nil, auth.ErrInvalidToken
+		}
+		return info, nil
+	}
+	httpServer := httptest.NewServer(auth.RequireBearerToken(verifier, nil)(server.Handler()))
+	defer httpServer.Close()
+
+	transport := &tokenTransport{token: "read", base: http.DefaultTransport}
+	client := mcp.NewClient(&mcp.Implementation{Name: "identity-client", Version: "test"}, nil)
+	clientSession, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
+		Endpoint: httpServer.URL, HTTPClient: &http.Client{Transport: transport}, DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = clientSession.Close() }()
+	if _, err := clientSession.CallTool(t.Context(), &mcp.CallToolParams{Name: "start_session", Arguments: map[string]any{}}); err != nil {
+		t.Fatal(err)
+	}
+	transport.set("write")
+	if _, err := clientSession.CallTool(t.Context(), &mcp.CallToolParams{Name: "start_procedure", Arguments: map[string]any{"canonical": "capture"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	access.mu.Lock()
+	seen := append([]sdd.RequestIdentity(nil), access.seen...)
+	access.mu.Unlock()
+	var readSeen, writeSeen bool
+	for _, identity := range seen {
+		sentinel, _ := identity.Attributes["sentinel"].(string)
+		readSeen = readSeen || sentinel == "read-request" && len(identity.Scopes) == 1
+		writeSeen = writeSeen || sentinel == "write-request" && len(identity.Scopes) == 2
+	}
+	if !readSeen || !writeSeen {
+		t.Fatalf("root application identities did not follow requests: %+v", seen)
 	}
 }

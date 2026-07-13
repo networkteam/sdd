@@ -1,11 +1,14 @@
 package mcpapp
 
-import "github.com/modelcontextprotocol/go-sdk/mcp"
+import (
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-// requestIdentity is the protocol-neutral authentication material carried by
-// the current MCP request. It deliberately stays private until the public SDD
-// application contract lands; the transport spike exercises this exact bridge
-// so later extraction does not fall back to initialization-time identity.
+	"github.com/networkteam/sdd"
+)
+
+// requestIdentity is the MCP-shaped authentication material carried by the
+// current request. Keeping extraction private prevents protocol SDK types from
+// leaking into the public application contract.
 type requestIdentity struct {
 	Subject    string
 	Scopes     []string
@@ -25,6 +28,19 @@ func identityFromRequest(req *mcp.CallToolRequest) requestIdentity {
 		for key, value := range info.Extra {
 			identity.Attributes[key] = value
 		}
+	}
+	return identity
+}
+
+func publicIdentityFromRequest(req *mcp.CallToolRequest) sdd.RequestIdentity {
+	identity := identityFromRequest(req)
+	return sdd.RequestIdentity{Subject: identity.Subject, Scopes: identity.Scopes, Attributes: identity.Attributes}
+}
+
+func (s *Server) requestIdentity(req *mcp.CallToolRequest) sdd.RequestIdentity {
+	identity := publicIdentityFromRequest(req)
+	if identity.Subject == "" && s.localIdentity.Subject != "" {
+		return s.localIdentity
 	}
 	return identity
 }

@@ -2,8 +2,10 @@ package sdd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
 	"strings"
 
 	"github.com/networkteam/sdd/internal/baseprocedures"
@@ -59,6 +61,7 @@ type EntryDocument struct {
 	LogicalPath string
 	Frontmatter map[string]any
 	Body        string
+	Attachments []string
 }
 
 type WIPDocument struct {
@@ -92,6 +95,7 @@ func BuildSnapshot(_ context.Context, data SnapshotData) (*Snapshot, error) {
 		if err != nil {
 			return nil, fmt.Errorf("sdd: parsing entry document %q: %w", document.LogicalPath, err)
 		}
+		entry.Attachments = append([]string(nil), document.Attachments...)
 		entries = append(entries, entry)
 		onDisk[entry.ID] = true
 	}
@@ -169,6 +173,27 @@ func LoadSnapshotFS(ctx context.Context, project ProjectID, revision string, fsy
 	if err != nil {
 		return nil, fmt.Errorf("sdd: walking graph documents: %w", err)
 	}
+	for index := range data.Entries {
+		document := &data.Entries[index]
+		attachmentDir := strings.TrimSuffix(document.LogicalPath, ".md")
+		readDir := attachmentDir
+		if graphDir != "." {
+			readDir = strings.TrimSuffix(graphDir, "/") + "/" + attachmentDir
+		}
+		attachments, readErr := fs.ReadDir(fsys, readDir)
+		if readErr != nil {
+			if errors.Is(readErr, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("sdd: reading attachments for %s: %w", document.LogicalPath, readErr)
+		}
+		for _, attachment := range attachments {
+			if !attachment.IsDir() {
+				document.Attachments = append(document.Attachments, attachmentDir+"/"+attachment.Name())
+			}
+		}
+		sort.Strings(document.Attachments)
+	}
 	return BuildSnapshot(ctx, data)
 }
 
@@ -197,6 +222,7 @@ func cloneSnapshotData(data SnapshotData) SnapshotData {
 	for i, document := range data.Entries {
 		clone.Entries[i] = document
 		clone.Entries[i].Frontmatter = cloneMap(document.Frontmatter)
+		clone.Entries[i].Attachments = append([]string(nil), document.Attachments...)
 	}
 	clone.WIP = append([]WIPDocument(nil), data.WIP...)
 	return clone

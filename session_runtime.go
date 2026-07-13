@@ -155,7 +155,7 @@ func (a *Application) BindSession(ctx context.Context, identity RequestIdentity,
 		live := current.ExpiresAt.After(now)
 		if !same && live && !request.Takeover {
 			holder := *current
-			return BindSessionResult{}, &ApplicationError{Code: ErrorSessionInUse, Message: "session is held by another live connection", Holder: &holder}
+			return BindSessionResult{}, &ApplicationError{Code: ErrorSessionInUse, Message: "session is live on another connection", Holder: &holder}
 		}
 		if !same {
 			reason := "expired_takeover"

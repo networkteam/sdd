@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 
+	"github.com/networkteam/sdd/internal/bundledskills"
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/model"
@@ -39,6 +41,34 @@ func (a *Application) Info(ctx context.Context, identity RequestIdentity, projec
 		search = "vector,text"
 	}
 	return InfoResult{Project: runtime.options.Project, Participant: runtime.options.Participant, Language: runtime.options.Language, Search: search}, nil
+}
+
+func (a *Application) Vocabulary(ctx context.Context, identity RequestIdentity, project ProjectID) (string, error) {
+	info, err := a.Info(ctx, identity, project, InfoRequest{})
+	if err != nil {
+		return "", err
+	}
+	if info.Language == "" {
+		return "", nil
+	}
+	locale := strings.ToLower(info.Language)
+	base := locale
+	if index := strings.IndexAny(base, "-_"); index >= 0 {
+		base = base[:index]
+	}
+	if base == "en" {
+		return "", nil
+	}
+	for _, candidate := range []string{locale, base} {
+		body, readErr := bundledskills.ReadReference("sdd", "references/vocabulary-"+candidate+".md")
+		if readErr == nil {
+			return strings.TrimSpace(string(body)), nil
+		}
+		if candidate == base {
+			break
+		}
+	}
+	return fmt.Sprintf("(configured graph language %q has no bundled vocabulary reference — render user-facing terms in English canonical form; adding references/vocabulary-%s.md is a framework-level contribution)", info.Language, base), nil
 }
 
 func (a *Application) View(ctx context.Context, identity RequestIdentity, project ProjectID, request ViewRequest) (ViewResult, error) {
@@ -109,7 +139,24 @@ func (a *Application) Show(ctx context.Context, identity RequestIdentity, projec
 	}
 	var rendered bytes.Buffer
 	presenters.RenderShow(&rendered, result, presenters.ShowOptions{})
-	return ShowResult{Project: runtime.options.Project, Entries: strings.TrimRight(rendered.String(), "\n")}, nil
+	show := ShowResult{Project: runtime.options.Project, Entries: strings.TrimRight(rendered.String(), "\n")}
+	for _, group := range result.Groups {
+		if group.Primary != nil {
+			if group.PrimaryID != "" {
+				show.FullIDs = append(show.FullIDs, group.PrimaryID)
+			} else {
+				show.FullIDs = append(show.FullIDs, group.Primary.ID)
+			}
+		}
+		for _, items := range [][]model.ShowTreeItem{group.Upstream, group.Downstream} {
+			for _, item := range items {
+				if item.Entry != nil {
+					show.SummaryIDs = append(show.SummaryIDs, item.NodeID())
+				}
+			}
+		}
+	}
+	return show, nil
 }
 
 func (a *Application) Search(ctx context.Context, identity RequestIdentity, project ProjectID, request SearchRequest) (SearchResult, error) {
@@ -160,7 +207,13 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 	}
 	var rendered bytes.Buffer
 	presenters.RenderSearch(&rendered, result, snapshot.graph)
-	return SearchResult{Project: runtime.options.Project, Results: strings.TrimRight(rendered.String(), "\n")}, nil
+	search := SearchResult{Project: runtime.options.Project, Results: strings.TrimRight(rendered.String(), "\n")}
+	for _, entry := range result.Entries {
+		if entry.Entry != nil {
+			search.EntryIDs = append(search.EntryIDs, entry.DisplayID())
+		}
+	}
+	return search, nil
 }
 
 func (a *Application) ReadAttachment(ctx context.Context, identity RequestIdentity, project ProjectID, request ReadAttachmentRequest) (ReadAttachmentResult, error) {
@@ -178,11 +231,23 @@ func (a *Application) ReadAttachment(ctx context.Context, identity RequestIdenti
 		store = dependency.options.Graph
 		entryID = memberID
 	}
+	snapshot, err := store.Current(ctx)
+	if err != nil {
+		return ReadAttachmentResult{}, err
+	}
+	entry, ok := snapshot.graph.ByID[entryID]
+	if !ok {
+		return ReadAttachmentResult{}, fmt.Errorf("entry not found: %s", entryID)
+	}
 	page, err := store.ReadAttachmentPage(ctx, entryID, request.Filename, request.Offset, request.MaxBytes)
 	if err != nil {
 		return ReadAttachmentResult{}, err
 	}
-	return ReadAttachmentResult{Project: runtime.options.Project, Page: page}, nil
+	available := make([]string, 0, len(entry.Attachments))
+	for _, attachment := range entry.Attachments {
+		available = append(available, filepath.Base(attachment))
+	}
+	return ReadAttachmentResult{Project: runtime.options.Project, Page: page, Available: available}, nil
 }
 
 func (a *Application) Procedures(ctx context.Context, identity RequestIdentity, project ProjectID, _ ProcedureListRequest) (ProcedureListResult, error) {

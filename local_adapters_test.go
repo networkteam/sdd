@@ -113,6 +113,14 @@ func TestFunctionalMechanicalAdaptersConform(t *testing.T) {
 	})
 }
 
+func TestMemorySearchIndexStoreConforms(t *testing.T) {
+	namespace := sdd.IndexNamespace{Project: "memory", Fingerprint: "fixture", Dimensions: 2, Metric: "cosine"}
+	chunks := []sdd.IndexedChunk{{Chunk: sdd.CanonicalChunk{ID: "chunk-1", EntryID: "entry-1", Revision: "r1", ContentHash: "h1"}, Vector: []float32{0, 1}}}
+	sddtest.RunSearchIndexStoreTests(t, func(*testing.T) sddtest.SearchIndexStoreFixture {
+		return sddtest.SearchIndexStoreFixture{Store: sdd.NewMemorySearchIndexStore(), Namespace: namespace, Revision: "r1", Chunks: chunks, Query: []float32{0, 1}}
+	})
+}
+
 type memoryIndex struct {
 	manifest map[sdd.IndexNamespace][]sdd.StoredChunkRef
 	chunks   map[sdd.IndexNamespace]map[string]sdd.IndexedChunk

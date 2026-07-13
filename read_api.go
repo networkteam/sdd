@@ -27,8 +27,10 @@ type ShowRequest struct {
 }
 
 type ShowResult struct {
-	Project ProjectRef
-	Entries string
+	Project    ProjectRef
+	Entries    string
+	FullIDs    []string
+	SummaryIDs []string
 }
 
 type SearchRequest struct {
@@ -45,8 +47,9 @@ type SearchRequest struct {
 }
 
 type SearchResult struct {
-	Project ProjectRef
-	Results string
+	Project  ProjectRef
+	Results  string
+	EntryIDs []string
 }
 
 type ReadAttachmentRequest struct {
@@ -57,8 +60,9 @@ type ReadAttachmentRequest struct {
 }
 
 type ReadAttachmentResult struct {
-	Project ProjectRef
-	Page    AttachmentPage
+	Project   ProjectRef
+	Page      AttachmentPage
+	Available []string
 }
 
 type ProcedureListRequest struct{}

@@ -57,6 +57,7 @@ type AppliedMutation struct {
 	Project  ProjectID
 	BatchID  string
 	Revision string
+	Batch    MutationBatch
 }
 
 // MutationFinalizer is a named, idempotent post-apply effect. It cannot
