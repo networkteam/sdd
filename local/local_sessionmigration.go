@@ -67,9 +67,10 @@ func (m *FilesystemLegacySessionMigrator) ListLegacySessions(_ context.Context) 
 }
 
 // MigrateLegacySession replaces one legacy log atomically. A current record is
-// an idempotent no-op. Any staged blobs created before replacement are removed
-// again if conversion fails, leaving the legacy log and staging directory
-// untouched for inspection and retry.
+// not rewritten, but any legacy staging directory left by an earlier migration
+// is removed. Any staged blobs created before replacement are removed again if
+// conversion fails, leaving the legacy log and staging directory untouched for
+// inspection and retry.
 func (m *FilesystemLegacySessionMigrator) MigrateLegacySession(ctx context.Context, path string) (err error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -100,8 +101,9 @@ func (m *FilesystemLegacySessionMigrator) MigrateLegacySession(ctx context.Conte
 	if err != nil {
 		return err
 	}
+	stagingDir := filepath.Join(m.sessions.dir, string(id)+"-staging")
 	if format == sessionFormatCurrent {
-		return nil
+		return removeLegacyStagingDir(m.sessions.dir, stagingDir)
 	}
 
 	legacy, err := readLegacyEvents(filename, id)
@@ -130,7 +132,6 @@ func (m *FilesystemLegacySessionMigrator) MigrateLegacySession(ctx context.Conte
 		})
 	}
 
-	stagingDir := filepath.Join(m.sessions.dir, string(id)+"-staging")
 	staged, readErr := os.ReadDir(stagingDir)
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return readErr
@@ -184,7 +185,17 @@ func (m *FilesystemLegacySessionMigrator) MigrateLegacySession(ctx context.Conte
 		return err
 	}
 	replaced = true
-	return syncDirectory(m.sessions.dir)
+	if err := syncDirectory(m.sessions.dir); err != nil {
+		return err
+	}
+	return removeLegacyStagingDir(m.sessions.dir, stagingDir)
+}
+
+func removeLegacyStagingDir(sessionsDir, stagingDir string) error {
+	if err := os.RemoveAll(stagingDir); err != nil {
+		return err
+	}
+	return syncDirectory(sessionsDir)
 }
 
 type legacyEventLog struct {

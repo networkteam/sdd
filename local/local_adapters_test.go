@@ -417,6 +417,9 @@ func TestFilesystemLegacySessionMigrationPreservesEventsAndStagedAttachments(t *
 	if content.String() != "legacy evidence" {
 		t.Fatalf("staged content = %q", content.String())
 	}
+	if _, err := os.Stat(stagingDir); !os.IsNotExist(err) {
+		t.Fatalf("legacy staging directory remains after migration: %v", err)
+	}
 
 	var replayEvents []engine.Event
 	for _, item := range stored.Events {
@@ -468,6 +471,25 @@ func TestFilesystemLegacySessionMigrationPreservesEventsAndStagedAttachments(t *
 	if !bytes.Equal(before, after) {
 		t.Fatal("idempotent migration rewrote a current session")
 	}
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stagingDir, "residue.md"), []byte("already migrated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.MigrateLegacySession(t.Context(), legacyPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stagingDir); !os.IsNotExist(err) {
+		t.Fatalf("legacy staging residue remains after idempotent migration: %v", err)
+	}
+	afterCleanup, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, afterCleanup) {
+		t.Fatal("idempotent staging cleanup rewrote a current session")
+	}
 	candidates, err = migrator.ListLegacySessions(t.Context())
 	if err != nil || len(candidates) != 0 {
 		t.Fatalf("remaining candidates after migration = %v, %v", candidates, err)
@@ -497,6 +519,14 @@ func TestFilesystemLegacySessionMigrationLeavesMalformedRecordUntouched(t *testi
 	if err := os.WriteFile(path, want, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	stagingDir := filepath.Join(sessionsDir, "broken-staging")
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stagedPath := filepath.Join(stagingDir, "evidence.md")
+	if err := os.WriteFile(stagedPath, []byte("legacy evidence"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	migrator, err := localadapter.NewFilesystemLegacySessionMigrator(sessionsDir, filepath.Join(root, "blobs"), "local", "example")
 	if err != nil {
 		t.Fatal(err)
@@ -510,6 +540,13 @@ func TestFilesystemLegacySessionMigrationLeavesMalformedRecordUntouched(t *testi
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("malformed record changed: %q", got)
+	}
+	staged, err := os.ReadFile(stagedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(staged) != "legacy evidence" {
+		t.Fatalf("legacy staging changed after failed migration: %q", staged)
 	}
 }
 
