@@ -230,7 +230,8 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	// longer lives in the tree (machine-global store, d-tac-nhx), so its
 	// gitignore entry is not emitted anymore; existing entries are harmless
 	// and left alone.
-	gitignoreEntries := []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/", ".sdd/sessions/", ".sdd/staged-blobs/"}
+	graphRuntimeEntry := filepath.ToSlash(filepath.Join(graphDir, ".sdd-runtime")) + "/"
+	gitignoreEntries := []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/", ".sdd/sessions/", ".sdd/staged-blobs/", graphRuntimeEntry}
 	gitignoreAdded, err := ensureGitignoreEntries(gitignorePath, gitignoreEntries)
 	if err != nil {
 		log.Warn("could not update .gitignore", "path", gitignorePath, "err", err)

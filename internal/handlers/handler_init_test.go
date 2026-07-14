@@ -149,7 +149,7 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .gitignore: %v", err)
 	}
-	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/", ".sdd/sessions/", ".sdd/staged-blobs/"} {
+	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/", ".sdd/sessions/", ".sdd/staged-blobs/", ".sdd/graph/.sdd-runtime/"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf(".gitignore missing %q, got:\n%s", want, data)
 		}
@@ -375,11 +375,36 @@ func TestInit_GitignoreIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .gitignore: %v", err)
 	}
-	for _, entry := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/"} {
+	for _, entry := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/", ".sdd/sessions/", ".sdd/staged-blobs/", ".sdd/graph/.sdd-runtime/"} {
 		count := strings.Count(string(data), entry)
 		if count != 1 {
 			t.Errorf("%q appears %d times in .gitignore; want exactly 1\n%s", entry, count, data)
 		}
+	}
+}
+
+func TestInit_GitignoreUsesConfiguredGraphDir(t *testing.T) {
+	tmp := t.TempDir()
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		GraphDir:      "decisions",
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if !strings.Contains(string(data), "decisions/.sdd-runtime/") {
+		t.Fatalf(".gitignore missing configured graph runtime directory:\n%s", data)
+	}
+	if strings.Contains(string(data), ".sdd/graph/.sdd-runtime/") {
+		t.Fatalf(".gitignore contains default graph runtime directory for custom graph:\n%s", data)
 	}
 }
 
