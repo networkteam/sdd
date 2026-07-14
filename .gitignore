@@ -11,3 +11,4 @@
 .sdd/staged-blobs/
 go.work
 go.work.sum
+.sdd/graph/.sdd-runtime/
