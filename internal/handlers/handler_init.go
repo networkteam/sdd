@@ -230,7 +230,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	// longer lives in the tree (machine-global store, d-tac-nhx), so its
 	// gitignore entry is not emitted anymore; existing entries are harmless
 	// and left alone.
-	gitignoreEntries := []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/", ".sdd/sessions/"}
+	gitignoreEntries := []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/", ".sdd/sessions/", ".sdd/staged-blobs/"}
 	gitignoreAdded, err := ensureGitignoreEntries(gitignorePath, gitignoreEntries)
 	if err != nil {
 		log.Warn("could not update .gitignore", "path", gitignorePath, "err", err)
@@ -397,7 +397,33 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 	}
 
-	return nil
+	return h.migrateLegacySessions(ctx, cmd)
+}
+
+func (h *Handler) migrateLegacySessions(ctx context.Context, cmd *command.InitCmd) error {
+	if !cmd.MigrateLegacySessions {
+		return nil
+	}
+	if h.sessions == nil {
+		return fmt.Errorf("legacy session migration is not configured")
+	}
+	paths, err := h.sessions.ListLegacySessions(ctx)
+	if err != nil {
+		return fmt.Errorf("listing legacy sessions: %w", err)
+	}
+	log := slogutils.FromContext(ctx)
+	var failures []error
+	for _, path := range paths {
+		if err := h.sessions.MigrateLegacySession(ctx, path); err != nil {
+			log.Error("legacy session migration failed", "path", path, "err", err)
+			failures = append(failures, fmt.Errorf("migrating legacy session %s: %w", path, err))
+			continue
+		}
+		if cmd.OnSessionMigrated != nil {
+			cmd.OnSessionMigrated(path)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // resolveSkillScope picks the scope `sdd init` should install under and

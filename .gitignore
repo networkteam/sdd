@@ -8,5 +8,6 @@
 .sdd/index/
 .sdd/stats/
 .sdd/sessions/
+.sdd/staged-blobs/
 go.work
 go.work.sum

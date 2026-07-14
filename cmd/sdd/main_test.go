@@ -51,6 +51,31 @@ func TestAgentsPromptModel_RequiresSelection(t *testing.T) {
 	}
 }
 
+func TestChooseLegacySessionMigrationRequiresExplicitNonInteractiveOptIn(t *testing.T) {
+	promptCalls := 0
+	prompt := func(int) (bool, error) {
+		promptCalls++
+		return true, nil
+	}
+
+	got, err := chooseLegacySessionMigration(2, false, false, prompt)
+	if err != nil || got || promptCalls != 0 {
+		t.Fatalf("non-interactive choice = %v, %v; prompt calls %d", got, err, promptCalls)
+	}
+	got, err = chooseLegacySessionMigration(2, true, false, prompt)
+	if err != nil || !got || promptCalls != 0 {
+		t.Fatalf("explicit non-interactive choice = %v, %v; prompt calls %d", got, err, promptCalls)
+	}
+	got, err = chooseLegacySessionMigration(2, false, true, prompt)
+	if err != nil || !got || promptCalls != 1 {
+		t.Fatalf("interactive choice = %v, %v; prompt calls %d", got, err, promptCalls)
+	}
+	declined, err := chooseLegacySessionMigration(2, false, true, func(int) (bool, error) { return false, nil })
+	if err != nil || declined {
+		t.Fatalf("declined interactive choice = %v, %v", declined, err)
+	}
+}
+
 // TestSplitCSV_TrimsWhitespaceAndDropsEmpty is the regression test for the
 // CSV whitespace-trim bug (s-prc-omw, d-tac-955) and the d-prc-8vh contract
 // requiring regression tests for bug fixes. Before the fix,

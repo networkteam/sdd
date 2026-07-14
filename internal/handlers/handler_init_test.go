@@ -31,6 +31,56 @@ func (r pruneFailReader) SkillStatus(ctx context.Context, q query.SkillStatusQue
 	return r.Reader.SkillStatus(ctx, q)
 }
 
+type fakeLegacySessionMigrator struct {
+	paths    []string
+	failPath string
+	seen     []string
+}
+
+func (m *fakeLegacySessionMigrator) ListLegacySessions(context.Context) ([]string, error) {
+	return append([]string(nil), m.paths...), nil
+}
+
+func (m *fakeLegacySessionMigrator) MigrateLegacySession(_ context.Context, path string) error {
+	m.seen = append(m.seen, path)
+	if path == m.failPath {
+		return fmt.Errorf("injected malformed session")
+	}
+	return nil
+}
+
+func TestInit_LegacySessionMigrationContinuesAfterPerSessionFailure(t *testing.T) {
+	tmp := t.TempDir()
+	migrator := &fakeLegacySessionMigrator{
+		paths:    []string{"/sessions/one.jsonl", "/sessions/broken.jsonl", "/sessions/three.jsonl"},
+		failPath: "/sessions/broken.jsonl",
+	}
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{}), Sessions: migrator})
+	var migrated []string
+	err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:              tmp,
+		BinaryVersion:         "v0.2.0",
+		Targets:               []model.AgentTarget{model.AgentClaude},
+		Scope:                 model.ScopeProject,
+		MigrateLegacySessions: true,
+		OnSessionMigrated: func(path string) {
+			migrated = append(migrated, path)
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "/sessions/broken.jsonl") {
+		t.Fatalf("Init error = %v, want failed session path", err)
+	}
+	if !slices.Equal(migrator.seen, migrator.paths) {
+		t.Fatalf("migration sweep = %v, want %v", migrator.seen, migrator.paths)
+	}
+	if !slices.Equal(migrated, []string{"/sessions/one.jsonl", "/sessions/three.jsonl"}) {
+		t.Fatalf("migrated callbacks = %v", migrated)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, model.SDDDirName, "config.yaml")); statErr != nil {
+		t.Fatalf("normal init did not complete: %v", statErr)
+	}
+}
+
 // TestInit_FreshProjectEndToEnd exercises the full Init orchestration on an
 // empty directory: .sdd/ tree creation, config + meta files, embedded skill
 // extraction with stamps, and the expected callback fanout.
@@ -99,7 +149,7 @@ func TestInit_FreshProjectEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .gitignore: %v", err)
 	}
-	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/"} {
+	for _, want := range []string{".sdd/tmp/", ".sdd/config.local.yaml", ".sdd/stats/", ".sdd/sessions/", ".sdd/staged-blobs/"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf(".gitignore missing %q, got:\n%s", want, data)
 		}

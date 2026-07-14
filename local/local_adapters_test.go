@@ -1,16 +1,22 @@
 package local_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
+	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/engine"
 	localadapter "github.com/networkteam/sdd/local"
 	"github.com/networkteam/sdd/sddtest"
 )
@@ -261,6 +267,249 @@ func TestFilesystemSessionStoreCASFencesIndependentInstances(t *testing.T) {
 	}
 	if _, err := second.Append(t.Context(), "shared", created.Version, sdd.SessionAppend{Events: []sdd.StoredEvent{{CodecVersion: 1, Code: "two"}}}); errorCode(err) != sdd.ErrorSessionConflict {
 		t.Fatalf("independent stale append error = %v", err)
+	}
+}
+
+func TestFilesystemSessionStoreIgnoresLegacyAndUnreadableRecords(t *testing.T) {
+	dir := t.TempDir()
+	store, err := localadapter.NewFilesystemSessionStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := sdd.SessionMetadata{CodecVersion: 1, ID: "current", Subject: "local", Project: "example"}
+	if _, err := store.Create(t.Context(), metadata); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"v":1,"ts":"2026-07-01T12:00:00Z","session":"legacy","seq":1,"event":"session_meta","data":{"participant":"Christopher"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "legacy.jsonl"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken.jsonl"), []byte("{not-json\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	assertOnlyCurrent := func() {
+		t.Helper()
+		listed, err := store.List(t.Context(), sdd.SessionFilter{})
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(listed) != 1 || listed[0].Metadata.ID != "current" {
+			t.Fatalf("List = %+v, want only current", listed)
+		}
+	}
+	assertOnlyCurrent()
+
+	// A pre-0.16 process may create another legacy record after the first
+	// scan. Classification is repeated, so it remains non-blocking.
+	if err := os.WriteFile(filepath.Join(dir, "later.jsonl"), []byte(strings.ReplaceAll(legacy, "legacy", "later")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	assertOnlyCurrent()
+
+	for _, id := range []sdd.SessionID{"legacy", "broken", "later"} {
+		_, err := store.Load(t.Context(), id)
+		var migration *sdd.ApplicationError
+		if !errors.As(err, &migration) || migration.Code != sdd.ErrorMigrationRequired {
+			t.Fatalf("Load(%s) error = %v, want migration required", id, err)
+		}
+		if strings.Contains(strings.ToLower(err.Error()), "sdd init") {
+			t.Fatalf("Load(%s) leaked a CLI instruction: %v", id, err)
+		}
+	}
+}
+
+func TestFilesystemLegacySessionMigrationPreservesEventsAndStagedAttachments(t *testing.T) {
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	blobsDir := filepath.Join(root, "staged-blobs")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	id := sdd.SessionID("legacy")
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	events := []engine.Event{
+		{V: 1, TS: now, Session: string(id), Seq: 1, Event: engine.EventSessionMeta, Data: map[string]any{"participant": "Christopher"}},
+		{V: 1, TS: now.Add(time.Second), Session: string(id), Seq: 2, Event: engine.EventLabeled, Data: map[string]any{"label": "Parked migration"}},
+		{V: 1, TS: now.Add(2 * time.Second), Session: string(id), Seq: 3, Instance: "i_1", Event: engine.EventStarted, Data: map[string]any{"procedure": "capture", "step": "work"}},
+		{V: 1, TS: now.Add(3 * time.Second), Session: string(id), Seq: 4, Instance: "i_1", Event: engine.EventReport, Data: map[string]any{"fields": map[string]any{"body": "parked draft"}}},
+	}
+	var legacy bytes.Buffer
+	writtenPayloads := make([][]byte, 0, len(events))
+	for _, event := range events {
+		payload, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writtenPayloads = append(writtenPayloads, payload)
+		legacy.Write(payload)
+		legacy.WriteByte('\n')
+	}
+	legacyPath := filepath.Join(sessionsDir, string(id)+".jsonl")
+	if err := os.WriteFile(legacyPath, legacy.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stagingDir := filepath.Join(sessionsDir, string(id)+"-staging")
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stagingDir, "evidence.md"), []byte("legacy evidence"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	migrator, err := localadapter.NewFilesystemLegacySessionMigrator(sessionsDir, blobsDir, "local", "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := migrator.ListLegacySessions(t.Context())
+	if err != nil || len(candidates) != 1 || candidates[0] != legacyPath {
+		t.Fatalf("candidates = %v, %v", candidates, err)
+	}
+	if err := migrator.MigrateLegacySession(t.Context(), legacyPath); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := localadapter.NewFilesystemSessionStore(sessionsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Load(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata.ID != id || stored.Metadata.Subject != "local" || stored.Metadata.Project != "example" ||
+		stored.Metadata.Participant != "Christopher" || stored.Metadata.Label != "Parked migration" || !stored.Metadata.UpdatedAt.Equal(now.Add(3*time.Second)) {
+		t.Fatalf("metadata = %+v", stored.Metadata)
+	}
+	if len(stored.Events) != 5 {
+		t.Fatalf("events = %d, want 5", len(stored.Events))
+	}
+	for index, want := range writtenPayloads {
+		if stored.Events[index].Code != sdd.WorkflowEventCode || !bytes.Equal(stored.Events[index].Payload, want) {
+			t.Fatalf("event %d = %+v, want payload %s", index, stored.Events[index], want)
+		}
+	}
+	var staged struct {
+		Handle string `json:"handle"`
+		BlobID string `json:"blob_id"`
+	}
+	if err := json.Unmarshal(stored.Events[4].Payload, &staged); err != nil {
+		t.Fatal(err)
+	}
+	if staged.Handle != "evidence.md" || staged.BlobID == "" {
+		t.Fatalf("staged event = %+v", staged)
+	}
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(blobsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := blobs.Open(t.Context(), sdd.BlobOwner{Subject: "local", Session: id}, staged.BlobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := new(bytes.Buffer)
+	if _, err := content.ReadFrom(reader); err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if content.String() != "legacy evidence" {
+		t.Fatalf("staged content = %q", content.String())
+	}
+
+	var replayEvents []engine.Event
+	for _, item := range stored.Events {
+		if item.Code != sdd.WorkflowEventCode {
+			continue
+		}
+		var event engine.Event
+		if err := json.Unmarshal(item.Payload, &event); err != nil {
+			t.Fatal(err)
+		}
+		replayEvents = append(replayEvents, event)
+	}
+	step := &engine.Step{ID: "work"}
+	spec := &engine.Spec{
+		Canonical: "capture",
+		State:     map[string]engine.VarDecl{"body": {Type: engine.VarType{Base: engine.TypeText}}},
+		Steps:     []*engine.Step{step},
+		StepByID:  map[string]*engine.Step{"work": step},
+	}
+	engineRuntime := engine.New(engine.NewRegistry(), engine.StaticGraphs{})
+	replayed, err := engineRuntime.ReplaySession(string(id), stored.Metadata.Participant, replayEvents, func(canonical string) (*engine.Spec, error) {
+		if canonical != "capture" {
+			return nil, fmt.Errorf("unexpected procedure %s", canonical)
+		}
+		return spec, nil
+	}, nil)
+	if err != nil {
+		t.Fatalf("ReplaySession: %v", err)
+	}
+	instance, ok := replayed.Instance("i_1")
+	if !ok {
+		t.Fatal("parked instance was not restored")
+	}
+	if body, _ := instance.Store.Get("body"); body != "parked draft" {
+		t.Fatalf("replayed body = %v", body)
+	}
+
+	before, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.MigrateLegacySession(t.Context(), legacyPath); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("idempotent migration rewrote a current session")
+	}
+	candidates, err = migrator.ListLegacySessions(t.Context())
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("remaining candidates after migration = %v, %v", candidates, err)
+	}
+
+	// A legacy server can write another record after an earlier completed
+	// migration. The next pass discovers only that new record.
+	laterPath := filepath.Join(sessionsDir, "later.jsonl")
+	later := bytes.ReplaceAll(writtenPayloads[0], []byte(`"legacy"`), []byte(`"later"`))
+	if err := os.WriteFile(laterPath, append(later, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err = migrator.ListLegacySessions(t.Context())
+	if err != nil || !slices.Equal(candidates, []string{laterPath}) {
+		t.Fatalf("later candidates = %v, %v", candidates, err)
+	}
+}
+
+func TestFilesystemLegacySessionMigrationLeavesMalformedRecordUntouched(t *testing.T) {
+	root := t.TempDir()
+	sessionsDir := filepath.Join(root, "sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sessionsDir, "broken.jsonl")
+	want := []byte("{not-json\n")
+	if err := os.WriteFile(path, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	migrator, err := localadapter.NewFilesystemLegacySessionMigrator(sessionsDir, filepath.Join(root, "blobs"), "local", "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.MigrateLegacySession(t.Context(), path); err == nil {
+		t.Fatal("malformed migration unexpectedly succeeded")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("malformed record changed: %q", got)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -133,6 +134,30 @@ func (s *FilesystemStagedBlobStore) Release(_ context.Context, owner app.BlobOwn
 	}
 	delete(retentions, retentionID)
 	return writeJSONAtomic(filename, retentions)
+}
+
+func (s *FilesystemStagedBlobStore) remove(owner app.BlobOwner, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ownerDir, err := s.ownerDir(owner)
+	if err != nil {
+		return err
+	}
+	if err := validBlobID(id); err != nil {
+		return err
+	}
+	return errors.Join(
+		removeIfExists(filepath.Join(ownerDir, id+".blob")),
+		removeIfExists(filepath.Join(ownerDir, id+".json")),
+	)
+}
+
+func removeIfExists(path string) error {
+	err := os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 func (s *FilesystemStagedBlobStore) retentionsLocked(owner app.BlobOwner) (map[string][]string, string, error) {

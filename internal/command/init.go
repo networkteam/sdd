@@ -80,6 +80,11 @@ type InitCmd struct {
 	// BumpMinimumVersionCmd; equal versions are a no-op.
 	Bump bool
 
+	// MigrateLegacySessions requests the explicit legacy-session sweep. The
+	// caller sets this only after interactive confirmation or an equivalent
+	// non-interactive acknowledgement.
+	MigrateLegacySessions bool
+
 	// OnMinimumVersionBumped fires when minimum_version was raised by a
 	// `sdd init --bump` invocation, carrying the previous value (empty
 	// when no floor was recorded) and the new value.
@@ -113,6 +118,10 @@ type InitCmd struct {
 	// store already existed there and the legacy dir was left in place for
 	// manual removal (never clobbered, never merged).
 	OnIndexMigrated func(legacyDir, storeDir string, moved bool)
+
+	// OnSessionMigrated fires after one legacy session was atomically replaced
+	// by the current envelope.
+	OnSessionMigrated func(path string)
 
 	// --- Always-fire callbacks (both initial and repeat runs) ---
 

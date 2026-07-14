@@ -83,6 +83,16 @@ func (s *FilesystemSessionStore) loadLocked(id app.SessionID) (app.StoredSession
 	if err != nil {
 		return app.StoredSession{}, err
 	}
+	format, err := classifySessionFile(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return app.StoredSession{}, fmt.Errorf("%w: %s", app.ErrSessionNotFound, id)
+		}
+		return app.StoredSession{}, err
+	}
+	if format != sessionFormatCurrent {
+		return app.StoredSession{}, sessionMigrationRequired()
+	}
 	file, err := os.Open(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -132,6 +142,17 @@ func (s *FilesystemSessionStore) List(_ context.Context, filter app.SessionFilte
 			continue
 		}
 		id := app.SessionID(strings.TrimSuffix(entry.Name(), ".jsonl"))
+		filename, err := s.filename(id)
+		if err != nil {
+			return nil, err
+		}
+		format, err := classifySessionFile(filename)
+		if err != nil {
+			return nil, err
+		}
+		if format != sessionFormatCurrent {
+			continue
+		}
 		lock, err := s.lock(id)
 		if err != nil {
 			return nil, err
@@ -224,6 +245,52 @@ type sessionLine struct {
 	Version  uint64               `json:"version"`
 	Metadata *app.SessionMetadata `json:"metadata,omitempty"`
 	Events   []app.StoredEvent    `json:"events,omitempty"`
+}
+
+type sessionFormat uint8
+
+const (
+	sessionFormatLegacy sessionFormat = iota
+	sessionFormatCurrent
+)
+
+// classifySessionFile only identifies the current envelope. Everything else
+// is legacy from the current runtime's perspective, including an unreadable
+// first line: it must not make unrelated healthy sessions unavailable.
+func classifySessionFile(filename string) (sessionFormat, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return sessionFormatLegacy, err
+	}
+	defer func() { _ = file.Close() }()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for scanner.Scan() {
+		raw := scanner.Bytes()
+		if len(strings.TrimSpace(string(raw))) == 0 {
+			continue
+		}
+		var shape map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &shape); err != nil {
+			return sessionFormatLegacy, nil
+		}
+		if _, ok := shape["version"]; ok {
+			return sessionFormatCurrent, nil
+		}
+		return sessionFormatLegacy, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return sessionFormatLegacy, err
+	}
+	return sessionFormatLegacy, nil
+}
+
+func sessionMigrationRequired() error {
+	return &app.ApplicationError{
+		Code:    app.ErrorMigrationRequired,
+		Message: "session migration required",
+	}
 }
 
 func appendSessionLine(file *os.File, line sessionLine) error {

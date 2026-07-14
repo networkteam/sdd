@@ -15,6 +15,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
+	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/git"
@@ -28,6 +29,7 @@ import (
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
+	localadapter "github.com/networkteam/sdd/local"
 	"github.com/networkteam/slogutils"
 	"github.com/urfave/cli/v3"
 )
@@ -1569,7 +1571,11 @@ func (m confirmPromptModel) View() tea.View {
 // skill file during sdd init. Default N (preserve). Returns false on empty
 // input, EOF, or cancellation — the safe side is always "leave it alone."
 func promptOverwriteModified(absPath string) (bool, error) {
-	m := newConfirmPromptModel(fmt.Sprintf("Overwrite user-edited %s?", absPath))
+	return promptConfirmation(fmt.Sprintf("Overwrite user-edited %s?", absPath))
+}
+
+func promptConfirmation(prompt string) (bool, error) {
+	m := newConfirmPromptModel(prompt)
 	result, err := tea.NewProgram(m).Run()
 	if err != nil {
 		return false, err
@@ -1580,6 +1586,26 @@ func promptOverwriteModified(absPath string) (bool, error) {
 	}
 	v := strings.ToLower(strings.TrimSpace(final.textInput.Value()))
 	return v == "y" || v == "yes", nil
+}
+
+func chooseLegacySessionMigration(count int, explicit, interactive bool, prompt func(int) (bool, error)) (bool, error) {
+	if count == 0 {
+		return false, nil
+	}
+	if explicit {
+		return true, nil
+	}
+	if !interactive {
+		return false, nil
+	}
+	return prompt(count)
+}
+
+func promptLegacySessionMigration(count int) (bool, error) {
+	return promptConfirmation(fmt.Sprintf(
+		"%d legacy session(s) need migration. Confirm no session server is currently using this repository and migrate them now?",
+		count,
+	))
 }
 
 func initCmd() *cli.Command {
@@ -1615,6 +1641,10 @@ func initCmd() *cli.Command {
 			&cli.BoolFlag{
 				Name:  "bump",
 				Usage: "Raise .sdd/meta.json minimum_version to this binary's version (released builds only)",
+			},
+			&cli.BoolFlag{
+				Name:  "migrate-sessions",
+				Usage: "Migrate all legacy sessions; acknowledges that no session server is actively using this repository",
 			},
 		},
 		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
@@ -1660,6 +1690,32 @@ func initCmd() *cli.Command {
 			}
 			languageFlag := strings.TrimSpace(cmd.String("language"))
 			participantFlag := strings.TrimSpace(cmd.String("participant"))
+			remoteURL := git.RemoteURL(repoRoot)
+
+			var sessionMigrator handlers.LegacySessionMigrator
+			var legacySessionPaths []string
+			if sddExists {
+				project := sdd.ProjectID("local")
+				if existingMerged != nil && existingMerged.RepoID != "" {
+					project = sdd.ProjectID(existingMerged.RepoID)
+				} else if repoID, deriveErr := model.DeriveRepoID(remoteURL); deriveErr == nil {
+					project = sdd.ProjectID(repoID)
+				}
+				migrator, err := localadapter.NewFilesystemLegacySessionMigrator(
+					filepath.Join(sddDir, "sessions"),
+					filepath.Join(sddDir, "staged-blobs"),
+					"local",
+					project,
+				)
+				if err != nil {
+					return fmt.Errorf("preparing legacy session migration: %w", err)
+				}
+				sessionMigrator = migrator
+				legacySessionPaths, err = migrator.ListLegacySessions(ctx)
+				if err != nil {
+					return fmt.Errorf("detecting legacy sessions: %w", err)
+				}
+			}
 
 			// Aggregated non-interactive error (AC 5): a single message
 			// names every missing piece and the exact flag to fix it,
@@ -1762,19 +1818,33 @@ func initCmd() *cli.Command {
 				targets = chosen
 			}
 
+			migrateSessions, err := chooseLegacySessionMigration(
+				len(legacySessionPaths),
+				cmd.Bool("migrate-sessions"),
+				isTerminal(os.Stdin),
+				promptLegacySessionMigration,
+			)
+			if err != nil {
+				return fmt.Errorf("prompt: %w", err)
+			}
+			if len(legacySessionPaths) > 0 && !migrateSessions {
+				fmt.Fprintf(os.Stderr, "  %d legacy session(s) need migration and were left unchanged; after stopping all session servers, rerun with --migrate-sessions\n", len(legacySessionPaths))
+			}
+
 			icmd := &command.InitCmd{
-				RepoRoot:      repoRoot,
-				GraphDir:      graphDir,
-				Participant:   participant,
-				Language:      language,
-				BinaryVersion: version,
-				Targets:       targets,
-				Scope:         scope,
-				ScopeExplicit: scopeExplicit,
-				UserHome:      userHome,
-				RemoteURL:     git.RemoteURL(repoRoot),
-				Force:         cmd.Bool("force"),
-				Bump:          cmd.Bool("bump"),
+				RepoRoot:              repoRoot,
+				GraphDir:              graphDir,
+				Participant:           participant,
+				Language:              language,
+				BinaryVersion:         version,
+				Targets:               targets,
+				Scope:                 scope,
+				ScopeExplicit:         scopeExplicit,
+				UserHome:              userHome,
+				RemoteURL:             remoteURL,
+				Force:                 cmd.Bool("force"),
+				Bump:                  cmd.Bool("bump"),
+				MigrateLegacySessions: migrateSessions,
 				OnMinimumVersionBumped: func(previous, current string) {
 					if previous == "" {
 						fmt.Printf("  minimum_version: → %s\n", current)
@@ -1836,6 +1906,9 @@ func initCmd() *cli.Command {
 					}
 					fmt.Printf("  index store already exists at %s — the legacy copy at %s is unused and can be removed\n", storeDir, legacyDir)
 				},
+				OnSessionMigrated: func(path string) {
+					fmt.Printf("  session migrated: %s\n", path)
+				},
 			}
 
 			reader, err := newReadFinder()
@@ -1850,6 +1923,7 @@ func initCmd() *cli.Command {
 				Reader:    reader,
 				Committer: git.CLI{},
 				Repos:     mgr,
+				Sessions:  sessionMigrator,
 			})
 			if err := handler.Init(ctx, icmd); err != nil {
 				return err

@@ -357,6 +357,8 @@ sdd config set --local embedding.api_keys.openai sk-...   # write to .sdd/config
 
 `sdd init` is safe to run again — after a binary upgrade to refresh drifted skill files, after a colleague adds something to `.sdd/`, or just to confirm setup. Pristine skill files update silently; files you've edited are preserved (`--force` to overwrite).
 
+When an upgrade leaves sessions in an older format, interactive init offers to migrate all of them after you confirm that no `sdd serve` process is actively using the repository. Declining leaves the sessions untouched and does not stop the rest of init; a later run offers again. For non-interactive use, `--migrate-sessions` is the explicit acknowledgement and opt-in.
+
 Pass `--bump` from a released binary to raise `.sdd/meta.json`'s `minimum_version` — this locks older binaries out of the graph after a breaking change.
 
 Run non-interactively by passing every required flag: `sdd init --scope project --participant <name> --language en`. Missing flags produce a single error naming what's still needed.

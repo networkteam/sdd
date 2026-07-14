@@ -67,6 +67,13 @@ type Puller interface {
 	MergePull(ctx context.Context) (string, error)
 }
 
+// LegacySessionMigrator is the local maintenance seam used by init. Runtime
+// session reads never call it: conversion requires an explicit user gate.
+type LegacySessionMigrator interface {
+	ListLegacySessions(context.Context) ([]string, error)
+	MigrateLegacySession(context.Context, string) error
+}
+
 // Handler holds injected dependencies shared across command methods.
 // Each public method corresponds to one command and lives in its own file
 // (handler_new_entry.go, etc.).
@@ -79,6 +86,7 @@ type Handler struct {
 	brancher  Brancher
 	mover     Mover
 	puller    Puller
+	sessions  LegacySessionMigrator
 	repos     *repos.Manager
 	stderr    io.Writer
 	now       func() time.Time
@@ -94,6 +102,7 @@ type Options struct {
 	Brancher  Brancher
 	Mover     Mover
 	Puller    Puller
+	Sessions  LegacySessionMigrator
 	// Repos owns the connected-repos side effects (clone, pull, config
 	// writes). Nil means no connected-repos support — repo commands fail
 	// loud, and cross-repo cache freshening is skipped.
@@ -113,6 +122,7 @@ func New(opts Options) *Handler {
 		brancher:  opts.Brancher,
 		mover:     opts.Mover,
 		puller:    opts.Puller,
+		sessions:  opts.Sessions,
 		repos:     opts.Repos,
 		stderr:    opts.Stderr,
 		now:       opts.Now,
