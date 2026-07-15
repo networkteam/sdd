@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -1382,4 +1383,50 @@ func TestInit_RepoIDDerivation(t *testing.T) {
 			t.Errorf("repo_id after re-init = %q", cfg.RepoID)
 		}
 	})
+}
+
+func TestInit_DefaultBranchUpgrade(t *testing.T) {
+	h := handlers.New(handlers.Options{Reader: finders.New(finders.Options{})})
+	tmp := t.TempDir()
+	configDir := filepath.Join(tmp, model.SDDDirName)
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("graph_dir: .sdd/graph\n# keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := command.InitCmd{
+		RepoRoot: tmp, DefaultBranch: "main", BinaryVersion: "v0.2.0",
+		Targets: []model.AgentTarget{model.AgentClaude}, Scope: model.ScopeProject,
+	}
+	if err := h.Init(context.Background(), &base); err != nil {
+		t.Fatal(err)
+	}
+	data := readFile(t, configPath)
+	cfg, err := model.ParseConfig(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DefaultBranch != "main" {
+		t.Fatalf("default_branch = %q, want main", cfg.DefaultBranch)
+	}
+	if !bytes.Contains(data, []byte("# keep me")) {
+		t.Fatal("upgrade discarded existing config comments")
+	}
+
+	second := base
+	second.DefaultBranch = "feature"
+	if err := h.Init(context.Background(), &second); err != nil {
+		t.Fatal(err)
+	}
+	data = readFile(t, configPath)
+	cfg, err = model.ParseConfig(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DefaultBranch != "main" {
+		t.Fatalf("recorded default_branch overwritten with %q", cfg.DefaultBranch)
+	}
 }

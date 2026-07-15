@@ -483,6 +483,8 @@ sdd show d-cpt-vr4              # the entry plus its grounding and consumers
 sdd show d-cpt-vr4 --up 4 --down 3   # widen the neighborhood
 ```
 
+**`sdd recover`** — inspect a durable write whose outcome needs an explicit decision. The interactive command reconciles the concrete branch target before offering a valid action; it never replays pending work automatically. `sdd recover --history` shows terminal audit history. See [local mutation targets and recovery](docs/local-mutation-recovery.md).
+
 For the full CLI surface, run `sdd --help`.
 
 ## Directory layout
@@ -490,7 +492,7 @@ For the full CLI surface, run `sdd --help`.
 ```
 your-project/
 └── .sdd/
-    ├── config.yaml               # graph_dir, language, scope
+    ├── config.yaml               # graph_dir, default_branch, language, scope
     ├── config.local.yaml         # local participant name, llm + embedding config (gitignored)
     ├── meta.json                 # graph_schema_version, minimum_version
     ├── graph/
@@ -508,6 +510,7 @@ The vector index and the connected-repo caches don't live in the project tree �
 - [docs/signal-dialogue-decision.md](docs/signal-dialogue-decision.md) — framework model
 - [docs/story.md](docs/story.md) — a fictional story (Kōgen Coffee) of what SDD could become; the vision that sparked the design
 - [docs/signals.md](docs/signals.md) — open design signals for the framework itself
+- [docs/local-mutation-recovery.md](docs/local-mutation-recovery.md) — explicit branch authority, durable apply, and recovery states
 - [CLAUDE.md](CLAUDE.md) — guidance for Claude Code working on SDD itself
 
 ## Star the repo

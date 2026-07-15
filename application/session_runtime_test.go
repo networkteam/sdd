@@ -70,9 +70,38 @@ func (s unknownAfterApplyStore) Apply(ctx context.Context, revision string, batc
 	return sdd.ApplyResult{State: sdd.MutationUnknown, Revision: result.Revision}, errors.New("injected lost apply acknowledgement")
 }
 
+type pendingUnknownStore struct {
+	sdd.GraphStore
+	mu         sync.Mutex
+	reconciles int
+}
+
+func (s *pendingUnknownStore) Apply(context.Context, string, sdd.MutationBatch, sdd.StagedBlobReader) (sdd.ApplyResult, error) {
+	return sdd.ApplyResult{State: sdd.MutationUnknown}, errors.New("injected unknown apply outcome")
+}
+
+func (s *pendingUnknownStore) Reconcile(context.Context, string, string) (sdd.ApplyResult, error) {
+	s.mu.Lock()
+	s.reconciles++
+	s.mu.Unlock()
+	return sdd.ApplyResult{State: sdd.MutationUnknown}, errors.New("injected non-definitive reconciliation")
+}
+
 type failOnceFinalizer struct {
 	mu    sync.Mutex
 	calls int
+}
+
+type recordingRecoveryAuthorizer struct {
+	mu      sync.Mutex
+	request sdd.RecoveryAccessRequest
+}
+
+func (a *recordingRecoveryAuthorizer) AuthorizeRecovery(_ context.Context, request sdd.RecoveryAccessRequest) error {
+	a.mu.Lock()
+	a.request = request
+	a.mu.Unlock()
+	return nil
 }
 
 func (*failOnceFinalizer) Name() string { return "fail-once" }
@@ -157,6 +186,10 @@ func TestPreparedTransitionRecoversUnknownApplyAndFinalizer(t *testing.T) {
 	if err != nil || recovered.Apply.State != sdd.MutationApplied || finalizer.calls != 2 || blobs.released != 1 {
 		t.Fatalf("second recovery = %+v, %v; finalizer calls=%d released=%d", recovered, err, finalizer.calls, blobs.released)
 	}
+	history, err := application.ListRecoveries(t.Context(), identity, "example", true)
+	if err != nil || len(history.Items) != 1 || history.Items[0].State != sdd.RecoveryRecovered || history.Items[0].Actionable {
+		t.Fatalf("recovered history = %+v, %v", history, err)
+	}
 	restarted, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: graph.dir})
 	if err != nil {
 		t.Fatal(err)
@@ -183,9 +216,88 @@ func TestPreparedTransitionPersistsNotAppliedAndRejectsStaleBinding(t *testing.T
 	if errorCode(err) != sdd.ErrorGraphConflict || result.Apply.State != sdd.MutationNotApplied || blobs.released != 0 {
 		t.Fatalf("stale graph ApplyPrepared = %+v, %v; released=%d", result, err, blobs.released)
 	}
+	pending, err := application.ListRecoveries(t.Context(), identity, "example", false)
+	if err != nil || len(pending.Items) != 1 || pending.Items[0].State != sdd.RecoveryNotAppliedAwaitingDecision {
+		t.Fatalf("not-applied recovery projection = %+v, %v", pending, err)
+	}
+	discarded, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
+		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard, Reason: "stale prepared graph",
+	})
+	if err != nil || discarded.Item.State != sdd.RecoveryDiscarded || blobs.released != 1 {
+		t.Fatalf("discard recovery = %+v, %v; released=%d", discarded, err, blobs.released)
+	}
 	other := preparedEntry(t, graph.GraphStore, bound.Binding, "stale-binding", "2026/07/13-052200-s-tac-bnd.md")
 	if _, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, other); errorCode(err) != sdd.ErrorSessionConflict {
 		t.Fatalf("stale binding error = %v", err)
+	}
+}
+
+func TestReadSurfacesNeverReplayPendingMutation(t *testing.T) {
+	var pendingStore *pendingUnknownStore
+	application, _, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
+		pendingStore = &pendingUnknownStore{GraphStore: store}
+		return pendingStore
+	}, nil)
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "no-replay", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "pending-unknown", "2026/07/13-052500-s-tac-unk.md")
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	if errorCode(err) != sdd.ErrorRecoveryRequired || result.Apply.State != sdd.MutationUnknown {
+		t.Fatalf("pending ApplyPrepared = %+v, %v", result, err)
+	}
+	if _, err := application.ListRecoveries(t.Context(), identity, "example", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.Info(t.Context(), identity, "example", sdd.InfoRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.View(t.Context(), identity, "example", sdd.ViewRequest{Layout: "active:as-list"}); err != nil {
+		t.Fatal(err)
+	}
+	pendingStore.mu.Lock()
+	reconciles := pendingStore.reconciles
+	pendingStore.mu.Unlock()
+	if reconciles != 0 || blobs.released != 0 {
+		t.Fatalf("read surfaces reconciled %d times; released=%d", reconciles, blobs.released)
+	}
+	abandoned, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
+		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryAbandonUnknown, Reason: "operator accepts unknown history",
+	})
+	if err != nil || abandoned.Item.State != sdd.RecoveryAbandonedUnknown || blobs.released != 1 {
+		t.Fatalf("abandon unknown = %+v, %v; released=%d", abandoned, err, blobs.released)
+	}
+}
+
+func TestRecoveryAuthorizationReceivesActorOwnerTargetAndDistinctVerb(t *testing.T) {
+	authorizer := &recordingRecoveryAuthorizer{}
+	application, _, _, graph := newDurableApplication(t, time.Now, nil, nil, authorizer)
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "authorize-recovery", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "authorize-discard", "2026/07/13-052600-s-tac-aut.md")
+	advance := preparedEntry(t, graph.GraphStore, bound.Binding, "authorize-external", "2026/07/13-052700-s-tac-ext.md")
+	if _, err := graph.Apply(t.Context(), advance.ExpectedGraphRevision, advance.Batch, nil); err != nil {
+		t.Fatal(err)
+	}
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	if errorCode(err) != sdd.ErrorGraphConflict {
+		t.Fatalf("stale apply = %+v, %v", result, err)
+	}
+	if _, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
+		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard, Reason: "operator chose discard",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	authorizer.mu.Lock()
+	request := authorizer.request
+	authorizer.mu.Unlock()
+	if request.Actor.Subject != "christopher" || request.OriginalSubject != "christopher" || request.OriginalSession != "authorize-recovery" || request.Target.Branch != "main" || request.Verb != sdd.RecoveryDiscard {
+		t.Fatalf("recovery authorization request = %+v", request)
 	}
 }
 
@@ -247,7 +359,7 @@ type graphFixture struct {
 	dir string
 }
 
-func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.GraphStore) sdd.GraphStore, finalizers []sdd.MutationFinalizer) (*sdd.Application, *localadapter.FilesystemSessionStore, *trackingBlobStore, graphFixture) {
+func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.GraphStore) sdd.GraphStore, finalizers []sdd.MutationFinalizer, authorizers ...sdd.RecoveryAuthorizer) (*sdd.Application, *localadapter.FilesystemSessionStore, *trackingBlobStore, graphFixture) {
 	t.Helper()
 	dir := t.TempDir()
 	baseGraph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: dir})
@@ -267,9 +379,13 @@ func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.Gra
 		t.Fatal(err)
 	}
 	blobs := &trackingBlobStore{StagedBlobStore: baseBlobs}
+	authorizer := sdd.RecoveryAuthorizer(sdd.RecoveryAuthorizerFunc(func(context.Context, sdd.RecoveryAccessRequest) error { return nil }))
+	if len(authorizers) > 0 {
+		authorizer = authorizers[0]
+	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: now, Finalizers: finalizers,
-		Recovery: sdd.RecoveryAuthorizerFunc(func(context.Context, sdd.RecoveryAccessRequest) error { return nil }),
+		Recovery: authorizer,
 		LLM:      sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
 	})
 	if err != nil {

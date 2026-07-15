@@ -266,29 +266,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	if localEmbedder != nil {
 		embeddings = publicEmbeddingExecutor(localEmbedder)
 	}
-	serverCheckout := filepath.Dir(sddDir)
-	targets, err := localadapter.NewGitWorktreeAcquirer(localadapter.GitWorktreeAcquirerOptions{
-		Project: project, ServerCheckout: serverCheckout,
-		Factory: func(_ context.Context, checkout string, target sdd.MutationTarget) (sdd.GraphStore, []sdd.MutationFinalizer, func() error, error) {
-			targetCfg, cfgErr := resolveConfigAt(filepath.Join(checkout, model.SDDDirName))
-			if cfgErr != nil {
-				return nil, nil, nil, fmt.Errorf("loading mutation target config for %s: %w", target.Branch, cfgErr)
-			}
-			if targetCfg == nil || sdd.ProjectID(targetCfg.RepoID) != project {
-				return nil, nil, nil, fmt.Errorf("mutation target checkout %q does not contain project %s", checkout, project)
-			}
-			targetGraphDir := meta.ResolveGraphDir(checkout, targetCfg)
-			targetGraph, graphErr := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: targetGraphDir})
-			if graphErr != nil {
-				return nil, nil, nil, graphErr
-			}
-			graphDirRel := targetCfg.GraphDir
-			if graphDirRel == "" {
-				graphDirRel = model.DefaultGraphDir
-			}
-			return targetGraph, []sdd.MutationFinalizer{localadapter.GitFinalizer{Checkout: checkout, GraphDir: graphDirRel}}, func() error { return nil }, nil
-		},
-	})
+	targets, err := newLocalMutationTargets(project, filepath.Dir(sddDir))
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
@@ -337,6 +315,38 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		return nil, "", sdd.RequestIdentity{}, err
 	}
 	return application, project, identity, nil
+}
+
+func newLocalMutationTargets(project sdd.ProjectID, serverCheckout string) (*localadapter.GitWorktreeAcquirer, error) {
+	return localadapter.NewGitWorktreeAcquirer(localadapter.GitWorktreeAcquirerOptions{
+		Project: project, ServerCheckout: serverCheckout,
+		Factory: func(_ context.Context, checkout string, target sdd.MutationTarget) (sdd.GraphStore, []sdd.MutationFinalizer, func() error, error) {
+			targetCfg, cfgErr := resolveConfigAt(filepath.Join(checkout, model.SDDDirName))
+			if cfgErr != nil {
+				return nil, nil, nil, fmt.Errorf("loading mutation target config for %s: %w", target.Branch, cfgErr)
+			}
+			if targetCfg == nil {
+				return nil, nil, nil, fmt.Errorf("mutation target checkout %q does not contain project %s", checkout, project)
+			}
+			targetProject := sdd.ProjectID(targetCfg.RepoID)
+			if targetProject == "" {
+				targetProject = "local"
+			}
+			if targetProject != project {
+				return nil, nil, nil, fmt.Errorf("mutation target checkout %q does not contain project %s", checkout, project)
+			}
+			targetGraphDir := meta.ResolveGraphDir(checkout, targetCfg)
+			targetGraph, graphErr := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: targetGraphDir})
+			if graphErr != nil {
+				return nil, nil, nil, graphErr
+			}
+			graphDirRel := targetCfg.GraphDir
+			if graphDirRel == "" {
+				graphDirRel = model.DefaultGraphDir
+			}
+			return targetGraph, []sdd.MutationFinalizer{localadapter.GitFinalizer{Checkout: checkout, GraphDir: graphDirRel, Branch: target.Branch}}, func() error { return nil }, nil
+		},
+	})
 }
 
 func publicEmbeddingExecutor(embedder llm.Embedder) sdd.EmbeddingExecutor {

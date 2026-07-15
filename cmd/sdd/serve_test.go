@@ -59,7 +59,7 @@ func TestLocalGitFinalizerCommitsBatchOnce(t *testing.T) {
 	if err := os.WriteFile(attachmentPath, []byte("evidence\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	finalizer := localadapter.GitFinalizer{Checkout: checkout, GraphDir: ".sdd/graph"}
+	finalizer := localadapter.GitFinalizer{Checkout: checkout, GraphDir: ".sdd/graph", Branch: "main"}
 	mutation := sdd.AppliedMutation{
 		BatchID: "mutation-1",
 		Batch: sdd.MutationBatch{

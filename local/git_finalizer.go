@@ -16,6 +16,7 @@ import (
 type GitFinalizer struct {
 	Checkout string
 	GraphDir string
+	Branch   string
 	Timeout  time.Duration
 }
 
@@ -28,7 +29,10 @@ func (f GitFinalizer) Finalize(ctx context.Context, mutation app.AppliedMutation
 	ctx, cancel := context.WithTimeout(ctx, f.Timeout)
 	defer cancel()
 	trailer := "SDD-Mutation: " + mutation.BatchID
-	out, err := exec.CommandContext(ctx, "git", "-C", f.Checkout, "log", "--all", "--fixed-strings", "--grep="+trailer, "--format=%H", "-n", "1").CombinedOutput()
+	if strings.TrimSpace(f.Branch) == "" {
+		return fmt.Errorf("git finalizer: concrete branch is required")
+	}
+	out, err := exec.CommandContext(ctx, "git", "-C", f.Checkout, "log", f.Branch, "--fixed-strings", "--grep="+trailer, "--format=%H", "-n", "1").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git finalizer log: %s (%w)", strings.TrimSpace(string(out)), err)
 	}

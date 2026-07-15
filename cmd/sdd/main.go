@@ -300,6 +300,7 @@ func main() {
 			indexCmd(),
 			searchCmd(),
 			serveCmd(),
+			recoverCmd(),
 			syncCmd(),
 			repoCmd(),
 			statsCmd(),
@@ -1691,9 +1692,16 @@ func initCmd() *cli.Command {
 			languageFlag := strings.TrimSpace(cmd.String("language"))
 			participantFlag := strings.TrimSpace(cmd.String("participant"))
 			remoteURL := git.RemoteURL(repoRoot)
-			defaultBranch, branchErr := git.CurrentBranch(repoRoot)
-			if branchErr != nil {
-				return branchErr
+			defaultBranch := ""
+			if existingMerged != nil {
+				defaultBranch = strings.TrimSpace(existingMerged.DefaultBranch)
+			}
+			if defaultBranch == "" {
+				var branchErr error
+				defaultBranch, branchErr = git.CurrentBranch(repoRoot)
+				if branchErr != nil {
+					return branchErr
+				}
 			}
 
 			var sessionMigrator handlers.LegacySessionMigrator

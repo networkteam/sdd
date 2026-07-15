@@ -21,7 +21,7 @@ type InitCmd struct {
 	GraphDir string
 
 	// DefaultBranch is the concrete Git branch persisted for ordinary engine
-	// captures on fresh initialization.
+	// captures on fresh initialization or when upgrading an older config.
 	DefaultBranch string
 
 	// Participant is the canonical author name to record in

@@ -212,47 +212,6 @@ func storedEvent(code string, value any) (StoredEvent, error) {
 	return StoredEvent{CodecVersion: SessionCodecVersion, Code: code, Payload: payload}, nil
 }
 
-func replayMutation(events []StoredEvent, mutationID string) (PreparedTransition, ApplyResult, map[string]FinalizerOutcome, error) {
-	var prepared PreparedTransition
-	apply := ApplyResult{State: MutationUnknown}
-	finalizers := map[string]FinalizerOutcome{}
-	for _, event := range events {
-		if event.CodecVersion != SessionCodecVersion {
-			return PreparedTransition{}, ApplyResult{}, nil, &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported session event codec version", Version: event.CodecVersion}
-		}
-		switch event.Code {
-		case eventMutationIntent:
-			var value mutationIntentEvent
-			if err := json.Unmarshal(event.Payload, &value); err != nil {
-				return PreparedTransition{}, ApplyResult{}, nil, err
-			}
-			if value.Prepared.Batch.ID == mutationID {
-				prepared = value.Prepared
-			}
-		case eventMutationOutcome:
-			var value mutationOutcomeEvent
-			if err := json.Unmarshal(event.Payload, &value); err != nil {
-				return PreparedTransition{}, ApplyResult{}, nil, err
-			}
-			if value.MutationID == mutationID {
-				apply = value.Apply
-			}
-		case eventFinalizerOutcome:
-			var value finalizerOutcomeEvent
-			if err := json.Unmarshal(event.Payload, &value); err != nil {
-				return PreparedTransition{}, ApplyResult{}, nil, err
-			}
-			if value.MutationID == mutationID {
-				finalizers[value.Outcome.Name] = value.Outcome
-			}
-		}
-	}
-	if prepared.Batch.ID == "" {
-		return PreparedTransition{}, ApplyResult{}, nil, fmt.Errorf("sdd: mutation intent %q not found", mutationID)
-	}
-	return prepared, apply, finalizers, nil
-}
-
 type ownedBlobReader struct {
 	store StagedBlobStore
 	owner BlobOwner
