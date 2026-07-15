@@ -1,6 +1,9 @@
 /tmp
 /bin
 /dist
+/website/node_modules
+/website/.astro
+/website/dist
 .env
 .claude/worktrees/
 .sdd/tmp/

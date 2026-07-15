@@ -1,15 +1,24 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
-  "packages": ["go@1.26", "golangci-lint@2.11", "uv"],
+  "packages": [
+    "go@1.26",
+    "golangci-lint@2.11",
+    "uv",
+    "nodejs@24"
+  ],
   "shell": {
     "init_hook": ["git config core.hooksPath .githooks 2>/dev/null || true"],
     "scripts": {
-      "build": "go build -o bin/sdd ./cmd/sdd",
-      "gen-installer": "binst gen -o install.sh",
+      "build":           "go build -o bin/sdd ./cmd/sdd",
+      "docs:build":      "pnpm --dir website build",
+      "docs:dev":        "pnpm --dir website dev",
+      "gen-installer":   "binst gen -o install.sh",
       "validate-skills": "rc=0; for d in .agents/skills/*/; do [ -f \"$d/SKILL.md\" ] || continue; uvx --from skills-ref@0.1.1 agentskills validate \"$d\" || rc=1; done; exit $rc"
     }
   },
   "env": {
+    "ASTRO_TELEMETRY_DISABLED": "1",
+    "DEVBOX_COREPACK_ENABLED": "true",
     "PATH": "$DEVBOX_PROJECT_ROOT/bin:$PATH"
   }
 }
