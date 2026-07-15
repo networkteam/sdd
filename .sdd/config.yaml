@@ -3,6 +3,7 @@
 
 # Graph directory relative to repository root.
 graph_dir: .sdd/graph
+default_branch: main
 skill_scope: project
 # Agent profiles sdd init renders skills for (.claude/skills/, .agents/skills/).
 supported_agents: [claude, codex]

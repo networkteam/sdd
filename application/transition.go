@@ -8,7 +8,10 @@ import (
 	"io"
 )
 
-const PreparedTransitionVersion uint32 = 1
+const (
+	LegacyPreparedTransitionVersion uint32 = 1
+	PreparedTransitionVersion       uint32 = 2
+)
 
 const (
 	eventMutationIntent   = "mutation_intent"
@@ -20,6 +23,7 @@ const (
 // only pinned v1 facts; adapters never reconstruct application intent.
 type PreparedTransition struct {
 	Version               uint32
+	Target                MutationTarget
 	ExpectedGraphRevision string
 	Batch                 MutationBatch
 	BlobOwner             BlobOwner
@@ -87,40 +91,32 @@ func (a *Application) ApplyPrepared(ctx context.Context, identity RequestIdentit
 		return TransitionResult{}, err
 	}
 	binding.Version = version
-	apply, applyErr := runtime.options.Graph.Apply(ctx, prepared.ExpectedGraphRevision, prepared.Batch, ownedBlobReader{store: runtime.options.StagedBlobs, owner: prepared.BlobOwner})
-	return a.finishTransition(ctx, runtime, binding, prepared, apply, applyErr, nil)
+	result := TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationUnknown}}
+	acquired, err := runtime.acquire(ctx, prepared.Target)
+	if err != nil {
+		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "mutation target could not be acquired after intent persistence", Cause: err}
+	}
+	return a.applyOnAcquired(ctx, runtime, acquired, binding, prepared, nil, principal.Subject, RecoveryApply)
 }
 
-// RecoverPrepared reconciles an intent that has no durable definitive
-// outcome. It is safe after process restart and retries unfinished finalizers.
-func (a *Application) RecoverPrepared(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, mutationID string) (TransitionResult, error) {
-	principal, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
+func (a *Application) applyOnAcquired(ctx context.Context, runtime *ProjectRuntime, acquired *AcquiredTarget, binding SessionBinding, prepared PreparedTransition, prior map[string]FinalizerOutcome, actor string, terminalVerb RecoveryVerb) (result TransitionResult, err error) {
+	defer func() {
+		if releaseErr := acquired.Release(); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("releasing mutation target %s: %w", prepared.Target.Branch, releaseErr))
+		}
+	}()
+	snapshot, err := acquired.Graph.Current(ctx)
 	if err != nil {
-		return TransitionResult{}, err
+		return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationUnknown}}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "reading mutation target before apply failed", Cause: err}
 	}
-	stored, err := runtime.options.Sessions.Load(ctx, binding.SessionID)
-	if err != nil {
-		return TransitionResult{}, err
+	if err := revalidatePreparedTransition(ctx, snapshot, prepared); err != nil {
+		return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationNotApplied, Revision: snapshot.Revision()}}, err
 	}
-	if err := verifyBinding(stored, binding); err != nil {
-		return TransitionResult{}, err
-	}
-	prepared, prior, finalizers, err := replayMutation(stored.Events, mutationID)
-	if err != nil {
-		return TransitionResult{}, err
-	}
-	if err := validatePreparedTransition(prepared, principal, binding, runtime.options.Project.ID); err != nil {
-		return TransitionResult{}, err
-	}
-	binding.Version = stored.Version
-	if prior.State == MutationApplied || prior.State == MutationNotApplied {
-		return a.finishTransition(ctx, runtime, binding, prepared, prior, nil, finalizers)
-	}
-	apply, reconcileErr := runtime.options.Graph.Reconcile(ctx, prepared.Batch.ID, prepared.Batch.Digest)
-	return a.finishTransition(ctx, runtime, binding, prepared, apply, reconcileErr, finalizers)
+	apply, applyErr := acquired.Graph.Apply(ctx, prepared.ExpectedGraphRevision, prepared.Batch, ownedBlobReader{store: runtime.options.StagedBlobs, owner: prepared.BlobOwner})
+	return a.finishTransition(ctx, runtime, acquired, binding, prepared, apply, applyErr, prior, actor, terminalVerb)
 }
 
-func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRuntime, binding SessionBinding, prepared PreparedTransition, apply ApplyResult, applyErr error, prior map[string]FinalizerOutcome) (TransitionResult, error) {
+func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRuntime, acquired *AcquiredTarget, binding SessionBinding, prepared PreparedTransition, apply ApplyResult, applyErr error, prior map[string]FinalizerOutcome, actor string, terminalVerb RecoveryVerb) (TransitionResult, error) {
 	if prior == nil {
 		prior = map[string]FinalizerOutcome{}
 	}
@@ -137,7 +133,7 @@ func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRunt
 		result.Binding.Version = next
 	}
 	if apply.State == MutationApplied {
-		for _, finalizer := range runtime.options.Finalizers {
+		for _, finalizer := range acquired.Finalizers {
 			if previous, ok := prior[finalizer.Name()]; ok && previous.Succeeded {
 				result.Finalizers = append(result.Finalizers, previous)
 				continue
@@ -162,13 +158,25 @@ func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRunt
 			}
 		}
 	}
-	if apply.State != MutationUnknown {
+	if apply.State == MutationApplied {
 		if err := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID); err != nil {
 			return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "staged blob retention could not be released", ApplyState: apply.State, Revision: apply.Revision, Cause: err}
 		}
+		next, err := appendRecoveryTerminal(ctx, runtime.options.Sessions, result.Binding, recoveryTerminalEvent{
+			MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
+			OriginalSubject: prepared.BlobOwner.Subject, OriginalSession: prepared.BlobOwner.Session,
+			Actor: actor, Verb: terminalVerb,
+		})
+		if err != nil {
+			return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "recovered mutation outcome was not persisted", ApplyState: apply.State, Revision: apply.Revision, Cause: err}
+		}
+		result.Binding.Version = next
 	}
 	if apply.State == MutationUnknown {
 		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "canonical mutation outcome is unknown", ApplyState: apply.State, Revision: apply.Revision, Cause: applyErr}
+	}
+	if apply.State == MutationNotApplied && applyErr == nil {
+		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "canonical mutation was not applied and awaits an explicit recovery decision", ApplyState: apply.State, Revision: apply.Revision}
 	}
 	if applyErr != nil {
 		return result, applyErr
@@ -182,6 +190,9 @@ func validatePreparedTransition(prepared PreparedTransition, principal Principal
 	}
 	if binding.Subject != principal.Subject || binding.Project != project || prepared.BlobOwner.Subject != principal.Subject || prepared.BlobOwner.Session != binding.SessionID {
 		return &ApplicationError{Code: ErrorSessionOwnership, Message: "prepared transition ownership mismatch"}
+	}
+	if err := prepared.Target.Validate(project); err != nil {
+		return err
 	}
 	digest, err := MutationBatchDigest(prepared.Batch)
 	if err != nil {

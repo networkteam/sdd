@@ -147,11 +147,13 @@ func TestPreparedTransitionRecoversUnknownApplyAndFinalizer(t *testing.T) {
 	if blobs.released != 0 {
 		t.Fatal("unknown outcome released staged-blob retention")
 	}
-	recovered, err := application.RecoverPrepared(t.Context(), identity, "example", unknown.Binding, prepared.Batch.ID)
+	recoveredResult, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: unknown.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryFinalizeRetry})
+	recovered := recoveredResult.Transition
 	if errorCode(err) != sdd.ErrorRecoveryRequired || recovered.Apply.State != sdd.MutationApplied || finalizer.calls != 1 {
 		t.Fatalf("first recovery = %+v, %v; finalizer calls=%d", recovered, err, finalizer.calls)
 	}
-	recovered, err = application.RecoverPrepared(t.Context(), identity, "example", recovered.Binding, prepared.Batch.ID)
+	recoveredResult, err = application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: recovered.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryFinalizeRetry})
+	recovered = recoveredResult.Transition
 	if err != nil || recovered.Apply.State != sdd.MutationApplied || finalizer.calls != 2 || blobs.released != 1 {
 		t.Fatalf("second recovery = %+v, %v; finalizer calls=%d released=%d", recovered, err, finalizer.calls, blobs.released)
 	}
@@ -178,7 +180,7 @@ func TestPreparedTransitionPersistsNotAppliedAndRejectsStaleBinding(t *testing.T
 		t.Fatal(err)
 	}
 	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
-	if errorCode(err) != sdd.ErrorGraphConflict || result.Apply.State != sdd.MutationNotApplied || blobs.released != 1 {
+	if errorCode(err) != sdd.ErrorGraphConflict || result.Apply.State != sdd.MutationNotApplied || blobs.released != 0 {
 		t.Fatalf("stale graph ApplyPrepared = %+v, %v; released=%d", result, err, blobs.released)
 	}
 	other := preparedEntry(t, graph.GraphStore, bound.Binding, "stale-binding", "2026/07/13-052200-s-tac-bnd.md")
@@ -203,7 +205,7 @@ func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *te
 	}
 	blobs := &trackingBlobStore{StagedBlobStore: baseBlobs, releaseErr: errors.New("injected release failure")}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs,
 		LLM: sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
 	})
 	if err != nil {
@@ -266,8 +268,9 @@ func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.Gra
 	}
 	blobs := &trackingBlobStore{StagedBlobStore: baseBlobs}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: now, Finalizers: finalizers,
-		LLM: sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
+		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: now, Finalizers: finalizers,
+		Recovery: sdd.RecoveryAuthorizerFunc(func(context.Context, sdd.RecoveryAccessRequest) error { return nil }),
+		LLM:      sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -287,14 +290,17 @@ func preparedEntry(t *testing.T, graph sdd.GraphStore, binding sdd.SessionBindin
 		t.Fatal(err)
 	}
 	canonical := []byte("---\ntype: signal\nkind: done\nlayer: tactical\nsummary: Durable transition fixture.\n---\n\nDurable transition fixture body.\n")
-	batch := sdd.MutationBatch{ID: id, Changes: []sdd.DocumentChange{{LogicalPath: path, CanonicalBytes: canonical}}}
+	document := sdd.EntryDocument{LogicalPath: path, Frontmatter: map[string]any{
+		"type": "signal", "kind": "done", "layer": "tactical", "summary": "Durable transition fixture.",
+	}, Body: "Durable transition fixture body."}
+	batch := sdd.MutationBatch{ID: id, Changes: []sdd.DocumentChange{{LogicalPath: path, Document: &document, CanonicalBytes: canonical}}}
 	digest, err := sdd.MutationBatchDigest(batch)
 	if err != nil {
 		t.Fatal(err)
 	}
 	batch.Digest = digest
 	return sdd.PreparedTransition{
-		Version: sdd.PreparedTransitionVersion, ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
+		Version: sdd.PreparedTransitionVersion, Target: sdd.MutationTarget{Project: "example", Branch: "main"}, ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
 		BlobOwner: sdd.BlobOwner{Subject: binding.Subject, Session: binding.SessionID},
 	}
 }

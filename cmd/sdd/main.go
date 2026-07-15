@@ -1691,6 +1691,10 @@ func initCmd() *cli.Command {
 			languageFlag := strings.TrimSpace(cmd.String("language"))
 			participantFlag := strings.TrimSpace(cmd.String("participant"))
 			remoteURL := git.RemoteURL(repoRoot)
+			defaultBranch, branchErr := git.CurrentBranch(repoRoot)
+			if branchErr != nil {
+				return branchErr
+			}
 
 			var sessionMigrator handlers.LegacySessionMigrator
 			var legacySessionPaths []string
@@ -1834,6 +1838,7 @@ func initCmd() *cli.Command {
 			icmd := &command.InitCmd{
 				RepoRoot:              repoRoot,
 				GraphDir:              graphDir,
+				DefaultBranch:         defaultBranch,
 				Participant:           participant,
 				Language:              language,
 				BinaryVersion:         version,

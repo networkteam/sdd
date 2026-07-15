@@ -1,7 +1,10 @@
 package application
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -12,17 +15,20 @@ type ProjectRuntime struct {
 }
 
 type ProjectRuntimeOptions struct {
-	Project      ProjectRef
-	Language     string
-	Dependencies []string
-	Graph        GraphStore
-	Sessions     SessionStore
-	StagedBlobs  StagedBlobStore
-	Embeddings   EmbeddingExecutor
-	SearchIndex  SearchIndexStore
-	LLM          LLMExecutor
-	Finalizers   []MutationFinalizer
-	Now          func() time.Time
+	Project       ProjectRef
+	DefaultBranch string
+	Language      string
+	Dependencies  []string
+	Graph         GraphStore
+	Targets       TargetAcquirer
+	Recovery      RecoveryAuthorizer
+	Sessions      SessionStore
+	StagedBlobs   StagedBlobStore
+	Embeddings    EmbeddingExecutor
+	SearchIndex   SearchIndexStore
+	LLM           LLMExecutor
+	Finalizers    []MutationFinalizer
+	Now           func() time.Time
 }
 
 func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
@@ -47,6 +53,12 @@ func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
 	if options.Now == nil {
 		options.Now = time.Now
 	}
+	if options.Targets == nil && options.DefaultBranch != "" {
+		options.Targets = FixedTargetAcquirer{
+			Target: MutationTarget{Project: options.Project.ID, Branch: options.DefaultBranch},
+			Graph:  options.Graph, Finalizers: options.Finalizers,
+		}
+	}
 	return &ProjectRuntime{options: options}, nil
 }
 
@@ -55,4 +67,32 @@ func (r *ProjectRuntime) Project() ProjectRef {
 		return ProjectRef{}
 	}
 	return r.options.Project
+}
+
+func (r *ProjectRuntime) defaultMutationTarget() (MutationTarget, error) {
+	target := MutationTarget{Project: r.options.Project.ID, Branch: strings.TrimSpace(r.options.DefaultBranch)}
+	if err := target.Validate(r.options.Project.ID); err != nil {
+		return MutationTarget{}, fmt.Errorf("sdd: no concrete default mutation branch is configured: %w", err)
+	}
+	return target, nil
+}
+
+func (r *ProjectRuntime) acquire(ctx context.Context, target MutationTarget) (*AcquiredTarget, error) {
+	if err := target.Validate(r.options.Project.ID); err != nil {
+		return nil, err
+	}
+	if r.options.Targets == nil {
+		return nil, &ApplicationError{Code: ErrorWriteDenied, Message: "project has no mutation target acquirer"}
+	}
+	acquired, err := r.options.Targets.Acquire(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	if err := acquired.validate(target); err != nil {
+		if acquired != nil && acquired.Release != nil {
+			return nil, errors.Join(err, acquired.Release())
+		}
+		return nil, err
+	}
+	return acquired, nil
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -28,6 +29,7 @@ type EntryRef struct {
 }
 
 type EntryDraft struct {
+	Target            MutationTarget
 	Kind              string
 	Layer             string
 	Intent            string
@@ -86,7 +88,15 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	if err != nil {
 		return CreateEntryResult{}, err
 	}
-	snapshot, err := a.snapshotWithDependencies(ctx, identity, runtime)
+	target, err := resolveMutationTarget(runtime, draft.Target)
+	if err != nil {
+		return CreateEntryResult{}, err
+	}
+	targetSnapshot, err := snapshotMutationTarget(ctx, runtime, target)
+	if err != nil {
+		return CreateEntryResult{}, err
+	}
+	snapshot, err := a.snapshotWithDependenciesFrom(ctx, identity, runtime, targetSnapshot)
 	if err != nil {
 		return CreateEntryResult{}, err
 	}
@@ -174,8 +184,12 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		return result, err
 	}
 	canonical := []byte(model.FormatFrontmatter(entry) + "\n" + entry.Content + "\n")
+	document, err := parseEntryDocument(filepath.ToSlash(logicalPath), canonical)
+	if err != nil {
+		return result, err
+	}
 	batch := MutationBatch{
-		ID: "entry-" + id, Changes: []DocumentChange{{LogicalPath: filepath.ToSlash(logicalPath), CanonicalBytes: canonical}},
+		ID: "entry-" + id, Changes: []DocumentChange{{LogicalPath: filepath.ToSlash(logicalPath), Document: &document, CanonicalBytes: canonical}},
 		Message: fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72)),
 	}
 	owner := BlobOwner{Subject: principal.Subject, Session: binding.SessionID}
@@ -198,7 +212,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		return result, err
 	}
 	transition, err := a.ApplyPrepared(ctx, identity, runtime.options.Project.ID, binding, PreparedTransition{
-		Version: PreparedTransitionVersion, ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
+		Version: PreparedTransitionVersion, Target: target, ExpectedGraphRevision: targetSnapshot.Revision(), Batch: batch,
 		BlobOwner: owner, BlobIDs: append([]string(nil), draft.AttachmentHandles...),
 	})
 	result.Binding = transition.Binding
@@ -209,12 +223,16 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	return result, nil
 }
 
-func (a *Application) ReplaceSummary(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, entryID, summary string) (MutationResult, error) {
+func (a *Application) ReplaceSummary(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, target MutationTarget, entryID, summary string) (MutationResult, error) {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
 	if err != nil {
 		return MutationResult{}, err
 	}
-	snapshot, err := runtime.options.Graph.Current(ctx)
+	target, err = resolveMutationTarget(runtime, target)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	snapshot, err := snapshotMutationTarget(ctx, runtime, target)
 	if err != nil {
 		return MutationResult{}, err
 	}
@@ -233,10 +251,14 @@ func (a *Application) ReplaceSummary(ctx context.Context, identity RequestIdenti
 	if err != nil {
 		return MutationResult{}, err
 	}
-	return a.applyDocumentMutation(ctx, identity, runtime, binding, mutationID, "sdd: summarize "+entryID+" (manual)", DocumentChange{LogicalPath: filepath.ToSlash(path), CanonicalBytes: canonical})
+	document, err := parseEntryDocument(filepath.ToSlash(path), canonical)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	return a.applyDocumentMutation(ctx, identity, runtime, binding, target, mutationID, "sdd: summarize "+entryID+" (manual)", DocumentChange{LogicalPath: filepath.ToSlash(path), Document: &document, CanonicalBytes: canonical})
 }
 
-func (a *Application) StartWIP(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, entryID, description string) (string, MutationResult, error) {
+func (a *Application) StartWIP(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, target MutationTarget, entryID, description string) (string, MutationResult, error) {
 	principal, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
 	if err != nil {
 		return "", MutationResult{}, err
@@ -248,22 +270,30 @@ func (a *Application) StartWIP(ctx context.Context, identity RequestIdentity, pr
 		ID: model.GenerateWIPMarkerID(principal.Participant), Entry: entryID, Participant: principal.Participant,
 		Exclusive: true, Content: description, Time: runtime.options.Now(),
 	}
-	result, err := a.applyDocumentMutation(ctx, identity, runtime, binding, "wip-start-"+marker.ID, fmt.Sprintf("sdd: wip start %s (%s)", entryID, principal.Participant), DocumentChange{
+	target, err = resolveMutationTarget(runtime, target)
+	if err != nil {
+		return "", MutationResult{}, err
+	}
+	result, err := a.applyDocumentMutation(ctx, identity, runtime, binding, target, "wip-start-"+marker.ID, fmt.Sprintf("sdd: wip start %s (%s)", entryID, principal.Participant), DocumentChange{
 		LogicalPath: filepath.ToSlash(model.WIPMarkerPath(marker.ID)), CanonicalBytes: []byte(model.FormatWIPMarker(marker)),
 	})
 	return marker.ID, result, err
 }
 
-func (a *Application) FinishWIP(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, markerID string) (MutationResult, error) {
+func (a *Application) FinishWIP(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, target MutationTarget, markerID string) (MutationResult, error) {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
 	if err != nil {
 		return MutationResult{}, err
 	}
-	return a.applyDocumentMutation(ctx, identity, runtime, binding, "wip-done-"+markerID, "sdd: wip done "+markerID, DocumentChange{LogicalPath: filepath.ToSlash(model.WIPMarkerPath(markerID)), Delete: true})
+	target, err = resolveMutationTarget(runtime, target)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	return a.applyDocumentMutation(ctx, identity, runtime, binding, target, "wip-done-"+markerID, "sdd: wip done "+markerID, DocumentChange{LogicalPath: filepath.ToSlash(model.WIPMarkerPath(markerID)), Delete: true})
 }
 
-func (a *Application) applyDocumentMutation(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime, binding SessionBinding, id, message string, change DocumentChange) (MutationResult, error) {
-	snapshot, err := runtime.options.Graph.Current(ctx)
+func (a *Application) applyDocumentMutation(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime, binding SessionBinding, target MutationTarget, id, message string, change DocumentChange) (MutationResult, error) {
+	snapshot, err := snapshotMutationTarget(ctx, runtime, target)
 	if err != nil {
 		return MutationResult{}, err
 	}
@@ -273,10 +303,36 @@ func (a *Application) applyDocumentMutation(ctx context.Context, identity Reques
 		return MutationResult{}, err
 	}
 	transition, err := a.ApplyPrepared(ctx, identity, runtime.options.Project.ID, binding, PreparedTransition{
-		Version: PreparedTransitionVersion, ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
+		Version: PreparedTransitionVersion, Target: target, ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
 		BlobOwner: BlobOwner{Subject: binding.Subject, Session: binding.SessionID},
 	})
 	return MutationResult{Project: runtime.options.Project, Binding: transition.Binding}, err
+}
+
+func resolveMutationTarget(runtime *ProjectRuntime, requested MutationTarget) (MutationTarget, error) {
+	if requested.Project == "" && requested.Branch == "" {
+		return runtime.defaultMutationTarget()
+	}
+	if requested.Project == "" {
+		requested.Project = runtime.options.Project.ID
+	}
+	if err := requested.Validate(runtime.options.Project.ID); err != nil {
+		return MutationTarget{}, err
+	}
+	return requested, nil
+}
+
+func snapshotMutationTarget(ctx context.Context, runtime *ProjectRuntime, target MutationTarget) (snapshot *Snapshot, err error) {
+	acquired, err := runtime.acquire(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if releaseErr := acquired.Release(); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("releasing mutation target %s after snapshot: %w", target.Branch, releaseErr))
+		}
+	}()
+	return acquired.Graph.Current(ctx)
 }
 
 func newMutationID(prefix string) (string, error) {

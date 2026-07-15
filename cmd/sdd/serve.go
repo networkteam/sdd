@@ -16,8 +16,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	sdd "github.com/networkteam/sdd/application"
-	gitadapter "github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
 	localadapter "github.com/networkteam/sdd/local"
@@ -266,10 +266,45 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	if localEmbedder != nil {
 		embeddings = publicEmbeddingExecutor(localEmbedder)
 	}
+	serverCheckout := filepath.Dir(sddDir)
+	targets, err := localadapter.NewGitWorktreeAcquirer(localadapter.GitWorktreeAcquirerOptions{
+		Project: project, ServerCheckout: serverCheckout,
+		Factory: func(_ context.Context, checkout string, target sdd.MutationTarget) (sdd.GraphStore, []sdd.MutationFinalizer, func() error, error) {
+			targetCfg, cfgErr := resolveConfigAt(filepath.Join(checkout, model.SDDDirName))
+			if cfgErr != nil {
+				return nil, nil, nil, fmt.Errorf("loading mutation target config for %s: %w", target.Branch, cfgErr)
+			}
+			if targetCfg == nil || sdd.ProjectID(targetCfg.RepoID) != project {
+				return nil, nil, nil, fmt.Errorf("mutation target checkout %q does not contain project %s", checkout, project)
+			}
+			targetGraphDir := meta.ResolveGraphDir(checkout, targetCfg)
+			targetGraph, graphErr := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: targetGraphDir})
+			if graphErr != nil {
+				return nil, nil, nil, graphErr
+			}
+			graphDirRel := targetCfg.GraphDir
+			if graphDirRel == "" {
+				graphDirRel = model.DefaultGraphDir
+			}
+			return targetGraph, []sdd.MutationFinalizer{localadapter.GitFinalizer{Checkout: checkout, GraphDir: graphDirRel}}, func() error { return nil }, nil
+		},
+	})
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	if cfg == nil || cfg.DefaultBranch == "" {
+		return nil, "", sdd.RequestIdentity{}, fmt.Errorf("default_branch is required in .sdd/config.yaml before serving mutation tools")
+	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: project, DisplayName: displayName}, Language: language,
-		Dependencies: dependencies, Graph: graph, Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, indexStore), LLM: executor,
-		Finalizers: []sdd.MutationFinalizer{localGitFinalizer{graphDir: graphDir, git: gitadapter.CLI{}}},
+		Project: sdd.ProjectRef{ID: project, DisplayName: displayName}, DefaultBranch: cfg.DefaultBranch, Language: language,
+		Dependencies: dependencies, Graph: graph, Targets: targets,
+		Recovery: sdd.RecoveryAuthorizerFunc(func(_ context.Context, request sdd.RecoveryAccessRequest) error {
+			if request.Actor.Subject != request.OriginalSubject {
+				return &sdd.ApplicationError{Code: sdd.ErrorWriteDenied, Message: "cross-principal recovery is not authorized by the local runtime"}
+			}
+			return nil
+		}),
+		Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, indexStore), LLM: executor,
 	})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
@@ -302,52 +337,6 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		return nil, "", sdd.RequestIdentity{}, err
 	}
 	return application, project, identity, nil
-}
-
-type localGitFinalizer struct {
-	graphDir string
-	git      localGit
-}
-
-type localGit interface {
-	Commit(string, ...string) error
-	HasCommitMessage(context.Context, string) (bool, error)
-}
-
-func (localGitFinalizer) Name() string { return "git" }
-
-func (f localGitFinalizer) Finalize(ctx context.Context, mutation sdd.AppliedMutation) error {
-	trailer := "SDD-Mutation: " + mutation.BatchID
-	committed, err := f.git.HasCommitMessage(ctx, trailer)
-	if err != nil {
-		return err
-	}
-	if committed {
-		return nil
-	}
-	seen := map[string]bool{}
-	var paths []string
-	appendPath := func(logical string) {
-		if logical == "" || seen[logical] {
-			return
-		}
-		seen[logical] = true
-		paths = append(paths, filepath.Join(f.graphDir, filepath.FromSlash(logical)))
-	}
-	for _, change := range mutation.Batch.Changes {
-		appendPath(change.LogicalPath)
-	}
-	for _, attachment := range mutation.Batch.Attachments {
-		appendPath(attachment.LogicalPath)
-	}
-	if len(paths) == 0 {
-		return fmt.Errorf("git finalizer: mutation %s has no paths", mutation.BatchID)
-	}
-	message := mutation.Batch.Message
-	if message == "" {
-		message = "sdd: apply " + mutation.BatchID
-	}
-	return f.git.Commit(message+"\n\n"+trailer, paths...)
 }
 
 func publicEmbeddingExecutor(embedder llm.Embedder) sdd.EmbeddingExecutor {

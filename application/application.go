@@ -114,6 +114,20 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 		fmt.Fprintf(&rendered, "\n── repo: %s ──\n", repoID)
 		presenters.RenderView(&rendered, memberResult)
 	}
+	recoveries, err := listRecoveriesRuntime(ctx, runtime, false)
+	if err != nil {
+		return ViewResult{}, err
+	}
+	if len(recoveries.Items) > 0 {
+		fmt.Fprint(&rendered, "\nRecovery\n\n")
+		for _, item := range recoveries.Items {
+			target := item.Target.Branch
+			if item.LegacyUnroutable {
+				target = "target binding required"
+			}
+			fmt.Fprintf(&rendered, "  a pending write awaits explicit recovery: %s · %s · %s\n", item.MutationID, item.State, target)
+		}
+	}
 	return ViewResult{Project: runtime.options.Project, Sections: strings.TrimRight(rendered.String(), "\n")}, nil
 }
 
@@ -322,6 +336,10 @@ func (a *Application) snapshotWithDependencies(ctx context.Context, identity Req
 	if err != nil {
 		return nil, err
 	}
+	return a.snapshotWithDependenciesFrom(ctx, identity, runtime, base)
+}
+
+func (a *Application) snapshotWithDependenciesFrom(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime, base *Snapshot) (*Snapshot, error) {
 	if len(runtime.options.Dependencies) == 0 {
 		return base, nil
 	}

@@ -223,8 +223,8 @@ The HTTP identity test anchors its real mutation here.
 		t.Fatal(err)
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "identity-test", DisplayName: "Identity test"},
-		Graph:   graph, Sessions: sessions, StagedBlobs: blobs,
+		Project: sdd.ProjectRef{ID: "identity-test", DisplayName: "Identity test"}, DefaultBranch: "main",
+		Graph: graph, Sessions: sessions, StagedBlobs: blobs,
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
 			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
