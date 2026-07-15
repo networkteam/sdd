@@ -13,4 +13,4 @@ The build emits the static site to `website/dist/`. The GitHub Pages workflow pu
 
 ## LLM tools compatibility
 
-`@wave-rf/starlight-llm-tools` 0.3.1 omits Astro's `base` path from absolute links in its generated Markdown and LLM manifests. The package's `postbuild` step runs `scripts/finalize-build.mjs` to correct and verify those generated links. Remove the compatibility rewrite once the plugin handles non-root deployments itself.
+`@wave-rf/starlight-llm-tools` 0.3.1 omits Astro's `base` path from absolute links in its generated Markdown and LLM manifests and from the Copy Markdown fetch URL. The package's `postbuild` step runs `scripts/finalize-build.mjs` to correct and verify those generated links. Remove the compatibility rewrite once the plugin handles non-root deployments itself.

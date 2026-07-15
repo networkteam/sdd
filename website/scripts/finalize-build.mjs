@@ -6,7 +6,7 @@ const pagesOrigin = "https://networkteam.github.io/";
 const docsOrigin = `${pagesOrigin}sdd/`;
 const unbasedDocsUrl = /https:\/\/networkteam\.github\.io\/(?!sdd(?:\/|$))/g;
 
-async function generatedLlmFiles(directory) {
+async function generatedFiles(directory, matches) {
   const files = [];
 
   for (const name of await readdir(directory)) {
@@ -14,8 +14,8 @@ async function generatedLlmFiles(directory) {
     const entry = await stat(path);
 
     if (entry.isDirectory()) {
-      files.push(...(await generatedLlmFiles(path)));
-    } else if (name.endsWith(".md") || /^llms(?:-full|-small)?\.txt$/.test(name)) {
+      files.push(...(await generatedFiles(path, matches)));
+    } else if (matches(name)) {
       files.push(path);
     }
   }
@@ -29,7 +29,10 @@ await Promise.all(requiredFiles.map((name) => stat(`${dist}/${name}`)));
 // @wave-rf/starlight-llm-tools 0.3.1 builds absolute links from
 // Astro.site.origin, which drops Astro's GitHub Pages base path. Restrict the
 // compatibility rewrite to plugin-generated Markdown and LLM manifests.
-for (const path of await generatedLlmFiles(dist)) {
+for (const path of await generatedFiles(
+  dist,
+  (name) => name.endsWith(".md") || /^llms(?:-full|-small)?\.txt$/.test(name),
+)) {
   const content = await readFile(path, "utf8");
   const corrected = content.replace(unbasedDocsUrl, docsOrigin);
 
@@ -39,6 +42,20 @@ for (const path of await generatedLlmFiles(dist)) {
 
   if (unbasedDocsUrl.test(corrected)) {
     throw new Error(`Generated documentation still contains a URL outside the /sdd base: ${path}`);
+  }
+}
+
+const unbasedCopyUrl = /data-url="\/(?!sdd\/)([^"]+\.md)"/g;
+for (const path of await generatedFiles(dist, (name) => name.endsWith(".html"))) {
+  const content = await readFile(path, "utf8");
+  const corrected = content.replace(unbasedCopyUrl, 'data-url="/sdd/$1"');
+
+  if (corrected !== content) {
+    await writeFile(path, corrected);
+  }
+
+  if (unbasedCopyUrl.test(corrected)) {
+    throw new Error(`Copy Markdown still points outside the /sdd base: ${path}`);
   }
 }
 
