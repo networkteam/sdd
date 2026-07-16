@@ -34,6 +34,28 @@ func (s *MemorySearchIndexStore) Manifest(_ context.Context, namespace app.Index
 	return result, nil
 }
 
+// IndexedEntries reports which entries have chunks stored — the optional
+// entry-manifest capability the application uses for monotonic, entry-presence
+// reconciliation. Distinct entry IDs, sorted for deterministic output.
+func (s *MemorySearchIndexStore) IndexedEntries(_ context.Context, namespace app.IndexNamespace) ([]app.StoredEntryRef, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := map[string]bool{}
+	var ids []string
+	for _, item := range s.chunks[namespace] {
+		if item.Chunk.EntryID != "" && !seen[item.Chunk.EntryID] {
+			seen[item.Chunk.EntryID] = true
+			ids = append(ids, item.Chunk.EntryID)
+		}
+	}
+	sort.Strings(ids)
+	result := make([]app.StoredEntryRef, len(ids))
+	for i, id := range ids {
+		result[i] = app.StoredEntryRef{EntryID: id}
+	}
+	return result, nil
+}
+
 func (s *MemorySearchIndexStore) Reconcile(_ context.Context, namespace app.IndexNamespace, _ string, upserts []app.IndexedChunk, deletes []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -82,8 +104,11 @@ func (s *MemorySearchIndexStore) Nearest(_ context.Context, namespaces []app.Ind
 				return nil, err
 			}
 			result = append(result, app.ScoredChunkHit{
-				Namespace: namespace, ChunkID: item.Chunk.ID, Revision: item.Chunk.Revision,
-				ContentHash: item.Chunk.ContentHash, Score: score,
+				Namespace: namespace, ChunkID: item.Chunk.ID, EntryID: item.Chunk.EntryID,
+				Revision: item.Chunk.Revision, ContentHash: item.Chunk.ContentHash, Score: score,
+				Body: item.Chunk.Body, Breadcrumb: item.Chunk.Breadcrumb, Depth: item.Chunk.Depth,
+				IsSummary: item.Chunk.IsSummary, IsAttachment: item.Chunk.IsAttachment,
+				SourceAttachmentPath: item.Chunk.SourceAttachmentPath,
 			})
 		}
 	}

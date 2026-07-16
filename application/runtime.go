@@ -23,6 +23,12 @@ type ProjectRuntimeOptions struct {
 	LLM          LLMExecutor
 	Finalizers   []MutationFinalizer
 	Now          func() time.Time
+	// ExcludeEmbeddedFromIndex mirrors the CLI's excludeEmbedded semantics for
+	// the vector index: connected-repo runtimes set it so binary-shipped base
+	// entries embed once per machine (in the base store) rather than once per
+	// connected repo. The base runtime leaves it false — its store includes
+	// embedded entries. The rule is applied identically at index and read time.
+	ExcludeEmbeddedFromIndex bool
 }
 
 func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
