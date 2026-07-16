@@ -59,12 +59,14 @@ func ManifestFingerprint(m *Manifest) string {
 	counts := map[string]int{}
 	best, bestN := "", 0
 	for _, state := range m.Entries {
-		if state.Fingerprint == "" {
-			continue
-		}
-		counts[state.Fingerprint]++
-		if counts[state.Fingerprint] > bestN {
-			best, bestN = state.Fingerprint, counts[state.Fingerprint]
+		for _, v := range state.Versions {
+			if v.Fingerprint == "" {
+				continue
+			}
+			counts[v.Fingerprint]++
+			if counts[v.Fingerprint] > bestN {
+				best, bestN = v.Fingerprint, counts[v.Fingerprint]
+			}
 		}
 	}
 	return best

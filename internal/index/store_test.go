@@ -47,7 +47,7 @@ func writeLegacyIndex(t *testing.T, dir, fingerprint string) {
 		t.Fatal(err)
 	}
 	m := &Manifest{Version: 1, Entries: map[string]EntryState{
-		"20260101-120000-s-tac-abc": {Hash: "h", Fingerprint: fingerprint},
+		"20260101-120000-s-tac-abc": {Versions: []EntryVersion{{Hash: "h", Fingerprint: fingerprint}}},
 	}}
 	if err := m.Save(dir); err != nil {
 		t.Fatal(err)

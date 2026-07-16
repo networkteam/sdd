@@ -36,7 +36,7 @@ func TestDeriveChunksCoversSummaryBodyAndMarkdownAttachments(t *testing.T) {
 		"2026/01/01-100000-s-tac-aaa/design.md":   []byte("# Design\n\nDesign detail about the topic."),
 		"2026/01/01-100000-s-tac-aaa/diagram.png": []byte{0x89, 'P', 'N', 'G'},
 	}
-	chunks, err := chunking.DeriveChunks(context.Background(), entry, textsplitter.NewSplitter(), reader)
+	chunks, err := chunking.DeriveChunks(context.Background(), entry, "hash8abc", textsplitter.NewSplitter(), reader)
 	if err != nil {
 		t.Fatalf("DeriveChunks: %v", err)
 	}
@@ -51,8 +51,8 @@ func TestDeriveChunksCoversSummaryBodyAndMarkdownAttachments(t *testing.T) {
 			if c.Chunk.SourceAttachmentPath != "2026/01/01-100000-s-tac-aaa/design.md" {
 				t.Errorf("attachment chunk source = %q, want the .md attachment", c.Chunk.SourceAttachmentPath)
 			}
-			if !strings.HasPrefix(c.ChunkID, entry.ID+"#attach-") {
-				t.Errorf("attachment chunk ID = %q, want an #attach- id", c.ChunkID)
+			if !strings.HasPrefix(c.ChunkID, entry.ID+"#v-hash8abc#attach-") {
+				t.Errorf("attachment chunk ID = %q, want a versioned #attach- id", c.ChunkID)
 			}
 		default:
 			haveBody = true

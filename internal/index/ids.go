@@ -16,19 +16,25 @@ func ChunkIDPrefix(entryID string) string {
 // SummaryChunkID is the deterministic chunk ID for an entry's summary
 // chunk. Re-indexing the same entry produces the same ID — the indexer
 // upserts via id rather than delete-and-add for the summary.
+//
+// This is the LEGACY (unversioned) form: a v1 store owns exactly this ID per
+// entry summary, interpreted as the entry's sole pre-existing version. New
+// writes mint version-qualified IDs (SummaryChunkIDVersioned) so two versions
+// of one entry can coexist in the shared store without colliding.
 func SummaryChunkID(entryID string) string {
 	return entryID + "#summary"
 }
 
 // BodyChunkID is the deterministic chunk ID for the n-th body chunk of an
-// entry. n is positional in the chunker's emit order.
+// entry. n is positional in the chunker's emit order. Legacy (unversioned)
+// form — see SummaryChunkID.
 func BodyChunkID(entryID string, n int) string {
 	return fmt.Sprintf("%s#body-%d", entryID, n)
 }
 
 // AttachmentChunkID is the deterministic chunk ID for the n-th chunk of
 // the named attachment under entryID. attachmentPath is the entry-relative
-// attachment path.
+// attachment path. Legacy (unversioned) form — see SummaryChunkID.
 func AttachmentChunkID(entryID, attachmentPath string, n int) string {
 	// Hash the attachment path so chunk IDs stay reasonably bounded and
 	// don't include path separators that some downstream consumers might
@@ -36,6 +42,41 @@ func AttachmentChunkID(entryID, attachmentPath string, n int) string {
 	h := sha256.Sum256([]byte(attachmentPath))
 	short := hex.EncodeToString(h[:3])
 	return fmt.Sprintf("%s#attach-%s-%d", entryID, short, n)
+}
+
+// VersionSegment derives the short version tag embedded in a versioned chunk ID
+// from an entry-state hash — the first 8 hex chars, enough to distinguish an
+// entry's stored versions while keeping IDs bounded. It is an identity tag
+// only: the FULL entry hash lives in the row's entry_hash metadata and in the
+// manifest, and that is what read-time freshness compares against. A hash
+// shorter than 8 chars (only in tests) is used whole.
+func VersionSegment(entryHash string) string {
+	if len(entryHash) >= 8 {
+		return entryHash[:8]
+	}
+	return entryHash
+}
+
+// SummaryChunkIDVersioned is the version-qualified summary chunk ID:
+// entryID#v-<hash8>#summary. New writes mint versioned IDs so a changed entry
+// adds a version rather than overwriting the old one — two branches holding
+// different versions of one entry each own their own rows in the shared store.
+func SummaryChunkIDVersioned(entryID, entryHash string) string {
+	return fmt.Sprintf("%s#v-%s#summary", entryID, VersionSegment(entryHash))
+}
+
+// BodyChunkIDVersioned is the version-qualified n-th body chunk ID:
+// entryID#v-<hash8>#body-N.
+func BodyChunkIDVersioned(entryID, entryHash string, n int) string {
+	return fmt.Sprintf("%s#v-%s#body-%d", entryID, VersionSegment(entryHash), n)
+}
+
+// AttachmentChunkIDVersioned is the version-qualified n-th attachment chunk ID:
+// entryID#v-<hash8>#attach-<p6>-N.
+func AttachmentChunkIDVersioned(entryID, entryHash, attachmentPath string, n int) string {
+	h := sha256.Sum256([]byte(attachmentPath))
+	short := hex.EncodeToString(h[:3])
+	return fmt.Sprintf("%s#v-%s#attach-%s-%d", entryID, VersionSegment(entryHash), short, n)
 }
 
 // HashContent returns a stable hex sha-256 of the chunk's embedded text.

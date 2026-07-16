@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/networkteam/sdd/internal/chunking"
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
@@ -266,6 +267,14 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 		candidateSet[e.ID] = e
 	}
 
+	// Read-time stale-version filtering: the shared store accumulates a
+	// version per entry state, so a hit is valid only when its version equals
+	// the entry's current state hash. A new row carries entry_hash metadata; a
+	// legacy v1 row's version is recovered from the manifest. The current hash
+	// is computed once per hit entry (attachments read from disk, as the
+	// indexer does) and cached.
+	freshness := f.newVersionFreshness()
+
 	// Collect all chunk hits per entry so the rollup can keep the
 	// strongest few rather than just the single best. An entry that
 	// matches on multiple dimensions (a long plan whose summary,
@@ -273,7 +282,15 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 	// to surface that breadth in its citations.
 	perEntry := map[string][]chunkScore{}
 	for _, h := range indexHits {
-		if _, ok := candidateSet[h.EntryID]; !ok {
+		entry, ok := candidateSet[h.EntryID]
+		if !ok {
+			continue
+		}
+		fresh, err := freshness.fresh(ctx, entry, h)
+		if err != nil {
+			return nil, err
+		}
+		if !fresh {
 			continue
 		}
 		adjusted := adjustVectorScore(h.Score, h.IsSummary, h.Depth)
@@ -317,6 +334,63 @@ func (f *SearchFinder) candidates(q query.SearchQuery) []*model.Entry {
 		out = append(out, e)
 	}
 	return out
+}
+
+// versionFreshness answers, per hit, whether its stored version equals the
+// entry's current state hash — the read-time gate that keeps the shared,
+// version-accumulating store from surfacing stale citations. The current hash
+// is computed once per hit entry (attachments read from disk, as the indexer
+// does) and cached; the manifest is loaded once, and only when a legacy row
+// (no entry_hash metadata) needs it.
+type versionFreshness struct {
+	indexDir    string // "" disables manifest fallback (an in-memory index, tests)
+	attachments chunking.AttachmentReader
+	current     map[string]string
+	manifest    *index.Manifest
+}
+
+func (f *SearchFinder) newVersionFreshness() *versionFreshness {
+	dir := ""
+	if f.indexStore != nil {
+		dir = f.indexStore.Path()
+	}
+	return &versionFreshness{
+		indexDir:    dir,
+		attachments: chunking.DiskAttachmentReader{GraphDir: f.graphDir},
+		current:     map[string]string{},
+	}
+}
+
+func (v *versionFreshness) fresh(ctx context.Context, entry *model.Entry, hit index.Hit) (bool, error) {
+	version := hit.EntryHash
+	if version == "" {
+		if v.indexDir == "" {
+			// No manifest to resolve a legacy row's version — keep the hit.
+			return true, nil
+		}
+		if v.manifest == nil {
+			m, err := index.LoadManifest(v.indexDir)
+			if err != nil {
+				return false, err
+			}
+			v.manifest = m
+		}
+		version = v.manifest.VersionHashForChunk(hit.EntryID, hit.ChunkID)
+		if version == "" {
+			// Unresolvable version — keep the hit rather than drop it blindly.
+			return true, nil
+		}
+	}
+	cur, ok := v.current[entry.ID]
+	if !ok {
+		h, err := chunking.EntryStateHash(ctx, entry, v.attachments)
+		if err != nil {
+			return false, err
+		}
+		cur = h
+		v.current[entry.ID] = h
+	}
+	return version == cur, nil
 }
 
 // compileTerms compiles each --term into a case-insensitive regex.

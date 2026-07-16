@@ -55,9 +55,12 @@ func (s *PersistentSearchIndexStore) storeDir(namespace app.IndexNamespace) (str
 	return index.StoreDir(s.cacheRoot, s.repoKey, namespace.Fingerprint), nil
 }
 
-// IndexedEntries reads the existing v1 manifest and returns the indexed entry
-// identities — no migration, no rebuild, no document embedding. This is the
-// presence source the application reconciles against.
+// IndexedEntries reads the manifest and returns one ref per stored (entry,
+// version) pair — no migration, no rebuild, no document embedding. A legacy v1
+// manifest loads as one version per entry, so an existing store answers its
+// presence immediately. This is the presence source the application reconciles
+// against: a graph entry whose current hash is absent here is embedded as an
+// added version.
 func (s *PersistentSearchIndexStore) IndexedEntries(_ context.Context, namespace app.IndexNamespace) ([]app.StoredEntryRef, error) {
 	dir, err := s.storeDir(namespace)
 	if err != nil {
@@ -67,15 +70,18 @@ func (s *PersistentSearchIndexStore) IndexedEntries(_ context.Context, namespace
 	if err != nil {
 		return nil, err
 	}
-	refs := make([]app.StoredEntryRef, 0, len(manifest.Entries))
+	var refs []app.StoredEntryRef
 	for _, id := range manifest.EntryIDsSorted() {
-		refs = append(refs, app.StoredEntryRef{EntryID: id})
+		for _, v := range manifest.Entries[id].Versions {
+			refs = append(refs, app.StoredEntryRef{EntryID: id, EntryHash: v.Hash})
+		}
 	}
 	return refs, nil
 }
 
-// Manifest reports stored chunk identities. Kept for the SearchIndexStore
-// contract; the application prefers IndexedEntries for reconciliation.
+// Manifest reports stored chunk identities across all versions. Kept for the
+// SearchIndexStore contract; the application prefers IndexedEntries for
+// reconciliation.
 func (s *PersistentSearchIndexStore) Manifest(_ context.Context, namespace app.IndexNamespace) ([]app.StoredChunkRef, error) {
 	dir, err := s.storeDir(namespace)
 	if err != nil {
@@ -87,8 +93,7 @@ func (s *PersistentSearchIndexStore) Manifest(_ context.Context, namespace app.I
 	}
 	var refs []app.StoredChunkRef
 	for _, id := range manifest.EntryIDsSorted() {
-		state := manifest.Entries[id]
-		for _, chunkID := range state.ChunkIDs {
+		for _, chunkID := range manifest.Entries[id].AllChunkIDs() {
 			refs = append(refs, app.StoredChunkRef{ID: chunkID})
 		}
 	}
@@ -144,9 +149,10 @@ func (s *PersistentSearchIndexStore) Reconcile(ctx context.Context, namespace ap
 			return err
 		}
 		for _, group := range groups {
-			// The application only reconciles entries absent from the manifest,
-			// so this is a pure add (no old chunk IDs to remove) — monotonic
-			// accumulation, never a request-shaped delete.
+			// The application only reconciles (entry, version) pairs absent
+			// from the manifest, so this is a pure add (no old chunk IDs to
+			// remove) — monotonic accumulation of a NEW version, never a
+			// request-shaped delete or a delete-on-change of another version.
 			if err := idx.UpsertEntry(ctx, group.id, nil, group.rows); err != nil {
 				return fmt.Errorf("upsert %s: %w", group.id, err)
 			}
@@ -154,12 +160,12 @@ func (s *PersistentSearchIndexStore) Reconcile(ctx context.Context, namespace ap
 			for _, row := range group.rows {
 				chunkIDs = append(chunkIDs, row.ChunkID)
 			}
-			manifest.Entries[group.id] = index.EntryState{
+			manifest.AddVersion(group.id, index.EntryVersion{
 				Hash:        group.hash,
 				Fingerprint: namespace.Fingerprint,
 				ChunkIDs:    chunkIDs,
 				IndexedAt:   s.now(),
-			}
+			})
 		}
 		return manifest.Save(dir)
 	})
@@ -177,30 +183,44 @@ func (s *PersistentSearchIndexStore) Nearest(ctx context.Context, namespaces []a
 		if err != nil {
 			return nil, err
 		}
+		var hits []index.Hit
 		err = index.ReadStore(ctx, dir, func(idx *index.Index) error {
-			hits, err := idx.Query(ctx, vector, limit)
-			if err != nil {
-				return err
-			}
-			for _, hit := range hits {
-				result = append(result, app.ScoredChunkHit{
-					Namespace:            namespace,
-					ChunkID:              hit.ChunkID,
-					EntryID:              hit.EntryID,
-					ContentHash:          hit.ContentHash,
-					Score:                float64(hit.Score),
-					Body:                 hit.Body,
-					Breadcrumb:           hit.Breadcrumb,
-					Depth:                hit.Depth,
-					IsSummary:            hit.IsSummary,
-					IsAttachment:         hit.IsAttachment,
-					SourceAttachmentPath: hit.SourceAttachmentPath,
-				})
-			}
-			return nil
+			hits, err = idx.Query(ctx, vector, limit)
+			return err
 		})
 		if err != nil {
 			return nil, err
+		}
+		// Resolve each hit's version. A new (versioned) row carries entry_hash
+		// metadata directly; a legacy v1 row does not, so its version is
+		// recovered from the manifest. The manifest is loaded once, and only
+		// when some hit needs it, so an all-versioned store never reads it.
+		var manifest *index.Manifest
+		for _, hit := range hits {
+			entryHash := hit.EntryHash
+			if entryHash == "" {
+				if manifest == nil {
+					manifest, err = index.LoadManifest(dir)
+					if err != nil {
+						return nil, err
+					}
+				}
+				entryHash = manifest.VersionHashForChunk(hit.EntryID, hit.ChunkID)
+			}
+			result = append(result, app.ScoredChunkHit{
+				Namespace:            namespace,
+				ChunkID:              hit.ChunkID,
+				EntryID:              hit.EntryID,
+				EntryHash:            entryHash,
+				ContentHash:          hit.ContentHash,
+				Score:                float64(hit.Score),
+				Body:                 hit.Body,
+				Breadcrumb:           hit.Breadcrumb,
+				Depth:                hit.Depth,
+				IsSummary:            hit.IsSummary,
+				IsAttachment:         hit.IsAttachment,
+				SourceAttachmentPath: hit.SourceAttachmentPath,
+			})
 		}
 	}
 	return result, nil
@@ -211,6 +231,7 @@ func (s *PersistentSearchIndexStore) Nearest(ctx context.Context, namespaces []a
 func rowFromChunk(chunk app.IndexedChunk, fingerprint string) index.Row {
 	return index.Row{
 		EntryID:              chunk.Chunk.EntryID,
+		EntryHash:            chunk.Chunk.EntryHash,
 		ChunkID:              chunk.Chunk.ID,
 		Text:                 chunk.Chunk.Text,
 		Body:                 chunk.Chunk.Body,

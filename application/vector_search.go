@@ -40,7 +40,15 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, r
 	}
 	namespace := IndexNamespace{Project: r.options.Project.ID, Fingerprint: spec.Fingerprint, Metric: "cosine"}
 
-	if err := r.reconcileVectorIndex(ctx, snapshot, namespace); err != nil {
+	// The current state hash of every entry that belongs in the store, computed
+	// once: reconcile compares it against stored versions for presence, and the
+	// read-time filter compares it against each hit's version.
+	hashes, err := r.currentEntryHashes(ctx, snapshot)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := r.reconcileVectorIndex(ctx, snapshot, namespace, hashes); err != nil {
 		return nil, err
 	}
 
@@ -64,7 +72,7 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, r
 		return nil, err
 	}
 
-	vector := r.vectorResult(snapshot.graph, request, hits)
+	vector := r.vectorResult(snapshot.graph, request, hits, hashes)
 	if len(request.Terms) == 0 {
 		return vector, nil
 	}
@@ -75,42 +83,74 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, r
 	return hybridResult(text, vector, limit), nil
 }
 
-// reconcileVectorIndex ensures every graph entry that belongs in the store has
-// its chunks embedded and persisted. It walks the FULL current graph
-// independent of request filters and status. A store advertising the
-// entry-manifest capability reconciles on entry presence (monotonic); a
-// third-party store without it falls back to chunk-identity comparison. Both
+// versionKey identifies one stored (entry, version) pair for the presence
+// check — a changed entry's new hash reads as absent even when a prior version
+// of the same entry ID is present.
+type versionKey struct {
+	entryID   string
+	entryHash string
+}
+
+// currentEntryHashes computes the state hash of every graph entry that belongs
+// in the store, once per search. Attachment bytes are part of the hash, paged
+// through the GraphStore exactly as chunking derives them. Reconcile compares
+// these against stored versions for presence; the read-time filter compares
+// them against each hit's version.
+func (r *ProjectRuntime) currentEntryHashes(ctx context.Context, snapshot *Snapshot) (map[string]string, error) {
+	attachments := graphStoreAttachmentReader{store: r.options.Graph}
+	hashes := make(map[string]string, len(snapshot.graph.Entries))
+	for _, entry := range snapshot.graph.Entries {
+		if !chunking.IncludeEntry(entry, r.options.ExcludeEmbeddedFromIndex) {
+			continue
+		}
+		hash, err := chunking.EntryStateHash(ctx, entry, attachments)
+		if err != nil {
+			return nil, err
+		}
+		hashes[entry.ID] = hash
+	}
+	return hashes, nil
+}
+
+// reconcileVectorIndex ensures every graph entry version that belongs in the
+// store is embedded and persisted. It walks the FULL current graph independent
+// of request filters and status. A store advertising the entry-manifest
+// capability reconciles on (entry, version) presence: a missing pair embeds
+// that entry once and ADDS a version — never deleting another. A third-party
+// store without the capability falls back to chunk-identity comparison. Both
 // ignore graph revision and never issue deletes.
-func (r *ProjectRuntime) reconcileVectorIndex(ctx context.Context, snapshot *Snapshot, namespace IndexNamespace) error {
+func (r *ProjectRuntime) reconcileVectorIndex(ctx context.Context, snapshot *Snapshot, namespace IndexNamespace, hashes map[string]string) error {
 	if manifestCap, ok := r.options.SearchIndex.(SearchIndexEntryManifest); ok {
 		indexed, err := manifestCap.IndexedEntries(ctx, namespace)
 		if err != nil {
 			return err
 		}
-		present := make(map[string]bool, len(indexed))
+		present := make(map[versionKey]bool, len(indexed))
 		for _, ref := range indexed {
-			present[ref.EntryID] = true
+			present[versionKey{ref.EntryID, ref.EntryHash}] = true
 		}
 		var absent []*model.Entry
 		for _, entry := range snapshot.graph.Entries {
 			if !chunking.IncludeEntry(entry, r.options.ExcludeEmbeddedFromIndex) {
 				continue
 			}
-			if present[entry.ID] {
+			if present[versionKey{entry.ID, hashes[entry.ID]}] {
 				continue
 			}
 			absent = append(absent, entry)
 		}
-		return r.embedEntries(ctx, snapshot, namespace, absent, nil)
+		return r.embedEntries(ctx, snapshot, namespace, absent, hashes, nil)
 	}
-	return r.reconcileByChunkIdentity(ctx, snapshot, namespace)
+	return r.reconcileByChunkIdentity(ctx, snapshot, namespace, hashes)
 }
 
 // reconcileByChunkIdentity is the compatibility path for third-party stores
 // that implement SearchIndexStore but not SearchIndexEntryManifest. It derives
 // chunks for the full graph and embeds those whose chunk ID is absent from the
-// store or whose content hash changed — graph revision ignored, no deletes.
-func (r *ProjectRuntime) reconcileByChunkIdentity(ctx context.Context, snapshot *Snapshot, namespace IndexNamespace) error {
+// store — graph revision ignored, no deletes. Because chunk IDs are now
+// version-qualified, a changed entry produces new IDs and its new version is
+// embedded while old-version rows remain (monotonic).
+func (r *ProjectRuntime) reconcileByChunkIdentity(ctx context.Context, snapshot *Snapshot, namespace IndexNamespace, hashes map[string]string) error {
 	manifest, err := r.options.SearchIndex.Manifest(ctx, namespace)
 	if err != nil {
 		return err
@@ -130,15 +170,16 @@ func (r *ProjectRuntime) reconcileByChunkIdentity(ctx context.Context, snapshot 
 		ref, ok := stored[chunk.ID]
 		return ok && ref.ContentHash == chunk.ContentHash
 	}
-	return r.embedEntries(ctx, snapshot, namespace, entries, keep)
+	return r.embedEntries(ctx, snapshot, namespace, entries, hashes, keep)
 }
 
-// embedEntries derives, embeds, and persists the chunks of the given entries.
-// When skip is non-nil, chunks it returns true for are already stored and are
-// not re-embedded (the compatibility path uses this; the entry-manifest path
-// passes nil because it only ever hands over absent entries). Attachments are
-// read through the GraphStore so MCP and the CLI derive identical content.
-func (r *ProjectRuntime) embedEntries(ctx context.Context, snapshot *Snapshot, namespace IndexNamespace, entries []*model.Entry, skip func(CanonicalChunk) bool) error {
+// embedEntries derives, embeds, and persists the chunks of the given entries
+// under their current version (version-qualified chunk IDs from the precomputed
+// hash). When skip is non-nil, chunks it returns true for are already stored
+// and are not re-embedded (the compatibility path uses this; the entry-manifest
+// path passes nil because it only ever hands over absent entries). Attachments
+// are read through the GraphStore so MCP and the CLI derive identical content.
+func (r *ProjectRuntime) embedEntries(ctx context.Context, snapshot *Snapshot, namespace IndexNamespace, entries []*model.Entry, hashes map[string]string, skip func(CanonicalChunk) bool) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -148,11 +189,17 @@ func (r *ProjectRuntime) embedEntries(ctx context.Context, snapshot *Snapshot, n
 	canonical := map[string]CanonicalChunk{}
 	var inputs []EmbeddingInput
 	for _, entry := range entries {
-		hash, err := chunking.EntryStateHash(ctx, entry, attachments)
-		if err != nil {
-			return err
+		hash := hashes[entry.ID]
+		if hash == "" {
+			// Defensive: an entry not covered by the precomputed set. Hash it
+			// now so its version identity is still correct.
+			h, err := chunking.EntryStateHash(ctx, entry, attachments)
+			if err != nil {
+				return err
+			}
+			hash = h
 		}
-		chunks, err := chunking.DeriveChunks(ctx, entry, splitter, attachments)
+		chunks, err := chunking.DeriveChunks(ctx, entry, hash, splitter, attachments)
 		if err != nil {
 			return err
 		}
@@ -211,15 +258,23 @@ func canonicalChunk(entryID, entryHash string, c chunking.Chunk) CanonicalChunk 
 }
 
 // vectorResult rolls chunk hits up to per-entry results, resolving each hit's
-// entry against the current graph and applying filter, status, supersession,
-// and embedded-entry rules at read time. A stored hit whose entry no longer
-// exists (or is filtered out) is ignored — the store is never mutated here.
-func (r *ProjectRuntime) vectorResult(graph *model.Graph, request query.SearchQuery, hits []ScoredChunkHit) *query.SearchResult {
+// entry against the current graph and applying the stale-version, filter,
+// status, supersession, and embedded-entry rules at read time. A stored hit
+// whose entry no longer exists, is filtered out, or belongs to a superseded
+// version is ignored — the store is never mutated here.
+func (r *ProjectRuntime) vectorResult(graph *model.Graph, request query.SearchQuery, hits []ScoredChunkHit, hashes map[string]string) *query.SearchResult {
 	candidates := candidateSet(graph, request, r.options.ExcludeEmbeddedFromIndex)
 	byEntry := map[string]*query.SearchEntry{}
 	for _, hit := range hits {
 		entry, ok := candidates[hit.EntryID]
 		if !ok {
+			continue
+		}
+		// Stale-version gate: keep the hit only when its version equals the
+		// entry's current state. A hit whose version the store could not
+		// resolve (empty EntryHash) is not filtered — a third-party store
+		// without version identity degrades to entry-presence only.
+		if hit.EntryHash != "" && hit.EntryHash != hashes[hit.EntryID] {
 			continue
 		}
 		score := float32(hit.Score) * publicStatusMultiplier(graph.DerivedStatus(entry).Kind)

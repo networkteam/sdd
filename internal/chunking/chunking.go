@@ -51,11 +51,17 @@ func IncludeEntry(entry *model.Entry, excludeEmbedded bool) bool {
 // summary chunk, body chunks, and one chunk-set per Markdown attachment.
 // Non-markdown attachments are skipped silently — chunking arbitrary binary
 // or non-markdown text is out of scope for v1.
-func DeriveChunks(ctx context.Context, entry *model.Entry, splitter *textsplitter.Splitter, attachments AttachmentReader) ([]Chunk, error) {
+//
+// entryHash is the entry's state hash (from EntryStateHash); new writes mint
+// version-qualified chunk IDs (entryID#v-<hash8>#…) so a changed entry adds a
+// version to the shared store rather than overwriting the old one. Both write
+// paths (CLI indexer, application vector search) pass the same hash, so the
+// derived IDs match across paths.
+func DeriveChunks(ctx context.Context, entry *model.Entry, entryHash string, splitter *textsplitter.Splitter, attachments AttachmentReader) ([]Chunk, error) {
 	out := make([]Chunk, 0, 8)
 
 	if sc, ok := splitter.SummaryChunk(entry.Summary); ok {
-		out = append(out, Chunk{ChunkID: index.SummaryChunkID(entry.ID), Chunk: sc})
+		out = append(out, Chunk{ChunkID: index.SummaryChunkIDVersioned(entry.ID, entryHash), Chunk: sc})
 	}
 
 	bodyOut, err := splitter.Split(textsplitter.SplitInput{
@@ -66,7 +72,7 @@ func DeriveChunks(ctx context.Context, entry *model.Entry, splitter *textsplitte
 		return nil, fmt.Errorf("split body for %s: %w", entry.ID, err)
 	}
 	for i, c := range bodyOut.Chunks {
-		out = append(out, Chunk{ChunkID: index.BodyChunkID(entry.ID, i), Chunk: c})
+		out = append(out, Chunk{ChunkID: index.BodyChunkIDVersioned(entry.ID, entryHash, i), Chunk: c})
 	}
 
 	for _, attRel := range entry.Attachments {
@@ -87,7 +93,7 @@ func DeriveChunks(ctx context.Context, entry *model.Entry, splitter *textsplitte
 			return nil, fmt.Errorf("split attachment %s: %w", attRel, err)
 		}
 		for i, c := range attOut.Chunks {
-			out = append(out, Chunk{ChunkID: index.AttachmentChunkID(entry.ID, attRel, i), Chunk: c})
+			out = append(out, Chunk{ChunkID: index.AttachmentChunkIDVersioned(entry.ID, entryHash, attRel, i), Chunk: c})
 		}
 	}
 

@@ -159,9 +159,9 @@ func TestPersistentSearchIndexStoreConforms(t *testing.T) {
 // first summary chunk.
 func conformanceSearchChunks() ([]sdd.IndexedChunk, []float32) {
 	return []sdd.IndexedChunk{
-		{Chunk: sdd.CanonicalChunk{ID: "entry-1#summary", EntryID: "entry-1", ContentHash: "h1", Text: "alpha summary", Body: "alpha summary body", IsSummary: true}, Vector: []float32{1, 0}},
-		{Chunk: sdd.CanonicalChunk{ID: "entry-1#body-0", EntryID: "entry-1", ContentHash: "h2", Text: "alpha body", Body: "alpha body text", Breadcrumb: []string{"Section"}, Depth: 2}, Vector: []float32{0.9, 0.1}},
-		{Chunk: sdd.CanonicalChunk{ID: "entry-2#summary", EntryID: "entry-2", ContentHash: "h3", Text: "beta summary", Body: "beta summary body", IsSummary: true}, Vector: []float32{0, 1}},
+		{Chunk: sdd.CanonicalChunk{ID: "entry-1#v-v1#summary", EntryID: "entry-1", EntryHash: "v1", ContentHash: "h1", Text: "alpha summary", Body: "alpha summary body", IsSummary: true}, Vector: []float32{1, 0}},
+		{Chunk: sdd.CanonicalChunk{ID: "entry-1#v-v1#body-0", EntryID: "entry-1", EntryHash: "v1", ContentHash: "h2", Text: "alpha body", Body: "alpha body text", Breadcrumb: []string{"Section"}, Depth: 2}, Vector: []float32{0.9, 0.1}},
+		{Chunk: sdd.CanonicalChunk{ID: "entry-2#v-w1#summary", EntryID: "entry-2", EntryHash: "w1", ContentHash: "h3", Text: "beta summary", Body: "beta summary body", IsSummary: true}, Vector: []float32{0, 1}},
 	}, []float32{1, 0}
 }
 

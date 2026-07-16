@@ -179,17 +179,15 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 			logger.Warn("hash failure, skipping entry", "entry", e.ID, "err", err)
 			continue
 		}
-		if !force {
-			if state, ok := manifest.Entries[e.ID]; ok && state.Hash == hash && state.Fingerprint == fingerprint {
-				logger.Debug("skipped, up to date", "entry", e.ID)
-				if onSkipped != nil {
-					onSkipped(e.ID)
-				}
-				skipped++
-				continue
+		if !force && manifest.Entries[e.ID].HasVersion(hash, fingerprint) {
+			logger.Debug("skipped, up to date", "entry", e.ID)
+			if onSkipped != nil {
+				onSkipped(e.ID)
 			}
+			skipped++
+			continue
 		}
-		chunks, err := chunking.DeriveChunks(ctx, e, h.splitter, h.attachments)
+		chunks, err := chunking.DeriveChunks(ctx, e, hash, h.splitter, h.attachments)
 		if err != nil {
 			return fmt.Errorf("deriving chunks for %s: %w", e.ID, err)
 		}
@@ -223,7 +221,7 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 		// batchSize) takes the entry on its own — the embedder will
 		// split internally on its way to the wire.
 		if bucketChunks > 0 && bucketChunks+len(w.chunks) > batchSize {
-			if err := h.indexBucket(ctx, idx, work[bucketStart:i], manifest, fingerprint, onBatchStart, onIndexed); err != nil {
+			if err := h.indexBucket(ctx, idx, work[bucketStart:i], manifest, fingerprint, force, onBatchStart, onIndexed); err != nil {
 				return err
 			}
 			if err := manifest.Save(h.indexDir); err != nil {
@@ -237,7 +235,7 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 	}
 	// Flush the trailing bucket.
 	if bucketStart < len(work) {
-		if err := h.indexBucket(ctx, idx, work[bucketStart:], manifest, fingerprint, onBatchStart, onIndexed); err != nil {
+		if err := h.indexBucket(ctx, idx, work[bucketStart:], manifest, fingerprint, force, onBatchStart, onIndexed); err != nil {
 			return err
 		}
 		if err := manifest.Save(h.indexDir); err != nil {
@@ -259,7 +257,7 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 // the bucket has all its embeddings ready and is upserted as a unit;
 // the manifest entry follows.
 func (h *IndexHandler) indexBucket(ctx context.Context, idx *index.Index, bucket []entryWithChunks,
-	manifest *index.Manifest, fingerprint string,
+	manifest *index.Manifest, fingerprint string, force bool,
 	onBatchStart func([]string, int), onIndexed func(string, int)) error {
 
 	logger := slogutils.FromContext(ctx)
@@ -292,14 +290,15 @@ func (h *IndexHandler) indexBucket(ctx context.Context, idx *index.Index, bucket
 	// Flatten chunks across the bucket while remembering which entry each
 	// embedding belongs to.
 	type ownedChunk struct {
-		entryID string
-		chunkID string
-		chunk   textsplitter.Chunk
+		entryID   string
+		entryHash string
+		chunkID   string
+		chunk     textsplitter.Chunk
 	}
 	var allChunks []ownedChunk
 	for _, w := range bucket {
 		for _, c := range w.chunks {
-			allChunks = append(allChunks, ownedChunk{entryID: w.entry.ID, chunkID: c.ChunkID, chunk: c.Chunk})
+			allChunks = append(allChunks, ownedChunk{entryID: w.entry.ID, entryHash: w.hash, chunkID: c.ChunkID, chunk: c.Chunk})
 		}
 	}
 
@@ -308,11 +307,21 @@ func (h *IndexHandler) indexBucket(ctx context.Context, idx *index.Index, bucket
 		// body). Record them in the manifest anyway so the up-to-date
 		// check skips them next pass.
 		for _, w := range bucket {
-			manifest.Entries[w.entry.ID] = index.EntryState{
+			version := index.EntryVersion{
 				Hash:        w.hash,
 				Fingerprint: fingerprint,
 				ChunkIDs:    nil,
 				IndexedAt:   h.now(),
+			}
+			if force {
+				if old := manifest.Entries[w.entry.ID].AllChunkIDs(); len(old) > 0 {
+					if err := idx.DeleteEntry(ctx, old); err != nil {
+						return fmt.Errorf("delete old chunks for %s: %w", w.entry.ID, err)
+					}
+				}
+				manifest.SetSingleVersion(w.entry.ID, version)
+			} else {
+				manifest.AddVersion(w.entry.ID, version)
 			}
 			report(w.entry.ID, 0)
 		}
@@ -335,6 +344,7 @@ func (h *IndexHandler) indexBucket(ctx context.Context, idx *index.Index, bucket
 	for i, c := range allChunks {
 		rowsByEntry[c.entryID] = append(rowsByEntry[c.entryID], index.Row{
 			EntryID:              c.entryID,
+			EntryHash:            c.entryHash,
 			ChunkID:              c.chunkID,
 			Text:                 c.chunk.Text,
 			Body:                 c.chunk.Body,
@@ -351,19 +361,31 @@ func (h *IndexHandler) indexBucket(ctx context.Context, idx *index.Index, bucket
 
 	for _, w := range bucket {
 		rows := rowsByEntry[w.entry.ID]
-		oldChunkIDs := manifest.Entries[w.entry.ID].ChunkIDs
-		if err := idx.UpsertEntry(ctx, w.entry.ID, oldChunkIDs, rows); err != nil {
-			return fmt.Errorf("upsert %s: %w", w.entry.ID, err)
-		}
 		newChunkIDs := make([]string, 0, len(rows))
 		for _, r := range rows {
 			newChunkIDs = append(newChunkIDs, r.ChunkID)
 		}
-		manifest.Entries[w.entry.ID] = index.EntryState{
+		version := index.EntryVersion{
 			Hash:        w.hash,
 			Fingerprint: fingerprint,
 			ChunkIDs:    newChunkIDs,
 			IndexedAt:   h.now(),
+		}
+		// Force is the destructive repair path: drop every stored version's
+		// rows and write this one as the entry's sole version. The lazy path
+		// adds this version without deleting — a changed entry accumulates a
+		// version so a shared store never flip-flops between two branches.
+		if force {
+			old := manifest.Entries[w.entry.ID].AllChunkIDs()
+			if err := idx.UpsertEntry(ctx, w.entry.ID, old, rows); err != nil {
+				return fmt.Errorf("upsert %s: %w", w.entry.ID, err)
+			}
+			manifest.SetSingleVersion(w.entry.ID, version)
+		} else {
+			if err := idx.UpsertEntry(ctx, w.entry.ID, nil, rows); err != nil {
+				return fmt.Errorf("upsert %s: %w", w.entry.ID, err)
+			}
+			manifest.AddVersion(w.entry.ID, version)
 		}
 		report(w.entry.ID, len(rows))
 	}
