@@ -125,13 +125,11 @@ func TestIndexHandler_Build(t *testing.T) {
 	writeEntry(t, graphDir, "20260101-100001-s-tac-bbb", "## Section B\nSecond entry body.", "Summary of B.")
 
 	emb := &fakeEmbedder{}
-	idx := index.OpenInMemory()
 	h := NewIndexHandler(IndexHandlerOptions{
-		GraphDir:   graphDir,
-		IndexDir:   indexDir,
-		Embedder:   emb,
-		IndexStore: idx,
-		Reader:     readFinderFor(t),
+		GraphDir: graphDir,
+		IndexDir: indexDir,
+		Embedder: emb,
+		Reader:   readFinderFor(t),
 	})
 
 	var indexed []string
@@ -177,13 +175,11 @@ func TestIndexHandler_BuildFiresOnBatchStart(t *testing.T) {
 	writeEntry(t, graphDir, "20260101-100001-s-tac-bbb", "## Section B\nSecond entry body.", "Summary of B.")
 
 	emb := &fakeEmbedder{}
-	idx := index.OpenInMemory()
 	h := NewIndexHandler(IndexHandlerOptions{
-		GraphDir:   graphDir,
-		IndexDir:   indexDir,
-		Embedder:   emb,
-		IndexStore: idx,
-		Reader:     readFinderFor(t),
+		GraphDir: graphDir,
+		IndexDir: indexDir,
+		Embedder: emb,
+		Reader:   readFinderFor(t),
 	})
 
 	var batches [][]string
@@ -234,13 +230,11 @@ func TestIndexHandler_BuildSkipsUnchanged(t *testing.T) {
 	writeEntry(t, graphDir, "20260101-100000-s-tac-aaa", "body", "summary")
 
 	emb := &fakeEmbedder{}
-	idx := index.OpenInMemory()
 	h := NewIndexHandler(IndexHandlerOptions{
-		GraphDir:   graphDir,
-		IndexDir:   indexDir,
-		Embedder:   emb,
-		IndexStore: idx,
-		Reader:     readFinderFor(t),
+		GraphDir: graphDir,
+		IndexDir: indexDir,
+		Embedder: emb,
+		Reader:   readFinderFor(t),
 	})
 
 	if err := h.Build(context.Background(), &command.BuildIndexCmd{}); err != nil {
@@ -273,13 +267,11 @@ func TestIndexHandler_BuildForceReindexes(t *testing.T) {
 	writeEntry(t, graphDir, "20260101-100000-s-tac-aaa", "body", "summary")
 
 	emb := &fakeEmbedder{}
-	idx := index.OpenInMemory()
 	h := NewIndexHandler(IndexHandlerOptions{
-		GraphDir:   graphDir,
-		IndexDir:   indexDir,
-		Embedder:   emb,
-		IndexStore: idx,
-		Reader:     readFinderFor(t),
+		GraphDir: graphDir,
+		IndexDir: indexDir,
+		Embedder: emb,
+		Reader:   readFinderFor(t),
 	})
 
 	if err := h.Build(context.Background(), &command.BuildIndexCmd{}); err != nil {
@@ -304,13 +296,11 @@ func TestIndexHandler_LazyFillCoversMissingEntries(t *testing.T) {
 	writeEntry(t, graphDir, "20260101-100000-s-tac-aaa", "body A", "summary A")
 
 	emb := &fakeEmbedder{}
-	idx := index.OpenInMemory()
 	h := NewIndexHandler(IndexHandlerOptions{
-		GraphDir:   graphDir,
-		IndexDir:   indexDir,
-		Embedder:   emb,
-		IndexStore: idx,
-		Reader:     readFinderFor(t),
+		GraphDir: graphDir,
+		IndexDir: indexDir,
+		Embedder: emb,
+		Reader:   readFinderFor(t),
 	})
 
 	// First build covers the existing entry.
@@ -347,13 +337,11 @@ func TestIndexHandler_BuildPicksUpEntryEdits(t *testing.T) {
 	writeEntry(t, graphDir, id, "old body", "old summary")
 
 	emb := &fakeEmbedder{}
-	idx := index.OpenInMemory()
 	h := NewIndexHandler(IndexHandlerOptions{
-		GraphDir:   graphDir,
-		IndexDir:   indexDir,
-		Embedder:   emb,
-		IndexStore: idx,
-		Reader:     readFinderFor(t),
+		GraphDir: graphDir,
+		IndexDir: indexDir,
+		Embedder: emb,
+		Reader:   readFinderFor(t),
 	})
 	if err := h.Build(context.Background(), &command.BuildIndexCmd{}); err != nil {
 		t.Fatal(err)

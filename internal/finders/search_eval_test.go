@@ -151,18 +151,13 @@ func TestEvalRecall(t *testing.T) {
 	// Build a fresh index in a temp dir so the test doesn't pollute the
 	// project's .sdd/index.
 	indexDir := t.TempDir()
-	idxStore, err := index.Open(indexDir)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	reader := finders.New(finders.Options{PreflightRunner: noopRunner{}})
 	ih := handlers.NewIndexHandler(handlers.IndexHandlerOptions{
-		GraphDir:   graphDir,
-		IndexDir:   indexDir,
-		Embedder:   emb,
-		IndexStore: idxStore,
-		Reader:     reader,
+		GraphDir: graphDir,
+		IndexDir: indexDir,
+		Embedder: emb,
+		Reader:   reader,
 	})
 
 	t.Logf("building index over %s ...", graphDir)
@@ -181,6 +176,11 @@ func TestEvalRecall(t *testing.T) {
 		t.Fatalf("LoadGraph: %v", err)
 	}
 
+	// Open the index after the build so the finder reads the committed rows.
+	idxStore, err := index.Open(indexDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	finder := finders.NewSearchFinder(finders.SearchFinderOptions{
 		GraphDir:   graphDir,
 		Embedder:   emb,
