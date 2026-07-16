@@ -103,11 +103,11 @@ func TestFunctionalMechanicalAdaptersConform(t *testing.T) {
 		return sddtest.EmbeddingExecutorFixture{Executor: embeddings, Inputs: []sdd.EmbeddingInput{{ID: "one", Text: "text"}}}
 	})
 
-	index := newMemoryIndex()
+	memIndex := newMemoryIndex()
 	namespace := sdd.IndexNamespace{Project: "example", Fingerprint: "fixture", Metric: "cosine"}
-	chunks := []sdd.IndexedChunk{{Chunk: sdd.CanonicalChunk{ID: "chunk-1", EntryID: "entry-1", Revision: "r1", ContentHash: "h1"}, Vector: []float32{0, 1}}}
+	chunks, queryVec := conformanceSearchChunks()
 	sddtest.RunSearchIndexStoreTests(t, func(*testing.T) sddtest.SearchIndexStoreFixture {
-		return sddtest.SearchIndexStoreFixture{Store: index, Namespace: namespace, Revision: "r1", Chunks: chunks, Query: []float32{0, 1}}
+		return sddtest.SearchIndexStoreFixture{Store: memIndex, Namespace: namespace, Chunks: chunks, Query: queryVec}
 	})
 
 	executor := sdd.LLMExecutorFuncs{
@@ -123,10 +123,46 @@ func TestFunctionalMechanicalAdaptersConform(t *testing.T) {
 
 func TestMemorySearchIndexStoreConforms(t *testing.T) {
 	namespace := sdd.IndexNamespace{Project: "memory", Fingerprint: "fixture", Metric: "cosine"}
-	chunks := []sdd.IndexedChunk{{Chunk: sdd.CanonicalChunk{ID: "chunk-1", EntryID: "entry-1", Revision: "r1", ContentHash: "h1"}, Vector: []float32{0, 1}}}
+	chunks, queryVec := conformanceSearchChunks()
+	store := localadapter.NewMemorySearchIndexStore()
 	sddtest.RunSearchIndexStoreTests(t, func(*testing.T) sddtest.SearchIndexStoreFixture {
-		return sddtest.SearchIndexStoreFixture{Store: localadapter.NewMemorySearchIndexStore(), Namespace: namespace, Revision: "r1", Chunks: chunks, Query: []float32{0, 1}}
+		return sddtest.SearchIndexStoreFixture{
+			Store: store, Namespace: namespace, Chunks: chunks, Query: queryVec,
+			Reopen: func() sdd.SearchIndexStore { return store },
+		}
 	})
+}
+
+// TestPersistentSearchIndexStoreConforms runs the same contract against the
+// chromem-backed machine-global store that sdd serve wires in production,
+// including the reopen-persistence assertion (a fresh adapter over the same
+// cache directory still answers with the reconciled chunks).
+func TestPersistentSearchIndexStoreConforms(t *testing.T) {
+	cacheRoot := t.TempDir()
+	const project = sdd.ProjectID("persistent")
+	const repoKey = "example.org/repo"
+	namespace := sdd.IndexNamespace{Project: project, Fingerprint: "fixture", Metric: "cosine"}
+	chunks, queryVec := conformanceSearchChunks()
+	sddtest.RunSearchIndexStoreTests(t, func(*testing.T) sddtest.SearchIndexStoreFixture {
+		return sddtest.SearchIndexStoreFixture{
+			Store:     localadapter.NewPersistentSearchIndexStore(project, cacheRoot, repoKey),
+			Namespace: namespace, Chunks: chunks, Query: queryVec,
+			Reopen: func() sdd.SearchIndexStore {
+				return localadapter.NewPersistentSearchIndexStore(project, cacheRoot, repoKey)
+			},
+		}
+	})
+}
+
+// conformanceSearchChunks returns a two-entry chunk set carrying citation
+// metadata and equal-length vectors, with a query vector that lands on the
+// first summary chunk.
+func conformanceSearchChunks() ([]sdd.IndexedChunk, []float32) {
+	return []sdd.IndexedChunk{
+		{Chunk: sdd.CanonicalChunk{ID: "entry-1#summary", EntryID: "entry-1", ContentHash: "h1", Text: "alpha summary", Body: "alpha summary body", IsSummary: true}, Vector: []float32{1, 0}},
+		{Chunk: sdd.CanonicalChunk{ID: "entry-1#body-0", EntryID: "entry-1", ContentHash: "h2", Text: "alpha body", Body: "alpha body text", Breadcrumb: []string{"Section"}, Depth: 2}, Vector: []float32{0.9, 0.1}},
+		{Chunk: sdd.CanonicalChunk{ID: "entry-2#summary", EntryID: "entry-2", ContentHash: "h3", Text: "beta summary", Body: "beta summary body", IsSummary: true}, Vector: []float32{0, 1}},
+	}, []float32{1, 0}
 }
 
 type memoryIndex struct {
@@ -165,6 +201,9 @@ func (m *memoryIndex) Nearest(_ context.Context, namespaces []sdd.IndexNamespace
 	var hits []sdd.ScoredChunkHit
 	for _, namespace := range namespaces {
 		for _, chunk := range m.chunks[namespace] {
+			if len(vector) != len(chunk.Vector) {
+				return nil, fmt.Errorf("query vector has %d dimensions, want %d", len(vector), len(chunk.Vector))
+			}
 			var score float64
 			for i := range vector {
 				score += float64(vector[i] * chunk.Vector[i])
@@ -172,7 +211,13 @@ func (m *memoryIndex) Nearest(_ context.Context, namespaces []sdd.IndexNamespace
 			if math.IsNaN(score) {
 				return nil, fmt.Errorf("invalid score")
 			}
-			hits = append(hits, sdd.ScoredChunkHit{Namespace: namespace, ChunkID: chunk.Chunk.ID, Revision: chunk.Chunk.Revision, ContentHash: chunk.Chunk.ContentHash, Score: score})
+			hits = append(hits, sdd.ScoredChunkHit{
+				Namespace: namespace, ChunkID: chunk.Chunk.ID, EntryID: chunk.Chunk.EntryID,
+				Revision: chunk.Chunk.Revision, ContentHash: chunk.Chunk.ContentHash, Score: score,
+				Body: chunk.Chunk.Body, Breadcrumb: chunk.Chunk.Breadcrumb, Depth: chunk.Chunk.Depth,
+				IsSummary: chunk.Chunk.IsSummary, IsAttachment: chunk.Chunk.IsAttachment,
+				SourceAttachmentPath: chunk.Chunk.SourceAttachmentPath,
+			})
 		}
 	}
 	sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
