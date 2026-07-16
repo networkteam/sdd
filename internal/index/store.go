@@ -146,19 +146,54 @@ func lockFile(indexDir string) *flock.Flock {
 // to minutes long (embedding round-trips), so a coarse interval is fine.
 const lockRetryInterval = 200 * time.Millisecond
 
-// WriteSession runs fn while holding the store's exclusive lock — the one
-// write boundary for every index mutation (build, lazy-fill). Manifest
-// reads belonging to the write must happen inside fn so concurrent writers
-// cannot clobber each other's manifest state. In-memory indexes (tests)
-// run fn without locking. Blocks until the lock is available or ctx ends.
-func (i *Index) WriteSession(ctx context.Context, fn func() error) error {
-	if i.indexDir == "" {
-		return fn()
+// WriteStore runs fn against a freshly loaded store while holding the store's
+// exclusive lock — the one write boundary for every index mutation (build,
+// lazy-fill, MCP reconcile). The lock is acquired BEFORE the snapshot is
+// loaded and held through fn, so a writer never operates on a snapshot that a
+// concurrent process has moved on from. Manifest reads and saves belonging to
+// the write must happen inside fn so concurrent writers cannot clobber each
+// other's manifest state. An empty indexDir runs fn against a fresh in-memory
+// store without locking (tests). Blocks until the lock is available or ctx ends.
+func WriteStore(ctx context.Context, indexDir string, fn func(*Index) error) error {
+	if indexDir == "" {
+		return fn(OpenInMemory())
 	}
-	l := lockFile(i.indexDir)
+	if err := ensureStoreDir(indexDir); err != nil {
+		return err
+	}
+	l := lockFile(indexDir)
 	if _, err := l.TryLockContext(ctx, lockRetryInterval); err != nil {
-		return fmt.Errorf("acquiring index write lock at %s: %w", i.indexDir, err)
+		return fmt.Errorf("acquiring index write lock at %s: %w", indexDir, err)
 	}
 	defer func() { _ = l.Unlock() }()
-	return fn()
+	store, err := loadStore(indexDir)
+	if err != nil {
+		return err
+	}
+	return fn(store)
+}
+
+// ReadStore runs fn against a freshly loaded store while holding the store's
+// shared lock — the read counterpart to WriteStore. A reader loads its
+// snapshot under the lock so it never decodes half-written chromem documents,
+// and it opens fresh per call so it reflects writes committed by the CLI or
+// another process. An empty indexDir runs fn against a fresh in-memory store
+// without locking (tests).
+func ReadStore(ctx context.Context, indexDir string, fn func(*Index) error) error {
+	if indexDir == "" {
+		return fn(OpenInMemory())
+	}
+	if err := ensureStoreDir(indexDir); err != nil {
+		return err
+	}
+	l := lockFile(indexDir)
+	if _, err := l.TryRLockContext(ctx, lockRetryInterval); err != nil {
+		return fmt.Errorf("acquiring index read lock at %s: %w", indexDir, err)
+	}
+	defer func() { _ = l.Unlock() }()
+	store, err := loadStore(indexDir)
+	if err != nil {
+		return err
+	}
+	return fn(store)
 }

@@ -108,19 +108,11 @@ func TestMigrateDir_EmptyManifestIsNoop(t *testing.T) {
 	}
 }
 
-// Two concurrent write sessions on the same store serialize on the
+// Two concurrent write stores on the same directory serialize on the
 // exclusive lock, and a reader's Open waits out an in-flight write session
 // — the scenario behind chromem's uncoordinated per-document files.
-func TestWriteSessionSerializesWritersAndBlocksReaders(t *testing.T) {
+func TestWriteStoreSerializesWritersAndBlocksReaders(t *testing.T) {
 	dir := t.TempDir()
-	a, err := Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	var mu sync.Mutex
 	var order []string
@@ -133,7 +125,7 @@ func TestWriteSessionSerializesWritersAndBlocksReaders(t *testing.T) {
 	inSession := make(chan struct{})
 	done := make(chan error, 2)
 	go func() {
-		done <- a.WriteSession(context.Background(), func() error {
+		done <- WriteStore(context.Background(), dir, func(*Index) error {
 			record("a-start")
 			close(inSession)
 			time.Sleep(300 * time.Millisecond)
@@ -143,7 +135,7 @@ func TestWriteSessionSerializesWritersAndBlocksReaders(t *testing.T) {
 	}()
 	<-inSession
 	go func() {
-		done <- b.WriteSession(context.Background(), func() error {
+		done <- WriteStore(context.Background(), dir, func(*Index) error {
 			record("b")
 			return nil
 		})

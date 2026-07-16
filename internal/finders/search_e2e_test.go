@@ -94,7 +94,6 @@ type e2eSetup struct {
 	graphDir string
 	indexDir string
 	embedder *e2eEmbedder
-	idxStore *index.Index
 	reader   handlers.Reader
 }
 
@@ -113,7 +112,6 @@ func setupE2E(t *testing.T) *e2eSetup {
 		"## Section\nMarsupial migration patterns.",
 		"Field study of marsupial migration.")
 
-	idxStore := index.OpenInMemory()
 	reader := finders.New(finders.Options{
 		PreflightRunner: e2eNoopRunner{},
 	})
@@ -122,7 +120,6 @@ func setupE2E(t *testing.T) *e2eSetup {
 		graphDir: graphDir,
 		indexDir: indexDir,
 		embedder: &e2eEmbedder{},
-		idxStore: idxStore,
 		reader:   reader,
 	}
 }
@@ -130,11 +127,10 @@ func setupE2E(t *testing.T) *e2eSetup {
 func (s *e2eSetup) build(t *testing.T) {
 	t.Helper()
 	h := handlers.NewIndexHandler(handlers.IndexHandlerOptions{
-		GraphDir:   s.graphDir,
-		IndexDir:   s.indexDir,
-		Embedder:   s.embedder,
-		IndexStore: s.idxStore,
-		Reader:     s.reader,
+		GraphDir: s.graphDir,
+		IndexDir: s.indexDir,
+		Embedder: s.embedder,
+		Reader:   s.reader,
 	})
 	if err := h.Build(context.Background(), &command.BuildIndexCmd{}); err != nil {
 		t.Fatalf("Build: %v", err)
@@ -144,11 +140,10 @@ func (s *e2eSetup) build(t *testing.T) {
 func (s *e2eSetup) lazyFill(t *testing.T) {
 	t.Helper()
 	h := handlers.NewIndexHandler(handlers.IndexHandlerOptions{
-		GraphDir:   s.graphDir,
-		IndexDir:   s.indexDir,
-		Embedder:   s.embedder,
-		IndexStore: s.idxStore,
-		Reader:     s.reader,
+		GraphDir: s.graphDir,
+		IndexDir: s.indexDir,
+		Embedder: s.embedder,
+		Reader:   s.reader,
 	})
 	if err := h.LazyFill(context.Background(), &command.LazyFillIndexCmd{}); err != nil {
 		t.Fatalf("LazyFill: %v", err)
@@ -194,11 +189,19 @@ func (s *e2eSetup) loadGraph(t *testing.T) *model.Graph {
 	return g
 }
 
-func (s *e2eSetup) finder() *finders.SearchFinder {
+// finder opens the persistent index fresh so it reflects whatever build /
+// lazyFill just committed (they write under index.WriteStore's exclusive lock,
+// so a snapshot opened earlier would miss the new rows).
+func (s *e2eSetup) finder(t *testing.T) *finders.SearchFinder {
+	t.Helper()
+	store, err := index.Open(s.indexDir)
+	if err != nil {
+		t.Fatalf("open index: %v", err)
+	}
 	return finders.NewSearchFinder(finders.SearchFinderOptions{
 		GraphDir:   s.graphDir,
 		Embedder:   s.embedder,
-		IndexStore: s.idxStore,
+		IndexStore: store,
 	})
 }
 
@@ -214,7 +217,7 @@ func TestE2E_BuildAndVectorSearch(t *testing.T) {
 	s.build(t)
 	g := s.loadGraph(t)
 
-	res, err := s.finder().Search(context.Background(), query.SearchQuery{
+	res, err := s.finder(t).Search(context.Background(), query.SearchQuery{
 		Graph:                g,
 		Phrase:               "looking for apples",
 		MaxCitationsPerEntry: query.DefaultMaxCitationsPerEntry,
@@ -251,7 +254,7 @@ func TestE2E_LazyFillCoversNewEntry(t *testing.T) {
 	s.lazyFill(t)
 
 	g := s.loadGraph(t)
-	res, err := s.finder().Search(context.Background(), query.SearchQuery{
+	res, err := s.finder(t).Search(context.Background(), query.SearchQuery{
 		Graph:  g,
 		Phrase: "I'd like a banana",
 	})
@@ -281,7 +284,7 @@ func TestE2E_BranchReconciliation(t *testing.T) {
 	}
 
 	g := s.loadGraph(t)
-	res, err := s.finder().Search(context.Background(), query.SearchQuery{
+	res, err := s.finder(t).Search(context.Background(), query.SearchQuery{
 		Graph:  g,
 		Phrase: "orange harvest",
 	})
@@ -301,7 +304,7 @@ func TestE2E_HybridFusion(t *testing.T) {
 	s.build(t)
 	g := s.loadGraph(t)
 
-	res, err := s.finder().Search(context.Background(), query.SearchQuery{
+	res, err := s.finder(t).Search(context.Background(), query.SearchQuery{
 		Graph:  g,
 		Terms:  []string{"orange"},
 		Phrase: "citrus harvest",
@@ -331,7 +334,7 @@ func TestE2E_TextModeDoesNotEmbed(t *testing.T) {
 	finder := finders.NewSearchFinder(finders.SearchFinderOptions{
 		GraphDir:   s.graphDir,
 		Embedder:   tracked,
-		IndexStore: s.idxStore,
+		IndexStore: index.OpenInMemory(),
 	})
 
 	g := s.loadGraph(t)

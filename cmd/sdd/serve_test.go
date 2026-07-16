@@ -17,9 +17,20 @@ import (
 	sdd "github.com/networkteam/sdd/application"
 )
 
-const stdioServeHelperEnv = "SDD_STDIO_SERVE_HELPER"
+const (
+	stdioServeHelperEnv = "SDD_STDIO_SERVE_HELPER"
+	// mainHelperArgsEnv carries a space-separated sdd argv for a subprocess
+	// that runs the real CLI (e.g. the production-path test seeds the index
+	// via `sdd index`). The subprocess re-enters main() with these args.
+	mainHelperArgsEnv = "SDD_MAIN_HELPER_ARGS"
+)
 
 func TestMain(m *testing.M) {
+	if args := os.Getenv(mainHelperArgsEnv); args != "" {
+		os.Args = append([]string{"sdd"}, strings.Fields(args)...)
+		main()
+		os.Exit(0)
+	}
 	if os.Getenv(stdioServeHelperEnv) == "1" {
 		os.Args = []string{"sdd", "--graph-dir", ".sdd/graph", "serve", "--transport", "stdio"}
 		main()

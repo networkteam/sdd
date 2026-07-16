@@ -210,32 +210,137 @@ func RunEmbeddingExecutorTests(t *testing.T, factory func(*testing.T) EmbeddingE
 type SearchIndexStoreFixture struct {
 	Store     sdd.SearchIndexStore
 	Namespace sdd.IndexNamespace
-	Revision  string
-	Chunks    []sdd.IndexedChunk
-	Query     []float32
+	// Chunks is the reconcile set. To exercise the full contract it should
+	// carry citation metadata (Body/Breadcrumb/IsSummary/…), distinct entry
+	// IDs across at least two entries, and equal-length vectors.
+	Chunks []sdd.IndexedChunk
+	Query  []float32
+	// Reopen returns a store backed by the same state — the same instance for
+	// an in-memory store, a fresh handle over the same directory for a
+	// persistent store. When nil the suite reuses Store (no reopen assertion).
+	Reopen func() sdd.SearchIndexStore
 }
 
 func RunSearchIndexStoreTests(t *testing.T, factory func(*testing.T) SearchIndexStoreFixture) {
 	t.Helper()
 	fixture := factory(t)
-	if err := fixture.Store.Reconcile(t.Context(), fixture.Namespace, fixture.Revision, fixture.Chunks, nil); err != nil {
+	ctx := t.Context()
+
+	if err := fixture.Store.Reconcile(ctx, fixture.Namespace, "r1", fixture.Chunks, nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
-	manifest, err := fixture.Store.Manifest(t.Context(), fixture.Namespace)
+	manifest, err := fixture.Store.Manifest(ctx, fixture.Namespace)
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
 	if len(manifest) != len(fixture.Chunks) {
 		t.Fatalf("Manifest returned %d chunks, want %d", len(manifest), len(fixture.Chunks))
 	}
-	hits, err := fixture.Store.Nearest(t.Context(), []sdd.IndexNamespace{fixture.Namespace}, fixture.Query, len(fixture.Chunks))
+
+	hits, err := fixture.Store.Nearest(ctx, []sdd.IndexNamespace{fixture.Namespace}, fixture.Query, len(fixture.Chunks))
 	if err != nil {
 		t.Fatalf("Nearest: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("Nearest returned no hits")
+	}
+	byChunk := map[string]sdd.IndexedChunk{}
+	for _, chunk := range fixture.Chunks {
+		byChunk[chunk.Chunk.ID] = chunk
 	}
 	for _, hit := range hits {
 		if hit.Namespace != fixture.Namespace {
 			t.Fatalf("Nearest returned unauthorized namespace %+v", hit.Namespace)
 		}
+		want, ok := byChunk[hit.ChunkID]
+		if !ok {
+			t.Fatalf("Nearest returned unknown chunk %q", hit.ChunkID)
+		}
+		// Complete citation metadata round-trip.
+		if hit.EntryID != want.Chunk.EntryID {
+			t.Errorf("hit %q EntryID = %q, want %q", hit.ChunkID, hit.EntryID, want.Chunk.EntryID)
+		}
+		if hit.Body != want.Chunk.Body {
+			t.Errorf("hit %q Body = %q, want %q", hit.ChunkID, hit.Body, want.Chunk.Body)
+		}
+		if !slices.Equal(hit.Breadcrumb, want.Chunk.Breadcrumb) {
+			t.Errorf("hit %q Breadcrumb = %v, want %v", hit.ChunkID, hit.Breadcrumb, want.Chunk.Breadcrumb)
+		}
+		if hit.IsSummary != want.Chunk.IsSummary || hit.IsAttachment != want.Chunk.IsAttachment {
+			t.Errorf("hit %q summary/attachment = %v/%v, want %v/%v", hit.ChunkID, hit.IsSummary, hit.IsAttachment, want.Chunk.IsSummary, want.Chunk.IsAttachment)
+		}
+		if hit.SourceAttachmentPath != want.Chunk.SourceAttachmentPath {
+			t.Errorf("hit %q SourceAttachmentPath = %q, want %q", hit.ChunkID, hit.SourceAttachmentPath, want.Chunk.SourceAttachmentPath)
+		}
+	}
+
+	// Entry-manifest reporting (optional capability): distinct entry IDs of
+	// everything reconciled, no migration or embedding triggered.
+	if manifestCap, ok := fixture.Store.(sdd.SearchIndexEntryManifest); ok {
+		refs, err := manifestCap.IndexedEntries(ctx, fixture.Namespace)
+		if err != nil {
+			t.Fatalf("IndexedEntries: %v", err)
+		}
+		wantEntries := map[string]bool{}
+		for _, chunk := range fixture.Chunks {
+			wantEntries[chunk.Chunk.EntryID] = true
+		}
+		gotEntries := map[string]bool{}
+		for _, ref := range refs {
+			gotEntries[ref.EntryID] = true
+		}
+		if len(gotEntries) != len(wantEntries) {
+			t.Fatalf("IndexedEntries reported %d entries, want %d", len(gotEntries), len(wantEntries))
+		}
+		for id := range wantEntries {
+			if !gotEntries[id] {
+				t.Errorf("IndexedEntries missing entry %q", id)
+			}
+		}
+	}
+
+	// Monotonic reconciliation without revision invalidation, and no
+	// filter-shaped deletion: reconciling a NEW entry under an unrelated
+	// revision adds it and leaves every prior chunk in place — nothing is
+	// dropped merely because it was absent from this reconcile set, and the
+	// revision string never invalidates stored vectors.
+	dim := len(fixture.Chunks[0].Vector)
+	extraVec := make([]float32, dim)
+	extraVec[0] = 1
+	extra := sdd.IndexedChunk{Chunk: sdd.CanonicalChunk{
+		ID: "sddtest-extra#summary", EntryID: "sddtest-extra", ContentHash: "extra",
+		Text: "extra text", Body: "extra body", IsSummary: true,
+	}, Vector: extraVec}
+	if err := fixture.Store.Reconcile(ctx, fixture.Namespace, "r2-unrelated", []sdd.IndexedChunk{extra}, nil); err != nil {
+		t.Fatalf("second Reconcile: %v", err)
+	}
+	manifest, err = fixture.Store.Manifest(ctx, fixture.Namespace)
+	if err != nil {
+		t.Fatalf("Manifest after adding an entry: %v", err)
+	}
+	if len(manifest) != len(fixture.Chunks)+1 {
+		t.Fatalf("reconcile of a new entry changed stored chunk count to %d, want %d (monotonic, no filter-shaped deletion)", len(manifest), len(fixture.Chunks)+1)
+	}
+
+	// Dimension mismatch: a query vector of the wrong length must error where
+	// it meets the store, not return silently wrong hits.
+	if _, err := fixture.Store.Nearest(ctx, []sdd.IndexNamespace{fixture.Namespace}, append(append([]float32(nil), fixture.Query...), 0), len(fixture.Chunks)); err == nil {
+		t.Error("Nearest with a mismatched-dimension query should error")
+	}
+
+	// Reopen persistence: a store reopened over the same backing state still
+	// answers with the reconciled chunks.
+	reopen := fixture.Reopen
+	if reopen == nil {
+		reopen = func() sdd.SearchIndexStore { return fixture.Store }
+	}
+	reopened := reopen()
+	reopenedHits, err := reopened.Nearest(ctx, []sdd.IndexNamespace{fixture.Namespace}, fixture.Query, len(fixture.Chunks))
+	if err != nil {
+		t.Fatalf("Nearest after reopen: %v", err)
+	}
+	if len(reopenedHits) == 0 {
+		t.Fatal("reopened store returned no hits — reconciled chunks did not persist")
 	}
 }
 

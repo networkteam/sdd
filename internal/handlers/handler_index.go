@@ -2,16 +2,13 @@ package handlers
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/networkteam/sdd/internal/chunking"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/llm"
@@ -34,14 +31,14 @@ import (
 //     entries on disk — re-embeds entries that are missing, or whose
 //     content hash / embedder fingerprint differs from the stored state.
 type IndexHandler struct {
-	graphDir   string
-	indexDir   string
-	embedder   llm.Embedder
-	splitter   *textsplitter.Splitter
-	indexStore *index.Index
-	reader     Reader
-	now        func() time.Time
-	stderr     io.Writer
+	graphDir    string
+	indexDir    string
+	embedder    llm.Embedder
+	splitter    *textsplitter.Splitter
+	attachments chunking.AttachmentReader
+	reader      Reader
+	now         func() time.Time
+	stderr      io.Writer
 	// excludeEmbedded skips binary-scoped entries when indexing. Set for
 	// connected-repo cache indexes: embedded entries are identical in every
 	// member graph, so the local index alone covers them and cross-graph
@@ -50,18 +47,18 @@ type IndexHandler struct {
 }
 
 // IndexHandlerOptions configures NewIndexHandler. Required fields are
-// GraphDir, IndexDir, Embedder, IndexStore, Reader. Splitter defaults to
+// GraphDir, IndexDir, Embedder, Reader. Splitter defaults to
 // textsplitter.NewSplitter() with default options when nil; Now defaults
-// to time.Now.
+// to time.Now. The store is loaded under the exclusive lock at write time
+// (see index.WriteStore), so no pre-opened index is injected.
 type IndexHandlerOptions struct {
-	GraphDir   string
-	IndexDir   string
-	Embedder   llm.Embedder
-	Splitter   *textsplitter.Splitter
-	IndexStore *index.Index
-	Reader     Reader
-	Now        func() time.Time
-	Stderr     io.Writer
+	GraphDir string
+	IndexDir string
+	Embedder llm.Embedder
+	Splitter *textsplitter.Splitter
+	Reader   Reader
+	Now      func() time.Time
+	Stderr   io.Writer
 	// ExcludeEmbedded skips binary-scoped entries — set for connected-repo
 	// cache indexes so embedded entries index only locally.
 	ExcludeEmbedded bool
@@ -74,7 +71,7 @@ func NewIndexHandler(opts IndexHandlerOptions) *IndexHandler {
 		indexDir:        opts.IndexDir,
 		embedder:        opts.Embedder,
 		splitter:        opts.Splitter,
-		indexStore:      opts.IndexStore,
+		attachments:     chunking.DiskAttachmentReader{GraphDir: opts.GraphDir},
 		reader:          opts.Reader,
 		now:             opts.Now,
 		stderr:          opts.Stderr,
@@ -142,16 +139,17 @@ func (h *IndexHandler) indexEntries(ctx context.Context, force bool,
 		return fmt.Errorf("loading graph: %w", err)
 	}
 
-	// The whole write session — manifest read, skip pass, embedding,
-	// upserts, manifest saves — runs under the store's exclusive lock so
-	// concurrent writers (a CLI build racing the MCP server's lazy-fill)
-	// serialize instead of interleaving chromem's per-document files.
-	return h.indexStore.WriteSession(ctx, func() error {
-		return h.indexEntriesLocked(ctx, g, force, onPlanned, onBatchStart, onIndexed, onSkipped, onComplete)
+	// The whole write session — snapshot load, manifest read, skip pass,
+	// embedding, upserts, manifest saves — runs under the store's exclusive
+	// lock, acquired before the snapshot is loaded, so concurrent writers (a
+	// CLI build racing the MCP server's reconcile) serialize instead of
+	// interleaving chromem's per-document files.
+	return index.WriteStore(ctx, h.indexDir, func(idx *index.Index) error {
+		return h.indexEntriesLocked(ctx, idx, g, force, onPlanned, onBatchStart, onIndexed, onSkipped, onComplete)
 	})
 }
 
-func (h *IndexHandler) indexEntriesLocked(ctx context.Context, g *model.Graph, force bool,
+func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index, g *model.Graph, force bool,
 	onPlanned func(int), onBatchStart func([]string, int), onIndexed func(string, int), onSkipped func(string), onComplete func(int, int)) error {
 
 	logger := slogutils.FromContext(ctx)
@@ -173,10 +171,10 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, g *model.Graph, f
 	)
 
 	for _, e := range g.Entries {
-		if h.excludeEmbedded && e.Embedded {
+		if !chunking.IncludeEntry(e, h.excludeEmbedded) {
 			continue
 		}
-		hash, err := h.entryStateHash(e)
+		hash, err := chunking.EntryStateHash(ctx, e, h.attachments)
 		if err != nil {
 			logger.Warn("hash failure, skipping entry", "entry", e.ID, "err", err)
 			continue
@@ -191,7 +189,7 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, g *model.Graph, f
 				continue
 			}
 		}
-		chunks, err := h.deriveChunks(e)
+		chunks, err := chunking.DeriveChunks(ctx, e, h.splitter, h.attachments)
 		if err != nil {
 			return fmt.Errorf("deriving chunks for %s: %w", e.ID, err)
 		}
@@ -225,7 +223,7 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, g *model.Graph, f
 		// batchSize) takes the entry on its own — the embedder will
 		// split internally on its way to the wire.
 		if bucketChunks > 0 && bucketChunks+len(w.chunks) > batchSize {
-			if err := h.indexBucket(ctx, work[bucketStart:i], manifest, fingerprint, onBatchStart, onIndexed); err != nil {
+			if err := h.indexBucket(ctx, idx, work[bucketStart:i], manifest, fingerprint, onBatchStart, onIndexed); err != nil {
 				return err
 			}
 			if err := manifest.Save(h.indexDir); err != nil {
@@ -239,7 +237,7 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, g *model.Graph, f
 	}
 	// Flush the trailing bucket.
 	if bucketStart < len(work) {
-		if err := h.indexBucket(ctx, work[bucketStart:], manifest, fingerprint, onBatchStart, onIndexed); err != nil {
+		if err := h.indexBucket(ctx, idx, work[bucketStart:], manifest, fingerprint, onBatchStart, onIndexed); err != nil {
 			return err
 		}
 		if err := manifest.Save(h.indexDir); err != nil {
@@ -260,7 +258,7 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, g *model.Graph, f
 // the embedder's BatchSize. After the call returns, every entry in
 // the bucket has all its embeddings ready and is upserted as a unit;
 // the manifest entry follows.
-func (h *IndexHandler) indexBucket(ctx context.Context, bucket []entryWithChunks,
+func (h *IndexHandler) indexBucket(ctx context.Context, idx *index.Index, bucket []entryWithChunks,
 	manifest *index.Manifest, fingerprint string,
 	onBatchStart func([]string, int), onIndexed func(string, int)) error {
 
@@ -354,7 +352,7 @@ func (h *IndexHandler) indexBucket(ctx context.Context, bucket []entryWithChunks
 	for _, w := range bucket {
 		rows := rowsByEntry[w.entry.ID]
 		oldChunkIDs := manifest.Entries[w.entry.ID].ChunkIDs
-		if err := h.indexStore.UpsertEntry(ctx, w.entry.ID, oldChunkIDs, rows); err != nil {
+		if err := idx.UpsertEntry(ctx, w.entry.ID, oldChunkIDs, rows); err != nil {
 			return fmt.Errorf("upsert %s: %w", w.entry.ID, err)
 		}
 		newChunkIDs := make([]string, 0, len(rows))
@@ -378,83 +376,5 @@ func (h *IndexHandler) indexBucket(ctx context.Context, bucket []entryWithChunks
 type entryWithChunks struct {
 	entry  *model.Entry
 	hash   string
-	chunks []entryChunk
-}
-
-// entryChunk pairs a derived chunk with its deterministic chunk ID. Used
-// internally so the index-write step can correlate chunks back to their
-// stored row IDs after batch embedding.
-type entryChunk struct {
-	ChunkID string
-	Chunk   textsplitter.Chunk
-}
-
-// deriveChunks produces every chunk this entry contributes to the index:
-// the summary chunk, body chunks, and one chunk-set per .md attachment.
-// Non-markdown attachments are skipped silently — chunking arbitrary
-// binary or non-markdown text is out of scope for v1.
-func (h *IndexHandler) deriveChunks(entry *model.Entry) ([]entryChunk, error) {
-	out := make([]entryChunk, 0, 8)
-
-	if sc, ok := h.splitter.SummaryChunk(entry.Summary); ok {
-		out = append(out, entryChunk{ChunkID: index.SummaryChunkID(entry.ID), Chunk: sc})
-	}
-
-	bodyOut, err := h.splitter.Split(textsplitter.SplitInput{
-		Markdown:     model.ResolveAttachmentLinks(entry.Content, entry.ID),
-		EntrySummary: entry.Summary,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("split body for %s: %w", entry.ID, err)
-	}
-	for i, c := range bodyOut.Chunks {
-		out = append(out, entryChunk{ChunkID: index.BodyChunkID(entry.ID, i), Chunk: c})
-	}
-
-	for _, attRel := range entry.Attachments {
-		if !strings.HasSuffix(strings.ToLower(attRel), ".md") {
-			continue
-		}
-		absPath := filepath.Join(h.graphDir, attRel)
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			return nil, fmt.Errorf("read attachment %s: %w", attRel, err)
-		}
-		attOut, err := h.splitter.Split(textsplitter.SplitInput{
-			Markdown:             string(data),
-			EntrySummary:         entry.Summary,
-			IsAttachment:         true,
-			SourceAttachmentPath: attRel,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("split attachment %s: %w", attRel, err)
-		}
-		for i, c := range attOut.Chunks {
-			out = append(out, entryChunk{ChunkID: index.AttachmentChunkID(entry.ID, attRel, i), Chunk: c})
-		}
-	}
-
-	return out, nil
-}
-
-// entryStateHash combines the entry's body, summary, and each attachment's
-// bytes into a single sha-256 digest. Stored in the manifest so a later
-// build can detect changes without re-chunking and re-embedding.
-func (h *IndexHandler) entryStateHash(entry *model.Entry) (string, error) {
-	hh := sha256.New()
-	hh.Write([]byte(entry.Content))
-	hh.Write([]byte("\n--summary--\n"))
-	hh.Write([]byte(entry.Summary))
-	for _, attRel := range entry.Attachments {
-		absPath := filepath.Join(h.graphDir, attRel)
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			return "", fmt.Errorf("read attachment %s: %w", attRel, err)
-		}
-		hh.Write([]byte("\n--attach:"))
-		hh.Write([]byte(attRel))
-		hh.Write([]byte("--\n"))
-		hh.Write(data)
-	}
-	return hex.EncodeToString(hh.Sum(nil)), nil
+	chunks []chunking.Chunk
 }

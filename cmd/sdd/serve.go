@@ -17,6 +17,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/application"
 	gitadapter "github.com/networkteam/sdd/internal/git"
+	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
@@ -261,14 +262,22 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	indexStore := localadapter.NewMemorySearchIndexStore()
+	// The machine-global persistent store the CLI also builds and reads: one
+	// store per (repo-key, embedding fingerprint) under the cache root. The
+	// base repo key matches the CLI exactly (see cmd search resolveIndexStore);
+	// the fingerprint selects the final StoreDir inside the adapter at request
+	// time, so a lazy embedder that reveals its dimensionality only on first
+	// use still routes correctly. No process-local memory store in production.
+	cacheRoot := registry.CacheRoot()
+	baseRepoKey := index.RepoKey(repoIDOf(cfg), filepath.Dir(sddDir))
+	baseIndex := localadapter.NewPersistentSearchIndexStore(project, cacheRoot, baseRepoKey)
 	var embeddings sdd.EmbeddingExecutor
 	if localEmbedder != nil {
 		embeddings = publicEmbeddingExecutor(localEmbedder)
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: project, DisplayName: displayName}, Language: language,
-		Dependencies: dependencies, Graph: graph, Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, indexStore), LLM: executor,
+		Dependencies: dependencies, Graph: graph, Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, baseIndex), LLM: executor,
 		Finalizers: []sdd.MutationFinalizer{localGitFinalizer{graphDir: graphDir, git: gitadapter.CLI{}}},
 	})
 	if err != nil {
@@ -284,9 +293,16 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		if graphErr != nil {
 			return nil, "", sdd.RequestIdentity{}, graphErr
 		}
+		// Connected stores are keyed by the connected repo's ID (the existing
+		// connected-repository storage contract) and exclude embedded entries,
+		// so binary-shipped base facts embed once per machine in the base store,
+		// not once per connected repo.
+		memberEmbedder := optionalEmbeddingExecutor(crossEmbedder)
+		memberIndex := localadapter.NewPersistentSearchIndexStore(sdd.ProjectID(dependency), cacheRoot, dependency)
 		member, runtimeErr := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: dependency}, Graph: memberGraph,
-			Sessions: sessions, StagedBlobs: blobs, Embeddings: optionalEmbeddingExecutor(crossEmbedder), SearchIndex: optionalSearchIndex(optionalEmbeddingExecutor(crossEmbedder), indexStore), LLM: executor,
+			Sessions: sessions, StagedBlobs: blobs, Embeddings: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: executor,
+			ExcludeEmbeddedFromIndex: true,
 		})
 		if runtimeErr != nil {
 			return nil, "", sdd.RequestIdentity{}, runtimeErr
@@ -402,4 +418,14 @@ func optionalSearchIndex(embeddings sdd.EmbeddingExecutor, index sdd.SearchIndex
 		return nil
 	}
 	return index
+}
+
+// repoIDOf returns the committed repo_id, or "" when unconfigured — the input
+// to index.RepoKey, which hashes the repo root under the "local" namespace
+// when there is no declared ID.
+func repoIDOf(cfg *model.PerRepoConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.RepoID
 }

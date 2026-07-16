@@ -45,12 +45,28 @@ type IndexNamespace struct {
 }
 
 type CanonicalChunk struct {
-	ID          string
-	EntryID     string
-	Ordinal     int
+	ID      string
+	EntryID string
+	Ordinal int
+	// Revision is deprecated: graph revision is a mutation-concurrency token,
+	// never a vector-freshness token (d-cpt-65i). Reconciliation and hit
+	// validity ignore it. Retained only for source compatibility.
 	Revision    string
 	ContentHash string
 	Text        string
+	// The following persisted citation and identity fields carry everything a
+	// store needs to render a citation and answer entry-presence queries
+	// without re-deriving chunks. Both the CLI indexer and the application
+	// vector search populate them through the shared chunk-derivation helper.
+	Body                 string
+	Breadcrumb           []string
+	Depth                int
+	IsSummary            bool
+	IsAttachment         bool
+	SourceAttachmentPath string
+	// EntryHash is the entry-state hash (entry content + summary + attachment
+	// bytes) — the same definition as the CLI manifest state hash.
+	EntryHash string
 }
 
 type IndexedChunk struct {
@@ -59,21 +75,47 @@ type IndexedChunk struct {
 }
 
 type StoredChunkRef struct {
-	ID          string
+	ID string
+	// Revision is deprecated and ignored by reconciliation (see CanonicalChunk).
 	Revision    string
 	ContentHash string
 }
 
+// StoredEntryRef identifies one graph entry represented in a persistent index.
+// Slice 1 keys presence by entry ID alone.
+type StoredEntryRef struct {
+	EntryID string
+}
+
 type ScoredChunkHit struct {
-	Namespace   IndexNamespace
-	ChunkID     string
+	Namespace IndexNamespace
+	ChunkID   string
+	EntryID   string
+	// Revision is deprecated and ignored by hit validity (see CanonicalChunk).
 	Revision    string
 	ContentHash string
 	Score       float64
+	// Persisted citation fields, rendered directly into search citations so a
+	// hit needs no re-derivation of its source chunk.
+	Body                 string
+	Breadcrumb           []string
+	Depth                int
+	IsSummary            bool
+	IsAttachment         bool
+	SourceAttachmentPath string
 }
 
 type SearchIndexStore interface {
 	Manifest(context.Context, IndexNamespace) ([]StoredChunkRef, error)
 	Reconcile(context.Context, IndexNamespace, string, []IndexedChunk, []string) error
 	Nearest(context.Context, []IndexNamespace, []float32, int) ([]ScoredChunkHit, error)
+}
+
+// SearchIndexEntryManifest is an optional capability a persistent store
+// implements so the application can reconcile on entry presence (monotonic
+// accumulation of immutable-entry chunks) instead of chunk-identity
+// comparison. A store that does not implement it falls back to the
+// compatibility reconciliation path in vector search.
+type SearchIndexEntryManifest interface {
+	IndexedEntries(context.Context, IndexNamespace) ([]StoredEntryRef, error)
 }

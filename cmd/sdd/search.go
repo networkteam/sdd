@@ -207,21 +207,16 @@ func indexCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			idxStore, err := index.Open(idxDir)
-			if err != nil {
-				return err
-			}
 			reader, err := newReadFinder()
 			if err != nil {
 				return err
 			}
 
 			h := handlers.NewIndexHandler(handlers.IndexHandlerOptions{
-				GraphDir:   graphDir,
-				IndexDir:   idxDir,
-				Embedder:   emb,
-				IndexStore: idxStore,
-				Reader:     reader,
+				GraphDir: graphDir,
+				IndexDir: idxDir,
+				Embedder: emb,
+				Reader:   reader,
 			})
 
 			// Pre-pass: does the local index need work? This decides whether to
@@ -417,7 +412,7 @@ func searchCmd() *cli.Command {
 
 			var (
 				emb      llm.Embedder
-				idxStore *index.Index
+				idxDir   string
 				ih       *handlers.IndexHandler
 				willFill bool
 				pending  int
@@ -435,11 +430,7 @@ func searchCmd() *cli.Command {
 				if emb == nil {
 					return fmt.Errorf("vector search requires an embedding provider — set embedding.provider in .sdd/config.local.yaml")
 				}
-				idxDir, err := resolveIndexStore(emb)
-				if err != nil {
-					return err
-				}
-				idxStore, err = index.Open(idxDir)
+				idxDir, err = resolveIndexStore(emb)
 				if err != nil {
 					return err
 				}
@@ -448,11 +439,10 @@ func searchCmd() *cli.Command {
 					return err
 				}
 				ih = handlers.NewIndexHandler(handlers.IndexHandlerOptions{
-					GraphDir:   graphDir,
-					IndexDir:   idxDir,
-					Embedder:   emb,
-					IndexStore: idxStore,
-					Reader:     reader,
+					GraphDir: graphDir,
+					IndexDir: idxDir,
+					Embedder: emb,
+					Reader:   reader,
 				})
 				// Will lazy-fill actually embed anything? A warm index does no
 				// work, so the transient view is skipped and the result path
@@ -469,12 +459,6 @@ func searchCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			finder := finders.NewSearchFinder(finders.SearchFinderOptions{
-				GraphDir:   graphDir,
-				Embedder:   emb,
-				IndexStore: idxStore,
-				Repos:      reg,
-			})
 
 			var typ model.EntryType
 			if t := cmd.String("type"); t != "" {
@@ -557,6 +541,23 @@ func searchCmd() *cli.Command {
 						return nil, err
 					}
 				}
+				// Build the finder after lazy-fill so its index snapshot reflects
+				// the chunks the fill just committed — the fill writes under its
+				// own exclusive lock (index.WriteStore), so a snapshot opened
+				// before it would miss the new rows.
+				var idxStore *index.Index
+				if needsVector {
+					idxStore, err = index.Open(idxDir)
+					if err != nil {
+						return nil, err
+					}
+				}
+				finder := finders.NewSearchFinder(finders.SearchFinderOptions{
+					GraphDir:   graphDir,
+					Embedder:   emb,
+					IndexStore: idxStore,
+					Repos:      reg,
+				})
 				if crossRepo {
 					// Side effects first (cache freshen + member index fill,
 					// the cross-repo analog of the local lazy-fill above),

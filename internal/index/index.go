@@ -90,23 +90,33 @@ type Index struct {
 //
 // The load phase holds the store's shared lock so a reader never decodes
 // half-written documents from a concurrent write session; the lock is
-// released before Open returns — queries run on the in-memory copy, and
-// mutation goes through WriteSession's exclusive lock.
+// released before Open returns — queries run on the in-memory copy. Open is
+// the read-side entry point (the CLI finders); mutation goes through
+// WriteStore, which acquires the exclusive lock before loading its snapshot.
 func Open(indexDir string) (*Index, error) {
 	if indexDir == "" {
 		return nil, errors.New("index dir is required")
 	}
-	chromemDir := filepath.Join(indexDir, "chromem")
-	if err := os.MkdirAll(chromemDir, 0o755); err != nil {
-		return nil, fmt.Errorf("creating index dir: %w", err)
-	}
-
 	l := lockFile(indexDir)
+	if err := ensureStoreDir(indexDir); err != nil {
+		return nil, err
+	}
 	if _, err := l.TryRLockContext(context.Background(), lockRetryInterval); err != nil {
 		return nil, fmt.Errorf("acquiring index read lock at %s: %w", indexDir, err)
 	}
 	defer func() { _ = l.Unlock() }()
+	return loadStore(indexDir)
+}
 
+// loadStore opens or creates the chromem store under indexDir WITHOUT taking
+// any lock. Callers must already hold the store lock (see Open, ReadStore,
+// WriteStore) — loading a snapshot outside the lock is the open/load race the
+// locked helpers close.
+func loadStore(indexDir string) (*Index, error) {
+	chromemDir := filepath.Join(indexDir, "chromem")
+	if err := os.MkdirAll(chromemDir, 0o755); err != nil {
+		return nil, fmt.Errorf("creating index dir: %w", err)
+	}
 	db, err := chromem.NewPersistentDB(chromemDir, false)
 	if err != nil {
 		return nil, fmt.Errorf("open chromem db at %s: %w", chromemDir, err)
@@ -116,6 +126,15 @@ func Open(indexDir string) (*Index, error) {
 		return nil, fmt.Errorf("get/create collection %q: %w", CollectionName, err)
 	}
 	return &Index{db: db, coll: coll, indexDir: indexDir, chromemDir: chromemDir}, nil
+}
+
+// ensureStoreDir creates the store directory tree so the advisory lock file
+// can be created before the snapshot is loaded.
+func ensureStoreDir(indexDir string) error {
+	if err := os.MkdirAll(filepath.Join(indexDir, "chromem"), 0o755); err != nil {
+		return fmt.Errorf("creating index dir: %w", err)
+	}
+	return nil
 }
 
 // OpenInMemory returns a non-persistent index. Used by tests.
