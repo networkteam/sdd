@@ -77,10 +77,12 @@ func (a FixedTargetAcquirer) Acquire(_ context.Context, target MutationTarget) (
 }
 
 // RecoveryVerb is deliberately finer-grained than write access. Runtime
-// compositions authorize each recovery action afresh.
+// compositions authorize each recovery action and the nonterminal reconcile
+// refresh afresh.
 type RecoveryVerb string
 
 const (
+	RecoveryReconcile      RecoveryVerb = "reconcile"
 	RecoveryApply          RecoveryVerb = "apply"
 	RecoveryDiscard        RecoveryVerb = "discard"
 	RecoveryFinalizeRetry  RecoveryVerb = "finalize-retry"

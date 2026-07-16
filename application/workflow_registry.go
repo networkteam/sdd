@@ -40,13 +40,13 @@ func (w *WorkflowSession) registerWorkflowPredicates(registry *engine.Registry) 
 
 func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) error {
 	if err := registry.RegisterQuery(engine.Query{
-		Doc: engine.FuncDoc{Name: "sessionInfo", Doc: "Session framing: local participant, configured language, available search modes (the sdd info header)."},
+		Doc: engine.FuncDoc{Name: "sessionInfo", Doc: "Session framing: local participant, configured language, available search modes, and actionable recovery notices."},
 		Fn: func(*engine.Context, map[string]any) (any, error) {
 			info, err := w.app.Info(w.ctx, w.identity, w.project, InfoRequest{})
 			if err != nil {
 				return nil, err
 			}
-			return map[string]any{"participant": info.Participant, "language": info.Language, "search": info.Search}, nil
+			return map[string]any{"participant": info.Participant, "language": info.Language, "search": info.Search, "recovery": info.Recovery}, nil
 		},
 	}); err != nil {
 		return err

@@ -25,6 +25,7 @@ type GitWorktreeAcquirer struct {
 	project        app.ProjectID
 	serverCheckout string
 	factory        TargetRuntimeFactory
+	runGit         func(context.Context, ...string) ([]byte, error)
 }
 
 func NewGitWorktreeAcquirer(options GitWorktreeAcquirerOptions) (*GitWorktreeAcquirer, error) {
@@ -35,17 +36,21 @@ func NewGitWorktreeAcquirer(options GitWorktreeAcquirerOptions) (*GitWorktreeAcq
 	if err != nil {
 		return nil, err
 	}
-	return &GitWorktreeAcquirer{project: options.Project, serverCheckout: root, factory: options.Factory}, nil
+	return &GitWorktreeAcquirer{project: options.Project, serverCheckout: root, factory: options.Factory, runGit: runGitTargetCommand}, nil
+}
+
+func runGitTargetCommand(ctx context.Context, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, "git", args...).CombinedOutput()
 }
 
 func (a *GitWorktreeAcquirer) Acquire(ctx context.Context, target app.MutationTarget) (*app.AcquiredTarget, error) {
 	if err := target.Validate(a.project); err != nil {
 		return nil, err
 	}
-	if output, err := exec.CommandContext(ctx, "git", "check-ref-format", "--branch", target.Branch).CombinedOutput(); err != nil {
+	if output, err := a.runGit(ctx, "check-ref-format", "--branch", target.Branch); err != nil {
 		return nil, fmt.Errorf("sdd: invalid mutation target branch %q: %s (%w)", target.Branch, strings.TrimSpace(string(output)), err)
 	}
-	output, err := exec.CommandContext(ctx, "git", "-C", a.serverCheckout, "worktree", "list", "--porcelain", "-z").Output()
+	output, err := a.runGit(ctx, "-C", a.serverCheckout, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("sdd: listing registered worktrees: %w", err)
 	}
@@ -54,7 +59,7 @@ func (a *GitWorktreeAcquirer) Acquire(ctx context.Context, target app.MutationTa
 		return nil, fmt.Errorf("sdd: mutation target branch %q must have exactly one registered checkout (found %d)", target.Branch, len(matches))
 	}
 	checkout := matches[0]
-	head, err := exec.CommandContext(ctx, "git", "-C", checkout, "symbolic-ref", "--quiet", "HEAD").Output()
+	head, err := a.runGit(ctx, "-C", checkout, "symbolic-ref", "--quiet", "HEAD")
 	if err != nil {
 		return nil, fmt.Errorf("sdd: mutation target checkout %q is detached or unreadable: %w", checkout, err)
 	}

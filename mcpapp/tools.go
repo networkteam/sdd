@@ -220,6 +220,7 @@ type InfoResult struct {
 	Participant string `json:"participant,omitempty" jsonschema:"configured local participant (canonical name)"`
 	Language    string `json:"language,omitempty" jsonschema:"configured graph language; empty = English"`
 	Search      string `json:"search" jsonschema:"available retrieval modes: text or vector,text"`
+	Recovery    string `json:"recovery,omitempty" jsonschema:"host-neutral actionable recovery notices; empty when no write awaits explicit recovery"`
 	Version     string `json:"version,omitempty"`
 	Hint        string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
@@ -330,7 +331,7 @@ func (s *Server) registerTools() {
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "info",
-		Description: "Session framing header: local participant, configured language, available search modes.",
+		Description: "Session framing header: local participant, configured language, available search modes, and actionable recovery notices.",
 	}, s.info)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -805,7 +806,7 @@ func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, _ InfoArgs)
 	if err != nil {
 		return nil, InfoResult{}, err
 	}
-	return nil, InfoResult{Participant: info.Participant, Language: info.Language, Search: info.Search, Version: s.version, Hint: s.readHint(req.Session)}, nil
+	return nil, InfoResult{Participant: info.Participant, Language: info.Language, Search: info.Search, Recovery: info.Recovery, Version: s.version, Hint: s.readHint(req.Session)}, nil
 
 }
 

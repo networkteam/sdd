@@ -21,6 +21,53 @@ func TestMatchingWorktreesExactBranchAndDetached(t *testing.T) {
 	if got := matchingWorktrees(output, "refs/heads/missing"); len(got) != 0 {
 		t.Fatalf("missing matches = %v", got)
 	}
+	duplicate := append(append([]byte(nil), output...), []byte("worktree /repo-copy\x00HEAD aaa\x00branch refs/heads/main\x00\x00")...)
+	if got := matchingWorktrees(duplicate, "refs/heads/main"); len(got) != 2 {
+		t.Fatalf("duplicate main matches = %v", got)
+	}
+}
+
+func TestGitWorktreeAcquirerRejectsMultipleMatchesAndChangedHEAD(t *testing.T) {
+	acquirer, err := NewGitWorktreeAcquirer(GitWorktreeAcquirerOptions{
+		Project: "example", ServerCheckout: t.TempDir(),
+		Factory: func(context.Context, string, app.MutationTarget) (app.GraphStore, []app.MutationFinalizer, func() error, error) {
+			t.Fatal("factory must not run for an invalid checkout")
+			return nil, nil, nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := app.MutationTarget{Project: "example", Branch: "feature"}
+
+	t.Run("multiple", func(t *testing.T) {
+		acquirer.runGit = func(_ context.Context, args ...string) ([]byte, error) {
+			if strings.Contains(strings.Join(args, " "), "worktree list") {
+				return []byte("worktree /one\x00branch refs/heads/feature\x00\x00worktree /two\x00branch refs/heads/feature\x00\x00"), nil
+			}
+			return nil, nil
+		}
+		if _, err := acquirer.Acquire(t.Context(), target); err == nil || !strings.Contains(err.Error(), "found 2") {
+			t.Fatalf("multiple checkout error = %v", err)
+		}
+	})
+
+	t.Run("changed HEAD", func(t *testing.T) {
+		acquirer.runGit = func(_ context.Context, args ...string) ([]byte, error) {
+			joined := strings.Join(args, " ")
+			switch {
+			case strings.Contains(joined, "worktree list"):
+				return []byte("worktree /one\x00branch refs/heads/feature\x00\x00"), nil
+			case strings.Contains(joined, "symbolic-ref"):
+				return []byte("refs/heads/other\n"), nil
+			default:
+				return nil, nil
+			}
+		}
+		if _, err := acquirer.Acquire(t.Context(), target); err == nil || !strings.Contains(err.Error(), "HEAD changed") {
+			t.Fatalf("changed HEAD error = %v", err)
+		}
+	})
 }
 
 func TestGitWorktreeAcquirerResolvesRegisteredCheckoutAndReleases(t *testing.T) {
@@ -28,6 +75,7 @@ func TestGitWorktreeAcquirerResolvesRegisteredCheckoutAndReleases(t *testing.T) 
 	runGitTargetTest(t, repo, "init", "-b", "main")
 	runGitTargetTest(t, repo, "config", "user.name", "Test")
 	runGitTargetTest(t, repo, "config", "user.email", "test@example.invalid")
+	runGitTargetTest(t, repo, "config", "commit.gpgsign", "false")
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

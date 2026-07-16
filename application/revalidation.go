@@ -1,9 +1,10 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/networkteam/sdd/internal/model"
@@ -36,7 +37,11 @@ func revalidatePreparedTransition(ctx context.Context, snapshot *Snapshot, prepa
 		if err != nil {
 			return fmt.Errorf("sdd: validating prepared canonical entry %q: %w", change.LogicalPath, err)
 		}
-		if !reflect.DeepEqual(parsed, *change.Document) {
+		equal, err := equalEntryDocuments(parsed, *change.Document)
+		if err != nil {
+			return fmt.Errorf("sdd: comparing prepared structured entry %q: %w", change.LogicalPath, err)
+		}
+		if !equal {
 			return &ApplicationError{Code: ErrorRecoveryRequired, Message: "prepared structured entry and canonical bytes diverge"}
 		}
 		upsertEntryDocument(&data, parsed)
@@ -46,6 +51,18 @@ func revalidatePreparedTransition(ctx context.Context, snapshot *Snapshot, prepa
 		return fmt.Errorf("sdd: prepared mutation no longer validates against target: %w", err)
 	}
 	return nil
+}
+
+func equalEntryDocuments(left, right EntryDocument) (bool, error) {
+	leftJSON, err := json.Marshal(left)
+	if err != nil {
+		return false, err
+	}
+	rightJSON, err := json.Marshal(right)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(leftJSON, rightJSON), nil
 }
 
 func applyPreparedWIP(data *SnapshotData, change DocumentChange) {

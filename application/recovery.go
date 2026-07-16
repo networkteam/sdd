@@ -54,6 +54,11 @@ type RecoveryRequest struct {
 	Target     MutationTarget
 }
 
+type RecoveryReconcileRequest struct {
+	Session    SessionID
+	MutationID string
+}
+
 type RecoveryResult struct {
 	Project    ProjectRef
 	Item       RecoveryItem
@@ -145,10 +150,118 @@ func listRecoveriesRuntime(ctx context.Context, runtime *ProjectRuntime, include
 	return result, nil
 }
 
+func renderRecoveryNotices(items []RecoveryItem) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var rendered strings.Builder
+	rendered.WriteString("Recovery\n\n")
+	for _, item := range items {
+		target := item.Target.Branch
+		if item.LegacyUnroutable {
+			target = "target binding required"
+		}
+		fmt.Fprintf(&rendered, "  a pending write awaits explicit recovery: %s · %s · %s\n", item.MutationID, item.State, target)
+	}
+	return strings.TrimRight(rendered.String(), "\n")
+}
+
+// ReconcileMutation refreshes one actionable recovery projection without
+// choosing a terminal or graph-affecting verb. It exists for interactive
+// clients that must present actions from current target evidence instead of
+// guessing from a durable projection that may predate reconciliation.
+func (a *Application) ReconcileMutation(ctx context.Context, identity RequestIdentity, project ProjectID, request RecoveryReconcileRequest) (result RecoveryResult, err error) {
+	principal, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	if request.Session == "" || strings.TrimSpace(request.MutationID) == "" {
+		return RecoveryResult{}, fmt.Errorf("sdd: recovery session and mutation ID are required")
+	}
+	stored, err := runtime.options.Sessions.Load(ctx, request.Session)
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	replay, err := replayRecovery(stored.Events, request.MutationID)
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	if replay.terminal != nil {
+		return RecoveryResult{Project: runtime.options.Project, Item: recoveryItem(stored, replay)}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "mutation recovery is already terminal"}
+	}
+	prepared := replay.prepared
+	if prepared.Version == LegacyPreparedTransitionVersion && replay.bound == nil {
+		return RecoveryResult{Project: runtime.options.Project, Item: recoveryItem(stored, replay)}, &ApplicationError{Code: ErrorMigrationRequired, Message: "legacy prepared intent needs an explicitly authorized target binding or recapture", Version: prepared.Version}
+	}
+	if replay.bound != nil {
+		prepared.Target = replay.bound.Target
+		prepared.Version = PreparedTransitionVersion
+	}
+	if err := validatePreparedForRecovery(prepared, stored.Metadata); err != nil {
+		return RecoveryResult{}, err
+	}
+	if runtime.options.Recovery == nil {
+		return RecoveryResult{}, &ApplicationError{Code: ErrorWriteDenied, Message: "project has no recovery authorizer"}
+	}
+	if err := runtime.options.Recovery.AuthorizeRecovery(ctx, RecoveryAccessRequest{
+		Actor: principal, Target: prepared.Target, Verb: RecoveryReconcile,
+		OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID,
+	}); err != nil {
+		return RecoveryResult{}, err
+	}
+	binding := SessionBinding{SessionID: stored.Metadata.ID, Subject: stored.Metadata.Subject, Project: stored.Metadata.Project, Version: stored.Version}
+	acquired, acquireErr := runtime.acquire(ctx, prepared.Target)
+	if acquireErr != nil {
+		attempt := recoveryAttemptEvent{
+			MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
+			OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID, Actor: principal.Subject,
+			Verb: RecoveryReconcile, Evidence: "target acquisition failed: " + acquireErr.Error(), Reconciled: ApplyResult{State: MutationUnknown},
+		}
+		binding, appendErr := appendRecoveryAttempt(ctx, runtime.options.Sessions, binding, attempt)
+		if appendErr != nil {
+			return RecoveryResult{}, errors.Join(acquireErr, appendErr)
+		}
+		replay.attempt = &attempt
+		return RecoveryResult{
+			Project: runtime.options.Project, Item: recoveryItem(stored, replay),
+			Transition: TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: attempt.Reconciled},
+		}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "recovery target acquisition failed; abandon-unknown may acknowledge the recorded evidence", Cause: acquireErr}
+	}
+	defer func() {
+		if releaseErr := acquired.Release(); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("releasing mutation target %s: %w", prepared.Target.Branch, releaseErr))
+		}
+	}()
+	reconciled, reconcileErr := acquired.Graph.Reconcile(ctx, prepared.Batch.ID, prepared.Batch.Digest)
+	evidence := "batch ID and digest reconciled"
+	if reconcileErr != nil {
+		evidence = "reconciliation failed: " + reconcileErr.Error()
+		reconciled.State = MutationUnknown
+	}
+	attempt := recoveryAttemptEvent{
+		MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
+		OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID, Actor: principal.Subject,
+		Verb: RecoveryReconcile, Evidence: evidence, Reconciled: reconciled,
+	}
+	binding, err = appendRecoveryAttempt(ctx, runtime.options.Sessions, binding, attempt)
+	if err != nil {
+		return RecoveryResult{}, err
+	}
+	replay.attempt = &attempt
+	result = RecoveryResult{
+		Project: runtime.options.Project, Item: recoveryItem(stored, replay),
+		Transition: TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: reconciled},
+	}
+	if reconcileErr != nil {
+		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "recovery reconciliation was non-definitive; abandon-unknown may acknowledge the recorded evidence", Cause: reconcileErr}
+	}
+	return result, nil
+}
+
 // RecoverMutation performs exactly one explicitly authorized verb. It always
 // reconciles a freshly acquired concrete target before any graph-affecting or
 // terminal action and never runs from startup, resume, or read surfaces.
-func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdentity, project ProjectID, request RecoveryRequest) (RecoveryResult, error) {
+func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdentity, project ProjectID, request RecoveryRequest) (result RecoveryResult, err error) {
 	principal, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
 	if err != nil {
 		return RecoveryResult{}, err
@@ -213,7 +326,9 @@ func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdent
 	release := true
 	defer func() {
 		if release {
-			_ = acquired.Release()
+			if releaseErr := acquired.Release(); releaseErr != nil {
+				err = errors.Join(err, fmt.Errorf("releasing mutation target %s: %w", prepared.Target.Branch, releaseErr))
+			}
 		}
 	}()
 	reconciled, reconcileErr := acquired.Graph.Reconcile(ctx, prepared.Batch.ID, prepared.Batch.Digest)

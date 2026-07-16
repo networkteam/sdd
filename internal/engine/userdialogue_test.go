@@ -27,7 +27,10 @@ func newShellEnv(t *testing.T) *shellEnv {
 	mustRegisterQuery(reg, Query{
 		Doc: FuncDoc{Name: "sessionInfo", Doc: "fake session info"},
 		Fn: func(_ *Context, _ map[string]any) (any, error) {
-			return map[string]any{"participant": "christopher", "language": "", "search": "text"}, nil
+			return map[string]any{
+				"participant": "christopher", "language": "", "search": "text",
+				"recovery": "Recovery\n\n  a pending write awaits explicit recovery: mutation-1 · unknown · main",
+			}, nil
 		},
 	})
 	mustRegisterQuery(reg, Query{
@@ -76,7 +79,7 @@ func TestUserDialogue_OpeningServeAndQuietConclude(t *testing.T) {
 	if sv.Goal != "dialogue freely; start a move when something crystallizes" {
 		t.Fatalf("the junction should carry the standing goal, got %q", sv.Goal)
 	}
-	for _, want := range []string{"Participant: christopher", "- capture — ", "Standing goal"} {
+	for _, want := range []string{"Participant: christopher", "pending write awaits explicit recovery", "- capture — ", "Standing goal"} {
 		if !strings.Contains(sv.Instructions, want) {
 			t.Errorf("opening serve should carry %q, got %q", want, sv.Instructions)
 		}

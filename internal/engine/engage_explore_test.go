@@ -32,6 +32,8 @@ type procEnv struct {
 	// wipMarkers records fake wipStart/wipDone calls: "start:<anchor>" /
 	// "done:<marker>", mirroring the shell's command contracts.
 	wipMarkers []string
+	// wipBranches records the explicit baseBranch used for each marker call.
+	wipBranches []string
 }
 
 func baseEntry(t *testing.T, canonical string) *model.Entry {
@@ -114,13 +116,15 @@ func newProcEnv(t *testing.T, canonical string) *procEnv {
 		Doc: FuncDoc{
 			Name:   "wipStart",
 			Doc:    "fake exclusive WIP marker creation",
-			Reads:  []string{"anchor", "wipDescription"},
+			Reads:  []string{"anchor", "baseBranch", "wipDescription"},
 			Writes: []string{"wipMarker"},
 		},
 		Fn: func(ctx *Context) error {
 			anchor, _ := ctx.Store.Get("anchor")
 			id, _ := anchor.(string)
+			branch, _ := ctx.Store.Get("baseBranch")
 			env.wipMarkers = append(env.wipMarkers, "start:"+id)
+			env.wipBranches = append(env.wipBranches, branch.(string))
 			ctx.Store.WriteEngine("wipMarker", "wip-"+id)
 			return nil
 		},
@@ -129,7 +133,7 @@ func newProcEnv(t *testing.T, canonical string) *procEnv {
 		Doc: FuncDoc{
 			Name:   "wipDone",
 			Doc:    "fake WIP marker removal",
-			Reads:  []string{"wipMarker"},
+			Reads:  []string{"wipMarker", "baseBranch"},
 			Writes: []string{"wipMarker"},
 		},
 		Fn: func(ctx *Context) error {
@@ -138,7 +142,9 @@ func newProcEnv(t *testing.T, canonical string) *procEnv {
 				return errFakeNoMarker
 			}
 			id, _ := marker.(string)
+			branch, _ := ctx.Store.Get("baseBranch")
 			env.wipMarkers = append(env.wipMarkers, "done:"+id)
+			env.wipBranches = append(env.wipBranches, branch.(string))
 			ctx.Store.WriteEngine("wipMarker", nil)
 			return nil
 		},

@@ -49,6 +49,15 @@ func recoverCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			if recoveryNeedsReconciliation(item, cmd.String("verb")) {
+				refreshed, err := application.ReconcileMutation(ctx, identity, project, sdd.RecoveryReconcileRequest{
+					Session: item.Session, MutationID: item.MutationID,
+				})
+				if err != nil {
+					return err
+				}
+				item = refreshed.Item
+			}
 			verb, err := selectRecoveryVerb(item, cmd)
 			if err != nil {
 				return err
@@ -213,19 +222,7 @@ func selectRecoveryVerb(item sdd.RecoveryItem, cmd *cli.Command) (sdd.RecoveryVe
 	if !isTerminal(os.Stdin) {
 		return "", fmt.Errorf("--verb is required in non-interactive mode")
 	}
-	var verbs []sdd.RecoveryVerb
-	if item.LegacyUnroutable {
-		verbs = []sdd.RecoveryVerb{sdd.RecoveryBindTarget}
-	} else {
-		switch item.State {
-		case sdd.RecoveryNotAppliedAwaitingDecision:
-			verbs = []sdd.RecoveryVerb{sdd.RecoveryApply, sdd.RecoveryDiscard}
-		case sdd.RecoveryAppliedFinalizationPending:
-			verbs = []sdd.RecoveryVerb{sdd.RecoveryFinalizeRetry}
-		default:
-			verbs = []sdd.RecoveryVerb{sdd.RecoveryAbandonUnknown}
-		}
-	}
+	verbs := recoveryVerbs(item)
 	for index, verb := range verbs {
 		fmt.Fprintf(os.Stdout, "%d. %s\n", index+1, verb)
 	}
@@ -234,6 +231,24 @@ func selectRecoveryVerb(item sdd.RecoveryItem, cmd *cli.Command) (sdd.RecoveryVe
 		return "", err
 	}
 	return verbs[choice-1], nil
+}
+
+func recoveryNeedsReconciliation(item sdd.RecoveryItem, explicitVerb string) bool {
+	return strings.TrimSpace(explicitVerb) == "" && !item.LegacyUnroutable && item.State == sdd.RecoveryUnknown
+}
+
+func recoveryVerbs(item sdd.RecoveryItem) []sdd.RecoveryVerb {
+	if item.LegacyUnroutable {
+		return []sdd.RecoveryVerb{sdd.RecoveryBindTarget}
+	}
+	switch item.State {
+	case sdd.RecoveryNotAppliedAwaitingDecision:
+		return []sdd.RecoveryVerb{sdd.RecoveryApply, sdd.RecoveryDiscard}
+	case sdd.RecoveryAppliedFinalizationPending:
+		return []sdd.RecoveryVerb{sdd.RecoveryFinalizeRetry}
+	default:
+		return []sdd.RecoveryVerb{sdd.RecoveryAbandonUnknown}
+	}
 }
 
 func parseRecoveryVerb(raw string) (sdd.RecoveryVerb, error) {

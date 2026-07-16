@@ -42,6 +42,7 @@ func TestLocalGitFinalizerCommitsBatchOnce(t *testing.T) {
 	runGit("init", "-b", "main")
 	runGit("config", "user.name", "Test")
 	runGit("config", "user.email", "test@example.invalid")
+	runGit("config", "commit.gpgsign", "false")
 	if err := os.WriteFile(filepath.Join(checkout, "README.md"), []byte("fixture\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

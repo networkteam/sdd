@@ -40,7 +40,14 @@ func (a *Application) Info(ctx context.Context, identity RequestIdentity, projec
 	if runtime.options.Embeddings != nil && runtime.options.SearchIndex != nil {
 		search = "vector,text"
 	}
-	return InfoResult{Project: runtime.options.Project, Participant: principal.Participant, Language: runtime.options.Language, Search: search}, nil
+	recoveries, err := listRecoveriesRuntime(ctx, runtime, false)
+	if err != nil {
+		return InfoResult{}, err
+	}
+	return InfoResult{
+		Project: runtime.options.Project, Participant: principal.Participant, Language: runtime.options.Language,
+		Search: search, Recovery: renderRecoveryNotices(recoveries.Items),
+	}, nil
 }
 
 func (a *Application) Vocabulary(ctx context.Context, identity RequestIdentity, project ProjectID) (string, error) {
@@ -118,15 +125,8 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 	if err != nil {
 		return ViewResult{}, err
 	}
-	if len(recoveries.Items) > 0 {
-		fmt.Fprint(&rendered, "\nRecovery\n\n")
-		for _, item := range recoveries.Items {
-			target := item.Target.Branch
-			if item.LegacyUnroutable {
-				target = "target binding required"
-			}
-			fmt.Fprintf(&rendered, "  a pending write awaits explicit recovery: %s · %s · %s\n", item.MutationID, item.State, target)
-		}
+	if notices := renderRecoveryNotices(recoveries.Items); notices != "" {
+		fmt.Fprintf(&rendered, "\n%s\n", notices)
 	}
 	return ViewResult{Project: runtime.options.Project, Sections: strings.TrimRight(rendered.String(), "\n")}, nil
 }

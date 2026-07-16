@@ -23,6 +23,7 @@ The durable projection distinguishes:
 
 Every recovery action resolves current authorization using the actor, original owner and session, concrete target, and a distinct verb. It then reacquires and reconciles batch ID plus digest before acting:
 
+- `reconcile` is a nonterminal refresh used by interactive clients before they present a verb; it records current evidence but never applies, finalizes, discards, abandons, or binds;
 - `apply` revalidates the retained structured facts and retries CAS only from definitely not applied;
 - `discard` terminally releases a definitely absent batch;
 - `finalize-retry` retries unfinished idempotent finalizers only after application is established;
@@ -33,4 +34,4 @@ Terminal audit records retain the original owner/session, recovery actor, target
 
 ## Local command
 
-Run `sdd recover` in a terminal to inspect actionable items and choose an allowed recovery verb with explicit confirmation. `sdd recover --history` shows closed audit history. Non-interactive recovery requires `--session`, `--mutation`, `--verb`, and `--yes`; `bind-target` additionally requires `--branch`.
+Run `sdd recover` in a terminal to inspect actionable items and choose an allowed recovery verb with explicit confirmation. An unknown item is reconciled first so the menu reflects current evidence; `reconcile` itself is not exposed as a user-selectable terminal action. `sdd recover --history` shows closed audit history. Non-interactive recovery requires `--session`, `--mutation`, `--verb`, and `--yes`; `bind-target` additionally requires `--branch`.

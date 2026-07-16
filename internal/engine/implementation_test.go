@@ -117,6 +117,52 @@ func TestImplementation_HappyPathTracked(t *testing.T) {
 	}
 }
 
+func TestImplementation_RoutesBaseAndWorkBranchesInEveryMode(t *testing.T) {
+	tests := []struct {
+		mode       string
+		workBranch string
+	}{
+		{mode: "inPlace", workBranch: "main"},
+		{mode: "branch", workBranch: "feature"},
+		{mode: "worktree", workBranch: "feature"},
+	}
+	for _, test := range tests {
+		t.Run(test.mode, func(t *testing.T) {
+			env := newProcEnv(t, "implementation")
+			sv, err := env.session.Start(env.spec, map[string]any{"anchor": procAnchorID}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sv, err = env.session.Report(sv.Instance, map[string]any{
+				"contract": "ready", "widenReport": "constraints checked",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sv, err = env.session.Report(sv.Instance, map[string]any{"baseBranch": "main"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sv, err = env.session.Answer(sv.Instance, "setup", test.mode, map[string]any{"wipDescription": "route targets"}, test.mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(env.wipBranches) != 1 || env.wipBranches[0] != "main" {
+				t.Fatalf("WIP branches = %v, want base main", env.wipBranches)
+			}
+			sv, err = env.session.Report(sv.Instance, map[string]any{"workBranch": test.workBranch})
+			if err != nil || sv.Step != "work" {
+				t.Fatalf("work target = %q, %v", sv.Step, err)
+			}
+			if got, ok := env.session.Instance(sv.Instance); !ok {
+				t.Fatal("implementation instance disappeared")
+			} else if branch, ok := got.Store.Get("workBranch"); !ok || branch != test.workBranch {
+				t.Fatalf("workBranch = %v, %v", branch, ok)
+			}
+		})
+	}
+}
+
 func TestImplementation_QuickSkipsMarker(t *testing.T) {
 	env := newProcEnv(t, "implementation")
 
