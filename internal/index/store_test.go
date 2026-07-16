@@ -47,7 +47,7 @@ func writeLegacyIndex(t *testing.T, dir, fingerprint string) {
 		t.Fatal(err)
 	}
 	m := &Manifest{Version: 1, Entries: map[string]EntryState{
-		"20260101-120000-s-tac-abc": {Hash: "h", Fingerprint: fingerprint},
+		"20260101-120000-s-tac-abc": {Versions: []EntryVersion{{Hash: "h", Fingerprint: fingerprint}}},
 	}}
 	if err := m.Save(dir); err != nil {
 		t.Fatal(err)
@@ -93,6 +93,50 @@ func TestMigrateDir_MoveThenSkip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(otherLegacy, "manifest.json")); err != nil {
 		t.Errorf("skipped legacy dir must stay in place: %v", err)
+	}
+}
+
+func TestStoreGeneration(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := ensureStoreDir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty store (no marker, no manifest): generation 0.
+	if g, err := storeGeneration(dir); err != nil || g != 0 {
+		t.Fatalf("empty store generation = %d, %v; want 0", g, err)
+	}
+
+	// Legacy store: a manifest but no marker. The identity fallback yields a
+	// stable non-zero token that an unchanged store keeps across reads.
+	m := &Manifest{Version: 1, Entries: map[string]EntryState{
+		"e": {Versions: []EntryVersion{{Hash: "h", Fingerprint: "fp", ChunkIDs: []string{"e#summary"}}}},
+	}}
+	if err := m.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	legacyGen, err := storeGeneration(dir)
+	if err != nil || legacyGen == 0 {
+		t.Fatalf("legacy (manifest, no marker) generation = %d, %v; want non-zero", legacyGen, err)
+	}
+	if again, _ := storeGeneration(dir); again != legacyGen {
+		t.Errorf("legacy generation not stable across reads: %d vs %d", again, legacyGen)
+	}
+
+	// The explicit marker takes precedence and increments per write, so a store
+	// that has been written since upgrade no longer depends on mtime resolution.
+	if err := bumpGeneration(dir); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := storeGeneration(dir); g != 1 {
+		t.Errorf("generation after first bump = %d, want 1 (marker wins over identity fallback)", g)
+	}
+	if err := bumpGeneration(dir); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := storeGeneration(dir); g != 2 {
+		t.Errorf("generation after second bump = %d, want 2", g)
 	}
 }
 

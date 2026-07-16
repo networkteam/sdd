@@ -4,9 +4,9 @@ import "testing"
 
 func TestManifest_PendingCount(t *testing.T) {
 	m := &Manifest{Version: 1, Entries: map[string]EntryState{
-		"a": {Fingerprint: "fp1"},
-		"b": {Fingerprint: "fp1"},
-		"c": {Fingerprint: "fp-old"}, // recorded under a stale embedder
+		"a": {Versions: []EntryVersion{{Fingerprint: "fp1"}}},
+		"b": {Versions: []EntryVersion{{Fingerprint: "fp1"}}},
+		"c": {Versions: []EntryVersion{{Fingerprint: "fp-old"}}}, // recorded under a stale embedder
 	}}
 
 	ids := []string{"a", "b", "c", "d"} // d is on disk but never indexed

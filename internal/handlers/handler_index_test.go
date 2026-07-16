@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/command"
@@ -365,6 +366,64 @@ func TestIndexHandler_BuildPicksUpEntryEdits(t *testing.T) {
 	}
 	if emb.calls != calls+1 {
 		t.Errorf("expected one new embed call after edit, got %d additional", emb.calls-calls)
+	}
+}
+
+// A changed entry accumulates a version on the lazy path (no delete-on-change),
+// and the write-session GC drops a version once it is neither current nor
+// within the retention window — deleting only through the sanctioned
+// write-session path.
+func TestIndexHandler_GarbageCollectsStaleVersions(t *testing.T) {
+	t.Parallel()
+
+	graphDir := t.TempDir()
+	indexDir := t.TempDir()
+	id := "20260101-100000-s-tac-aaa"
+	writeEntry(t, graphDir, id, "body", "old summary")
+
+	clock := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	emb := &fakeEmbedder{}
+	h := NewIndexHandler(IndexHandlerOptions{
+		GraphDir: graphDir,
+		IndexDir: indexDir,
+		Embedder: emb,
+		Reader:   readFinderFor(t),
+		Now:      func() time.Time { return clock },
+	})
+
+	// First fill: entry indexed as version 1 at the initial clock time.
+	if err := h.LazyFill(context.Background(), &command.LazyFillIndexCmd{}); err != nil {
+		t.Fatalf("first fill: %v", err)
+	}
+	manifest, err := index.LoadManifest(indexDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(manifest.Entries[id].Versions); got != 1 {
+		t.Fatalf("after first fill entry has %d versions, want 1", got)
+	}
+
+	// Change the entry (summary regen) and advance the clock past the retention
+	// window. The lazy fill adds version 2; version 1 is now neither current nor
+	// recent, so GC drops it.
+	writeEntry(t, graphDir, id, "body", "new summary")
+	clock = clock.Add(index.VersionRetention + 24*time.Hour)
+	if err := h.LazyFill(context.Background(), &command.LazyFillIndexCmd{}); err != nil {
+		t.Fatalf("second fill: %v", err)
+	}
+
+	manifest, err = index.LoadManifest(indexDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions := manifest.Entries[id].Versions
+	if len(versions) != 1 {
+		t.Fatalf("after GC entry has %d versions, want 1 (stale version collected)", len(versions))
+	}
+	// The surviving version is the current (new) one — the stale version's rows
+	// were the ones deleted.
+	if versions[0].Fingerprint != emb.Fingerprint() {
+		t.Errorf("surviving version fingerprint = %q, want %q", versions[0].Fingerprint, emb.Fingerprint())
 	}
 }
 

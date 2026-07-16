@@ -81,16 +81,27 @@ type StoredChunkRef struct {
 	ContentHash string
 }
 
-// StoredEntryRef identifies one graph entry represented in a persistent index.
-// Slice 1 keys presence by entry ID alone.
+// StoredEntryRef identifies one stored (entry, version) pair in a persistent
+// index. Presence is keyed by the pair: a store returns one ref per stored
+// version of an entry, so a changed entry (a new EntryHash) reads as absent
+// and is embedded as an added version rather than overwriting the old one.
 type StoredEntryRef struct {
 	EntryID string
+	// EntryHash is the entry-state hash of this stored version — the same
+	// definition as CanonicalChunk.EntryHash and the CLI manifest hash. Empty
+	// only for a store that cannot report per-version identity.
+	EntryHash string
 }
 
 type ScoredChunkHit struct {
 	Namespace IndexNamespace
 	ChunkID   string
 	EntryID   string
+	// EntryHash is the version this hit belongs to, resolved by the store (row
+	// metadata, or the manifest for a legacy row). Read-time filtering keeps
+	// the hit only when it equals the current entry's state hash. Empty means
+	// the store cannot report a version, so the hit is not version-filtered.
+	EntryHash string
 	// Revision is deprecated and ignored by hit validity (see CanonicalChunk).
 	Revision    string
 	ContentHash string

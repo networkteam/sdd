@@ -29,6 +29,7 @@ const CollectionName = "sdd-graph"
 // constants so the indexer, finder, and tests share one source of truth.
 const (
 	MetaEntryID              = "entry_id"
+	MetaEntryHash            = "entry_hash"
 	MetaChunkPath            = "chunk_path"
 	MetaDepth                = "depth"
 	MetaContentHash          = "content_hash"
@@ -42,7 +43,12 @@ const (
 // IndexHandler has already populated from the splitter + embedder.
 // Embedding must be non-empty; the index does not call out to embedders.
 type Row struct {
-	EntryID              string
+	EntryID string
+	// EntryHash is the entry-state hash of the version this row belongs to.
+	// Persisted so a read can decide the hit is fresh (its version equals the
+	// current entry state) without re-deriving the chunk. Empty only for
+	// legacy v1 rows, whose version is recovered from the manifest.
+	EntryHash            string
 	ChunkID              string
 	Text                 string // embedded text (with Entry/Breadcrumb preamble)
 	Body                 string // citation snippet source (without preamble)
@@ -59,7 +65,11 @@ type Row struct {
 // Hit is one query result with the metadata needed to render a citation
 // and to decide whether to re-embed (for fingerprint drift).
 type Hit struct {
-	EntryID              string
+	EntryID string
+	// EntryHash is the version this hit belongs to (from row metadata). Empty
+	// for a legacy v1 row — the caller recovers the version through the
+	// manifest (Manifest.VersionHashForChunk).
+	EntryHash            string
 	ChunkID              string
 	Score                float32
 	Text                 string
@@ -79,6 +89,11 @@ type Index struct {
 	coll       *chromem.Collection
 	indexDir   string // root of the index storage tree (passed to Open)
 	chromemDir string // sub-directory chromem-go writes its gob files into
+	// dirty records whether a mutation touched the collection during this
+	// session, so WriteStore bumps the store generation only for writes that
+	// actually changed content — a no-op lazy-fill never invalidates readers'
+	// cached snapshots.
+	dirty bool
 }
 
 // Open opens or creates the persistent index under indexDir. The chromem
@@ -185,6 +200,7 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 		if err := i.coll.Delete(ctx, nil, nil, oldChunkIDs...); err != nil {
 			return fmt.Errorf("delete old chunks for %s: %w", entryID, err)
 		}
+		i.dirty = true
 	}
 
 	if len(rows) == 0 {
@@ -203,6 +219,7 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 	if err := i.coll.AddDocuments(ctx, docs, 1); err != nil {
 		return fmt.Errorf("add chunks for %s: %w", entryID, err)
 	}
+	i.dirty = true
 	return nil
 }
 
@@ -212,7 +229,11 @@ func (i *Index) DeleteEntry(ctx context.Context, chunkIDs []string) error {
 	if len(chunkIDs) == 0 {
 		return nil
 	}
-	return i.coll.Delete(ctx, nil, nil, chunkIDs...)
+	if err := i.coll.Delete(ctx, nil, nil, chunkIDs...); err != nil {
+		return err
+	}
+	i.dirty = true
+	return nil
 }
 
 // Query returns the top-N matches for the given query embedding. The
@@ -262,6 +283,11 @@ func rowMetadata(r Row) map[string]string {
 		// preamble out of the embedded text.
 		"body": r.Body,
 	}
+	// Only set for versioned (new) rows; a legacy v1 row leaves it absent, and
+	// read-time freshness recovers its version through the manifest.
+	if r.EntryHash != "" {
+		m[MetaEntryHash] = r.EntryHash
+	}
 	if r.SourceAttachmentPath != "" {
 		m[MetaSourceAttachmentPath] = r.SourceAttachmentPath
 	}
@@ -272,6 +298,7 @@ func hitFromResult(r chromem.Result) Hit {
 	depth, _ := strconv.Atoi(r.Metadata[MetaDepth])
 	return Hit{
 		EntryID:              r.Metadata[MetaEntryID],
+		EntryHash:            r.Metadata[MetaEntryHash],
 		ChunkID:              r.ID,
 		Score:                r.Similarity,
 		Text:                 r.Content,

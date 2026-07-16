@@ -34,26 +34,32 @@ func (s *MemorySearchIndexStore) Manifest(_ context.Context, namespace app.Index
 	return result, nil
 }
 
-// IndexedEntries reports which entries have chunks stored — the optional
-// entry-manifest capability the application uses for monotonic, entry-presence
-// reconciliation. Distinct entry IDs, sorted for deterministic output.
+// IndexedEntries reports one ref per stored (entry, version) pair — the
+// optional entry-manifest capability the application uses for monotonic,
+// per-version reconciliation. Distinct (entry-id, entry-hash) pairs, sorted for
+// deterministic output.
 func (s *MemorySearchIndexStore) IndexedEntries(_ context.Context, namespace app.IndexNamespace) ([]app.StoredEntryRef, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	seen := map[string]bool{}
-	var ids []string
+	seen := map[app.StoredEntryRef]bool{}
+	var refs []app.StoredEntryRef
 	for _, item := range s.chunks[namespace] {
-		if item.Chunk.EntryID != "" && !seen[item.Chunk.EntryID] {
-			seen[item.Chunk.EntryID] = true
-			ids = append(ids, item.Chunk.EntryID)
+		if item.Chunk.EntryID == "" {
+			continue
+		}
+		ref := app.StoredEntryRef{EntryID: item.Chunk.EntryID, EntryHash: item.Chunk.EntryHash}
+		if !seen[ref] {
+			seen[ref] = true
+			refs = append(refs, ref)
 		}
 	}
-	sort.Strings(ids)
-	result := make([]app.StoredEntryRef, len(ids))
-	for i, id := range ids {
-		result[i] = app.StoredEntryRef{EntryID: id}
-	}
-	return result, nil
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].EntryID != refs[j].EntryID {
+			return refs[i].EntryID < refs[j].EntryID
+		}
+		return refs[i].EntryHash < refs[j].EntryHash
+	})
+	return refs, nil
 }
 
 func (s *MemorySearchIndexStore) Reconcile(_ context.Context, namespace app.IndexNamespace, _ string, upserts []app.IndexedChunk, deletes []string) error {
@@ -105,7 +111,8 @@ func (s *MemorySearchIndexStore) Nearest(_ context.Context, namespaces []app.Ind
 			}
 			result = append(result, app.ScoredChunkHit{
 				Namespace: namespace, ChunkID: item.Chunk.ID, EntryID: item.Chunk.EntryID,
-				Revision: item.Chunk.Revision, ContentHash: item.Chunk.ContentHash, Score: score,
+				EntryHash: item.Chunk.EntryHash,
+				Revision:  item.Chunk.Revision, ContentHash: item.Chunk.ContentHash, Score: score,
 				Body: item.Chunk.Body, Breadcrumb: item.Chunk.Breadcrumb, Depth: item.Chunk.Depth,
 				IsSummary: item.Chunk.IsSummary, IsAttachment: item.Chunk.IsAttachment,
 				SourceAttachmentPath: item.Chunk.SourceAttachmentPath,

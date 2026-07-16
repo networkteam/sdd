@@ -274,27 +274,25 @@ func RunSearchIndexStoreTests(t *testing.T, factory func(*testing.T) SearchIndex
 		}
 	}
 
-	// Entry-manifest reporting (optional capability): distinct entry IDs of
-	// everything reconciled, no migration or embedding triggered.
+	// Entry-manifest reporting (optional capability): one ref per stored
+	// (entry, version) pair, no migration or embedding triggered. Each
+	// reconciled chunk's (EntryID, EntryHash) must be reported as present.
 	if manifestCap, ok := fixture.Store.(sdd.SearchIndexEntryManifest); ok {
 		refs, err := manifestCap.IndexedEntries(ctx, fixture.Namespace)
 		if err != nil {
 			t.Fatalf("IndexedEntries: %v", err)
 		}
-		wantEntries := map[string]bool{}
+		wantVersions := map[[2]string]bool{}
 		for _, chunk := range fixture.Chunks {
-			wantEntries[chunk.Chunk.EntryID] = true
+			wantVersions[[2]string{chunk.Chunk.EntryID, chunk.Chunk.EntryHash}] = true
 		}
-		gotEntries := map[string]bool{}
+		gotVersions := map[[2]string]bool{}
 		for _, ref := range refs {
-			gotEntries[ref.EntryID] = true
+			gotVersions[[2]string{ref.EntryID, ref.EntryHash}] = true
 		}
-		if len(gotEntries) != len(wantEntries) {
-			t.Fatalf("IndexedEntries reported %d entries, want %d", len(gotEntries), len(wantEntries))
-		}
-		for id := range wantEntries {
-			if !gotEntries[id] {
-				t.Errorf("IndexedEntries missing entry %q", id)
+		for pair := range wantVersions {
+			if !gotVersions[pair] {
+				t.Errorf("IndexedEntries missing (entry, version) %v", pair)
 			}
 		}
 	}
@@ -341,6 +339,37 @@ func RunSearchIndexStoreTests(t *testing.T, factory func(*testing.T) SearchIndex
 	}
 	if len(reopenedHits) == 0 {
 		t.Fatal("reopened store returned no hits — reconciled chunks did not persist")
+	}
+
+	// Multi-version accumulation (per-version stores only): reconciling the
+	// first entry under a NEW version — new entry hash, new chunk IDs — ADDS a
+	// version rather than replacing the old one, so the store reports both. This
+	// is the shared store's branch-divergence guarantee at the adapter boundary.
+	// Runs last so the earlier monotonic count assertion is unaffected.
+	if manifestCap, ok := fixture.Store.(sdd.SearchIndexEntryManifest); ok && len(fixture.Chunks) > 0 && fixture.Chunks[0].Chunk.EntryHash != "" {
+		first := fixture.Chunks[0].Chunk
+		v2vec := make([]float32, len(fixture.Chunks[0].Vector))
+		v2vec[0] = 1
+		v2 := sdd.IndexedChunk{Chunk: sdd.CanonicalChunk{
+			ID: first.EntryID + "#v-conformancev2#summary", EntryID: first.EntryID, EntryHash: "conformance-v2",
+			ContentHash: "conformance-v2", Text: first.Text, Body: first.Body, IsSummary: true,
+		}, Vector: v2vec}
+		if err := fixture.Store.Reconcile(ctx, fixture.Namespace, "r-newversion", []sdd.IndexedChunk{v2}, nil); err != nil {
+			t.Fatalf("reconcile of a new version: %v", err)
+		}
+		refs, err := manifestCap.IndexedEntries(ctx, fixture.Namespace)
+		if err != nil {
+			t.Fatalf("IndexedEntries after new version: %v", err)
+		}
+		versionsOfFirst := 0
+		for _, ref := range refs {
+			if ref.EntryID == first.EntryID {
+				versionsOfFirst++
+			}
+		}
+		if versionsOfFirst < 2 {
+			t.Errorf("entry %q reports %d versions after adding one, want >= 2 (monotonic accumulation, no delete-on-change)", first.EntryID, versionsOfFirst)
+		}
 	}
 }
 

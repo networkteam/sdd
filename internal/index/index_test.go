@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -214,11 +215,11 @@ func TestManifest_RoundTrip(t *testing.T) {
 		t.Errorf("fresh manifest should be empty, got %#v", m.Entries)
 	}
 
-	m.Entries["entry-Q"] = EntryState{
+	m.AddVersion("entry-Q", EntryVersion{
 		Hash:        "abc",
 		Fingerprint: "test/m/4",
 		ChunkIDs:    []string{"entry-Q#summary"},
-	}
+	})
 	if err := m.Save(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -227,8 +228,58 @@ func TestManifest_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Entries["entry-Q"].ChunkIDs, []string{"entry-Q#summary"}) {
+	if !reflect.DeepEqual(got.Entries["entry-Q"].AllChunkIDs(), []string{"entry-Q#summary"}) {
 		t.Errorf("round-trip mismatch: %#v", got.Entries["entry-Q"])
+	}
+}
+
+// A legacy v1 single-version entry serializes back in the flat shape (no
+// migration), while an entry with multiple versions uses the versions list —
+// and both load into the multi-version in-memory form.
+func TestManifest_LegacyShapeRoundTrip(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Seed a legacy single-version manifest by hand (the exact v1 on-disk
+	// shape: a flat object per entry, no "versions" key).
+	legacy := `{"version":1,"entries":{"entry-L":{"hash":"h1","fingerprint":"fp","chunk_ids":["entry-L#summary"],"indexed_at":"2026-01-01T00:00:00Z"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Entries["entry-L"].HasVersion("h1", "fp") {
+		t.Fatalf("legacy manifest did not load as one version: %#v", m.Entries["entry-L"])
+	}
+	if got := m.VersionHashForChunk("entry-L", "entry-L#summary"); got != "h1" {
+		t.Errorf("legacy chunk version = %q, want h1", got)
+	}
+
+	// A single-version entry saves back in the flat shape (no "versions" key).
+	if err := m.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(saved), "\"versions\"") {
+		t.Errorf("single-version entry serialized with a versions list: %s", saved)
+	}
+
+	// Adding a second version switches that entry to the versions-list shape.
+	m.AddVersion("entry-L", EntryVersion{Hash: "h2", Fingerprint: "fp", ChunkIDs: []string{"entry-L#v-h2#summary"}})
+	if err := m.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := LoadManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.Entries["entry-L"].HasVersion("h1", "fp") || !reloaded.Entries["entry-L"].HasVersion("h2", "fp") {
+		t.Errorf("multi-version round-trip lost a version: %#v", reloaded.Entries["entry-L"])
 	}
 }
 
@@ -237,10 +288,10 @@ func TestManifest_MismatchCount(t *testing.T) {
 	m := &Manifest{
 		Version: 1,
 		Entries: map[string]EntryState{
-			"a": {Fingerprint: "x"},
-			"b": {Fingerprint: "x"},
-			"c": {Fingerprint: "y"},
-			"d": {Fingerprint: ""},
+			"a": {Versions: []EntryVersion{{Fingerprint: "x"}}},
+			"b": {Versions: []EntryVersion{{Fingerprint: "x"}}},
+			"c": {Versions: []EntryVersion{{Fingerprint: "y"}}},
+			"d": {Versions: []EntryVersion{{Fingerprint: ""}}},
 		},
 	}
 	if got := m.MismatchCount("x"); got != 2 {
