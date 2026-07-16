@@ -11,6 +11,7 @@ type ErrorCode string
 
 const (
 	ErrorAuthenticationRequired ErrorCode = "authentication_required"
+	ErrorInvalidArgument        ErrorCode = "invalid_argument"
 	ErrorProjectRequired        ErrorCode = "project_required"
 	ErrorProjectUnavailable     ErrorCode = "project_unavailable"
 	ErrorActionRequired         ErrorCode = "action_required"

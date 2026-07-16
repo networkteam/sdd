@@ -168,7 +168,10 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 	if err != nil {
 		return SearchResult{}, err
 	}
-	filter := publicGraphFilter(request)
+	filter, err := publicGraphFilter(request)
+	if err != nil {
+		return SearchResult{}, err
+	}
 	q := query.SearchQuery{
 		Graph: snapshot.graph, Terms: request.Terms, Phrase: request.Phrase, Filter: filter,
 		IncludeSuperseded: request.IncludeSuperseded, Limit: request.Limit, MaxCitationsPerEntry: request.MaxCitations,
@@ -386,22 +389,37 @@ func dependencyUnavailable() error {
 	return &ApplicationError{Code: ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
 
-func publicGraphFilter(request SearchRequest) model.GraphFilter {
+// publicGraphFilter normalizes the request's type/layer/kind into a
+// GraphFilter. The MCP tool schema documents these as abbreviations ("s"/"d",
+// "tac", …) and agents pass them, so an unnormalized cast — matching the
+// canonical full names only — makes every filtered search silently return
+// nothing. Each field is normalized (abbrev → canonical) and validated;
+// an unrecognized value fails loud rather than building a filter that matches
+// no entry.
+func publicGraphFilter(request SearchRequest) (model.GraphFilter, error) {
 	filter := model.GraphFilter{}
 	if request.Type != "" {
-		filter.Type = model.EntryType(request.Type)
+		t, ok := model.ParseTypeFilter(request.Type)
+		if !ok {
+			return model.GraphFilter{}, &ApplicationError{Code: ErrorInvalidArgument, Message: fmt.Sprintf("sdd: unknown type %q (want s, d, signal, or decision)", request.Type)}
+		}
+		filter.Type = t
 	}
 	if request.Layer != "" {
-		layer := model.Layer(request.Layer)
-		if expanded, ok := model.LayerFromAbbrev[request.Layer]; ok {
-			layer = expanded
+		l, ok := model.ParseLayerFilter(request.Layer)
+		if !ok {
+			return model.GraphFilter{}, &ApplicationError{Code: ErrorInvalidArgument, Message: fmt.Sprintf("sdd: unknown layer %q (want stg, cpt, tac, ops, prc, or the full name)", request.Layer)}
 		}
-		filter.Layer = layer
+		filter.Layer = l
 	}
 	if request.Kind != "" {
-		filter.Kind = model.Kind(request.Kind)
+		k := model.Kind(request.Kind)
+		if !model.IsKnownKind(k) {
+			return model.GraphFilter{}, &ApplicationError{Code: ErrorInvalidArgument, Message: fmt.Sprintf("sdd: unknown kind %q", request.Kind)}
+		}
+		filter.Kind = k
 	}
-	return filter
+	return filter, nil
 }
 
 func publicProcedureSignature(head *model.Entry) string {

@@ -110,6 +110,40 @@ var decisionKinds = map[Kind]bool{
 	KindProcedure:  true,
 }
 
+// ParseTypeFilter resolves a user-supplied type filter — an abbreviation
+// ("s"/"d") or the full canonical name ("signal"/"decision") — to its
+// EntryType. The MCP tool schema and the CLI both document the abbreviated
+// form, so callers must normalize before building a GraphFilter or the filter
+// silently matches no entries.
+func ParseTypeFilter(s string) (EntryType, bool) {
+	if t, ok := TypeFromAbbrev[s]; ok {
+		return t, true
+	}
+	switch EntryType(s) {
+	case TypeSignal, TypeDecision:
+		return EntryType(s), true
+	}
+	return "", false
+}
+
+// ParseLayerFilter resolves a user-supplied layer filter — an abbreviation
+// ("stg"/"cpt"/"tac"/"ops"/"prc") or the full canonical name — to its Layer.
+func ParseLayerFilter(s string) (Layer, bool) {
+	if l, ok := LayerFromAbbrev[s]; ok {
+		return l, true
+	}
+	if _, ok := LayerAbbrev[Layer(s)]; ok {
+		return Layer(s), true
+	}
+	return "", false
+}
+
+// IsKnownKind reports whether k is a valid kind on either signals or decisions
+// — the union used to validate a kind filter, which is not scoped to a type.
+func IsKnownKind(k Kind) bool {
+	return signalKinds[k] || decisionKinds[k]
+}
+
 // IsValidKindForType reports whether k is an allowed kind for the given type.
 // Empty kind is allowed at this layer — defaults are applied separately during
 // entry construction (see DefaultKindForType).
