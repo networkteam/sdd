@@ -170,6 +170,11 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 		skipped int
 	)
 
+	// The writer's current state hash for every entry it processed — the input
+	// to version GC below, which keeps a version only when it is a current
+	// version here or was indexed within the retention window.
+	currentHashes := map[string]string{}
+
 	for _, e := range g.Entries {
 		if !chunking.IncludeEntry(e, h.excludeEmbedded) {
 			continue
@@ -179,6 +184,7 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 			logger.Warn("hash failure, skipping entry", "entry", e.ID, "err", err)
 			continue
 		}
+		currentHashes[e.ID] = hash
 		if !force && manifest.Entries[e.ID].HasVersion(hash, fingerprint) {
 			logger.Debug("skipped, up to date", "entry", e.ID)
 			if onSkipped != nil {
@@ -206,6 +212,11 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 	}
 
 	if len(work) == 0 {
+		// No entries to embed, but stale versions may still be collectable —
+		// this write session already holds the exclusive lock.
+		if err := h.collectGarbage(ctx, idx, manifest, currentHashes); err != nil {
+			return err
+		}
 		if onComplete != nil {
 			onComplete(0, skipped)
 		}
@@ -244,9 +255,35 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 		indexed += len(work) - bucketStart
 	}
 
+	if err := h.collectGarbage(ctx, idx, manifest, currentHashes); err != nil {
+		return err
+	}
+
 	if onComplete != nil {
 		onComplete(indexed, skipped)
 	}
+	return nil
+}
+
+// collectGarbage drops stored versions that are neither a current version (in
+// currentHashes, the writer's graph) nor within the retention window, deleting
+// their rows from the index and persisting the pruned manifest. It runs inside
+// the write session under the exclusive lock — one of the two sanctioned delete
+// paths (the other is a force rebuild); reads never delete. Revisiting a stale
+// branch after collection re-embeds that branch's changed entries: bounded and
+// self-healing, since vectors are derived data.
+func (h *IndexHandler) collectGarbage(ctx context.Context, idx *index.Index, manifest *index.Manifest, currentHashes map[string]string) error {
+	dropped := manifest.CollectStaleVersions(currentHashes, h.now(), index.VersionRetention)
+	if len(dropped) == 0 {
+		return nil
+	}
+	if err := idx.DeleteEntry(ctx, dropped); err != nil {
+		return fmt.Errorf("garbage-collecting stale versions: %w", err)
+	}
+	if err := manifest.Save(h.indexDir); err != nil {
+		return fmt.Errorf("save manifest after garbage collection: %w", err)
+	}
+	slogutils.FromContext(ctx).Info("garbage-collected stale index versions", "chunks", len(dropped))
 	return nil
 }
 
