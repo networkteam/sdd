@@ -3,6 +3,8 @@ package local
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	app "github.com/networkteam/sdd/application"
@@ -16,18 +18,30 @@ import (
 // lazy embedder that only reports its dimensionality on first use still routes
 // correctly.
 //
-// The adapter holds no long-lived chromem snapshot. Every operation reopens the
-// store under the appropriate lock (index.ReadStore / index.WriteStore) so a
-// long-running server always reflects writes committed by the CLI or another
-// process. Reconciliation is monotonic: it accumulates chunks for immutable
-// entries and never deletes based on request filters — the sanctioned delete
-// paths are the CLI's explicit rebuild and (later) version GC, not the search
-// path.
+// Reads hold a generation-checked snapshot cache: each read acquires the shared
+// lock, stats the store's write generation, reuses the held snapshot when it is
+// unchanged, and reloads only after an actual write. Steady state is therefore
+// lock + stat + in-memory query — a full reload happens only when the CLI or
+// another process has written. The cache is guarded by mu (a long-running
+// server serves concurrent reads); the generation check happens under the read
+// lock so a writer between stat and query cannot be missed. Writes still reopen
+// under the exclusive lock (index.WriteStore).
+//
+// Reconciliation is monotonic: it accumulates chunks for immutable-entry
+// versions and never deletes based on request filters — the sanctioned delete
+// paths are the CLI's explicit rebuild and write-session version GC, not the
+// search path.
 type PersistentSearchIndexStore struct {
 	project   app.ProjectID
 	cacheRoot string
 	repoKey   string
 	now       func() time.Time
+
+	mu     sync.Mutex
+	caches map[string]*index.SnapshotCache // per store dir
+	// reloads counts fresh snapshot loads, for tests that assert the cache
+	// reuses a snapshot until a write bumps the generation.
+	reloads atomic.Int64
 }
 
 // NewPersistentSearchIndexStore builds the adapter for one project. cacheRoot
@@ -35,7 +49,13 @@ type PersistentSearchIndexStore struct {
 // or the connected repo's ID (the existing connected-repository storage
 // contract).
 func NewPersistentSearchIndexStore(project app.ProjectID, cacheRoot, repoKey string) *PersistentSearchIndexStore {
-	return &PersistentSearchIndexStore{project: project, cacheRoot: cacheRoot, repoKey: repoKey, now: time.Now}
+	return &PersistentSearchIndexStore{
+		project:   project,
+		cacheRoot: cacheRoot,
+		repoKey:   repoKey,
+		now:       time.Now,
+		caches:    map[string]*index.SnapshotCache{},
+	}
 }
 
 var (
@@ -184,12 +204,16 @@ func (s *PersistentSearchIndexStore) Nearest(ctx context.Context, namespaces []a
 			return nil, err
 		}
 		var hits []index.Hit
-		err = index.ReadStore(ctx, dir, func(idx *index.Index) error {
-			hits, err = idx.Query(ctx, vector, limit)
-			return err
+		reloaded, err := s.queryCached(ctx, dir, func(idx *index.Index) error {
+			var qerr error
+			hits, qerr = idx.Query(ctx, vector, limit)
+			return qerr
 		})
 		if err != nil {
 			return nil, err
+		}
+		if reloaded {
+			s.reloads.Add(1)
 		}
 		// Resolve each hit's version. A new (versioned) row carries entry_hash
 		// metadata directly; a legacy v1 row does not, so its version is
@@ -224,6 +248,22 @@ func (s *PersistentSearchIndexStore) Nearest(ctx context.Context, namespaces []a
 		}
 	}
 	return result, nil
+}
+
+// queryCached runs fn against the store snapshot for dir through the
+// generation-checked cache, reloading only when the store changed since the
+// last read. The adapter mutex guards the shared per-dir cache and is held
+// across the query (a local server's searches are infrequent); the shared file
+// lock and the generation check live inside index.ReadCached.
+func (s *PersistentSearchIndexStore) queryCached(ctx context.Context, dir string, fn func(*index.Index) error) (reloaded bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cache := s.caches[dir]
+	if cache == nil {
+		cache = &index.SnapshotCache{}
+		s.caches[dir] = cache
+	}
+	return index.ReadCached(ctx, dir, cache, fn)
 }
 
 // rowFromChunk maps an application IndexedChunk to an index.Row, carrying the

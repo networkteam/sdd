@@ -89,6 +89,11 @@ type Index struct {
 	coll       *chromem.Collection
 	indexDir   string // root of the index storage tree (passed to Open)
 	chromemDir string // sub-directory chromem-go writes its gob files into
+	// dirty records whether a mutation touched the collection during this
+	// session, so WriteStore bumps the store generation only for writes that
+	// actually changed content — a no-op lazy-fill never invalidates readers'
+	// cached snapshots.
+	dirty bool
 }
 
 // Open opens or creates the persistent index under indexDir. The chromem
@@ -195,6 +200,7 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 		if err := i.coll.Delete(ctx, nil, nil, oldChunkIDs...); err != nil {
 			return fmt.Errorf("delete old chunks for %s: %w", entryID, err)
 		}
+		i.dirty = true
 	}
 
 	if len(rows) == 0 {
@@ -213,6 +219,7 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 	if err := i.coll.AddDocuments(ctx, docs, 1); err != nil {
 		return fmt.Errorf("add chunks for %s: %w", entryID, err)
 	}
+	i.dirty = true
 	return nil
 }
 
@@ -222,7 +229,11 @@ func (i *Index) DeleteEntry(ctx context.Context, chunkIDs []string) error {
 	if len(chunkIDs) == 0 {
 		return nil
 	}
-	return i.coll.Delete(ctx, nil, nil, chunkIDs...)
+	if err := i.coll.Delete(ctx, nil, nil, chunkIDs...); err != nil {
+		return err
+	}
+	i.dirty = true
+	return nil
 }
 
 // Query returns the top-N matches for the given query embedding. The
