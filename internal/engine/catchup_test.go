@@ -25,6 +25,9 @@ func TestCatchup_HappyPath(t *testing.T) {
 			t.Errorf("compose unit should inject the %q lane, got %q", lane, sv.Instructions)
 		}
 	}
+	if !strings.Contains(sv.Instructions, "explicit recovery choice is available") {
+		t.Fatalf("catch-up instructions do not project actionable recovery notices: %q", sv.Instructions)
+	}
 	if got := strings.Join(sv.Missing, ","); got != "briefing" {
 		t.Fatalf("missing = %q, want briefing", got)
 	}

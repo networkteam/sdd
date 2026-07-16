@@ -90,6 +90,10 @@ type PerRepoConfig struct {
 	BaseConfig `yaml:",inline"`
 
 	GraphDir string `yaml:"graph_dir,omitempty"`
+	// DefaultBranch is the concrete branch used by ordinary engine captures
+	// when no workflow-selected branch is supplied. It is committed so a
+	// long-lived server never infers mutation authority from its launch cwd.
+	DefaultBranch string `yaml:"default_branch,omitempty"`
 	// RepoID is the repo's canonical URL-shaped identity (host/path, e.g.
 	// github.com/networkteam/sdd) used as the prefix of cross-repo
 	// references into this graph. Auto-derived from the git remote by
@@ -340,6 +344,9 @@ func MergeConfig(base, overlay *PerRepoConfig) *PerRepoConfig {
 	if overlay.GraphDir != "" {
 		out.GraphDir = overlay.GraphDir
 	}
+	if overlay.DefaultBranch != "" {
+		out.DefaultBranch = overlay.DefaultBranch
+	}
 	if overlay.RepoID != "" {
 		out.RepoID = overlay.RepoID
 	}
@@ -482,6 +489,13 @@ func FormatConfig(cfg PerRepoConfig) string {
 	} else {
 		repoIDBlock += "# repo_id: github.com/org/repo\n"
 	}
+	defaultBranchBlock := "# Concrete branch for ordinary engine captures. Implementation runs carry\n" +
+		"# explicit base/work branches instead; cwd never selects mutation authority.\n"
+	if cfg.DefaultBranch != "" {
+		defaultBranchBlock += "default_branch: " + cfg.DefaultBranch + "\n"
+	} else {
+		defaultBranchBlock += "# default_branch: main\n"
+	}
 	languageBlock := "# Graph language — locale code for the language captured entries are\n" +
 		"# authored in. Empty means English (default). The /sdd skill reads the\n" +
 		"# matching references/vocabulary-<locale>.md when rendering to users.\n"
@@ -518,6 +532,8 @@ func FormatConfig(cfg PerRepoConfig) string {
 		"\n" +
 		"# Graph directory relative to repository root.\n" +
 		"graph_dir: " + graphDir + "\n" +
+		"\n" +
+		defaultBranchBlock +
 		"\n" +
 		repoIDBlock +
 		"\n" +

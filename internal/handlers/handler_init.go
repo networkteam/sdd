@@ -96,7 +96,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		if err := os.MkdirAll(sddDir, 0o755); err != nil {
 			return fmt.Errorf("creating %s: %w", sddDir, err)
 		}
-		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.PerRepoConfig{GraphDir: graphDir, RepoID: derivedRepoID, Language: cmd.Language, SkillScope: effectiveScope, SupportedAgents: effectiveAgents})), 0o644); err != nil {
+		if err := os.WriteFile(configPath, []byte(model.FormatConfig(model.PerRepoConfig{GraphDir: graphDir, DefaultBranch: cmd.DefaultBranch, RepoID: derivedRepoID, Language: cmd.Language, SkillScope: effectiveScope, SupportedAgents: effectiveAgents})), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", configPath, err)
 		}
 		touched = append(touched, configPath)
@@ -134,6 +134,32 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 		if err := os.MkdirAll(absGraphDir, 0o755); err != nil {
 			return fmt.Errorf("creating graph dir %s: %w", absGraphDir, err)
+		}
+
+		// Upgrade configs that predate branch-targeted mutation capture. An
+		// existing value is authoritative and is never replaced by the branch
+		// from which a later init happens to run.
+		if cmd.DefaultBranch != "" {
+			existing, readErr := os.ReadFile(configPath)
+			if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
+				return fmt.Errorf("reading %s: %w", configPath, readErr)
+			}
+			recorded, err := model.ParseConfig(existing)
+			if err != nil {
+				return fmt.Errorf("parsing %s: %w", configPath, err)
+			}
+			if recorded.DefaultBranch == "" {
+				updated, err := model.SetYAMLField(existing, "default_branch", cmd.DefaultBranch)
+				if err != nil {
+					return fmt.Errorf("updating %s: %w", configPath, err)
+				}
+				if !bytes.Equal(existing, updated) {
+					if err := os.WriteFile(configPath, updated, 0o644); err != nil {
+						return fmt.Errorf("writing %s: %w", configPath, err)
+					}
+					touched = append(touched, configPath)
+				}
+			}
 		}
 
 		// Upgrade case: record the derived repo_id when the existing config

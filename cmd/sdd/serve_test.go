@@ -8,13 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	sdd "github.com/networkteam/sdd/application"
+	localadapter "github.com/networkteam/sdd/local"
 )
 
 const (
@@ -39,27 +39,39 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-type recordingLocalGit struct {
-	committed bool
-	messages  []string
-	paths     [][]string
-}
-
-func (g *recordingLocalGit) HasCommitMessage(context.Context, string) (bool, error) {
-	return g.committed, nil
-}
-
-func (g *recordingLocalGit) Commit(message string, paths ...string) error {
-	g.committed = true
-	g.messages = append(g.messages, message)
-	g.paths = append(g.paths, append([]string(nil), paths...))
-	return nil
-}
-
 func TestLocalGitFinalizerCommitsBatchOnce(t *testing.T) {
-	git := &recordingLocalGit{}
-	graphDir := t.TempDir()
-	finalizer := localGitFinalizer{graphDir: graphDir, git: git}
+	checkout := t.TempDir()
+	runGit := func(args ...string) string {
+		t.Helper()
+		command := exec.Command("git", append([]string{"-C", checkout}, args...)...)
+		out, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %s (%v)", args, out, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init", "-b", "main")
+	runGit("config", "user.name", "Test")
+	runGit("config", "user.email", "test@example.invalid")
+	runGit("config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(checkout, "README.md"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "README.md")
+	runGit("commit", "-m", "fixture")
+	graphDir := filepath.Join(checkout, ".sdd", "graph")
+	entryPath := filepath.Join(graphDir, "2026/07/13-120000-s-tac-api.md")
+	attachmentPath := filepath.Join(graphDir, "2026/07/13-120000-s-tac-api", "evidence.md")
+	if err := os.MkdirAll(filepath.Dir(attachmentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entryPath, []byte("entry\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(attachmentPath, []byte("evidence\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	finalizer := localadapter.GitFinalizer{Checkout: checkout, GraphDir: ".sdd/graph", Branch: "main"}
 	mutation := sdd.AppliedMutation{
 		BatchID: "mutation-1",
 		Batch: sdd.MutationBatch{
@@ -77,15 +89,8 @@ func TestLocalGitFinalizerCommitsBatchOnce(t *testing.T) {
 	if err := finalizer.Finalize(t.Context(), mutation); err != nil {
 		t.Fatal(err)
 	}
-	if len(git.messages) != 1 || !strings.Contains(git.messages[0], "SDD-Mutation: mutation-1") {
-		t.Fatalf("commits = %q", git.messages)
-	}
-	want := []string{
-		filepath.Join(graphDir, "2026/07/13-120000-s-tac-api.md"),
-		filepath.Join(graphDir, "2026/07/13-120000-s-tac-api/evidence.md"),
-	}
-	if len(git.paths) != 1 || !slices.Equal(git.paths[0], want) {
-		t.Fatalf("paths = %v, want %v", git.paths, want)
+	if count := runGit("log", "--fixed-strings", "--grep=SDD-Mutation: mutation-1", "--format=%H"); len(strings.Fields(count)) != 1 {
+		t.Fatalf("matching commits = %q", count)
 	}
 }
 
@@ -110,7 +115,7 @@ func TestServeStdioTransport(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".sdd", "graph"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".sdd", "config.yaml"), []byte("graph_dir: .sdd/graph\nrepo_id: example.test/stdio-smoke\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".sdd", "config.yaml"), []byte("graph_dir: .sdd/graph\ndefault_branch: main\nrepo_id: example.test/stdio-smoke\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".sdd", "config.local.yaml"), []byte("participant: Stdio Smoke\n"), 0o644); err != nil {

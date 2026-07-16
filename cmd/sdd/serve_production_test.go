@@ -99,6 +99,7 @@ func TestServeUsesPersistentMachineGlobalIndex(t *testing.T) {
 	}
 	const repoID = "example.test/prod"
 	config := "graph_dir: .sdd/graph\n" +
+		"default_branch: main\n" +
 		"repo_id: " + repoID + "\n" +
 		"embedding:\n" +
 		"  provider: ollama\n" +

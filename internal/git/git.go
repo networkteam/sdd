@@ -220,6 +220,20 @@ func RemoteURL(repoRoot string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// CurrentBranch resolves the symbolic branch at repoRoot. Detached HEAD is
+// returned as an error because it cannot seed durable mutation authority.
+func CurrentBranch(repoRoot string) (string, error) {
+	out, err := exec.Command("git", "-C", repoRoot, "symbolic-ref", "--quiet", "--short", "HEAD").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git current branch: %s (%w)", strings.TrimSpace(string(out)), err)
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch == "" {
+		return "", fmt.Errorf("git current branch is empty")
+	}
+	return branch, nil
+}
+
 // errExitCode returns the exit code when err is an exec.ExitError, or -1.
 func errExitCode(err error) int {
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {

@@ -40,13 +40,13 @@ func (w *WorkflowSession) registerWorkflowPredicates(registry *engine.Registry) 
 
 func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) error {
 	if err := registry.RegisterQuery(engine.Query{
-		Doc: engine.FuncDoc{Name: "sessionInfo", Doc: "Session framing: local participant, configured language, available search modes (the sdd info header)."},
+		Doc: engine.FuncDoc{Name: "sessionInfo", Doc: "Session framing: local participant, configured language, available search modes, and actionable recovery notices."},
 		Fn: func(*engine.Context, map[string]any) (any, error) {
 			info, err := w.app.Info(w.ctx, w.identity, w.project, InfoRequest{})
 			if err != nil {
 				return nil, err
 			}
-			return map[string]any{"participant": info.Participant, "language": info.Language, "search": info.Search}, nil
+			return map[string]any{"participant": info.Participant, "language": info.Language, "search": info.Search, "recovery": info.Recovery}, nil
 		},
 	}); err != nil {
 		return err
@@ -145,7 +145,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 			if !ok {
 				return fmt.Errorf("replaceSummary: correctedSummary is not set")
 			}
-			result, err := w.app.ReplaceSummary(w.ctx, w.identity, w.project, w.binding, id, text)
+			result, err := w.app.ReplaceSummary(w.ctx, w.identity, w.project, w.binding, w.mutationTarget(ctx.Store, "captureBranch"), id, text)
 			if err == nil {
 				w.binding = result.Binding
 			}
@@ -156,7 +156,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 
 func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 	if err := registry.RegisterCommand(engine.Command{
-		Doc:          engine.FuncDoc{Name: "wipStart", Doc: "Creates an exclusive WIP marker for the store's anchor entry, described by wipDescription.", Reads: []string{"anchor", "wipDescription", "participants"}, Writes: []string{"wipMarker"}},
+		Doc:          engine.FuncDoc{Name: "wipStart", Doc: "Creates an exclusive WIP marker for the store's anchor entry on baseBranch, described by wipDescription.", Reads: []string{"anchor", "baseBranch", "wipDescription", "participants"}, Writes: []string{"wipMarker"}},
 		MutatesGraph: true,
 		Fn: func(ctx *engine.Context) error {
 			anchor, ok := workflowStoreString(ctx.Store, "anchor")
@@ -164,7 +164,7 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 				return fmt.Errorf("wipStart: anchor is not set")
 			}
 			description, _ := workflowStoreString(ctx.Store, "wipDescription")
-			marker, result, err := w.app.StartWIP(w.ctx, w.identity, w.project, w.binding, anchor, description)
+			marker, result, err := w.app.StartWIP(w.ctx, w.identity, w.project, w.binding, w.mutationTarget(ctx.Store, "baseBranch"), anchor, description)
 			if err != nil {
 				return err
 			}
@@ -176,14 +176,14 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 		return err
 	}
 	if err := registry.RegisterCommand(engine.Command{
-		Doc:          engine.FuncDoc{Name: "wipDone", Doc: "Removes the WIP marker named by the store's wipMarker field.", Reads: []string{"wipMarker"}, Writes: []string{"wipMarker"}},
+		Doc:          engine.FuncDoc{Name: "wipDone", Doc: "Removes the WIP marker named by the store's wipMarker field from baseBranch.", Reads: []string{"wipMarker", "baseBranch"}, Writes: []string{"wipMarker"}},
 		MutatesGraph: true,
 		Fn: func(ctx *engine.Context) error {
 			marker, ok := workflowStoreString(ctx.Store, "wipMarker")
 			if !ok {
 				return fmt.Errorf("wipDone: wipMarker is not set")
 			}
-			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, marker)
+			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, w.mutationTarget(ctx.Store, "baseBranch"), marker)
 			if err != nil {
 				return err
 			}
@@ -202,7 +202,7 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 			if !ok {
 				return fmt.Errorf("wipRemove: staleMarker is not set")
 			}
-			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, marker)
+			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, MutationTarget{}, marker)
 			if err == nil {
 				w.binding = result.Binding
 			}
@@ -225,7 +225,8 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		return fmt.Errorf("newEntry: body is not set")
 	}
 	draft := EntryDraft{
-		Kind: entryKind, Layer: layer, Body: body, Topics: workflowStoreStrings(ctx.Store, "topics"),
+		Target: w.mutationTarget(ctx.Store, "captureBranch"),
+		Kind:   entryKind, Layer: layer, Body: body, Topics: workflowStoreStrings(ctx.Store, "topics"),
 		Closes: workflowStoreStrings(ctx.Store, "closes"), Supersedes: workflowStoreStrings(ctx.Store, "supersedes"),
 		AttachmentHandles: workflowStoreStrings(ctx.Store, "attachments"), Participants: workflowStoreStrings(ctx.Store, "participants"),
 	}
@@ -266,6 +267,14 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	ctx.Store.WriteEngine("entryId", result.EntryID)
 	w.session.LogRead("newEntry", []string{result.EntryID}, nil)
 	return nil
+}
+
+func (w *WorkflowSession) mutationTarget(store *engine.Store, branchField string) MutationTarget {
+	branch, _ := workflowStoreString(store, branchField)
+	if branch == "" {
+		return MutationTarget{}
+	}
+	return MutationTarget{Project: w.project, Branch: branch}
 }
 
 func workflowStoreString(store *engine.Store, name string) (string, bool) {

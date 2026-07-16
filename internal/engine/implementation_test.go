@@ -27,16 +27,27 @@ func startImplementationAtWork(t *testing.T, env *procEnv) *Serve {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sv.Step != "setup" {
-		t.Fatalf("after contract step = %s, want setup", sv.Step)
+	if sv.Step != "baseTarget" {
+		t.Fatalf("after contract step = %s, want baseTarget", sv.Step)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{"baseBranch": "main"})
+	if err != nil {
+		t.Fatal(err)
 	}
 	sv, err = env.session.Answer(sv.Instance, "setup", "inPlace",
 		map[string]any{"wipDescription": "implement the anchor"}, "in place, small scope")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if sv.Step != "workTarget" {
+		t.Fatalf("after setup step = %s, want workTarget", sv.Step)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{"workBranch": "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if sv.Step != "work" {
-		t.Fatalf("after setup step = %s, want work", sv.Step)
+		t.Fatalf("after work target step = %s, want work", sv.Step)
 	}
 	return sv
 }
@@ -78,17 +89,23 @@ func TestImplementation_HappyPathTracked(t *testing.T) {
 		t.Fatalf("conclude should reach record, got %q", sv.Step)
 	}
 
-	// Recording the done routes through closeMarker (wipDone) on a tracked
-	// run, landing on the closeout chooser with the marker removed.
+	// Recording the done holds the marker through the landing junction.
 	sv, err = env.session.Report(sv.Instance, map[string]any{"doneEntry": procNeighborID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sv.Step != "closeout" || sv.Chooser == nil || sv.Chooser.Kind != ChooserUser {
-		t.Fatalf("record should route to the closeout user chooser, got %q", sv.Step)
+	if sv.Step != "landing" || sv.Chooser == nil || sv.Chooser.Kind != ChooserUser {
+		t.Fatalf("record should route to the landing user chooser, got %q", sv.Step)
 	}
-	if len(env.wipMarkers) != 2 || env.wipMarkers[1] != "done:wip-"+procAnchorID {
-		t.Fatalf("closeMarker should remove the marker, got %v", env.wipMarkers)
+	if len(env.wipMarkers) != 1 {
+		t.Fatalf("landing must retain the marker, got %v", env.wipMarkers)
+	}
+	sv, err = env.session.Answer(sv.Instance, "landing", "landed", nil, "merged successfully")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "closeout" || len(env.wipMarkers) != 2 || env.wipMarkers[1] != "done:wip-"+procAnchorID {
+		t.Fatalf("landed should remove marker and reach closeout, got step=%q markers=%v", sv.Step, env.wipMarkers)
 	}
 
 	sv, err = env.session.Answer(sv.Instance, "closeout", "finish", nil, "done for today")
@@ -97,6 +114,52 @@ func TestImplementation_HappyPathTracked(t *testing.T) {
 	}
 	if sv.Status != StatusCompleted {
 		t.Fatalf("finish should complete the run, got %s at %q", sv.Status, sv.Step)
+	}
+}
+
+func TestImplementation_RoutesBaseAndWorkBranchesInEveryMode(t *testing.T) {
+	tests := []struct {
+		mode       string
+		workBranch string
+	}{
+		{mode: "inPlace", workBranch: "main"},
+		{mode: "branch", workBranch: "feature"},
+		{mode: "worktree", workBranch: "feature"},
+	}
+	for _, test := range tests {
+		t.Run(test.mode, func(t *testing.T) {
+			env := newProcEnv(t, "implementation")
+			sv, err := env.session.Start(env.spec, map[string]any{"anchor": procAnchorID}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sv, err = env.session.Report(sv.Instance, map[string]any{
+				"contract": "ready", "widenReport": "constraints checked",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sv, err = env.session.Report(sv.Instance, map[string]any{"baseBranch": "main"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sv, err = env.session.Answer(sv.Instance, "setup", test.mode, map[string]any{"wipDescription": "route targets"}, test.mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(env.wipBranches) != 1 || env.wipBranches[0] != "main" {
+				t.Fatalf("WIP branches = %v, want base main", env.wipBranches)
+			}
+			sv, err = env.session.Report(sv.Instance, map[string]any{"workBranch": test.workBranch})
+			if err != nil || sv.Step != "work" {
+				t.Fatalf("work target = %q, %v", sv.Step, err)
+			}
+			if got, ok := env.session.Instance(sv.Instance); !ok {
+				t.Fatal("implementation instance disappeared")
+			} else if branch, ok := got.Store.Get("workBranch"); !ok || branch != test.workBranch {
+				t.Fatalf("workBranch = %v, %v", branch, ok)
+			}
+		})
 	}
 }
 
@@ -114,12 +177,20 @@ func TestImplementation_QuickSkipsMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{"baseBranch": "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	sv, err = env.session.Answer(sv.Instance, "setup", "quick", nil, "too small to track")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sv.Step != "work" {
-		t.Fatalf("quick should reach work, got %q", sv.Step)
+	if sv.Step != "workTarget" {
+		t.Fatalf("quick should reach workTarget, got %q", sv.Step)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{"workBranch": "main"})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	sv, err = env.session.Answer(sv.Instance, "work", "conclude", nil, "fixed")
@@ -154,6 +225,10 @@ func TestImplementation_HoldLoopsBackToSetup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{"baseBranch": "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Hold stashes the capture seed and re-serves setup: the missing decision
 	// is captured as a sub-move, then the user picks a mode.
@@ -173,8 +248,12 @@ func TestImplementation_HoldLoopsBackToSetup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sv.Step != "work" {
-		t.Fatalf("after hold resolution setup should advance to work, got %q", sv.Step)
+	if sv.Step != "workTarget" {
+		t.Fatalf("after hold resolution setup should advance to workTarget, got %q", sv.Step)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{"workBranch": "main"})
+	if err != nil || sv.Step != "work" {
+		t.Fatalf("work branch should advance to work, got %q, %v", sv.Step, err)
 	}
 }
 
@@ -243,11 +322,11 @@ func TestImplementation_DispatchDeclarations(t *testing.T) {
 		seed      map[string]string
 	}{
 		"hold": {step: "setup", choice: "hold", procedure: "capture",
-			seed: map[string]string{"widenReport": "widenReport", "anchor": "anchor"}},
+			seed: map[string]string{"widenReport": "widenReport", "anchor": "anchor", "captureBranch": "baseBranch"}},
 		"blocked": {step: "work", choice: "blocked", procedure: "",
-			seed: map[string]string{"widenReport": "widenReport", "anchor": "anchor"}},
+			seed: map[string]string{"widenReport": "widenReport", "anchor": "anchor", "captureBranch": "workBranch"}},
 		"conclude": {step: "work", choice: "conclude", procedure: "capture",
-			seed: map[string]string{"widenReport": "widenReport", "anchor": "anchor"}},
+			seed: map[string]string{"widenReport": "widenReport", "anchor": "anchor", "captureBranch": "workBranch"}},
 		"evaluate": {step: "closeout", choice: "evaluate", procedure: "evaluate",
 			seed: map[string]string{"anchor": "doneEntry", "widenReport": "widenReport"}},
 	}

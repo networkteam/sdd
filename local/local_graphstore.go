@@ -395,7 +395,10 @@ func (s *FilesystemGraphStore) Reconcile(_ context.Context, mutationID, batchDig
 		return app.ApplyResult{State: app.MutationUnknown}, err
 	}
 	if !ok {
-		return app.ApplyResult{State: app.MutationUnknown}, nil
+		// The applied-record directory is the filesystem adapter's canonical
+		// batch ledger. Absence while holding its lock is definitive evidence
+		// that this batch was not applied, not an unknown outcome.
+		return app.ApplyResult{State: app.MutationNotApplied}, nil
 	}
 	if record.Digest != batchDigest {
 		return app.ApplyResult{State: app.MutationUnknown}, &app.ApplicationError{Code: app.ErrorRecoveryRequired, Message: "mutation digest does not match recorded apply"}

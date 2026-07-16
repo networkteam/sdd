@@ -208,7 +208,7 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	}
 	now := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC).Add(time.Duration(testRuntimeGeneration.Add(1)) * time.Hour)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, Language: language,
+		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, DefaultBranch: "main", Language: language,
 		Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: func() time.Time { return now },
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
@@ -485,7 +485,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "4888dd6f1f2978ff89bb4a4b08bd6e6862dc643731b3fb194c58ca1883b3af76"
+	const want = "ffcec574c529be86ef98462b6c347dc9381ff49c5e06fc1acb02affbb8e096dc"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}

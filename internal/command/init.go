@@ -20,6 +20,10 @@ type InitCmd struct {
 	// defaults to model.DefaultGraphDir (".sdd/graph").
 	GraphDir string
 
+	// DefaultBranch is the concrete Git branch persisted for ordinary engine
+	// captures on fresh initialization or when upgrading an older config.
+	DefaultBranch string
+
 	// Participant is the canonical author name to record in
 	// .sdd/config.local.yaml. Empty means "do not change" — existing
 	// values in the local config are preserved (caller resolves the value

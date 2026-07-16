@@ -40,7 +40,14 @@ func (a *Application) Info(ctx context.Context, identity RequestIdentity, projec
 	if runtime.options.Embeddings != nil && runtime.options.SearchIndex != nil {
 		search = "vector,text"
 	}
-	return InfoResult{Project: runtime.options.Project, Participant: principal.Participant, Language: runtime.options.Language, Search: search}, nil
+	recoveries, err := listRecoveriesRuntime(ctx, runtime, false)
+	if err != nil {
+		return InfoResult{}, err
+	}
+	return InfoResult{
+		Project: runtime.options.Project, Participant: principal.Participant, Language: runtime.options.Language,
+		Search: search, Recovery: renderRecoveryNotices(recoveries.Items),
+	}, nil
 }
 
 func (a *Application) Vocabulary(ctx context.Context, identity RequestIdentity, project ProjectID) (string, error) {
@@ -113,6 +120,13 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 		}
 		fmt.Fprintf(&rendered, "\n── repo: %s ──\n", repoID)
 		presenters.RenderView(&rendered, memberResult)
+	}
+	recoveries, err := listRecoveriesRuntime(ctx, runtime, false)
+	if err != nil {
+		return ViewResult{}, err
+	}
+	if notices := renderRecoveryNotices(recoveries.Items); notices != "" {
+		fmt.Fprintf(&rendered, "\n%s\n", notices)
 	}
 	return ViewResult{Project: runtime.options.Project, Sections: strings.TrimRight(rendered.String(), "\n")}, nil
 }
@@ -325,6 +339,10 @@ func (a *Application) snapshotWithDependencies(ctx context.Context, identity Req
 	if err != nil {
 		return nil, err
 	}
+	return a.snapshotWithDependenciesFrom(ctx, identity, runtime, base)
+}
+
+func (a *Application) snapshotWithDependenciesFrom(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime, base *Snapshot) (*Snapshot, error) {
 	if len(runtime.options.Dependencies) == 0 {
 		return base, nil
 	}

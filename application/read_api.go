@@ -16,6 +16,7 @@ type InfoResult struct {
 	Participant string
 	Language    string
 	Search      string
+	Recovery    string
 }
 
 type ViewRequest struct {
