@@ -2,9 +2,13 @@ package application
 
 import "context"
 
+// EmbeddingSpec identifies the vector space an executor embeds into. The
+// fingerprint must uniquely determine the embedding model and with it the
+// vector dimensionality — dimensionality itself is discovered from the
+// vectors on first real use, so lazy providers (ollama reports dimensions
+// only with its first response) satisfy the contract without a probe call.
 type EmbeddingSpec struct {
 	Fingerprint string
-	Dimensions  int
 }
 
 type EmbeddingInput struct {
@@ -30,10 +34,13 @@ type EmbeddingExecutor interface {
 	Embed(context.Context, []EmbeddingInput) ([]EmbeddingVector, error)
 }
 
+// IndexNamespace keys one reconciled vector index. The fingerprint pins the
+// embedding model (and thus the dimensionality), so dimensions are not part
+// of the identity — stores enforce vector-length consistency per namespace
+// at reconcile and query time instead.
 type IndexNamespace struct {
 	Project     ProjectID
 	Fingerprint string
-	Dimensions  int
 	Metric      string
 }
 

@@ -353,7 +353,7 @@ func (f localGitFinalizer) Finalize(ctx context.Context, mutation sdd.AppliedMut
 func publicEmbeddingExecutor(embedder llm.Embedder) sdd.EmbeddingExecutor {
 	return sdd.EmbeddingExecutorFuncs{
 		SpecFunc: func(context.Context) (sdd.EmbeddingSpec, error) {
-			return sdd.EmbeddingSpec{Fingerprint: embedder.Fingerprint(), Dimensions: embedder.Dimensions()}, nil
+			return sdd.EmbeddingSpec{Fingerprint: embedder.Fingerprint()}, nil
 		},
 		EmbedFunc: func(ctx context.Context, inputs []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
 			result := make([]sdd.EmbeddingVector, len(inputs))

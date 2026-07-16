@@ -89,7 +89,7 @@ func TestFilesystemStagedBlobStoreConformance(t *testing.T) {
 func TestFunctionalMechanicalAdaptersConform(t *testing.T) {
 	embeddings := sdd.EmbeddingExecutorFuncs{
 		SpecFunc: func(context.Context) (sdd.EmbeddingSpec, error) {
-			return sdd.EmbeddingSpec{Fingerprint: "fixture", Dimensions: 2}, nil
+			return sdd.EmbeddingSpec{Fingerprint: "fixture"}, nil
 		},
 		EmbedFunc: func(_ context.Context, inputs []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
 			vectors := make([]sdd.EmbeddingVector, len(inputs))
@@ -104,7 +104,7 @@ func TestFunctionalMechanicalAdaptersConform(t *testing.T) {
 	})
 
 	index := newMemoryIndex()
-	namespace := sdd.IndexNamespace{Project: "example", Fingerprint: "fixture", Dimensions: 2, Metric: "cosine"}
+	namespace := sdd.IndexNamespace{Project: "example", Fingerprint: "fixture", Metric: "cosine"}
 	chunks := []sdd.IndexedChunk{{Chunk: sdd.CanonicalChunk{ID: "chunk-1", EntryID: "entry-1", Revision: "r1", ContentHash: "h1"}, Vector: []float32{0, 1}}}
 	sddtest.RunSearchIndexStoreTests(t, func(*testing.T) sddtest.SearchIndexStoreFixture {
 		return sddtest.SearchIndexStoreFixture{Store: index, Namespace: namespace, Revision: "r1", Chunks: chunks, Query: []float32{0, 1}}
@@ -122,7 +122,7 @@ func TestFunctionalMechanicalAdaptersConform(t *testing.T) {
 }
 
 func TestMemorySearchIndexStoreConforms(t *testing.T) {
-	namespace := sdd.IndexNamespace{Project: "memory", Fingerprint: "fixture", Dimensions: 2, Metric: "cosine"}
+	namespace := sdd.IndexNamespace{Project: "memory", Fingerprint: "fixture", Metric: "cosine"}
 	chunks := []sdd.IndexedChunk{{Chunk: sdd.CanonicalChunk{ID: "chunk-1", EntryID: "entry-1", Revision: "r1", ContentHash: "h1"}, Vector: []float32{0, 1}}}
 	sddtest.RunSearchIndexStoreTests(t, func(*testing.T) sddtest.SearchIndexStoreFixture {
 		return sddtest.SearchIndexStoreFixture{Store: localadapter.NewMemorySearchIndexStore(), Namespace: namespace, Revision: "r1", Chunks: chunks, Query: []float32{0, 1}}

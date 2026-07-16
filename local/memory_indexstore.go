@@ -43,9 +43,23 @@ func (s *MemorySearchIndexStore) Reconcile(_ context.Context, namespace app.Inde
 	for _, id := range deletes {
 		delete(s.chunks[namespace], id)
 	}
+	// The namespace fingerprint pins the embedding model, so every vector in
+	// a namespace must share one dimensionality — the first stored vector
+	// sets it, a mismatch is a provider bug.
+	dims := 0
+	for _, item := range s.chunks[namespace] {
+		dims = len(item.Vector)
+		break
+	}
 	for _, item := range upserts {
-		if len(item.Vector) != namespace.Dimensions {
-			return fmt.Errorf("sdd: vector for %s has %d dimensions, want %d", item.Chunk.ID, len(item.Vector), namespace.Dimensions)
+		if len(item.Vector) == 0 {
+			return fmt.Errorf("sdd: vector for %s is empty", item.Chunk.ID)
+		}
+		if dims == 0 {
+			dims = len(item.Vector)
+		}
+		if len(item.Vector) != dims {
+			return fmt.Errorf("sdd: vector for %s has %d dimensions, want %d", item.Chunk.ID, len(item.Vector), dims)
 		}
 		copy := item
 		copy.Vector = append([]float32(nil), item.Vector...)
@@ -59,10 +73,10 @@ func (s *MemorySearchIndexStore) Nearest(_ context.Context, namespaces []app.Ind
 	defer s.mu.RUnlock()
 	var result []app.ScoredChunkHit
 	for _, namespace := range namespaces {
-		if len(vector) != namespace.Dimensions {
-			return nil, fmt.Errorf("sdd: query vector has %d dimensions, want %d", len(vector), namespace.Dimensions)
-		}
 		for _, item := range s.chunks[namespace] {
+			if len(vector) != len(item.Vector) {
+				return nil, fmt.Errorf("sdd: query vector has %d dimensions, want %d", len(vector), len(item.Vector))
+			}
 			score, err := cosineSimilarity(vector, item.Vector)
 			if err != nil {
 				return nil, err

@@ -33,10 +33,10 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, r
 	if err != nil {
 		return nil, err
 	}
-	if spec.Fingerprint == "" || spec.Dimensions <= 0 {
+	if spec.Fingerprint == "" {
 		return nil, fmt.Errorf("sdd: embedding executor returned invalid spec")
 	}
-	namespace := IndexNamespace{Project: r.options.Project.ID, Fingerprint: spec.Fingerprint, Dimensions: spec.Dimensions, Metric: "cosine"}
+	namespace := IndexNamespace{Project: r.options.Project.ID, Fingerprint: spec.Fingerprint, Metric: "cosine"}
 	chunks, err := deriveApplicationChunks(snapshot, request)
 	if err != nil {
 		return nil, err
@@ -82,9 +82,16 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, r
 		if len(vectors) != len(inputs) {
 			return nil, fmt.Errorf("sdd: embedding executor returned %d vectors for %d inputs", len(vectors), len(inputs))
 		}
+		dims := 0
 		for i, vector := range vectors {
-			if vector.ID != inputs[i].ID || len(vector.Values) != spec.Dimensions {
-				return nil, fmt.Errorf("sdd: embedding vector %d does not match its input/spec", i)
+			if vector.ID != inputs[i].ID || len(vector.Values) == 0 {
+				return nil, fmt.Errorf("sdd: embedding vector %d does not match its input", i)
+			}
+			if dims == 0 {
+				dims = len(vector.Values)
+			}
+			if len(vector.Values) != dims {
+				return nil, fmt.Errorf("sdd: embedding vector %d has %d dimensions, want %d", i, len(vector.Values), dims)
 			}
 			upserts = append(upserts, IndexedChunk{Chunk: desired[vector.ID].canonical.public, Vector: vector.Values})
 		}
@@ -98,7 +105,7 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, r
 	if err != nil {
 		return nil, err
 	}
-	if len(queryVectors) != 1 || len(queryVectors[0].Values) != spec.Dimensions {
+	if len(queryVectors) != 1 || len(queryVectors[0].Values) == 0 {
 		return nil, fmt.Errorf("sdd: embedding executor returned invalid query vector")
 	}
 	limit := request.EffectiveLimit()

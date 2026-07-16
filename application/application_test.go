@@ -89,7 +89,7 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 	}
 	embeddings := sdd.EmbeddingExecutorFuncs{
 		SpecFunc: func(context.Context) (sdd.EmbeddingSpec, error) {
-			return sdd.EmbeddingSpec{Fingerprint: "application-test", Dimensions: 2}, nil
+			return sdd.EmbeddingSpec{Fingerprint: "application-test"}, nil
 		},
 		EmbedFunc: func(_ context.Context, inputs []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
 			vectors := make([]sdd.EmbeddingVector, len(inputs))

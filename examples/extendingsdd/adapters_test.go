@@ -56,7 +56,7 @@ func (blobStore) Release(context.Context, sdd.BlobOwner, string) error          
 type embeddingExecutor struct{}
 
 func (embeddingExecutor) Spec(context.Context) (sdd.EmbeddingSpec, error) {
-	return sdd.EmbeddingSpec{Fingerprint: "example", Dimensions: 1}, nil
+	return sdd.EmbeddingSpec{Fingerprint: "example"}, nil
 }
 func (embeddingExecutor) Embed(context.Context, []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
 	return nil, nil

@@ -183,7 +183,7 @@ func RunEmbeddingExecutorTests(t *testing.T, factory func(*testing.T) EmbeddingE
 	if err != nil {
 		t.Fatalf("Spec: %v", err)
 	}
-	if spec.Fingerprint == "" || spec.Dimensions <= 0 {
+	if spec.Fingerprint == "" {
 		t.Fatalf("Spec = %+v", spec)
 	}
 	vectors, err := fixture.Executor.Embed(t.Context(), fixture.Inputs)
@@ -193,9 +193,16 @@ func RunEmbeddingExecutorTests(t *testing.T, factory func(*testing.T) EmbeddingE
 	if len(vectors) != len(fixture.Inputs) {
 		t.Fatalf("Embed returned %d vectors, want %d", len(vectors), len(fixture.Inputs))
 	}
+	dims := 0
 	for i, vector := range vectors {
-		if vector.ID != fixture.Inputs[i].ID || len(vector.Values) != spec.Dimensions {
+		if vector.ID != fixture.Inputs[i].ID || len(vector.Values) == 0 {
 			t.Fatalf("vector %d = %+v", i, vector)
+		}
+		if dims == 0 {
+			dims = len(vector.Values)
+		}
+		if len(vector.Values) != dims {
+			t.Fatalf("vector %d has %d dimensions, want %d", i, len(vector.Values), dims)
 		}
 	}
 }
