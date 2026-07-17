@@ -134,6 +134,14 @@ type Graphs interface {
 	Invalidate()
 }
 
+// ContextualGraphs optionally resolves the graph for one procedure store.
+// The engine does not interpret store fields: application shells use this
+// hook when a move carries an explicit graph authority that differs from the
+// session's ordinary read graph. Procedure loading still uses Graphs.Current.
+type ContextualGraphs interface {
+	CurrentFor(*Store) (*model.Graph, error)
+}
+
 // Engine executes procedure instances against a graph provider and a registry.
 // It is pure Go over data — shells (MCP, webapp) sit on top; side-effectful
 // commands come in through the registry with their own dependencies. The

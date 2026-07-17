@@ -109,11 +109,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 			if !ok {
 				return nil, fmt.Errorf("generatedSummary: entryId is not set — the write gate has not created an entry")
 			}
-			graph, err := w.graphs.Current()
-			if err != nil {
-				return nil, err
-			}
-			entry, ok := graph.ByID[id]
+			entry, ok := ctx.Graph.ByID[id]
 			if !ok {
 				return nil, fmt.Errorf("generatedSummary: entry %s not found", id)
 			}

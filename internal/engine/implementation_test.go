@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // Per-procedure table tests for the embedded implementation entry, driving
@@ -11,6 +13,20 @@ import (
 // engage_explore_test for the shared harness and the fake WIP commands).
 
 var errFakeNoMarker = errors.New("fake wipDone: no marker set")
+
+type implementationBranchGraphs struct {
+	base *model.Graph
+	work *model.Graph
+}
+
+func (g implementationBranchGraphs) Current() (*model.Graph, error) { return g.base, nil }
+func (g implementationBranchGraphs) Invalidate()                    {}
+func (g implementationBranchGraphs) CurrentFor(store *Store) (*model.Graph, error) {
+	if branch, ok := store.Get("workBranch"); ok && branch == "feature" {
+		return g.work, nil
+	}
+	return g.base, nil
+}
 
 // startImplementationAtWork drives a fresh instance through contract and a
 // tracked in-place setup to the working junction.
@@ -304,6 +320,50 @@ func TestImplementation_DoneEntryMustResolve(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("failing = %+v, want doneEntryResolves", sv.Failing)
+	}
+}
+
+func TestImplementation_DoneEntryResolvesAgainstWorkBranch(t *testing.T) {
+	env := newProcEnv(t, "implementation")
+	work := procGraph(t)
+	env.session.engine.Graphs = implementationBranchGraphs{
+		base: model.NewGraph([]*model.Entry{work.ByID[procAnchorID]}),
+		work: work,
+	}
+
+	sv, err := env.session.Start(env.spec, map[string]any{"anchor": procAnchorID}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"contract": "ready", "widenReport": "constraints checked",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{"baseBranch": "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Answer(sv.Instance, "setup", "worktree",
+		map[string]any{"wipDescription": "target-aware reads"}, "use a worktree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{"workBranch": "feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Answer(sv.Instance, "work", "conclude", nil, "contract met")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{"doneEntry": procNeighborID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "landing" {
+		t.Fatalf("work-branch-only done should reach landing, got %q with failures %+v", sv.Step, sv.Failing)
 	}
 }
 

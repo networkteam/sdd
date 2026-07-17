@@ -687,6 +687,7 @@ func (w *WorkflowSession) publicServe(serve *engine.Serve) *WorkflowServe {
 type workflowGraphs struct {
 	workflow *WorkflowSession
 	snapshot *Snapshot
+	targets  map[MutationTarget]*Snapshot
 }
 
 func (g *workflowGraphs) Current() (*model.Graph, error) {
@@ -705,7 +706,54 @@ func (g *workflowGraphs) Current() (*model.Graph, error) {
 	return snapshot.graph, nil
 }
 
-func (g *workflowGraphs) Invalidate() { g.snapshot = nil }
+// CurrentFor resolves the graph authority carried by a procedure instance.
+// Capture state names captureBranch; implementation state names workBranch.
+// The application owns those meanings while the engine remains unaware of
+// branch semantics.
+func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
+	target := g.workflow.readTarget(store)
+	if target == (MutationTarget{}) {
+		return g.Current()
+	}
+	if snapshot := g.targets[target]; snapshot != nil {
+		return snapshot.graph, nil
+	}
+	_, runtime, err := g.workflow.app.resolve(g.workflow.ctx, g.workflow.identity, g.workflow.project, AccessRead)
+	if err != nil {
+		return nil, err
+	}
+	target, err = resolveMutationTarget(runtime, target)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := snapshotMutationTarget(g.workflow.ctx, runtime, target)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err = g.workflow.app.snapshotWithDependenciesFrom(g.workflow.ctx, g.workflow.identity, runtime, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if g.targets == nil {
+		g.targets = make(map[MutationTarget]*Snapshot)
+	}
+	g.targets[target] = snapshot
+	return snapshot.graph, nil
+}
+
+func (g *workflowGraphs) Invalidate() {
+	g.snapshot = nil
+	g.targets = nil
+}
+
+func (w *WorkflowSession) readTarget(store *engine.Store) MutationTarget {
+	for _, field := range []string{"captureBranch", "workBranch"} {
+		if target := w.mutationTarget(store, field); target != (MutationTarget{}) {
+			return target
+		}
+	}
+	return MutationTarget{}
+}
 
 type workflowSink struct{ workflow *WorkflowSession }
 

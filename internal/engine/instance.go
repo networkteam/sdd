@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // InstanceStatus is a procedure instance's lifecycle state.
@@ -164,7 +166,15 @@ func (s *Session) evalGuard(inst *Instance, g *GuardExpr) (bool, []FailedPredica
 // engine's provider. Reading can fail (a disk load error surfaces here rather
 // than through a mutable field poked from outside); callers propagate it.
 func (s *Session) funcContext(inst *Instance) (*Context, error) {
-	graph, err := s.engine.Graphs.Current()
+	var (
+		graph *model.Graph
+		err   error
+	)
+	if contextual, ok := s.engine.Graphs.(ContextualGraphs); ok {
+		graph, err = contextual.CurrentFor(inst.Store)
+	} else {
+		graph, err = s.engine.Graphs.Current()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolving current graph: %w", err)
 	}
