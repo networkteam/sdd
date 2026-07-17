@@ -8,7 +8,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/baseprocedures"
+	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 	"gopkg.in/yaml.v3"
@@ -110,6 +112,15 @@ func BuildSnapshot(_ context.Context, data SnapshotData) (*Snapshot, error) {
 		return nil, fmt.Errorf("sdd: loading base procedures: %w", err)
 	}
 	for _, entry := range base {
+		if !onDisk[entry.ID] {
+			entries = append(entries, entry)
+		}
+	}
+	facts, err := basefacts.Entries(finders.LiveViewVocabulary())
+	if err != nil {
+		return nil, fmt.Errorf("sdd: loading base facts: %w", err)
+	}
+	for _, entry := range facts {
 		if !onDisk[entry.ID] {
 			entries = append(entries, entry)
 		}

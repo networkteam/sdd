@@ -1,0 +1,91 @@
+// Package basefacts assembles the base facts shipped with the sdd binary.
+// Base facts are framework reference knowledge merged into every graph as
+// Embedded `fact` signals — the pull layer that answers the engine's
+// push-only knowledge gap (d-cpt-dtv). They mirror the base-procedures
+// pattern: always loaded, no participants, no project refs, stable IDs, and
+// overridable per-project by a superseding entry on the same ID.
+//
+// Unlike base procedures — static .md files embedded at compile time — a base
+// fact body may be rendered at load from live executor vocabularies, so the
+// fact tracks the code with zero manual sync. To keep this package free of a
+// dependency on the read stack (finders assembles the vocabulary and merges
+// these entries, so importing it here would cycle), the caller supplies the
+// vocabulary as data — the same dependency inversion viewlayout uses.
+package basefacts
+
+import (
+	"fmt"
+
+	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/viewlayout"
+)
+
+// Entries returns the base facts to merge into a graph, rendered against the
+// supplied live vocabulary. The set is compile-time-shaped, so a construction
+// error means a broken build — callers fail hard, exactly as with base
+// procedures.
+func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
+	entries := []*model.Entry{}
+
+	viewGrammar, err := build(viewGrammarID, viewGrammarFrontmatter, viewGrammarBody(vocab))
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, viewGrammar)
+
+	return entries, nil
+}
+
+// build materializes one base fact from its frontmatter and rendered body
+// through the same ParseEntry path every on-disk entry uses, then marks it
+// Embedded so write-side surfaces (summary regeneration, lint, rewrite) skip
+// it. A base fact must be exactly a kind: fact signal — anything else is a
+// build mistake, caught here so it never reaches a graph.
+func build(id, frontmatter, body string) (*model.Entry, error) {
+	content := "---\n" + frontmatter + "---\n\n" + body
+	entry, err := model.ParseEntry(id+".md", content)
+	if err != nil {
+		return nil, fmt.Errorf("parsing base fact %s: %w", id, err)
+	}
+	if entry.Type != model.TypeSignal || entry.Kind != model.KindFact {
+		return nil, fmt.Errorf("base fact %s is %s %s — base facts ship as kind: fact signals", id, entry.Type, entry.Kind)
+	}
+	entry.Embedded = true
+	return entry, nil
+}
+
+// viewGrammarID is the stable identity of the view-layout-grammar fact. It
+// never changes across releases: readers cite it, and the first-hit view hint
+// points at it. Its timestamp is a fixed authoring stamp, not a live clock.
+const viewGrammarID = "20260717-110000-s-prc-vwg"
+
+// viewGrammarFrontmatter is the fact's static envelope. The body is rendered
+// separately from live vocabulary; everything a summary surface reads lives
+// here. No participants and no project refs, per the base-entry contract.
+const viewGrammarFrontmatter = `type: signal
+layer: process
+kind: fact
+confidence: high
+topics:
+    - engine/base-facts
+    - cli/view
+summary: >-
+    The view layout language composes graph views from a colon-chained
+    pipeline — filters, then ranking, paging, and transforms, ending in a
+    render terminator — with named macros as shortcuts; this fact is the
+    grammar and vocabulary reference for building a layout, including the
+    quoting rule for multi-word, date, and duration arguments.
+`
+
+// viewGrammarBody renders the fact's body: a short neutral orientation line
+// followed by the host-neutral grammar-and-vocabulary reference generated
+// from the live executor vocabulary. Nothing here names a host command, so
+// the fact stays host-neutral (d-cpt-476).
+func viewGrammarBody(vocab viewlayout.Vocabulary) string {
+	return "Reference for the view layout language — the grammar for composing graph " +
+		"views by pipeline. Pull it when building or debugging a layout: it lists " +
+		"every filter, rank algorithm, transform, render terminator, and macro the " +
+		"executor accepts, and the quoting rule that trips up unquoted multi-word, " +
+		"date, and duration arguments.\n\n" +
+		viewlayout.ReferenceBody(vocab)
+}

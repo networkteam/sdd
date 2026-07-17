@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
@@ -76,6 +77,20 @@ func (f *Finder) LoadGraph(dir string) (*model.Graph, error) {
 	for _, be := range base {
 		if !onDisk[be.ID] {
 			entries = append(entries, be)
+		}
+	}
+
+	// Join the base facts shipped in the binary, rendered against the live
+	// layout vocabulary. Same always-loaded, disk-wins semantics as base
+	// procedures; the embedded set is compile-time-shaped, so an error is a
+	// broken build.
+	facts, err := basefacts.Entries(LiveViewVocabulary())
+	if err != nil {
+		return nil, fmt.Errorf("loading base facts: %w", err)
+	}
+	for _, fe := range facts {
+		if !onDisk[fe.ID] {
+			entries = append(entries, fe)
 		}
 	}
 
