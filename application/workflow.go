@@ -715,9 +715,6 @@ func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
 	if target == (MutationTarget{}) {
 		return g.Current()
 	}
-	if snapshot := g.targets[target]; snapshot != nil {
-		return snapshot.graph, nil
-	}
 	_, runtime, err := g.workflow.app.resolve(g.workflow.ctx, g.workflow.identity, g.workflow.project, AccessRead)
 	if err != nil {
 		return nil, err
@@ -726,6 +723,13 @@ func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
 	if err != nil {
 		return nil, err
 	}
+	if snapshot := g.targets[target]; snapshot != nil {
+		return snapshot.graph, nil
+	}
+	// A cache miss deliberately uses the same short-lived acquisition as a
+	// write snapshot. Local acquisition is a checkout lookup; remote target
+	// acquirers may clone, so remote compositions should accelerate this seam
+	// with their read cache while preserving explicit target authority.
 	snapshot, err := snapshotMutationTarget(g.workflow.ctx, runtime, target)
 	if err != nil {
 		return nil, err
@@ -746,8 +750,14 @@ func (g *workflowGraphs) Invalidate() {
 	g.targets = nil
 }
 
+// workflowReadTargetFields is the application-owned registry of procedure
+// state fields that carry branch authority for graph reads. A procedure that
+// introduces another branch-bearing field must register it here so reads do
+// not silently fall back to the session graph.
+var workflowReadTargetFields = [...]string{"captureBranch", "workBranch"}
+
 func (w *WorkflowSession) readTarget(store *engine.Store) MutationTarget {
-	for _, field := range []string{"captureBranch", "workBranch"} {
+	for _, field := range workflowReadTargetFields {
 		if target := w.mutationTarget(store, field); target != (MutationTarget{}) {
 			return target
 		}
