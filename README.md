@@ -2,7 +2,7 @@
 
 **signal · dialogue · decision**
 
-**Keep humans and AI agents aligned across parallel work.**
+**SDD is agent-native memory for your project's decisions and the why behind them.** Your agents get exactly the project context they need — what was noticed, discussed, and decided — and new knowledge is captured in dialogue with the people who create it, as the work happens.
 
 SDD records your project's reasoning as an immutable decision graph — signals (what you noticed) and decisions (what you committed to). At any moment, anyone (human or agent) can see what's in flight, which decisions are active, and what's still open. Built for developers and teams shipping with AI agents.
 
