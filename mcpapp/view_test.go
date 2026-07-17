@@ -6,8 +6,56 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/basefacts"
 	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
+
+// TestViewFirstHitHint covers the four (bound × first-view) cells of the
+// view-tool breadcrumb (AC8). The first-view pointer is keyed to the
+// connection, so two fresh connections realize every cell: an unbound reader
+// (the s-prc-3kh cohort) and a bound session.
+func TestViewFirstHitHint(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	const doorMark = "start_session is the door"
+	const factMark = "view layout grammar"
+
+	// Connection A: never opens a session (unbound).
+	unbound := connect(t, env.srv)
+	var a1, a2 mcpserver.ViewResult
+	call(t, unbound, "view", map[string]any{"layout": "active:as-list"}, &a1)
+	call(t, unbound, "view", map[string]any{"layout": "active:as-list"}, &a2)
+
+	// unbound + first view: door AND fact, door first.
+	if !strings.Contains(a1.Hint, doorMark) || !strings.Contains(a1.Hint, factMark) {
+		t.Errorf("unbound first view should join both breadcrumbs: %q", a1.Hint)
+	}
+	if !strings.Contains(a1.Hint, basefacts.ViewGrammarFactID) {
+		t.Errorf("first-view hint should point at the fact ID: %q", a1.Hint)
+	}
+	if strings.Index(a1.Hint, doorMark) > strings.Index(a1.Hint, factMark) {
+		t.Errorf("door breadcrumb should come first: %q", a1.Hint)
+	}
+	// unbound + subsequent view: door only.
+	if !strings.Contains(a2.Hint, doorMark) || strings.Contains(a2.Hint, factMark) {
+		t.Errorf("unbound second view should carry the door breadcrumb only: %q", a2.Hint)
+	}
+
+	// Connection B: opens a session (bound).
+	bound := connect(t, env.srv)
+	openSession(t, bound)
+	var b1, b2 mcpserver.ViewResult
+	call(t, bound, "view", map[string]any{"layout": "active:as-list"}, &b1)
+	call(t, bound, "view", map[string]any{"layout": "active:as-list"}, &b2)
+
+	// bound + first view: fact only.
+	if strings.Contains(b1.Hint, doorMark) || !strings.Contains(b1.Hint, factMark) {
+		t.Errorf("bound first view should carry the fact breadcrumb only: %q", b1.Hint)
+	}
+	// bound + subsequent view: no breadcrumb.
+	if b2.Hint != "" {
+		t.Errorf("bound second view should carry no breadcrumb, got %q", b2.Hint)
+	}
+}
 
 // TestViewEmptyResultNamesParticipants exercises the AC3 path end to end: a
 // participant filter that matches nothing must not return a blank string, and

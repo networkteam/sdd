@@ -28,8 +28,8 @@ func TestEntriesShipViewGrammarFact(t *testing.T) {
 	}
 
 	fact := entries[0]
-	if fact.ID != viewGrammarID {
-		t.Errorf("fact ID = %q, want stable %q", fact.ID, viewGrammarID)
+	if fact.ID != ViewGrammarFactID {
+		t.Errorf("fact ID = %q, want stable %q", fact.ID, ViewGrammarFactID)
 	}
 	if fact.Type != model.TypeSignal || fact.Kind != model.KindFact {
 		t.Errorf("fact is %s %s, want signal fact", fact.Type, fact.Kind)

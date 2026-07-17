@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/basefacts"
 )
 
 // defaultSearchHits caps search responses when the caller sets no limit —
@@ -692,6 +693,37 @@ func (s *Server) readHint(ms *mcp.ServerSession) string {
 	return "no dialogue session is open — start_session is the door; reads stay free"
 }
 
+// viewHintServedKey is the served-once sentinel for the first-view breadcrumb,
+// deduped per connection through the same servedBefore memory as instruction
+// blocks (cleared on disconnect and repeated start_session).
+const viewHintServedKey = "view-layout-grammar-hint"
+
+// viewHint is the single producer of the view tool's Hint field. It joins two
+// breadcrumbs that are otherwise mutually exclusive by session-boundness: the
+// door breadcrumb readHint serves while no session is bound, and a one-time
+// pointer to the view-grammar fact served on the first view call of a
+// connection. First-view is keyed to the connection (like readHint), so the
+// unbound free-reader cohort the fact exists for (s-prc-3kh) gets it too. In
+// the one overlapping cell — unbound and first view — both join, door first;
+// every other cell carries a single breadcrumb or none. This strengthens the
+// breadcrumb; it never gates the read (s-cpt-1dz, d-cpt-h99).
+func (s *Server) viewHint(ms *mcp.ServerSession) string {
+	door := s.readHint(ms)
+	var fact string
+	if !s.servedBefore(ms, viewHintServedKey) {
+		fact = "view layout grammar: show " + basefacts.ViewGrammarFactID +
+			" for the full filter/rank/macro vocabulary and the quoting rules"
+	}
+	switch {
+	case door != "" && fact != "":
+		return door + " · " + fact
+	case fact != "":
+		return fact
+	default:
+		return door
+	}
+}
+
 func (s *Server) logRootRead(ctx context.Context, req *mcp.CallToolRequest, tool string, full, summary []string) error {
 	ss := s.sessions.bound(req.Session)
 	if ss == nil {
@@ -758,7 +790,7 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 		}
 	}
 	sections = guardViewSize(sections)
-	return nil, ViewResult{Sections: sections, Hint: s.readHint(req.Session)}, nil
+	return nil, ViewResult{Sections: sections, Hint: s.viewHint(req.Session)}, nil
 
 }
 

@@ -27,7 +27,7 @@ import (
 func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	entries := []*model.Entry{}
 
-	viewGrammar, err := build(viewGrammarID, viewGrammarFrontmatter, viewGrammarBody(vocab))
+	viewGrammar, err := build(ViewGrammarFactID, viewGrammarFrontmatter, viewGrammarBody(vocab))
 	if err != nil {
 		return nil, err
 	}
@@ -54,10 +54,11 @@ func build(id, frontmatter, body string) (*model.Entry, error) {
 	return entry, nil
 }
 
-// viewGrammarID is the stable identity of the view-layout-grammar fact. It
+// ViewGrammarFactID is the stable identity of the view-layout-grammar fact. It
 // never changes across releases: readers cite it, and the first-hit view hint
-// points at it. Its timestamp is a fixed authoring stamp, not a live clock.
-const viewGrammarID = "20260717-110000-s-prc-vwg"
+// (mcpapp) points at it. Its timestamp is a fixed authoring stamp, not a live
+// clock. Exported so the hint producer references one shared constant.
+const ViewGrammarFactID = "20260717-110000-s-prc-vwg"
 
 // viewGrammarFrontmatter is the fact's static envelope. The body is rendered
 // separately from live vocabulary; everything a summary surface reads lives
