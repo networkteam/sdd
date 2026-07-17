@@ -744,8 +744,52 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if err != nil {
 		return nil, ViewResult{}, toolError("viewing: %v", err)
 	}
-	return nil, ViewResult{Sections: result.Sections, Hint: s.readHint(req.Session)}, nil
+	sections := result.Sections
+	// An empty result must never reach an agent as a blank string — it cannot
+	// tell "matched nothing" from a broken call. Say so, and when a participant
+	// filter came up empty (exact-match miss), name the participants the graph
+	// knows. Any rendered content (e.g. recovery notices) is kept below.
+	if result.MatchedCount == 0 {
+		msg := emptyViewMessage(result.KnownParticipants)
+		if strings.TrimSpace(sections) == "" {
+			sections = msg
+		} else {
+			sections = msg + "\n\n" + sections
+		}
+	}
+	sections = guardViewSize(sections)
+	return nil, ViewResult{Sections: sections, Hint: s.readHint(req.Session)}, nil
 
+}
+
+// emptyViewMessage is the explicit stand-in for an empty view result. It names
+// the graph's known participants when a participant filter matched nothing so
+// an exact-match miss reads as a wrong spelling, not absent data.
+func emptyViewMessage(knownParticipants []string) string {
+	msg := "0 entries matched the layout."
+	if len(knownParticipants) > 0 {
+		msg += " Known participants: " + strings.Join(knownParticipants, ", ") + "."
+	}
+	return msg
+}
+
+// maxViewResultBytes caps a view response over MCP. A pathological layout
+// (e.g. active:as-list on a large graph) can otherwise blow the client's token
+// budget in one call; the cap keeps the tool usable and points at paging.
+const maxViewResultBytes = 40000
+
+// guardViewSize truncates an over-cap view result on a line boundary and
+// appends a notice naming n() paging as the recovery, so an agent that hit the
+// cap knows how to narrow rather than seeing a silently cut result.
+func guardViewSize(s string) string {
+	if len(s) <= maxViewResultBytes {
+		return s
+	}
+	truncated := s[:maxViewResultBytes]
+	if i := strings.LastIndexByte(truncated, '\n'); i > 0 {
+		truncated = truncated[:i]
+	}
+	return fmt.Sprintf("%s\n\n[view output truncated at %d of %d bytes — narrow with n(K), tighter filters, or fewer sections]", truncated, len(truncated), len(s))
 }
 
 func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {

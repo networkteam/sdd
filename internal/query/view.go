@@ -23,6 +23,19 @@ type ViewResult struct {
 	Sections []SectionResult
 }
 
+// MatchedCount sums the primary units across every section — the total the
+// pipeline produced. Zero means the layout matched nothing, which callers use
+// to render an explicit empty result instead of a blank string.
+func (r ViewResult) MatchedCount() int {
+	total := 0
+	for _, s := range r.Sections {
+		if s.Data != nil {
+			total += s.Data.Count()
+		}
+	}
+	return total
+}
+
 // SectionResult is one section's render-ready data plus dispatch metadata.
 // Render names the presenter that should consume Data; Data carries the
 // shape-tagged result. The presenter validates that Data.Shape() matches

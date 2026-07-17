@@ -85,3 +85,6 @@ func (g *Graph) TopicCounts(entries []*Entry, now time.Time) Counts {
 	})
 	return Counts{Rows: rows}
 }
+
+// Count implements SectionData: the number of topic rows produced.
+func (c Counts) Count() int { return len(c.Rows) }

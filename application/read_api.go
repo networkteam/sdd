@@ -28,6 +28,16 @@ type ViewRequest struct {
 type ViewResult struct {
 	Project  ProjectRef
 	Sections string
+	// MatchedCount is the total primary units the layout produced across the
+	// local graph and any queried dependency repos. Zero means the pipeline
+	// matched nothing — surfaces distinguish an empty result from a failure
+	// (an agent over MCP cannot tell a blank string from a broken call).
+	MatchedCount int
+	// KnownParticipants names the graph's canonical participants, populated
+	// only when the result was empty and the layout carried a participant
+	// filter — so an empty participant() view can say what names exist rather
+	// than leaving an exact-match miss indistinguishable from no data.
+	KnownParticipants []string
 }
 
 type ShowRequest struct {

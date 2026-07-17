@@ -62,3 +62,6 @@ type FocusTarget struct {
 
 // Shape implements SectionData.
 func (FocusBlock) Shape() RenderShape { return ShapeFocusBlock }
+
+// Count implements SectionData: the number of focus groups produced.
+func (f FocusBlock) Count() int { return len(f.Focuses) }

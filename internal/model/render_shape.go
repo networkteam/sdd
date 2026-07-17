@@ -17,6 +17,11 @@ const (
 // slices add Grouped, FocusBlock, etc.
 type SectionData interface {
 	Shape() RenderShape
+	// Count reports how many primary units the section rendered — entries,
+	// topic rows, focuses, actors, or WIP markers by shape. Zero means the
+	// pipeline matched nothing, which lets callers distinguish an empty result
+	// from a failure without re-deriving it from rendered text.
+	Count() int
 }
 
 // FlatList is an ordered sequence of entries — the shape consumed by the
@@ -65,3 +70,6 @@ type RefExpansion struct {
 
 // Shape implements SectionData.
 func (FlatList) Shape() RenderShape { return ShapeFlatList }
+
+// Count implements SectionData.
+func (f FlatList) Count() int { return len(f.Entries) }

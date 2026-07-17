@@ -15,3 +15,6 @@ type WipList struct {
 
 // Shape implements SectionData.
 func (WipList) Shape() RenderShape { return ShapeWipList }
+
+// Count implements SectionData: the number of WIP markers produced.
+func (w WipList) Count() int { return len(w.Markers) }

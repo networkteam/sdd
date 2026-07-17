@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/index"
@@ -23,7 +22,10 @@ import (
 // entry, but fixture assertions count only the on-disk project entries.
 func withoutEmbedded(t *testing.T, ids []string) []string {
 	t.Helper()
-	base, err := baseprocedures.Entries()
+	// Exclude every embedded entry the loader merges — base procedures and
+	// base facts alike — so counts track project entries as the embedded set
+	// grows. Uses the same assembly production does (finders.BaseEntries).
+	base, err := finders.BaseEntries()
 	if err != nil {
 		t.Fatal(err)
 	}
