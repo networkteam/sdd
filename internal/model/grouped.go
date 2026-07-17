@@ -32,3 +32,12 @@ type Grouped struct {
 
 // Shape implements SectionData.
 func (Grouped) Shape() RenderShape { return ShapeGrouped }
+
+// Count implements SectionData: total entries across all groups.
+func (g Grouped) Count() int {
+	n := 0
+	for _, group := range g.Groups {
+		n += len(group.Entries)
+	}
+	return n
+}

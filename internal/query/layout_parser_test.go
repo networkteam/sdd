@@ -330,3 +330,40 @@ func TestParseLayout_Invalid(t *testing.T) {
 		})
 	}
 }
+
+// TestParseLayout_QuotingHint covers the actionable hint on the arguments that
+// must be quoted: a bare multi-word name, ISO date, or duration breaks the
+// parser, and the hint points at the fix. Punctuation that breaks at the same
+// site gets no hint, so genuine syntax errors stay uncluttered.
+func TestParseLayout_QuotingHint(t *testing.T) {
+	const hint = "quote multi-word names"
+
+	present := []string{
+		`participant(Jonathan Philipp)`, // space — multi-word name
+		`since(7d)`,                     // trailing letter — duration
+		`since(2026-07-17)`,             // hyphen — ISO date
+	}
+	for _, input := range present {
+		_, err := query.ParseLayout(input)
+		if err == nil {
+			t.Fatalf("ParseLayout(%q): expected error, got nil", input)
+		}
+		if !strings.Contains(err.Error(), hint) {
+			t.Errorf("ParseLayout(%q): error %q missing quoting hint", input, err.Error())
+		}
+	}
+
+	absent := []string{
+		`n(10;)`, // punctuation at the expected-')' site — not a bare value
+		`n(10:)`, // colon likewise
+	}
+	for _, input := range absent {
+		_, err := query.ParseLayout(input)
+		if err == nil {
+			t.Fatalf("ParseLayout(%q): expected error, got nil", input)
+		}
+		if strings.Contains(err.Error(), hint) {
+			t.Errorf("ParseLayout(%q): error %q should not carry the quoting hint", input, err.Error())
+		}
+	}
+}

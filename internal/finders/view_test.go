@@ -121,7 +121,10 @@ func TestView_UnknownFunction(t *testing.T) {
 		t.Fatalf("expected error for unknown function, got nil")
 	}
 	msg := err.Error()
-	for _, want := range []string{"unknown function", "futurefn", "active", "as-list"} {
+	// Lists primitives AND macros: a wrong guess is often a reach for a macro,
+	// and the primitive-only list left that vocabulary undiscoverable (top,
+	// focus, done, …).
+	for _, want := range []string{"unknown function", "futurefn", "active", "as-list", "top", "focus"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q missing substring %q", msg, want)
 		}

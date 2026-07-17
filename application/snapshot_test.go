@@ -46,6 +46,24 @@ func TestBuildSnapshotAndFilesystemLoaderConverge(t *testing.T) {
 	}
 }
 
+// TestBuildSnapshotMergesBaseFact locks the base-facts wiring on the
+// application load path (AC7): a snapshot built with no on-disk facts still
+// contains the embedded view-grammar fact, marked Embedded.
+func TestBuildSnapshotMergesBaseFact(t *testing.T) {
+	snapshot, err := BuildSnapshot(t.Context(), SnapshotData{Project: "example", Revision: "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const factID = "20260717-110000-s-prc-vwg"
+	fact := snapshot.graph.ByID[factID]
+	if fact == nil {
+		t.Fatalf("snapshot graph missing base fact %s", factID)
+	}
+	if !fact.Embedded {
+		t.Error("base fact is not marked Embedded")
+	}
+}
+
 func TestBuildSnapshotRejectsInvalidCanonicalDocument(t *testing.T) {
 	_, err := BuildSnapshot(t.Context(), SnapshotData{
 		Project:  "example",

@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/basefacts"
 )
 
 // defaultSearchHits caps search responses when the caller sets no limit —
@@ -692,6 +693,37 @@ func (s *Server) readHint(ms *mcp.ServerSession) string {
 	return "no dialogue session is open — start_session is the door; reads stay free"
 }
 
+// viewHintServedKey is the served-once sentinel for the first-view breadcrumb,
+// deduped per connection through the same servedBefore memory as instruction
+// blocks (cleared on disconnect and repeated start_session).
+const viewHintServedKey = "view-layout-grammar-hint"
+
+// viewHint is the single producer of the view tool's Hint field. It joins two
+// breadcrumbs that are otherwise mutually exclusive by session-boundness: the
+// door breadcrumb readHint serves while no session is bound, and a one-time
+// pointer to the view-grammar fact served on the first view call of a
+// connection. First-view is keyed to the connection (like readHint), so the
+// unbound free-reader cohort the fact exists for (s-prc-3kh) gets it too. In
+// the one overlapping cell — unbound and first view — both join, door first;
+// every other cell carries a single breadcrumb or none. This strengthens the
+// breadcrumb; it never gates the read (s-cpt-1dz, d-cpt-h99).
+func (s *Server) viewHint(ms *mcp.ServerSession) string {
+	door := s.readHint(ms)
+	var fact string
+	if !s.servedBefore(ms, viewHintServedKey) {
+		fact = "view layout grammar: show " + basefacts.ViewGrammarFactID +
+			" for the full filter/rank/macro vocabulary and the quoting rules"
+	}
+	switch {
+	case door != "" && fact != "":
+		return door + " · " + fact
+	case fact != "":
+		return fact
+	default:
+		return door
+	}
+}
+
 func (s *Server) logRootRead(ctx context.Context, req *mcp.CallToolRequest, tool string, full, summary []string) error {
 	ss := s.sessions.bound(req.Session)
 	if ss == nil {
@@ -744,8 +776,52 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if err != nil {
 		return nil, ViewResult{}, toolError("viewing: %v", err)
 	}
-	return nil, ViewResult{Sections: result.Sections, Hint: s.readHint(req.Session)}, nil
+	sections := result.Sections
+	// An empty result must never reach an agent as a blank string — it cannot
+	// tell "matched nothing" from a broken call. Say so, and when a participant
+	// filter came up empty (exact-match miss), name the participants the graph
+	// knows. Any rendered content (e.g. recovery notices) is kept below.
+	if result.MatchedCount == 0 {
+		msg := emptyViewMessage(result.KnownParticipants)
+		if strings.TrimSpace(sections) == "" {
+			sections = msg
+		} else {
+			sections = msg + "\n\n" + sections
+		}
+	}
+	sections = guardViewSize(sections)
+	return nil, ViewResult{Sections: sections, Hint: s.viewHint(req.Session)}, nil
 
+}
+
+// emptyViewMessage is the explicit stand-in for an empty view result. It names
+// the graph's known participants when a participant filter matched nothing so
+// an exact-match miss reads as a wrong spelling, not absent data.
+func emptyViewMessage(knownParticipants []string) string {
+	msg := "0 entries matched the layout."
+	if len(knownParticipants) > 0 {
+		msg += " Known participants: " + strings.Join(knownParticipants, ", ") + "."
+	}
+	return msg
+}
+
+// maxViewResultBytes caps a view response over MCP. A pathological layout
+// (e.g. active:as-list on a large graph) can otherwise blow the client's token
+// budget in one call; the cap keeps the tool usable and points at paging.
+const maxViewResultBytes = 40000
+
+// guardViewSize truncates an over-cap view result on a line boundary and
+// appends a notice naming n() paging as the recovery, so an agent that hit the
+// cap knows how to narrow rather than seeing a silently cut result.
+func guardViewSize(s string) string {
+	if len(s) <= maxViewResultBytes {
+		return s
+	}
+	truncated := s[:maxViewResultBytes]
+	if i := strings.LastIndexByte(truncated, '\n'); i > 0 {
+		truncated = truncated[:i]
+	}
+	return fmt.Sprintf("%s\n\n[view output truncated at %d of %d bytes — narrow with n(K), tighter filters, or fewer sections]", truncated, len(truncated), len(s))
 }
 
 func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {

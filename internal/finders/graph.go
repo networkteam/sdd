@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 )
@@ -63,21 +62,18 @@ func (f *Finder) LoadGraph(dir string) (*model.Graph, error) {
 		return nil, fmt.Errorf("walking graph dir: %w", walkErr)
 	}
 
-	// Join the base procedure entries shipped in the binary. The embedded
-	// set is compile-time constant, so a load error is a broken build.
-	base, err := baseprocedures.Entries()
+	// Join the embedded base entries (procedures + facts) shipped in the
+	// binary, disk-wins: a project owns its IDs. The set is compile-time-
+	// shaped, so a load error is a broken build.
+	base, err := BaseEntries()
 	if err != nil {
-		return nil, fmt.Errorf("loading base procedures: %w", err)
+		return nil, err
 	}
 	onDisk := make(map[string]bool, len(entries))
 	for _, e := range entries {
 		onDisk[e.ID] = true
 	}
-	for _, be := range base {
-		if !onDisk[be.ID] {
-			entries = append(entries, be)
-		}
-	}
+	entries = model.MergeEmbedded(entries, onDisk, base)
 
 	// Scan for attachment directories
 	for _, e := range entries {

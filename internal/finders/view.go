@@ -569,9 +569,12 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 		spec.render = fn.Name
 
 	default:
+		// List macros alongside primitives: a wrong guess like recent(15)
+		// is often a reach for a macro (top, focus, done, …), and the
+		// primitive-only list left that vocabulary undiscoverable.
 		return fmt.Errorf(
-			"unknown function %q (known: %s)",
-			fn.Name, strings.Join(knownFunctions, ", "))
+			"unknown function %q (known primitives: %s; macros, valid at section start: %s)",
+			fn.Name, strings.Join(knownFunctions, ", "), strings.Join(query.MacroNames(), ", "))
 	}
 	return nil
 }

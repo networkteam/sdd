@@ -101,6 +101,11 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 	}
 	var rendered bytes.Buffer
 	presenters.RenderView(&rendered, result)
+	// Matched count is a read-side fact owned by the finder; sum it across the
+	// local graph and every queried dependency so "empty" means nothing
+	// rendered anywhere, not just an empty rendered string (which is also false
+	// once a repo header or recovery notice prints).
+	matched := result.MatchedCount()
 	repos, err := a.selectedDependencies(request.Repos, request.AllRepos, runtime.options.Dependencies)
 	if err != nil {
 		return ViewResult{}, err
@@ -118,6 +123,7 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 		if err != nil {
 			return ViewResult{}, err
 		}
+		matched += memberResult.MatchedCount()
 		fmt.Fprintf(&rendered, "\n── repo: %s ──\n", repoID)
 		presenters.RenderView(&rendered, memberResult)
 	}
@@ -128,7 +134,20 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 	if notices := renderRecoveryNotices(recoveries.Items); notices != "" {
 		fmt.Fprintf(&rendered, "\n%s\n", notices)
 	}
-	return ViewResult{Project: runtime.options.Project, Sections: strings.TrimRight(rendered.String(), "\n")}, nil
+	// When a participant filter matched nothing, name the participants the
+	// local graph knows: participant() is an exact canonical match, so an
+	// empty result usually means a wrong spelling rather than genuinely no
+	// work. Only the local graph's names are offered (the useful hint).
+	var knownParticipants []string
+	if matched == 0 && layout.UsesFunction("participant") {
+		knownParticipants = snapshot.graph.AllParticipants()
+	}
+	return ViewResult{
+		Project:           runtime.options.Project,
+		Sections:          strings.TrimRight(rendered.String(), "\n"),
+		MatchedCount:      matched,
+		KnownParticipants: knownParticipants,
+	}, nil
 }
 
 func (a *Application) Show(ctx context.Context, identity RequestIdentity, project ProjectID, request ShowRequest) (ShowResult, error) {

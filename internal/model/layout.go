@@ -50,3 +50,18 @@ type FunctionArg struct {
 	Number float64
 	String string
 }
+
+// UsesFunction reports whether any section calls a function with the given
+// name. Callers inspect the expanded layout — so a filter injected by a macro
+// counts the same as one written by hand — to tailor feedback, e.g. naming
+// known participants when a participant() filter matched nothing.
+func (l Layout) UsesFunction(name string) bool {
+	for _, section := range l.Sections {
+		for _, fn := range section.Functions {
+			if fn.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}

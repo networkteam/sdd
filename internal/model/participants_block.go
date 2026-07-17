@@ -24,3 +24,6 @@ type ParticipantsGroup struct {
 
 // Shape implements SectionData.
 func (ParticipantsBlock) Shape() RenderShape { return ShapeParticipantsBlock }
+
+// Count implements SectionData: the number of participant groups produced.
+func (p ParticipantsBlock) Count() int { return len(p.Groups) }
