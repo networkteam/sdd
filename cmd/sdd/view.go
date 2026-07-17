@@ -11,11 +11,10 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// viewHelpText is shown when `sdd view` runs without `--layout`. It
-// enumerates the implemented pipeline vocabulary; keep it in sync with
-// the finder's knownFunctions and the cli-reference skill doc whenever a
-// primitive is added — this text has drifted from the implementation
-// before.
+// viewHelpText is appended to `sdd view --help`. It enumerates the
+// implemented pipeline vocabulary; keep it in sync with the finder's
+// knownFunctions and the cli-reference skill doc whenever a primitive is
+// added — this text has drifted from the implementation before.
 const viewHelpText = `Usage: sdd view --layout=<spec>
 
 Compose a pipeline of primitives separated by colons; multiple sections
@@ -215,8 +214,9 @@ available vocabulary. See the cli-reference skill doc for the full grammar.
 
 func viewCmd() *cli.Command {
 	return &cli.Command{
-		Name:  "view",
-		Usage: "Compose a pipeline of primitives over the graph (mechanical catch-up)",
+		Name:               "view",
+		Usage:              "Compose custom graph views with filters, ranking, transforms, and renderers",
+		CustomHelpTemplate: cli.CommandHelpTemplate + "\nLAYOUT REFERENCE:\n\n" + viewHelpText,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "layout",
@@ -232,18 +232,16 @@ func viewCmd() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			// Bare `sdd view` (no --layout): print help text. Distinct
-			// from urfave's --help; this is the AC's "no-presets" surface
-			// — there's no implicit default layout.
+			// A layout is always explicit. The full grammar and vocabulary live
+			// on the conventional --help surface so a missing layout remains an
+			// actionable error rather than a second help entry point.
 			if !cmd.IsSet("layout") {
-				fmt.Fprint(os.Stdout, viewHelpText)
-				return nil
+				return fmt.Errorf("--layout is required; run `sdd view --help` for the layout reference")
 			}
 
 			spec := cmd.String("layout")
 			if spec == "" {
-				// Empty `--layout=` is a grammar error, not a fall-through to help.
-				return fmt.Errorf("--layout: empty value (expected pipeline spec; bare `sdd view` for help)")
+				return fmt.Errorf("--layout: empty value; run `sdd view --help` for the layout reference")
 			}
 
 			layout, err := query.ParseLayout(spec)
