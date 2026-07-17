@@ -93,10 +93,27 @@ var macroReference = map[string]string{
 
 var categoryOrder = []string{"Sources", "Filters", "Rank", "Page", "Aggregate", "Transform", "Output", "Other primitives"}
 
-// Reference renders the complete layout reference. Every live vocabulary
-// name is emitted even when descriptive metadata has not caught up, making a
-// newly added primitive discoverable instead of silently absent.
+// Reference renders the complete CLI-shaped layout reference around the
+// host-neutral vocabulary body.
 func Reference(v Vocabulary) string {
+	var b strings.Builder
+	b.WriteString("Usage: sdd view --layout=<spec>\n\n")
+	b.WriteString(ReferenceBody(v))
+	b.WriteString("\nExamples:\n")
+	b.WriteString("  sdd view --layout='top(20)'\n")
+	b.WriteString("  sdd view --layout='active:kind(plan):rank(heat(exp-14d)):n(10):as-list'\n")
+	b.WriteString("  sdd view --layout='topic(\"infrastructure/cli\"):rank(by(date)):n(20):as-list'\n")
+	b.WriteString("  sdd view --layout='active:participant(\"Jonathan Philipp\"):as-list'\n")
+	b.WriteString("  sdd view --layout='decisions,signals,participants'\n")
+	b.WriteString("  sdd view --layout='top(20):not(kind(contract,aspiration))'\n")
+	b.WriteString("  sdd view --layout='wip'\n")
+	return b.String()
+}
+
+// ReferenceBody renders the host-neutral grammar and categorized vocabulary.
+// Every live name is emitted even when descriptive metadata has not caught up,
+// making a newly added primitive discoverable instead of silently absent.
+func ReferenceBody(v Vocabulary) string {
 	renders := make(map[string]struct{}, len(v.Renders))
 	for _, name := range v.Renders {
 		renders[name] = struct{}{}
@@ -115,7 +132,6 @@ func Reference(v Vocabulary) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("Usage: sdd view --layout=<spec>\n\n")
 	b.WriteString("Compose colon-chained functions into a section; separate multiple sections with commas.\n")
 	b.WriteString("Every section ends in a render function. Filters intersect; rank, page, name, and\n")
 	b.WriteString("render modifiers use the last call of their kind. No whitespace is allowed outside\n")
@@ -177,14 +193,6 @@ func Reference(v Vocabulary) string {
 		fmt.Fprintf(&b, "    %s\n", description)
 	}
 
-	b.WriteString("\nExamples:\n")
-	b.WriteString("  sdd view --layout='top(20)'\n")
-	b.WriteString("  sdd view --layout='active:kind(plan):rank(heat(exp-14d)):n(10):as-list'\n")
-	b.WriteString("  sdd view --layout='topic(\"infrastructure/cli\"):rank(by(date)):n(20):as-list'\n")
-	b.WriteString("  sdd view --layout='active:participant(\"Jonathan Philipp\"):as-list'\n")
-	b.WriteString("  sdd view --layout='decisions,signals,participants'\n")
-	b.WriteString("  sdd view --layout='top(20):not(kind(contract,aspiration))'\n")
-	b.WriteString("  sdd view --layout='wip'\n")
 	return b.String()
 }
 

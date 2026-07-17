@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/networkteam/sdd/internal/finders"
-	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
@@ -14,21 +13,11 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-func viewVocabulary() viewlayout.Vocabulary {
-	return viewlayout.Vocabulary{
-		Functions:  finders.ViewFunctionNames(),
-		Renders:    finders.ViewRenderNames(),
-		Algorithms: finders.ViewRankAlgorithmNames(),
-		Decays:     model.DecayNames(),
-		Macros:     query.MacroNames(),
-	}
-}
-
 func viewCmd() *cli.Command {
 	return &cli.Command{
 		Name:               "view",
 		Usage:              "Compose custom graph views with filters, ranking, transforms, and renderers",
-		CustomHelpTemplate: cli.CommandHelpTemplate + "\nLAYOUT REFERENCE:\n\n" + viewlayout.Reference(viewVocabulary()),
+		CustomHelpTemplate: cli.CommandHelpTemplate + "\nLAYOUT REFERENCE:\n\n" + viewlayout.Reference(finders.LiveViewVocabulary()),
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "layout",

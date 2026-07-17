@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"github.com/networkteam/sdd/internal/finders"
-	"github.com/networkteam/sdd/internal/model"
-	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/viewlayout"
 	"github.com/urfave/cli/v3"
 )
@@ -49,7 +47,8 @@ func TestViewHelpOwnsLayoutReference(t *testing.T) {
 }
 
 func TestViewHelpCoversLiveVocabulary(t *testing.T) {
-	if missing := viewlayout.MissingReferenceNames(viewVocabulary()); len(missing) > 0 {
+	vocabulary := finders.LiveViewVocabulary()
+	if missing := viewlayout.MissingReferenceNames(vocabulary); len(missing) > 0 {
 		t.Fatalf("live layout vocabulary lacks reference metadata: %v", missing)
 	}
 
@@ -58,10 +57,10 @@ func TestViewHelpCoversLiveVocabulary(t *testing.T) {
 		t.Fatalf("view --help: %v", err)
 	}
 	for _, names := range [][]string{
-		finders.ViewFunctionNames(),
-		finders.ViewRankAlgorithmNames(),
-		model.DecayNames(),
-		query.MacroNames(),
+		vocabulary.Functions,
+		vocabulary.Algorithms,
+		vocabulary.Decays,
+		vocabulary.Macros,
 	} {
 		for _, name := range names {
 			if !strings.Contains(out, name) {
