@@ -3,7 +3,18 @@ package model
 import (
 	"fmt"
 	"math"
+	"slices"
+	"strings"
 )
+
+var decayNames = []string{"exp-7d", "exp-14d", "exp-30d", "linear-7d", "linear-14d", "linear-30d", "none"}
+
+// DecayNames returns the decay functions accepted by ranking algorithms.
+// Reference surfaces use the model's live vocabulary instead of duplicating
+// it in help text.
+func DecayNames() []string {
+	return slices.Clone(decayNames)
+}
 
 // DecayFunc maps an entry age in days to a recency weight in [0, 1].
 // Used by ranking algorithms to weight an entry's incoming references by
@@ -40,7 +51,7 @@ func DecayByName(name string) (DecayFunc, error) {
 	case "none":
 		return decayNone, nil
 	default:
-		return nil, fmt.Errorf("unknown decay %q (known: exp-7d, exp-14d, exp-30d, linear-7d, linear-14d, linear-30d, none)", name)
+		return nil, fmt.Errorf("unknown decay %q (known: %s)", name, strings.Join(decayNames, ", "))
 	}
 }
 
