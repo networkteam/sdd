@@ -6,6 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/finders"
+	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/viewlayout"
 	"github.com/urfave/cli/v3"
 )
 
@@ -32,8 +36,8 @@ func TestViewHelpOwnsLayoutReference(t *testing.T) {
 		"Compose custom graph views with filters, ranking, transforms, and renderers",
 		"LAYOUT REFERENCE:",
 		"Implemented pipeline vocabulary:",
-		"Macros (named pipelines",
-		"sdd view --layout=top(20)",
+		"Macros (recognized at section start",
+		"sdd view --layout='top(20)'",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("view --help output missing %q", want)
@@ -41,6 +45,29 @@ func TestViewHelpOwnsLayoutReference(t *testing.T) {
 	}
 	if strings.Contains(out, "mechanical catch-up") {
 		t.Errorf("view --help retains catch-up-only command description")
+	}
+}
+
+func TestViewHelpCoversLiveVocabulary(t *testing.T) {
+	if missing := viewlayout.MissingReferenceNames(viewVocabulary()); len(missing) > 0 {
+		t.Fatalf("live layout vocabulary lacks reference metadata: %v", missing)
+	}
+
+	out, err := runViewCommand(t, "--help")
+	if err != nil {
+		t.Fatalf("view --help: %v", err)
+	}
+	for _, names := range [][]string{
+		finders.ViewFunctionNames(),
+		finders.ViewRankAlgorithmNames(),
+		model.DecayNames(),
+		query.MacroNames(),
+	} {
+		for _, name := range names {
+			if !strings.Contains(out, name) {
+				t.Errorf("view --help omits live vocabulary name %q", name)
+			}
+		}
 	}
 }
 

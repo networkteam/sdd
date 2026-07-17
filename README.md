@@ -463,7 +463,9 @@ sdd view --layout='topic(infrastructure/cli)'  # a topic's neighborhood
 sdd view --layout='decisions,signals'          # kind-grouped views
 ```
 
-Bare `sdd view` prints the macro vocabulary and filter primitives.
+Run `sdd view --help` for the full layout grammar, macro vocabulary, filter
+primitives, and worked examples. Bare `sdd view` reports the missing
+`--layout` and points there.
 
 **`sdd search`** — three-mode retrieval:
 

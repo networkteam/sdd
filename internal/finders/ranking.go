@@ -2,6 +2,7 @@ package finders
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -22,6 +23,12 @@ type rankSpec struct {
 // knownAlgorithms is the user-facing list shown in unknown-algorithm
 // errors so users see what's available without consulting docs.
 var knownAlgorithms = []string{"heat", "in-degree", "mult", "add", "log", "coldness", "by(date)"}
+
+// ViewRankAlgorithmNames returns the algorithms accepted by rank() in their
+// user-facing order. Reference surfaces use the executor's registry directly.
+func ViewRankAlgorithmNames() []string {
+	return slices.Clone(knownAlgorithms)
+}
 
 // parseRankArg validates rank()'s single argument and resolves it to a
 // rankSpec. Accepts both bare identifier form (rank(heat) — shorthand

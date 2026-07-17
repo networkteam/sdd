@@ -112,6 +112,24 @@ var renderFunctions = map[string]model.RenderShape{
 // in the unknown-function error message so users see what's available.
 var knownFunctions = []string{"source", "active", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
 
+// ViewFunctionNames returns the function names accepted by the layout
+// executor. Reference surfaces use this instead of maintaining their own
+// vocabulary list.
+func ViewFunctionNames() []string {
+	return slices.Clone(knownFunctions)
+}
+
+// ViewRenderNames returns the render terminators accepted by the layout
+// executor in deterministic order.
+func ViewRenderNames() []string {
+	names := make([]string, 0, len(renderFunctions))
+	for name := range renderFunctions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // supportedNotInner lists the inner filter names accepted by `not(<inner>)`
 // in d-tac-e1s's first cut. Pure set-shaped filters with unambiguous
 // inverse semantics. active and since are deferred (closed-vs-superseded
@@ -681,12 +699,7 @@ func isRenderFunction(name string) bool {
 // for inclusion in error messages. Iteration order over the map is not
 // stable, so the slice is sorted for deterministic test output.
 func renderFunctionsList() string {
-	names := make([]string, 0, len(renderFunctions))
-	for n := range renderFunctions {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return strings.Join(names, ", ")
+	return strings.Join(ViewRenderNames(), ", ")
 }
 
 // parseNameArgs validates name()'s single string argument. Empty strings
