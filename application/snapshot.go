@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/networkteam/sdd/internal/basefacts"
-	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
@@ -107,24 +105,11 @@ func BuildSnapshot(_ context.Context, data SnapshotData) (*Snapshot, error) {
 		entries = append(entries, entry)
 		onDisk[entry.ID] = true
 	}
-	base, err := baseprocedures.Entries()
+	base, err := finders.BaseEntries()
 	if err != nil {
-		return nil, fmt.Errorf("sdd: loading base procedures: %w", err)
+		return nil, fmt.Errorf("sdd: %w", err)
 	}
-	for _, entry := range base {
-		if !onDisk[entry.ID] {
-			entries = append(entries, entry)
-		}
-	}
-	facts, err := basefacts.Entries(finders.LiveViewVocabulary())
-	if err != nil {
-		return nil, fmt.Errorf("sdd: loading base facts: %w", err)
-	}
-	for _, entry := range facts {
-		if !onDisk[entry.ID] {
-			entries = append(entries, entry)
-		}
-	}
+	entries = model.MergeEmbedded(entries, onDisk, base)
 	markers := make([]*model.WIPMarker, 0, len(data.WIP))
 	for _, document := range data.WIP {
 		if !strings.HasPrefix(document.LogicalPath, "wip/") {

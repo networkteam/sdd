@@ -3,6 +3,7 @@ package finders
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd/internal/model"
@@ -86,6 +87,63 @@ Done signal closing decision.`)
 	chain := g.RefChain("20260406-115559-s-cpt-f8v")
 	if len(chain) != 3 {
 		t.Errorf("RefChain = %d, want 3", len(chain))
+	}
+}
+
+// viewGrammarFactID is the stable ID of the embedded view-grammar base fact
+// (basefacts.viewGrammarID). Duplicated here rather than exported so the wiring
+// test breaks loudly if the shipped ID ever changes.
+const viewGrammarFactID = "20260717-110000-s-prc-vwg"
+
+// TestLoadGraphMergesBaseFact locks the base-facts wiring (AC7): an empty
+// project graph still contains the view-grammar fact, marked Embedded, with a
+// body generated from the live layout vocabulary.
+func TestLoadGraphMergesBaseFact(t *testing.T) {
+	g, err := New(Options{}).LoadGraph(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fact := g.ByID[viewGrammarFactID]
+	if fact == nil {
+		t.Fatalf("loaded graph missing base fact %s", viewGrammarFactID)
+	}
+	if !fact.Embedded {
+		t.Error("base fact is not marked Embedded")
+	}
+	// Body is generated from the executor vocabulary, not hand-written.
+	if !strings.Contains(fact.Content, "Grammar:") {
+		t.Error("base fact body missing generated grammar reference")
+	}
+}
+
+// TestLoadGraphDiskWinsOverBaseFact locks disk-wins precedence: a project
+// entry sharing the base fact's ID shadows the embedded one (the per-project
+// customization path).
+func TestLoadGraphDiskWinsOverBaseFact(t *testing.T) {
+	dir := t.TempDir()
+	writeGraphEntry(t, dir, viewGrammarFactID, `---
+type: signal
+layer: process
+kind: fact
+---
+
+Project override of the view-grammar fact.`)
+
+	g, err := New(Options{}).LoadGraph(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fact := g.ByID[viewGrammarFactID]
+	if fact == nil {
+		t.Fatalf("loaded graph missing entry %s", viewGrammarFactID)
+	}
+	if fact.Embedded {
+		t.Error("disk entry did not shadow the embedded base fact")
+	}
+	if !strings.Contains(fact.Content, "Project override") {
+		t.Error("loaded entry is not the on-disk override")
 	}
 }
 
