@@ -102,4 +102,17 @@ A fixture gap authored by Christopher.
 	if !strings.Contains(hit.Sections, "s-tac-aaa") {
 		t.Errorf("matching participant view should list the entry: %q", hit.Sections)
 	}
+
+	// as-counts aggregates by topic and the fixture entry is untagged: it
+	// produces zero rows but did match the pipeline. The response must not
+	// claim "0 entries matched" (nor name participants as if the filter
+	// missed) — the honest render is the presenter's "(no topics)" line.
+	var counts mcpserver.ViewResult
+	call(t, cs, "view", map[string]any{"layout": "participant(Christopher):as-counts"}, &counts)
+	if strings.Contains(counts.Sections, "0 entries matched") {
+		t.Errorf("untagged as-counts falsely reported an empty result: %q", counts.Sections)
+	}
+	if !strings.Contains(counts.Sections, "(no topics)") {
+		t.Errorf("untagged as-counts should render the no-topics line: %q", counts.Sections)
+	}
 }

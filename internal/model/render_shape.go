@@ -17,10 +17,11 @@ const (
 // slices add Grouped, FocusBlock, etc.
 type SectionData interface {
 	Shape() RenderShape
-	// Count reports how many primary units the section rendered — entries,
-	// topic rows, focuses, actors, or WIP markers by shape. Zero means the
-	// pipeline matched nothing, which lets callers distinguish an empty result
-	// from a failure without re-deriving it from rendered text.
+	// Count reports how many primary units the pipeline matched — entries,
+	// focuses, actors, or WIP markers by shape; aggregating shapes like
+	// as-counts report the entries aggregated, not the rows rendered. Zero
+	// means the pipeline matched nothing, which lets callers distinguish an
+	// empty result from a failure without re-deriving it from rendered text.
 	Count() int
 }
 

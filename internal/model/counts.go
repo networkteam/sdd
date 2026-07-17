@@ -30,6 +30,10 @@ type CountRow struct {
 // the `untagged` filter instead.
 type Counts struct {
 	Rows []CountRow
+	// Matched is the number of entries in the filtered set the rows aggregate.
+	// It can exceed zero while Rows is empty — untagged entries contribute no
+	// row — so the pipeline's matched-anything fact lives here, not in Rows.
+	Matched int
 }
 
 // Shape implements SectionData.
@@ -83,8 +87,10 @@ func (g *Graph) TopicCounts(entries []*Entry, now time.Time) Counts {
 		}
 		return rows[i].Label < rows[j].Label
 	})
-	return Counts{Rows: rows}
+	return Counts{Rows: rows, Matched: len(entries)}
 }
 
-// Count implements SectionData: the number of topic rows produced.
-func (c Counts) Count() int { return len(c.Rows) }
+// Count implements SectionData: the entries the section aggregated, not the
+// row count — entries without topics produce no row but still matched the
+// pipeline, and Count answers "did the pipeline match anything".
+func (c Counts) Count() int { return c.Matched }
