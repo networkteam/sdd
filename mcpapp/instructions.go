@@ -42,10 +42,10 @@ If you lose the handle — your context was compacted or summarized — recover
 without guessing: resume_session with no arguments re-serves the session this
 connection is already attached to (every running move at its current step with
 the schema to continue it), or, if this connection is not attached to one,
-names the open sessions to attach to. list_sessions lists them too. Repeated
-no-args reorients converge — blocks you were already served stub — so pass
-fullReplay:true for a one-shot complete re-serve when context loss really
-dropped them. Then re-establish which one with the user before continuing.`
+names the open sessions to attach to. list_sessions lists them too. A plain
+reorient stubs blocks you were already served — it assumes you still hold them;
+if a compaction dropped them, pass fullReplay:true for the complete re-serve.
+Then re-establish which one with the user before continuing.`
 
 const resumeInstructions = `Session resumed: step position and collected evidence persist; the
 open_instances list carries each running instance's current serve — the
@@ -53,4 +53,5 @@ session shell (user-dialogue) among them, carrying the open-threads block.
 Brief the user on where the work stands (procedure, step, goal) before
 continuing, and continue through next, carrying this session's handle. If you
 lose your place again later, resume_session with no session re-serves this
-list.`
+list; if a context compaction dropped the instructions a stub only points back
+to, add fullReplay:true for the full text.`

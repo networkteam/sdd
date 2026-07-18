@@ -40,9 +40,11 @@ func newShellEnv(t *testing.T) *shellEnv {
 		},
 	})
 	// The shell declares its framing lanes as viewLayout injects; the MCP shell
-	// registers the real query in production. Stub it so the base entry loads.
+	// registers the real query in production. Stub it (serve-safe, like the real
+	// one) so the base entry loads.
 	mustRegisterQuery(reg, Query{
-		Doc: FuncDoc{Name: "viewLayout", Doc: "fake view layout"},
+		Doc:       FuncDoc{Name: "viewLayout", Doc: "fake view layout"},
+		ServeSafe: true,
 		Fn: func(_ *Context, args map[string]any) (any, error) {
 			layout, _ := args["layout"].(string)
 			return "view: " + layout, nil
@@ -88,7 +90,10 @@ func TestUserDialogue_OpeningServeAndQuietConclude(t *testing.T) {
 	if sv.Goal != "dialogue freely; start a move when something crystallizes" {
 		t.Fatalf("the junction should carry the standing goal, got %q", sv.Goal)
 	}
-	for _, want := range []string{"Participant: christopher", "pending write awaits explicit recovery", "- capture — ", "Standing goal"} {
+	// Participant/language/search now live in the engine-supplied info block
+	// (application framing), not the unit — the unit keeps recovery, the move
+	// list, and the standing goal.
+	for _, want := range []string{"pending write awaits explicit recovery", "- capture — ", "Standing goal"} {
 		if !strings.Contains(sv.Instructions, want) {
 			t.Errorf("opening serve should carry %q, got %q", want, sv.Instructions)
 		}

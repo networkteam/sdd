@@ -320,9 +320,9 @@ func (s *Server) registerTools() {
 			"state resumes — step position, collected fields, staged files — not the other conversation's " +
 			"context. Omit session to reorient " +
 			"the session you are already attached to (no consent needed): its framing plus every running " +
-			"move at its current step, each with the report schema to continue it. Repeated reorients " +
-			"converge — blocks you have already been served stub — so pass fullReplay:true for a one-shot " +
-			"complete re-serve when context loss dropped them. Omit session while unattached " +
+			"move at its current step, each with the report schema to continue it. A plain reorient stubs " +
+			"blocks you were already served — it assumes you still hold them; if a context compaction " +
+			"dropped them, pass fullReplay:true for the complete re-serve. Omit session while unattached " +
 			"and the rejection carries the sessions with open work to attach to.",
 	}, s.resumeSession)
 
@@ -451,8 +451,14 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 		}
 		current.rootIdentity = identity
 		s.forgetConnection(req.Session)
-		result, err := s.toRootServeResult(ctx, req, current, serve, true)
-		return nil, result, err
+		result, err := s.toRootServeResult(ctx, req, current, serve)
+		if err != nil {
+			return nil, ServeResult{}, err
+		}
+		if err := s.addDoorCount(ctx, req, current, &result); err != nil {
+			return nil, ServeResult{}, err
+		}
+		return nil, result, nil
 	}
 	workflow, serve, err := s.app.OpenWorkflow(ctx, identity, s.project, sdd.WorkflowOpenRequest{
 		MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
@@ -469,8 +475,14 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 	if err := s.leaveSession(ctx, prev, sdd.CauseSwitch); err != nil {
 		return nil, ServeResult{}, err
 	}
-	result, err := s.toRootServeResult(ctx, req, ss, serve, true)
-	return nil, result, err
+	result, err := s.toRootServeResult(ctx, req, ss, serve)
+	if err != nil {
+		return nil, ServeResult{}, err
+	}
+	if err := s.addDoorCount(ctx, req, ss, &result); err != nil {
+		return nil, ServeResult{}, err
+	}
+	return nil, result, nil
 }
 
 func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, args StartProcedureArgs) (*mcp.CallToolResult, ServeResult, error) {
@@ -487,7 +499,7 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 		return nil, ServeResult{}, err
 	}
 	ss.rootIdentity = identity
-	result, err := s.toRootServeResult(ctx, req, ss, serve, false)
+	result, err := s.toRootServeResult(ctx, req, ss, serve)
 	return nil, result, err
 }
 
@@ -508,7 +520,7 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 		return nil, ServeResult{}, err
 	}
 	ss.rootIdentity = identity
-	result, err := s.toRootServeResult(ctx, req, ss, serve, false)
+	result, err := s.toRootServeResult(ctx, req, ss, serve)
 	return nil, result, err
 }
 
@@ -534,7 +546,7 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 		out.Instructions = "The instance holds WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
 	}
 	if result.Base != nil {
-		base, err := s.toRootServeResult(ctx, req, ss, result.Base, false)
+		base, err := s.toRootServeResult(ctx, req, ss, result.Base)
 		if err != nil {
 			return nil, AbandonResult{}, err
 		}
@@ -568,7 +580,7 @@ func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkAr
 		Instructions: "The move is parked with its state kept — it stays listed as an open thread and resumes through next. Tell the user it is recorded as open work, not forgotten.",
 	}
 	if result.Base != nil {
-		base, err := s.toRootServeResult(ctx, req, ss, result.Base, false)
+		base, err := s.toRootServeResult(ctx, req, ss, result.Base)
 		if err != nil {
 			return nil, ParkResult{}, err
 		}
@@ -607,7 +619,7 @@ func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, a
 			return nil, AbandonResult{}, err
 		}
 		if serve != nil {
-			mapped, err := s.toRootServeResult(ctx, req, current, serve, false)
+			mapped, err := s.toRootServeResult(ctx, req, current, serve)
 			if err != nil {
 				return nil, AbandonResult{}, err
 			}
@@ -984,12 +996,28 @@ func (s *Server) registryDocs(ctx context.Context, req *mcp.CallToolRequest, arg
 // exact rendered bytes, a one-line stub after — identical bytes stub,
 // changed content always serves in full (d-tac-dbk).
 
-// toRootServeResult converts an engine serve into the tool response. sessionEntry
-// marks the door serve (start_session): only there does the shell's open-work
-// block carry the one-line count of OTHER open dialogues. Every other serve —
-// move landings, resume, conclude — lists this dialogue's own threads only, and
-// the recursive base serve is never a session entry.
-func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe, sessionEntry bool) (ServeResult, error) {
+// composeFraming renders the framing blocks with per-lane served-once dedup:
+// each block this connection has already seen is omitted, so only blocks whose
+// content is new to the connection serve in full. A graph write that changes
+// one lane (the recent-moves lane) re-serves that lane alone, never the stable
+// aspirations or directives — the per-lane dedup that keeps a reorientation
+// from exceeding the original serve (I6).
+func (s *Server) composeFraming(ms *mcp.ServerSession, blocks []string) string {
+	var served []string
+	for _, block := range blocks {
+		if block == "" || s.servedBefore(ms, block) {
+			continue
+		}
+		served = append(served, block)
+	}
+	return strings.Join(served, "\n\n")
+}
+
+// toRootServeResult converts an engine serve into the tool response. The shell's
+// open-work block lists this dialogue's own threads only; other dialogues never
+// appear here (the door's one-line count is composed at the start_session call
+// sites, not in this shared converter).
+func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res := ServeResult{
 		Session: string(serve.Session), Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
 		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
@@ -1009,14 +1037,9 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return ServeResult{}, err
 	}
-	if !s.servedBefore(req.Session, framing) {
-		res.Framing = framing
-	}
+	res.Framing = s.composeFraming(req.Session, framing)
 	if ss.root.IsShell(serve.Instance) {
-		res.OpenThreads, err = s.openThreadsRoot(ctx, req, ss, sessionEntry)
-		if err != nil {
-			return ServeResult{}, err
-		}
+		res.OpenThreads = s.openThreadsRoot(req, ss)
 	}
 	vocabulary, err := s.app.Vocabulary(ctx, s.requestIdentity(req), s.project)
 	if err != nil {
@@ -1026,7 +1049,7 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 		res.Vocabulary = vocabulary
 	}
 	if serve.Base != nil {
-		base, err := s.toRootServeResult(ctx, req, ss, serve.Base, false)
+		base, err := s.toRootServeResult(ctx, req, ss, serve.Base)
 		if err != nil {
 			return ServeResult{}, err
 		}
@@ -1071,11 +1094,9 @@ func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss
 	if err != nil {
 		return ResumeSessionResult{}, err
 	}
-	if !s.servedBefore(req.Session, framing) {
-		result.Framing = framing
-	}
+	result.Framing = s.composeFraming(req.Session, framing)
 	for i := range source.Open {
-		mapped, err := s.toRootServeResult(ctx, req, ss, &source.Open[i], false)
+		mapped, err := s.toRootServeResult(ctx, req, ss, &source.Open[i])
 		if err != nil {
 			return ResumeSessionResult{}, err
 		}
@@ -1086,38 +1107,43 @@ func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss
 }
 
 // openThreadsRoot renders the session shell's open-work block: this dialogue's
-// own open threads only. Other dialogues are never pushed onto a serve (I6,
-// A1) — at session entry (the door) a one-line count of them points at
-// list_sessions; every other serve (move landings, resume, conclude) carries
-// own threads alone. The full labeled listing exists solely via list_sessions.
-func (s *Server) openThreadsRoot(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, sessionEntry bool) (string, error) {
+// own open threads only. Other dialogues are never pushed onto any serve (I6,
+// A1): the full labeled listing exists solely via list_sessions, and the door
+// serve (composed at the start_session call sites) carries only a one-line
+// count of them.
+func (s *Server) openThreadsRoot(req *mcp.CallToolRequest, ss *shellSession) string {
 	var lines []string
 	for _, instance := range ss.root.OpenInstances() {
 		lines = append(lines, fmt.Sprintf("- %s: %s at %s", instance.Instance, instance.Procedure, instance.Step))
 	}
-	var block string
-	if len(lines) > 0 {
-		header := openThreadsReminder
-		if !s.servedBefore(req.Session, openThreadsIntro) {
-			header = openThreadsIntro
-		}
-		block = header + "\n" + strings.Join(lines, "\n")
+	if len(lines) == 0 {
+		return ""
 	}
-	if !sessionEntry {
-		return block, nil
+	header := openThreadsReminder
+	if !s.servedBefore(req.Session, openThreadsIntro) {
+		header = openThreadsIntro
 	}
+	return header + "\n" + strings.Join(lines, "\n")
+}
+
+// addDoorCount appends the session-entry one-line count of OTHER open dialogues
+// to a door serve's open-threads block. Composed only at the start_session call
+// sites (never inside the shared converter), so a junction serve — where other
+// dialogues must not appear at all — never carries it.
+func (s *Server) addDoorCount(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, result *ServeResult) error {
 	count, err := s.otherWorkCount(ctx, req, ss)
 	if err != nil {
-		return "", err
+		return err
 	}
-	switch {
-	case count == "":
-		return block, nil
-	case block == "":
-		return count, nil
-	default:
-		return block + "\n\n" + count, nil
+	if count == "" {
+		return nil
 	}
+	if result.OpenThreads == "" {
+		result.OpenThreads = count
+	} else {
+		result.OpenThreads += "\n\n" + count
+	}
+	return nil
 }
 
 // otherWorkCount is the session-entry one-liner: how many OTHER sessions carry

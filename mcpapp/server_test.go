@@ -416,8 +416,8 @@ func TestVocabularyBlockForNonEnglishGraphs(t *testing.T) {
 	if !strings.Contains(door.Vocabulary, "Vokabular") {
 		t.Fatalf("a German graph's first serve should carry the vocabulary table, got %q", door.Vocabulary)
 	}
-	if !strings.Contains(door.Instructions, "Language: de") {
-		t.Fatalf("the shell orientation should state the locale, got %q", door.Instructions)
+	if !strings.Contains(door.Framing, "Language: de") {
+		t.Fatalf("the framing info block should state the locale, got %q", door.Framing)
 	}
 
 	var serve mcpserver.ServeResult
@@ -493,7 +493,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "5585fbfc3d61dde01ba4993915a5dea101e17e55434bb363c59066250f78c48d"
+	const want = "2b4c0c1feb43f68a608b509c458ef0419c2b364aaa13dba6955eb1d017cc08e9"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1706,7 +1706,7 @@ func TestDoorPayloadUnder25KB(t *testing.T) {
 type: %s
 kind: %s
 %sconfidence: medium
-summary: Representative entry %02d records a realistic-length observation about the flux subsystem, the kind of one-sentence summary the graph accumulates over a busy week of dialogue and capture.
+summary: Representative entry %02d records a realistic first-sentence-heavy observation about the flux subsystem — the kind of ~350-character one-liner a real graph accumulates, naming the concrete surface that moved, the trade-off weighed in dialogue, and the follow-up it opens, so the recent-moves and heat lanes have honestly-sized content to rank and cap against rather than a toy stub of a summary line.
 ---
 
 Body of entry %02d: a paragraph of realistic content that the door serve never renders in full but that inflates the graph the framing lanes rank over.
@@ -1756,6 +1756,97 @@ A bare shell.
 
 You are in a bare session shell.
 `
+
+// runCaptureToCompletion drives the fixture capture spine to a written entry:
+// assemble → playback confirm → verifySummary faithful. Findings must be nil
+// (newTestServer(t, nil, …)) so the write cascades past the no-high-findings
+// gate. Returns the created entry ID.
+func runCaptureToCompletion(t *testing.T, cs *mcp.ClientSession, session, label string) string {
+	t.Helper()
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": label}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": assembleReport()}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
+		"chooser": "playback", "choice": "confirm", "userWords": "yes, capture it",
+	}}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
+		"chooser": "verifySummary", "choice": "faithful", "fields": map[string]any{"fidelityNote": "matches"},
+	}}, &serve)
+	if serve.Status != "completed" {
+		t.Fatalf("capture did not complete, got %s at %q", serve.Status, serve.Step)
+	}
+	id, _ := serve.Produced["entryId"].(string)
+	return id
+}
+
+// TestFramingLaneDedupAfterWrite pins per-lane framing dedup (I6, AC8): after a
+// graph write changes only the recent-moves lane, a reorient re-serves THAT
+// lane alone — the stable info block stays stubbed — so the reorientation stays
+// under the original serve. Under whole-block hashing the entire framing would
+// re-serve on any write, the reproduced regression.
+func TestFramingLaneDedupAfterWrite(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	// Connection B: the reorienting connection.
+	csB := connect(t, env.srv)
+	door := openSession(t, csB)
+	if !strings.Contains(door.Framing, "Local participant:") || !strings.Contains(door.Framing, "Recent graph movement") {
+		t.Fatalf("the door should serve the full framing, got %q", door.Framing)
+	}
+	var converged mcpserver.ResumeSessionResult
+	call(t, csB, "resume_session", map[string]any{}, &converged)
+	if converged.Framing != "" {
+		t.Fatalf("with nothing changed, a reorient converges to empty framing, got %q", converged.Framing)
+	}
+
+	// Connection A writes an entry — the recent-moves lane now changes for B.
+	csA := connect(t, env.srv)
+	sessionA := openSession(t, csA).Session
+	if id := runCaptureToCompletion(t, csA, sessionA, "churn write"); id == "" {
+		t.Fatal("precondition: the capture should produce an entry")
+	}
+
+	var afterWrite mcpserver.ResumeSessionResult
+	call(t, csB, "resume_session", map[string]any{}, &afterWrite)
+	if !strings.Contains(afterWrite.Framing, "Recent graph movement") {
+		t.Fatalf("the changed recent-moves lane must re-serve, got %q", afterWrite.Framing)
+	}
+	if strings.Contains(afterWrite.Framing, "Local participant:") {
+		t.Fatalf("the unchanged info block must stay stubbed (per-lane dedup), got %q", afterWrite.Framing)
+	}
+	if len(afterWrite.Framing) >= len(door.Framing) {
+		t.Fatalf("a post-write reorient (%d) must stay under the original serve (%d)", len(afterWrite.Framing), len(door.Framing))
+	}
+}
+
+// TestReorientCarriesCompactionBreadcrumb pins the B4 self-trigger: a compacted
+// agent's reorient stubs blocks it already saw, and those stubs (both the resume
+// instructions and the per-step reminder) must name the fullReplay escape — a
+// bare "served earlier, follow them" is useless to an amnesiac.
+func TestReorientCarriesCompactionBreadcrumb(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "breadcrumb"}, &serve)
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{}, &resumed)
+	if !strings.Contains(resumed.Instructions, "fullReplay") {
+		t.Fatalf("resume instructions should point a compaction victim at fullReplay, got %q", resumed.Instructions)
+	}
+	var reminder *mcpserver.ServeResult
+	for i := range resumed.Open {
+		if resumed.Open[i].Instance == serve.Instance {
+			reminder = &resumed.Open[i]
+		}
+	}
+	if reminder == nil {
+		t.Fatalf("the reorient should re-serve the in-flight move, got %+v", resumed.Open)
+	}
+	if !strings.Contains(reminder.Instructions, "served earlier this session") || !strings.Contains(reminder.Instructions, "fullReplay") {
+		t.Fatalf("a stubbed per-step reminder must carry the compaction breadcrumb, got %q", reminder.Instructions)
+	}
+}
 
 // TestChooserSequenceValidation exercises the trust property over MCP: a
 // chooser cannot be answered before it is pending.
@@ -2046,15 +2137,19 @@ func TestDoorGatingAndShellLifecycle(t *testing.T) {
 		t.Fatalf("a named resume of an unknown handle should name it, got %q", msg)
 	}
 
-	// The door serves the shell's orientation: standing goal, session info,
-	// and the live move enumeration (shells excluded from it).
+	// The door serves the shell's orientation: standing goal and the live move
+	// enumeration (shells excluded). Participant/language/search live in the
+	// engine-supplied framing block now, not the unit — the single source.
 	shell := openSession(t, cs)
 	session := shell.Session
 	if shell.Goal != "dialogue freely; start a move when something crystallizes" {
 		t.Fatalf("shell junction should carry the standing goal, got %q", shell.Goal)
 	}
-	if !strings.Contains(shell.Instructions, "Participant: Tester") {
-		t.Fatalf("opening serve should carry the session info header, got %q", shell.Instructions)
+	if !strings.Contains(shell.Framing, "Local participant: Tester") {
+		t.Fatalf("the framing block should carry the session info header, got %q", shell.Framing)
+	}
+	if strings.Contains(shell.Instructions, "Local participant:") || strings.Contains(shell.Instructions, "Participant: Tester") {
+		t.Fatalf("the orientation unit must not duplicate the info block, got %q", shell.Instructions)
 	}
 	if !strings.Contains(shell.Instructions, "- capture(") {
 		t.Fatalf("opening serve should enumerate the moves, got %q", shell.Instructions)

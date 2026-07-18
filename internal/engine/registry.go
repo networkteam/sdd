@@ -73,6 +73,12 @@ type Predicate struct {
 type Query struct {
 	Doc FuncDoc
 	Fn  QueryFunc
+	// ServeSafe marks the query as a pure read with no side effects — it writes
+	// nothing to the session log or graph. Only serve-safe queries may be
+	// declared as shell framing lanes: framing renders on every serve, and a
+	// serve must not write (I7). A query that logs its reads (LogRead) or
+	// mutates is not serve-safe and is rejected as a framing lane at spec load.
+	ServeSafe bool
 }
 
 // Command is a registered command.
@@ -210,6 +216,7 @@ func registerBuiltinQueries(r *Registry) {
 			Name: "registryList",
 			Doc:  "Function contracts per class — what spec authors consult. Optional arg class: predicate|query|command.",
 		},
+		ServeSafe: true,
 		Fn: func(_ *Context, args map[string]any) (any, error) {
 			class, _ := args["class"].(string)
 			switch FuncClass(class) {

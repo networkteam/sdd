@@ -277,6 +277,9 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 		}
 		spec.Framing = append(spec.Framing, InjectCall(iy))
 	}
+	if len(spec.Framing) > 0 && spec.Class != model.ProcedureClassShell {
+		addProblem("framing: declared on a %s procedure — framing lanes are a session-shell concern, ignored anywhere else", spec.Class)
+	}
 
 	for name, d := range paramsYAML {
 		decl, err := parseVarDecl(name, d)
@@ -611,8 +614,13 @@ func (s *Spec) Validate(reg *Registry) []string {
 	}
 
 	for i, inj := range s.Framing {
-		if _, ok := reg.Query(inj.Fn); !ok {
+		q, ok := reg.Query(inj.Fn)
+		if !ok {
 			addProblem("framing[%d]: inject fn %q is not a registered query", i, inj.Fn)
+			continue
+		}
+		if !q.ServeSafe {
+			addProblem("framing[%d]: query %q is not serve-safe — a framing lane renders on every serve and must not write or log (I7)", i, inj.Fn)
 		}
 	}
 

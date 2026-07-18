@@ -88,11 +88,14 @@ type WorkflowServe struct {
 
 // ReminderInstructions composes the short reminder used when a host has
 // already served this instruction unit, while retaining any gate diagnostics.
+// The stub assumes the caller still holds the earlier full text; if a context
+// compaction dropped it, the breadcrumb names the one-shot escape so an
+// amnesiac agent is not left following instructions it no longer has.
 func (s *WorkflowServe) ReminderInstructions() string {
 	if s == nil {
 		return ""
 	}
-	reminder := fmt.Sprintf("(step %s instructions were served earlier this session — follow them; goal: %s)", s.Step, s.Goal)
+	reminder := fmt.Sprintf("(step %s instructions were served earlier this session — follow them; goal: %s. Lost them to a context compaction? resume_session with fullReplay:true re-serves this position in full.)", s.Step, s.Goal)
 	return engine.ComposeInstructions(reminder, s.Diagnostics)
 }
 
@@ -602,59 +605,60 @@ func (w *WorkflowSession) LogRead(ctx context.Context, identity RequestIdentity,
 	return w.session.SinkErr()
 }
 
-// Framing composes the session framing: the engine-supplied info block
-// (participant, language, search modes) — the fixed part every shell needs —
-// followed by the shell procedure's declared lanes, rendered through the
-// injection mechanism. A shell that declares no lanes serves info only; there
-// is no Go-constant fallback (I6, A1).
-func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity) (string, error) {
+// Framing composes the session framing as ordered, independently dedupable
+// blocks: the engine-supplied info block (participant, language, search modes)
+// first, then one block per declared shell lane, rendered through the injection
+// mechanism. Returning the lanes as separate blocks — not one joined string —
+// lets the host dedup each on its own, so a graph write that changes only the
+// recent-moves lane re-serves that lane alone, never the stable aspirations or
+// directives (I6, A1). A shell with no declared lanes yields the info block
+// alone; there is no Go-constant fallback.
+func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity) ([]string, error) {
 	w.setOperation(ctx, identity)
 	info, err := w.app.Info(ctx, identity, w.project, InfoRequest{})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var out strings.Builder
-	fmt.Fprintf(&out, "Local participant: %s\n", info.Participant)
+	var infoBlock strings.Builder
+	fmt.Fprintf(&infoBlock, "Local participant: %s\n", info.Participant)
 	if info.Language != "" {
-		fmt.Fprintf(&out, "Language: %s\n", info.Language)
+		fmt.Fprintf(&infoBlock, "Language: %s\n", info.Language)
 	}
-	fmt.Fprintf(&out, "Search: %s", info.Search)
+	fmt.Fprintf(&infoBlock, "Search: %s", info.Search)
 	lanes, err := w.framingLanes()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if lanes != "" {
-		out.WriteString("\n\n")
-		out.WriteString(lanes)
-	}
-	return out.String(), nil
+	return append([]string{infoBlock.String()}, lanes...), nil
 }
 
-// framingLanes renders the shell procedure's declared framing lanes through
-// the engine's inject query mechanism and joins them. An empty result — no
-// shell, or a shell that declares none — leaves framing as the info block
-// alone.
-func (w *WorkflowSession) framingLanes() (string, error) {
+// framingLanes renders the shell procedure's declared framing lanes through the
+// engine's inject query mechanism, one block per lane (empty results omitted).
+// A lane whose query returns a non-string fails loud — a framing lane must
+// render to text, never be silently dropped.
+func (w *WorkflowSession) framingLanes() ([]string, error) {
 	if w.shell == "" {
-		return "", nil
+		return nil, nil
 	}
 	inst, ok := w.session.Instance(w.shell)
 	if !ok {
-		return "", nil
+		return nil, nil
 	}
 	var lanes []string
 	for _, call := range inst.Spec.Framing {
 		result, err := w.session.Inject(w.shell, call)
 		if err != nil {
-			return "", fmt.Errorf("framing lane %s: %w", call.Fn, err)
+			return nil, fmt.Errorf("framing lane %s: %w", call.Fn, err)
 		}
-		if text, ok := result.(string); ok {
-			if text = strings.TrimSpace(text); text != "" {
-				lanes = append(lanes, text)
-			}
+		text, ok := result.(string)
+		if !ok {
+			return nil, fmt.Errorf("framing lane %s: query returned %T, want string", call.Fn, result)
+		}
+		if text = strings.TrimSpace(text); text != "" {
+			lanes = append(lanes, text)
 		}
 	}
-	return strings.Join(lanes, "\n\n"), nil
+	return lanes, nil
 }
 
 func (w *WorkflowSession) Release(ctx context.Context, identity RequestIdentity, cause AttachmentCause, reason string) error {
