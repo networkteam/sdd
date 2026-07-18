@@ -62,9 +62,13 @@ func (*failAtPrincipalResolver) ResolveDependency(context.Context, sdd.Principal
 	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
 
-func (r *failAtPrincipalResolver) failSecondResolution() {
+// failResolutionAfter arms the injected authorization failure to fire n
+// resolutions from now. Callers arm it so the failure lands on the shell
+// re-serve that trails a terminal action — after the action's own appends have
+// resolved and durably succeeded — exercising the shell-serve failure path.
+func (r *failAtPrincipalResolver) failResolutionAfter(n int) {
 	r.mu.Lock()
-	r.failAt = r.calls + 1
+	r.failAt = r.calls + n
 	r.mu.Unlock()
 }
 
@@ -81,20 +85,26 @@ func TestTerminalWorkflowActionsSurfaceShellServeFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			resolver.failSecondResolution()
 
 			switch action {
 			case "advance":
+				// The completing advance appends report+transition+completed (three
+				// resolves) before the shell re-serve resolves; fail that re-serve.
+				resolver.failResolutionAfter(5)
 				result, actionErr := workflow.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "done"}})
 				if actionErr == nil || result == nil || result.Status != "completed" || !strings.Contains(actionErr.Error(), "serving session shell after advancing") {
 					t.Fatalf("Advance = %+v, %v", result, actionErr)
 				}
 			case "abandon":
+				// The abandon append resolves and succeeds, then the shell re-serve
+				// resolves; fail that re-serve.
+				resolver.failResolutionAfter(2)
 				result, actionErr := workflow.Abandon(t.Context(), identity, serve.Instance, "test")
 				if actionErr == nil || !result.Abandoned || !strings.Contains(actionErr.Error(), "serving session shell after abandoning") {
 					t.Fatalf("Abandon = %+v, %v", result, actionErr)
 				}
 			case "park":
+				resolver.failResolutionAfter(2)
 				result, actionErr := workflow.Park(t.Context(), identity, serve.Instance, "test")
 				if actionErr == nil || result.Instance != serve.Instance || !strings.Contains(actionErr.Error(), "serving session shell after parking") {
 					t.Fatalf("Park = %+v, %v", result, actionErr)

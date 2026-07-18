@@ -2,7 +2,6 @@ package mcpapp
 
 import (
 	"sync"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	sdd "github.com/networkteam/sdd/application"
@@ -13,10 +12,8 @@ import (
 // recent request identity used when a disconnect has no request context.
 type shellSession struct {
 	id           string
-	participant  string
 	root         *sdd.WorkflowSession
 	rootIdentity sdd.RequestIdentity
-	lastActivity time.Time
 }
 
 // sessionStore owns only MCP connection bindings. Durable session state,

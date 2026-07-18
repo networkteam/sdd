@@ -255,6 +255,14 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 // connect attaches an in-memory client session to the server.
 func connect(t *testing.T, srv *mcpserver.Server) *mcp.ClientSession {
 	t.Helper()
+	cs, _ := connectPair(t, srv)
+	return cs
+}
+
+// connectPair connects like connect but also returns the server session, so a
+// test can drive the server-side lifecycle (Disconnect/Shutdown) directly.
+func connectPair(t *testing.T, srv *mcpserver.Server) (*mcp.ClientSession, *mcp.ServerSession) {
+	t.Helper()
 	ctx := t.Context()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := srv.Connect(ctx, serverTransport)
@@ -270,7 +278,7 @@ func connect(t *testing.T, srv *mcpserver.Server) *mcp.ClientSession {
 		_ = srv.Disconnect(context.Background(), serverSession)
 		_ = cs.Close()
 	})
-	return cs
+	return cs, serverSession
 }
 
 // openSession enters through the door: start_session opens the dialogue
@@ -1963,6 +1971,97 @@ func TestShellConcludeWalksOpenThreads(t *testing.T) {
 	if serve.Status != "completed" {
 		t.Fatalf("conclude after settling threads should complete the shell, got %s at %q", serve.Status, serve.Step)
 	}
+}
+
+// TestLeaveCauseFidelityAcrossPaths pins register decision 6/I7: each leave
+// path records the specific trigger cause in the attachment history, driven
+// through the real call sites (not a bare ReleaseSession) so the Leave layer's
+// cause handling is exercised — including that a quiescent switch records
+// switch, never conclude.
+func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
+	lastCause := func(t *testing.T, env testEnv, session string) sdd.AttachmentCause {
+		t.Helper()
+		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(session))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(stored.Metadata.AttachmentHistory) == 0 {
+			t.Fatalf("session %s recorded no attachment history", session)
+		}
+		return stored.Metadata.AttachmentHistory[len(stored.Metadata.AttachmentHistory)-1].Cause
+	}
+	startMove := func(t *testing.T, cs *mcp.ClientSession, session string) {
+		t.Helper()
+		var serve mcpserver.ServeResult
+		call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "work"}, &serve)
+	}
+
+	t.Run("switch away from a session with an open move records switch", func(t *testing.T) {
+		env := newTestServer(t, nil, "", "")
+		other := connect(t, env.srv)
+		b := openSession(t, other).Session // a second session to attach away to
+		cs := connect(t, env.srv)
+		a := openSession(t, cs).Session
+		startMove(t, cs, a)
+		var resumed mcpserver.ResumeSessionResult
+		call(t, cs, "resume_session", map[string]any{"session": b}, &resumed) // switch away from a
+		if c := lastCause(t, env, a); c != sdd.CauseSwitch {
+			t.Fatalf("switch away (open move) cause = %q, want switch", c)
+		}
+	})
+
+	t.Run("switch away from a quiescent session records switch not conclude", func(t *testing.T) {
+		env := newTestServer(t, nil, "", "")
+		other := connect(t, env.srv)
+		b := openSession(t, other).Session
+		cs := connect(t, env.srv)
+		a := openSession(t, cs).Session // no move — quiescent
+		var resumed mcpserver.ResumeSessionResult
+		call(t, cs, "resume_session", map[string]any{"session": b}, &resumed) // switch away; shell auto-concludes
+		if c := lastCause(t, env, a); c != sdd.CauseSwitch {
+			t.Fatalf("switch away (quiescent) cause = %q, want switch (not conclude)", c)
+		}
+	})
+
+	t.Run("abandon by handle records abandon", func(t *testing.T) {
+		env := newTestServer(t, nil, "", "")
+		csA := connect(t, env.srv)
+		a := openSession(t, csA).Session
+		startMove(t, csA, a)
+		csB := connect(t, env.srv)
+		openSession(t, csB)
+		var torn mcpserver.AbandonResult
+		call(t, csB, "abandon", map[string]any{"session": a}, &torn)
+		if c := lastCause(t, env, a); c != sdd.CauseAbandon {
+			t.Fatalf("abandon cause = %q, want abandon", c)
+		}
+	})
+
+	t.Run("shutdown records shutdown", func(t *testing.T) {
+		env := newTestServer(t, nil, "", "")
+		cs := connect(t, env.srv)
+		a := openSession(t, cs).Session
+		startMove(t, cs, a)
+		if err := env.srv.Shutdown(t.Context()); err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+		if c := lastCause(t, env, a); c != sdd.CauseShutdown {
+			t.Fatalf("shutdown cause = %q, want shutdown", c)
+		}
+	})
+
+	t.Run("disconnect records disconnect", func(t *testing.T) {
+		env := newTestServer(t, nil, "", "")
+		cs, ss := connectPair(t, env.srv)
+		a := openSession(t, cs).Session
+		startMove(t, cs, a)
+		if err := env.srv.Disconnect(t.Context(), ss); err != nil {
+			t.Fatalf("disconnect: %v", err)
+		}
+		if c := lastCause(t, env, a); c != sdd.CauseDisconnect {
+			t.Fatalf("disconnect cause = %q, want disconnect", c)
+		}
+	})
 }
 
 // TestParkedSessionsAcrossConnections pins the leave rule and the discovery

@@ -861,6 +861,13 @@ func instanceCounter(id string) int {
 }
 
 // checkSink surfaces a deferred log-append failure before advancing.
+// SinkErr returns a stashed durable-append failure without clearing it, so the
+// operation that caused it can surface the typed error synchronously while
+// subsequent operations still refuse through checkSink.
+func (s *Session) SinkErr() error {
+	return s.sinkErr
+}
+
 func (s *Session) checkSink() error {
 	if s.sinkErr != nil {
 		return fmt.Errorf("session log append failed earlier — refusing to advance without durability: %w", s.sinkErr)

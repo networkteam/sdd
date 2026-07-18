@@ -226,17 +226,23 @@ func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdenti
 	}
 	now := runtime.options.Now().UTC().Round(0)
 	metadata := stored.Metadata
-	if current := metadata.Attachment; current != nil && current.MCPSessionID != request.MCPSessionID {
-		metadata.AttachmentHistory = append(metadata.AttachmentHistory, AttachmentRecord{Attachment: *current, EndedAt: now, Cause: CauseClaim})
+	current := metadata.Attachment
+	// A same-client re-attach (the compaction reorientation) changes nothing in
+	// the store — no version bump, no stamp refresh; the next real operation
+	// stamps. Only a first attach or a displacement of another client writes.
+	if current == nil || current.MCPSessionID != request.MCPSessionID {
+		if current != nil {
+			metadata.AttachmentHistory = append(metadata.AttachmentHistory, endAttachment(*current, now, CauseClaim))
+		}
+		metadata.Attachment = newAttachment(principal.Subject, request.MCPSessionID, request.ClientName, request.ClientVersion, now)
+		metadata.UpdatedAt = now
+		version, appendErr := runtime.options.Sessions.Append(ctx, request.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
+		if appendErr != nil {
+			return nil, WorkflowResumeResult{}, appendErr
+		}
+		stored.Metadata = metadata
+		stored.Version = version
 	}
-	metadata.Attachment = newAttachment(principal.Subject, request.MCPSessionID, request.ClientName, request.ClientVersion, now)
-	metadata.UpdatedAt = now
-	version, err := runtime.options.Sessions.Append(ctx, request.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
-	if err != nil {
-		return nil, WorkflowResumeResult{}, err
-	}
-	stored.Metadata = metadata
-	stored.Version = version
 	w, err := a.newWorkflow(ctx, identity, runtime.options.Project.ID, sessionBindingFrom(stored))
 	if err != nil {
 		return nil, WorkflowResumeResult{}, err
@@ -307,6 +313,9 @@ func (w *WorkflowSession) Reopen(ctx context.Context, identity RequestIdentity, 
 	if err != nil {
 		return nil, err
 	}
+	if err := w.session.SinkErr(); err != nil {
+		return nil, err
+	}
 	return w.publicServe(serve), nil
 }
 
@@ -332,6 +341,9 @@ func (w *WorkflowSession) Start(ctx context.Context, identity RequestIdentity, r
 	}
 	serve, err := w.session.Start(spec, request.Params, parent)
 	if err != nil {
+		return nil, err
+	}
+	if err := w.session.SinkErr(); err != nil {
 		return nil, err
 	}
 	return w.publicServe(serve), nil
@@ -360,6 +372,12 @@ func (w *WorkflowSession) Advance(ctx context.Context, identity RequestIdentity,
 		serve, err = w.session.Report(request.Instance, request.Report)
 	}
 	if err != nil {
+		return nil, err
+	}
+	// A displaced binding fails its append inside the engine, which stashes the
+	// typed error rather than returning it; surface it here so the first write
+	// fails typed instead of a phantom success.
+	if err := w.session.SinkErr(); err != nil {
 		return nil, err
 	}
 	result := w.publicServe(serve)
@@ -418,6 +436,9 @@ func (w *WorkflowSession) Abandon(ctx context.Context, identity RequestIdentity,
 	if err := w.session.Abandon(instance, reason); err != nil {
 		return WorkflowAbandonResult{}, err
 	}
+	if err := w.session.SinkErr(); err != nil {
+		return WorkflowAbandonResult{}, err
+	}
 	base, err := w.ServeShell(ctx, identity)
 	if err != nil {
 		return result, fmt.Errorf("serving session shell after abandoning %s: %w", instance, err)
@@ -436,6 +457,9 @@ func (w *WorkflowSession) Park(ctx context.Context, identity RequestIdentity, in
 		return WorkflowParkResult{}, fmt.Errorf("instance %q not found in session", instance)
 	}
 	if err := w.session.Park(instance, note); err != nil {
+		return WorkflowParkResult{}, err
+	}
+	if err := w.session.SinkErr(); err != nil {
 		return WorkflowParkResult{}, err
 	}
 	base, err := w.ServeShell(ctx, identity)
@@ -465,7 +489,7 @@ func (w *WorkflowSession) StageAttachment(ctx context.Context, identity RequestI
 func (w *WorkflowSession) LogRead(ctx context.Context, identity RequestIdentity, tool string, full, summary []string) error {
 	w.setOperation(ctx, identity)
 	w.session.LogRead(tool, full, summary)
-	return nil
+	return w.session.SinkErr()
 }
 
 func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity) (string, error) {
@@ -491,9 +515,10 @@ func (w *WorkflowSession) Release(ctx context.Context, identity RequestIdentity,
 	return w.app.ReleaseSession(ctx, identity, w.project, w.binding, cause)
 }
 
-// Leave ends the connection's attachment with the transport cause. A session
-// with no open moves is auto-concluded (cause conclude) so it does not remain
-// as an empty parked dialogue.
+// Leave ends the connection's attachment with the trigger cause its caller
+// passed (switch, disconnect, shutdown, …). A quiescent session — shell only,
+// no open moves — auto-concludes its shell so it does not linger as an empty
+// parked dialogue, but the attachment still records the trigger, not conclude.
 func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity, cause AttachmentCause) error {
 	w.setOperation(ctx, identity)
 	if len(w.OpenInstances()) == 0 && w.shell != "" {
@@ -502,7 +527,6 @@ func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity, c
 				return err
 			}
 		}
-		cause = CauseConclude
 	}
 	return w.Release(ctx, identity, cause)
 }

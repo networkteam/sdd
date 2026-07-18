@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -115,8 +116,8 @@ func TestEngineOperationAppendsOnceAndServesDoNotWrite(t *testing.T) {
 	}
 
 	// A non-completing advance emits exactly one engine event (the report), so
-	// it performs exactly one session-store append — no extra bind append rides
-	// the operation now that begin() is gone.
+	// it performs exactly one session-store append — the operation's own event
+	// with the stamp, and nothing else.
 	before := sessions.appends.Load()
 	if _, err := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}}); err != nil {
 		t.Fatal(err)
@@ -139,6 +140,69 @@ func TestEngineOperationAppendsOnceAndServesDoNotWrite(t *testing.T) {
 	}
 	if got := sessions.appends.Load() - before; got != 0 {
 		t.Fatalf("serves performed %d session-store appends, want 0", got)
+	}
+}
+
+// TestDisplacedWriterFailsTypedImmediately covers I2 and the fail-loud rule:
+// once another client displaces the attachment, the displaced writer's very
+// next write fails typed synchronously — not a phantom success that surfaces
+// only on a later call — and nothing is persisted.
+func TestDisplacedWriterFailsTypedImmediately(t *testing.T) {
+	application, sessions, _, _ := newStampWorkflowApp(t, "", "", time.Now)
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another client attaches to the same session, displacing A's attachment.
+	if _, _, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b"}); err != nil {
+		t.Fatal(err)
+	}
+	// A's next write — a non-completing advance — must fail typed on this call,
+	// with zero durable appends.
+	before := sessions.appends.Load()
+	_, advErr := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}})
+	if advErr == nil {
+		t.Fatal("displaced writer's advance should fail, got success")
+	}
+	var appErr *sdd.ApplicationError
+	if !errors.As(advErr, &appErr) || appErr.Code != sdd.ErrorSessionOwnership {
+		t.Fatalf("displaced advance error = %v, want typed ErrorSessionOwnership on the first call", advErr)
+	}
+	if got := sessions.appends.Load() - before; got != 0 {
+		t.Fatalf("displaced advance persisted %d appends, want 0", got)
+	}
+}
+
+// TestAttachmentActiveClampsClockSkew covers item 6: a future-dated stamp from
+// clock skew must not read active indefinitely — activity outside the recency
+// window on either side of now is idle.
+func TestAttachmentActiveClampsClockSkew(t *testing.T) {
+	t0 := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
+	now := t0
+	application, _, graphDir, sessionsDir := newStampWorkflowApp(t, "", "", func() time.Time { return now })
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "terminal-test"}); err != nil {
+		t.Fatal(err)
+	}
+	// A fresh runtime whose clock reads far BEFORE the stamp (skew) must not
+	// classify the session active — a future stamp beyond the window is idle.
+	now = t0.Add(-2 * sdd.SessionRecencyWindow)
+	revived, _, _, _ := newStampWorkflowApp(t, graphDir, sessionsDir, func() time.Time { return now })
+	list, err := revived.ListWorkflowSessions(t.Context(), identity, "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Active {
+		t.Fatalf("a stamp beyond the future side of the window must read idle, got %+v", list)
 	}
 }
 

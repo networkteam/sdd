@@ -23,8 +23,8 @@ type SessionMetadata struct {
 }
 
 // Attachment is the informational stamp of the client currently driving the
-// session. It carries no lease: integrity comes from CAS on append, and status
-// is derived from LastActivity recency, never from an expiry.
+// session: integrity comes from CAS on append, and status is derived from
+// LastActivity recency.
 type Attachment struct {
 	Subject       string
 	ClientName    string

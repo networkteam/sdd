@@ -444,7 +444,7 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	ss := &shellSession{id: string(workflow.ID()), participant: "", root: workflow, rootIdentity: identity, lastActivity: time.Now()}
+	ss := &shellSession{id: string(workflow.ID()), root: workflow, rootIdentity: identity}
 	prev := s.sessions.bind(req.Session, ss)
 	if err := s.watchDisconnect(req.Session); err != nil {
 		return nil, ServeResult{}, err
@@ -656,7 +656,7 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 		if err != nil {
 			return nil, ResumeSessionResult{}, err
 		}
-		ss := &shellSession{id: string(workflow.ID()), participant: result.Participant, root: workflow, rootIdentity: identity, lastActivity: time.Now()}
+		ss := &shellSession{id: string(workflow.ID()), root: workflow, rootIdentity: identity}
 		prev := s.sessions.bind(req.Session, ss)
 		if err := s.leaveSession(ctx, prev, sdd.CauseSwitch); err != nil {
 			return nil, ResumeSessionResult{}, err

@@ -8,8 +8,7 @@ import (
 const SessionCodecVersion uint32 = 1
 
 // SessionRecencyWindow is the single threshold separating an active attachment
-// from an idle one. It labels listings and (in a later slice) gates takeover;
-// erring long is cheap, so it is generous.
+// from an idle one. Erring long is cheap, so it is generous.
 const SessionRecencyWindow = 15 * time.Minute
 
 // ChooserKind classifies who answers a pending chooser, mirrored from the
@@ -27,9 +26,10 @@ type SessionBinding struct {
 	Version      uint64
 }
 
-// ReleaseSession records the current attachment ending with a specific cause
-// and clears it. Status is derived from the store afterwards; nothing is
-// marked "released".
+// ReleaseSession ends this connection's own attachment, recording it in history
+// with the given cause. Releasing means "end MY attachment", so when the current
+// attachment is absent or belongs to another MCP session — already displaced,
+// concluded, or taken over — it is a no-op: there is nothing of mine to end.
 func (a *Application) ReleaseSession(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, cause AttachmentCause) error {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
@@ -39,25 +39,38 @@ func (a *Application) ReleaseSession(ctx context.Context, identity RequestIdenti
 	if err != nil {
 		return err
 	}
-	if err := verifyBinding(stored, binding); err != nil {
+	if err := validateStoredSession(stored); err != nil {
 		return err
+	}
+	current := stored.Metadata.Attachment
+	if current == nil || current.MCPSessionID != binding.MCPSessionID {
+		return nil
 	}
 	now := runtime.options.Now().UTC().Round(0)
 	metadata := stored.Metadata
-	if metadata.Attachment != nil {
-		metadata.AttachmentHistory = append(metadata.AttachmentHistory, AttachmentRecord{Attachment: *metadata.Attachment, EndedAt: now, Cause: cause})
-		metadata.Attachment = nil
-	}
+	metadata.AttachmentHistory = append(metadata.AttachmentHistory, endAttachment(*current, now, cause))
+	metadata.Attachment = nil
 	metadata.UpdatedAt = now
 	_, err = runtime.options.Sessions.Append(ctx, binding.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
 	return err
 }
 
-// attachmentActive reports whether an attachment counts as active given the
-// injected clock — present and stamped within the recency window. A server
-// killed without a leave event leaves a stale stamp, so it reads idle.
+// endAttachment closes out a past attachment with the cause it ended for the
+// history log.
+func endAttachment(att Attachment, endedAt time.Time, cause AttachmentCause) AttachmentRecord {
+	return AttachmentRecord{Attachment: att, EndedAt: endedAt, Cause: cause}
+}
+
+// attachmentActive reports whether an attachment counts as active: present and
+// stamped within the recency window on either side of now. A stale stamp (a
+// server killed without a leave event) reads idle, and so does a far-future
+// stamp from clock skew — activity outside [-window, +window) is not "now".
 func attachmentActive(att *Attachment, now time.Time) bool {
-	return att != nil && now.Sub(att.LastActivity) < SessionRecencyWindow
+	if att == nil {
+		return false
+	}
+	delta := now.Sub(att.LastActivity)
+	return delta >= -SessionRecencyWindow && delta < SessionRecencyWindow
 }
 
 func sessionBindingFrom(stored StoredSession) SessionBinding {
