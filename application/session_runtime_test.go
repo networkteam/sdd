@@ -266,37 +266,31 @@ func TestPreparedTransitionRecoversUnknownApplyAndFinalizer(t *testing.T) {
 	}
 }
 
-func TestPreparedTransitionPersistsNotAppliedAndRejectsStaleBinding(t *testing.T) {
+func TestPreparedTransitionMergesUnrelatedAppendAndRejectsStaleBinding(t *testing.T) {
 	application, _, blobs, graph := newDurableApplication(t, time.Now, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "stale", MCPSessionID: "mcp-1", Chooser: sdd.ChooserAgent})
+	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "merge", MCPSessionID: "mcp-1", Chooser: sdd.ChooserAgent})
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "stale-revision", "2026/07/13-052000-s-tac-stl.md")
+	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "merge-revision", "2026/07/13-052000-s-tac-stl.md")
 	advance := preparedEntry(t, graph.GraphStore, bound.Binding, "external", "2026/07/13-052100-s-tac-ext.md")
 	if _, err := graph.Apply(t.Context(), advance.ExpectedGraphRevision, advance.Batch, nil); err != nil {
 		t.Fatal(err)
 	}
+	// The prepared write pins the pre-advance revision, but an unrelated append
+	// moved the store. It merges cleanly against the revalidated fresh revision
+	// instead of failing the stale pin, and never files a recovery.
 	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
-	if errorCode(err) != sdd.ErrorGraphConflict || result.Apply.State != sdd.MutationNotApplied || blobs.released != 0 {
-		t.Fatalf("stale graph ApplyPrepared = %+v, %v; released=%d", result, err, blobs.released)
+	if err != nil || result.Apply.State != sdd.MutationApplied || blobs.released != 1 {
+		t.Fatalf("merge-under-append ApplyPrepared = %+v, %v; released=%d", result, err, blobs.released)
 	}
 	pending, err := application.ListRecoveries(t.Context(), identity, "example", false)
-	if err != nil || len(pending.Items) != 1 || pending.Items[0].State != sdd.RecoveryNotAppliedAwaitingDecision {
-		t.Fatalf("not-applied recovery projection = %+v, %v", pending, err)
+	if err != nil || len(pending.Items) != 0 {
+		t.Fatalf("merge-under-append recovery projection = %+v, %v", pending, err)
 	}
-	if _, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
-		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryAbandonUnknown,
-	}); errorCode(err) != sdd.ErrorRecoveryRequired {
-		t.Fatalf("abandon after reconciled not-applied error = %v", err)
-	}
-	discarded, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
-		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard, Reason: "stale prepared graph",
-	})
-	if err != nil || discarded.Item.State != sdd.RecoveryDiscarded || blobs.released != 1 {
-		t.Fatalf("discard recovery = %+v, %v; released=%d", discarded, err, blobs.released)
-	}
+	// The successful write advanced the session; a second write presenting the
+	// pre-write binding version is fenced as a stale binding.
 	other := preparedEntry(t, graph.GraphStore, bound.Binding, "stale-binding", "2026/07/13-052200-s-tac-bnd.md")
 	if _, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, other); errorCode(err) != sdd.ErrorSessionConflict {
 		t.Fatalf("stale binding error = %v", err)
@@ -591,14 +585,17 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// A structurally diverged intent files a discardable not-applied
+		// recovery without ever reaching the graph store.
 		prepared := preparedEntry(t, graph, bound.Binding, "release-discard", "2026/07/13-052310-s-tac-dis.md")
-		advance := preparedEntry(t, graph, bound.Binding, "release-discard-advance", "2026/07/13-052311-s-tac-ext.md")
-		if _, err := graph.Apply(t.Context(), advance.ExpectedGraphRevision, advance.Batch, nil); err != nil {
+		prepared.Batch.Changes[0].Document.Body = "Diverged structured body."
+		prepared.Batch.Digest, err = sdd.MutationBatchDigest(prepared.Batch)
+		if err != nil {
 			t.Fatal(err)
 		}
 		result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
-		if errorCode(err) != sdd.ErrorGraphConflict {
-			t.Fatalf("stale apply = %+v, %v", result, err)
+		if errorCode(err) != sdd.ErrorRecoveryRequired {
+			t.Fatalf("diverged apply = %+v, %v", result, err)
 		}
 		targets.setReleaseError(errors.New("injected target release failure"))
 		discarded, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard})
@@ -724,14 +721,17 @@ func TestRecoveryAuthorizationReceivesActorOwnerTargetAndDistinctVerb(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A structurally diverged intent yields an actionable recovery item to
+	// discard, without depending on a graph revision race.
 	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "authorize-discard", "2026/07/13-052600-s-tac-aut.md")
-	advance := preparedEntry(t, graph.GraphStore, bound.Binding, "authorize-external", "2026/07/13-052700-s-tac-ext.md")
-	if _, err := graph.Apply(t.Context(), advance.ExpectedGraphRevision, advance.Batch, nil); err != nil {
+	prepared.Batch.Changes[0].Document.Body = "Diverged structured body."
+	prepared.Batch.Digest, err = sdd.MutationBatchDigest(prepared.Batch)
+	if err != nil {
 		t.Fatal(err)
 	}
 	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
-	if errorCode(err) != sdd.ErrorGraphConflict {
-		t.Fatalf("stale apply = %+v, %v", result, err)
+	if errorCode(err) != sdd.ErrorRecoveryRequired {
+		t.Fatalf("diverged apply = %+v, %v", result, err)
 	}
 	if _, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard, Reason: "operator chose discard",

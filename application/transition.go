@@ -19,11 +19,21 @@ const (
 	eventFinalizerOutcome = "finalizer_outcome"
 )
 
+// maxApplyAttempts bounds the read-fresh → revalidate → apply loop inside a
+// single acquired target. The graph adapter's lock is per-call, so a
+// concurrent process can move the revision between our fresh read and the CAS
+// apply; a lost race simply re-reads and re-applies. The retry is mechanical —
+// neither pre-flight nor summary re-runs (both complete before ApplyPrepared).
+const maxApplyAttempts = 3
+
 // PreparedTransition is the storage-neutral write-gate output. It contains
 // only pinned v1 facts; adapters never reconstruct application intent.
 type PreparedTransition struct {
-	Version               uint32
-	Target                MutationTarget
+	Version uint32
+	Target  MutationTarget
+	// ExpectedGraphRevision is prepare-time provenance only. The apply CAS
+	// operand is the freshly revalidated revision (see applyOnAcquired), so a
+	// concurrent unrelated append merges cleanly instead of failing the pin.
 	ExpectedGraphRevision string
 	Batch                 MutationBatch
 	BlobOwner             BlobOwner
@@ -105,14 +115,23 @@ func (a *Application) applyOnAcquired(ctx context.Context, runtime *ProjectRunti
 			err = errors.Join(err, fmt.Errorf("releasing mutation target %s: %w", prepared.Target.Branch, releaseErr))
 		}
 	}()
-	snapshot, err := acquired.Graph.Current(ctx)
-	if err != nil {
-		return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationUnknown}}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "reading mutation target before apply failed", Cause: err}
+	var apply ApplyResult
+	var applyErr error
+	for attempt := 1; ; attempt++ {
+		snapshot, readErr := acquired.Graph.Current(ctx)
+		if readErr != nil {
+			return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationUnknown}}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "reading mutation target before apply failed", Cause: readErr}
+		}
+		if revalidateErr := revalidatePreparedTransition(ctx, snapshot, prepared); revalidateErr != nil {
+			return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationNotApplied, Revision: snapshot.Revision()}}, revalidateErr
+		}
+		// Apply against the revision just revalidated rather than the
+		// prepare-time pin, so a concurrent unrelated append merges cleanly.
+		apply, applyErr = acquired.Graph.Apply(ctx, snapshot.Revision(), prepared.Batch, ownedBlobReader{store: runtime.options.StagedBlobs, owner: prepared.BlobOwner})
+		if !isGraphConflict(applyErr) || attempt >= maxApplyAttempts {
+			break
+		}
 	}
-	if err := revalidatePreparedTransition(ctx, snapshot, prepared); err != nil {
-		return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationNotApplied, Revision: snapshot.Revision()}}, err
-	}
-	apply, applyErr := acquired.Graph.Apply(ctx, prepared.ExpectedGraphRevision, prepared.Batch, ownedBlobReader{store: runtime.options.StagedBlobs, owner: prepared.BlobOwner})
 	return a.finishTransition(ctx, runtime, acquired, binding, prepared, apply, applyErr, prior, actor, terminalVerb)
 }
 
@@ -121,6 +140,9 @@ func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRunt
 		prior = map[string]FinalizerOutcome{}
 	}
 	result := TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: apply}
+	if isGraphConflict(applyErr) {
+		return a.discardContendedTransition(ctx, runtime, result, prepared, actor)
+	}
 	if apply.State != MutationUnknown {
 		outcome, err := storedEvent(eventMutationOutcome, mutationOutcomeEvent{MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Apply: apply})
 		if err != nil {
@@ -176,12 +198,48 @@ func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRunt
 		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "canonical mutation outcome is unknown", ApplyState: apply.State, Revision: apply.Revision, Cause: applyErr}
 	}
 	if apply.State == MutationNotApplied && applyErr == nil {
+		// A definitive not-applied with no error is a genuine awaiting-decision
+		// outcome (deduplicated or reconciled), never a revision conflict —
+		// conflicts short-circuit above and are re-tried, then closed.
 		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "canonical mutation was not applied and awaits an explicit recovery decision", ApplyState: apply.State, Revision: apply.Revision}
 	}
 	if applyErr != nil {
 		return result, applyErr
 	}
 	return result, nil
+}
+
+// isGraphConflict reports whether err is the adapter's typed revision-conflict
+// signal — the graph moved under a CAS apply.
+func isGraphConflict(err error) bool {
+	var appErr *ApplicationError
+	return errors.As(err, &appErr) && appErr.Code == ErrorGraphConflict
+}
+
+// discardContendedTransition closes a durable intent whose bounded apply
+// retries were all lost to concurrent writers. A revision conflict fails the
+// CAS before any file write, so the intent carries no partial graph state:
+// release its retained blobs, record a discard terminal so it never surfaces
+// as a pending recovery, and return the typed conflict inviting a plain
+// re-try (which re-reads, re-validates, and re-applies from scratch).
+func (a *Application) discardContendedTransition(ctx context.Context, runtime *ProjectRuntime, result TransitionResult, prepared PreparedTransition, actor string) (TransitionResult, error) {
+	if err := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID); err != nil {
+		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "contended mutation could not release retained blobs", Cause: err}
+	}
+	next, err := appendRecoveryTerminal(ctx, runtime.options.Sessions, result.Binding, recoveryTerminalEvent{
+		MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
+		OriginalSubject: prepared.BlobOwner.Subject, OriginalSession: prepared.BlobOwner.Session,
+		Actor: actor, Verb: RecoveryDiscard, Reason: "graph contention: bounded apply retries exhausted",
+	})
+	if err != nil {
+		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "contended mutation discard was not persisted", Cause: err}
+	}
+	result.Binding.Version = next
+	return result, &ApplicationError{
+		Code:     ErrorGraphConflict,
+		Message:  "the graph is being written concurrently and this change lost every apply retry; re-try the write",
+		Revision: result.Apply.Revision,
+	}
 }
 
 func validatePreparedTransition(prepared PreparedTransition, principal Principal, binding SessionBinding, project ProjectID) error {

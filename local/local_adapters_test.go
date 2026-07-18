@@ -53,7 +53,18 @@ func TestFilesystemGraphStoreConformance(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return sddtest.GraphStoreFixture{Store: store, InitialRevision: initial.Revision(), Batch: batch}
+		secondBatch := sdd.MutationBatch{
+			ID: "mutation-2",
+			Changes: []sdd.DocumentChange{{
+				LogicalPath:    "2026/07/13-030000-s-tac-two.md",
+				CanonicalBytes: []byte(localEntry),
+			}},
+		}
+		secondBatch.Digest, err = sdd.MutationBatchDigest(secondBatch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sddtest.GraphStoreFixture{Store: store, InitialRevision: initial.Revision(), Batch: batch, SecondBatch: secondBatch}
 	})
 }
 

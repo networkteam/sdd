@@ -53,6 +53,10 @@ type GraphStoreFixture struct {
 	Blobs           sdd.StagedBlobReader
 	AttachmentEntry string
 	AttachmentName  string
+	// SecondBatch, when set, exercises the merge-under-append guarantee: it
+	// must target paths unrelated to Batch so it can apply cleanly against the
+	// revision Batch advanced the store to.
+	SecondBatch sdd.MutationBatch
 }
 
 func RunGraphStoreTests(t *testing.T, factory func(*testing.T) GraphStoreFixture) {
@@ -90,6 +94,25 @@ func RunGraphStoreTests(t *testing.T, factory func(*testing.T) GraphStoreFixture
 		}
 		if page.Filename != fixture.AttachmentName || len(page.Content) > 1 {
 			t.Fatalf("ReadAttachmentPage = %+v", page)
+		}
+	}
+	if fixture.SecondBatch.ID != "" {
+		// Merge under append: SecondBatch was prepared against InitialRevision,
+		// but the first Apply advanced the store, so that pin is now stale and
+		// conflicts. Re-reading the fresh revision and applying there succeeds
+		// cleanly — the adapter guarantee the engine's bounded-retry merge
+		// depends on. A conflict must leave no ledger record blocking the retry.
+		stale, staleErr := fixture.Store.Apply(t.Context(), fixture.InitialRevision, fixture.SecondBatch, fixture.Blobs)
+		if stale.State != sdd.MutationNotApplied {
+			t.Fatalf("stale merge Apply = %+v (error %v), want not_applied conflict", stale, staleErr)
+		}
+		fresh, err := fixture.Store.Current(t.Context())
+		if err != nil {
+			t.Fatalf("Current before merge apply: %v", err)
+		}
+		merged, err := fixture.Store.Apply(t.Context(), fresh.Revision(), fixture.SecondBatch, fixture.Blobs)
+		if err != nil || merged.State != sdd.MutationApplied || merged.Revision == "" {
+			t.Fatalf("merge-under-append Apply = %+v, %v", merged, err)
 		}
 	}
 }
