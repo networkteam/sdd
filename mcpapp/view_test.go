@@ -16,7 +16,7 @@ import (
 // (the s-prc-3kh cohort) and a bound session.
 func TestViewFirstHitHint(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
-	const doorMark = "start_session is the door"
+	const doorMark = "start_session opens a fresh one"
 	const factMark = "view layout grammar"
 
 	// Connection A: never opens a session (unbound).

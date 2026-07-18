@@ -485,7 +485,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "c62b74b49f6b80addaa784c85f78e1d8e556a67803f444087b33d525f5941621"
+	const want = "38a51a6388671672b2803ae4882d61ce9e3a7d3c22c0a51bc693aee0c055d9eb"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -862,9 +862,9 @@ func TestSessionLabelFallbackAndValidation(t *testing.T) {
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
 
-	// A live-bound session never lists on its own connection; the descriptor
-	// is observed the way another participant would see it — a fresh server
-	// over the same sessions dir.
+	// The descriptor is observed from a peer — a fresh server over the same
+	// sessions dir, where this session reads as idle — so the label-derivation
+	// assertions are isolated from this connection's own live hold.
 	descriptor := func() mcpserver.ListSessionsResult {
 		t.Helper()
 		peer := newTestServer(t, nil, env.graphDir, env.sessionsDir)
@@ -1289,6 +1289,11 @@ func TestAbandonSessionByHandle_Rejections(t *testing.T) {
 	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": "i_1", "session": "s_x"}); !strings.Contains(msg, "not attached to s_x") {
 		t.Fatalf("a move abandon naming an unattached session should funnel to resume_session, got %q", msg)
 	}
+	// Instance set but session omitted is a work-tool call missing its handle:
+	// it names both doors, not the pass-one-of message.
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": "i_1"}); !strings.Contains(msg, "start_session") || !strings.Contains(msg, "resume_session") {
+		t.Fatalf("a move abandon without a session handle should name both doors, got %q", msg)
+	}
 	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": serve.Session}); !strings.Contains(msg, "own junction") {
 		t.Fatalf("tearing down the bound session should point at conclude, got %q", msg)
 	}
@@ -1326,9 +1331,9 @@ func TestUnboundRejectionInlinesParkedSessions(t *testing.T) {
 	}
 }
 
-// TestWorkToolWrongSessionFunnels: a work tool naming a session this connection
-// is not attached to funnels into resume_session — the single attach point
-// (d-cpt-9of). The handle must name the connection's own attachment.
+// TestWorkToolWrongSessionFunnels: every work tool naming a session this
+// connection is not attached to funnels into resume_session — the single attach
+// point (d-cpt-9of). The handle must name the connection's own attachment.
 func TestWorkToolWrongSessionFunnels(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
@@ -1336,11 +1341,19 @@ func TestWorkToolWrongSessionFunnels(t *testing.T) {
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
 
-	msg := callExpectError(t, cs, "next", map[string]any{
-		"session": "s_not-mine", "instance": serve.Instance, "report": assembleReport(),
-	})
-	if !strings.Contains(msg, "not attached to s_not-mine") || !strings.Contains(msg, "resume_session") {
-		t.Fatalf("a work tool naming a foreign session should funnel to resume_session, got %q", msg)
+	const foreign = "s_not-mine"
+	cases := map[string]map[string]any{
+		"start_procedure":  {"session": foreign, "canonical": "capture"},
+		"next":             {"session": foreign, "instance": serve.Instance, "report": assembleReport()},
+		"park":             {"session": foreign, "instance": serve.Instance},
+		"stage_attachment": {"session": foreign, "name": "a.md", "content": "x"},
+		"abandon":          {"session": foreign, "instance": serve.Instance},
+	}
+	for tool, args := range cases {
+		msg := callExpectError(t, cs, tool, args)
+		if !strings.Contains(msg, "not attached to "+foreign) || !strings.Contains(msg, "resume_session") {
+			t.Fatalf("%s naming a foreign session should funnel to resume_session, got %q", tool, msg)
+		}
 	}
 }
 
@@ -1383,6 +1396,62 @@ func TestNamedResumeOnUnboundConnection(t *testing.T) {
 	call(t, cs2, "next", map[string]any{"session": handle, "instance": capServe.Instance, "report": assembleReport()}, &serve)
 	if serve.Step != "playback" {
 		t.Fatalf("the attached connection should advance the move, got %q", serve.Step)
+	}
+}
+
+// TestSwitchParksSessionWithOpenMove: switching a connection to another session
+// applies the leave rule to the one it leaves — a session with an open move is
+// parked (not concluded), its move kept and resumable (d-cpt-9of decision 6).
+// The target B is seeded on an earlier server so it reads as idle to the later
+// server that does the switch (holder TTL < the fixture's per-server clock gap).
+func TestSwitchParksSessionWithOpenMove(t *testing.T) {
+	seed := newTestServer(t, nil, "", "")
+	csSeed := connect(t, seed.srv)
+	sessionB := openSession(t, csSeed).Session
+	var serveB mcpserver.ServeResult
+	call(t, csSeed, "start_procedure", map[string]any{"session": sessionB, "canonical": "capture", "label": "target B"}, &serveB)
+
+	// Later server over the same store: A is opened here with an open move.
+	env := newTestServer(t, nil, seed.graphDir, seed.sessionsDir)
+	csA := connect(t, env.srv)
+	sessionA := openSession(t, csA).Session
+	var serveA mcpserver.ServeResult
+	call(t, csA, "start_procedure", map[string]any{"session": sessionA, "canonical": "capture", "label": "left-behind A"}, &serveA)
+
+	// Switch csA to B: A is left with an open move, so the leave rule parks it.
+	var resumed mcpserver.ResumeSessionResult
+	call(t, csA, "resume_session", map[string]any{"session": sessionB}, &resumed)
+	if resumed.Session != sessionB {
+		t.Fatalf("switch should attach to B, got %s", resumed.Session)
+	}
+
+	// A is parked, not concluded: it lists with its open capture still standing.
+	var listed mcpserver.ListSessionsResult
+	call(t, csA, "list_sessions", map[string]any{}, &listed)
+	found := false
+	for _, s := range listed.Sessions {
+		if s.Session == sessionA {
+			found = true
+			if len(s.Open) != 1 || s.Open[0].Procedure != "capture" || s.Open[0].Step != serveA.Step {
+				t.Fatalf("the parked session should keep its open capture at its step, got %+v", s.Open)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the switched-away session should be parked and listed, got %+v", listed.Sessions)
+	}
+
+	// A's move is resumable: switching back re-serves the capture at its step.
+	var reA mcpserver.ResumeSessionResult
+	call(t, csA, "resume_session", map[string]any{"session": sessionA}, &reA)
+	var capA *mcpserver.ServeResult
+	for i := range reA.Open {
+		if reA.Open[i].Procedure == "capture" {
+			capA = &reA.Open[i]
+		}
+	}
+	if capA == nil || capA.Instance != serveA.Instance || capA.Step != serveA.Step {
+		t.Fatalf("the parked move should resume intact at its step, got %+v", reA.Open)
 	}
 }
 
@@ -1920,8 +1989,10 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 	if listed.Sessions[0].Activity != "active" || listed.Sessions[0].ClientName != "test-client" {
 		t.Fatalf("a live-held session should list as active with its client name, got %+v", listed.Sessions[0])
 	}
-	if msg := callExpectError(t, csB, "resume_session", map[string]any{"session": sessionA}); !strings.Contains(msg, "live") {
-		t.Fatalf("attaching to a live-held session should refuse, got %q", msg)
+	// The refusal names the holder — client and last activity — the same facts
+	// the listing advertises, so the agent knows whom to check with.
+	if msg := callExpectError(t, csB, "resume_session", map[string]any{"session": sessionA}); !strings.Contains(msg, "live") || !strings.Contains(msg, "held by test-client") {
+		t.Fatalf("attaching to a live-held session should refuse and name the holder, got %q", msg)
 	}
 
 	// A fresh server over the same sessions dir sees A as parked: the door

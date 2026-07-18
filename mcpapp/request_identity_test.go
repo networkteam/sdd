@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -66,7 +67,6 @@ func TestStreamableHTTPUsesCurrentRequestIdentity(t *testing.T) {
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "identity-spike", Version: "test"}, nil)
 	for _, lane := range []string{"project_resolution", "engine_query", "mutation_authorization"} {
-		lane := lane
 		mcp.AddTool(server, &mcp.Tool{Name: lane}, func(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 			mu.Lock()
 			observations = append(observations, observation{lane: lane, identity: identityFromRequest(req)})
@@ -180,10 +180,8 @@ func (a *observingAccess) ResolveProject(_ context.Context, principal sdd.Princi
 		want = "project:write"
 		code = sdd.ErrorWriteDenied
 	}
-	for _, scope := range scopes {
-		if scope == want {
-			return a.runtime, nil
-		}
+	if slices.Contains(scopes, want) {
+		return a.runtime, nil
 	}
 	return nil, &sdd.ApplicationError{Code: code, Message: "scope denied"}
 }

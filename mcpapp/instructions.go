@@ -25,11 +25,14 @@ dialogue should feel, and the moves you can start; resume_session attaches to
 an existing session by its handle.
 
 The session handle is the dialogue's identity. Every work tool (start_procedure,
-next, park, stage_attachment, abandon) carries it as a required argument, and it
-must name the session this connection is attached to — retain it across context
-compaction. Discovery and reading stay free: list_sessions shows every session
-with open work (no handle needed), and the read tools (search, view, show,
-read_attachment, info, registry) are always ungated.
+next, park, stage_attachment, and abandon of a move) carries it as a required
+argument naming the session this connection is attached to — retain it across
+context compaction. The one exception is abandon's teardown mode (session alone,
+no instance): it tears down a session by handle without attaching, so the handle
+there names a session you need not be attached to. Discovery and reading stay
+free: list_sessions shows every session with open work (no handle needed), and
+the read tools (search, view, show, read_attachment, info, registry) are always
+ungated.
 
 If you lose the handle — your context was compacted or summarized — recover
 without guessing: resume_session with no arguments re-serves the session this

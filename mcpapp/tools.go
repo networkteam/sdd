@@ -2,6 +2,7 @@ package mcpapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -135,7 +136,7 @@ type ListSessionsResult struct {
 }
 
 type ResumeSessionArgs struct {
-	Session string `json:"session,omitempty" jsonschema:"a session handle (from list_sessions) to attach this connection to — works on a fresh unbound connection, and switches away from a currently attached session (parking or concluding it per the leave rule). Omit to reorient the session this connection is already attached to; omit while unattached to list the sessions with open work"`
+	Session string `json:"session,omitempty" jsonschema:"a session handle (from list_sessions) to attach this connection to — works on a fresh unbound connection, and switches away from a currently attached session (parking or concluding it per the leave rule). Omit to reorient the session this connection is already attached to; omit while unattached and the rejection carries the sessions with open work to attach to"`
 }
 
 type ResumeSessionResult struct {
@@ -294,8 +295,9 @@ func (s *Server) registerTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "list_sessions",
 		Description: "List every session with open work — free discovery, no session needed. Each carries " +
-			"participant, label, client name, last activity, and an active/idle tag; active sessions are " +
-			"listed, never hidden. Attach to one with resume_session.",
+			"participant, label, last activity, an active/idle tag, and the holding client's name when a " +
+			"client currently holds it; active sessions are listed, never hidden. Attach to one with " +
+			"resume_session.",
 	}, s.listSessions)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -305,7 +307,7 @@ func (s *Server) registerTools() {
 			"a currently attached session (parking it when moves are open, concluding it when quiescent). " +
 			"Omit session to reorient the session you are already attached to: its framing plus every " +
 			"running move at its current step, each with the report schema to continue it. Omit it while " +
-			"unattached to list the sessions with open work to attach to.",
+			"unattached and the rejection carries the sessions with open work to attach to.",
 	}, s.resumeSession)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -631,7 +633,7 @@ func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ L
 }
 
 // activityTag derives the listing label from whether a live client currently
-// holds the session. Slice 3 swaps the source to attachment-stamp recency.
+// holds the session.
 func activityTag(holderLive bool) string {
 	if holderLive {
 		return "active"
@@ -639,12 +641,35 @@ func activityTag(holderLive bool) string {
 	return "idle"
 }
 
+// enrichSessionInUse rewrites an attach rejection to name the current holder —
+// client and last activity, the same facts list_sessions advertises — so a
+// refusal tells the agent whom to check with before taking the session over.
+// The application error shape is unchanged; only the surfaced message grows.
+func enrichSessionInUse(err error) error {
+	var appErr *sdd.ApplicationError
+	if !errors.As(err, &appErr) || appErr.Code != sdd.ErrorSessionInUse || appErr.Holder == nil {
+		return err
+	}
+	msg := appErr.Message
+	var parts []string
+	if name := appErr.Holder.ClientName; name != "" {
+		parts = append(parts, "held by "+name)
+	}
+	if last := appErr.Holder.LastActivity; !last.IsZero() {
+		parts = append(parts, "last active "+last.UTC().Format(time.RFC3339))
+	}
+	if len(parts) > 0 {
+		msg += " — " + strings.Join(parts, ", ")
+	}
+	return toolError("%s", msg)
+}
+
 // resumeSession is the attach door and the compaction escape. Its session
 // handle is the deliberate exception to the required-handle rule: omitting it
 // reorients the currently attached session (or, unattached, lists what to
 // attach to); a named handle attaches — working on a fresh unbound connection,
 // and switching (leave rule on the previous) when already attached elsewhere
-// (d-cpt-9of decisions 4, 6, 15).
+// (d-cpt-9of).
 func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, args ResumeSessionArgs) (*mcp.CallToolResult, ResumeSessionResult, error) {
 	identity := s.requestIdentity(req)
 	current := s.sessions.bound(req.Session)
@@ -654,7 +679,7 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 			SessionID: sdd.SessionID(args.Session), MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
 		})
 		if err != nil {
-			return nil, ResumeSessionResult{}, err
+			return nil, ResumeSessionResult{}, enrichSessionInUse(err)
 		}
 		ss := &shellSession{id: string(workflow.ID()), participant: result.Participant, root: workflow, rootIdentity: identity, lastActivity: time.Now()}
 		prev := s.sessions.bind(req.Session, ss)
@@ -729,7 +754,7 @@ func (s *Server) readHint(ms *mcp.ServerSession) string {
 	if s.sessions.bound(ms) != nil {
 		return ""
 	}
-	return "no dialogue session is open — start_session is the door; reads stay free"
+	return "no dialogue session on this connection — start_session opens a fresh one, resume_session attaches to an existing one (list_sessions to discover); reads stay free"
 }
 
 // viewHintServedKey is the served-once sentinel for the first-view breadcrumb,
