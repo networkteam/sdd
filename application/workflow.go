@@ -22,7 +22,6 @@ const (
 	DefaultShellCanonical  = "user-dialogue"
 	WorkflowMaxLabelLength = 120
 	ExecutionForkPreferred = "fork-preferred"
-	workflowFramingLayout  = `aspirations:rank(heat(exp-14d)):n(8):brief,kind(directive):intent(guiding):active:rank(heat(exp-14d)):n(10):name("Guiding directives"):brief:as-list,focus:brief,participants:brief`
 )
 
 type WorkflowOpenRequest struct {
@@ -603,12 +602,14 @@ func (w *WorkflowSession) LogRead(ctx context.Context, identity RequestIdentity,
 	return w.session.SinkErr()
 }
 
+// Framing composes the session framing: the engine-supplied info block
+// (participant, language, search modes) — the fixed part every shell needs —
+// followed by the shell procedure's declared lanes, rendered through the
+// injection mechanism. A shell that declares no lanes serves info only; there
+// is no Go-constant fallback (I6, A1).
 func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity) (string, error) {
+	w.setOperation(ctx, identity)
 	info, err := w.app.Info(ctx, identity, w.project, InfoRequest{})
-	if err != nil {
-		return "", err
-	}
-	view, err := w.app.View(ctx, identity, w.project, ViewRequest{Layout: workflowFramingLayout})
 	if err != nil {
 		return "", err
 	}
@@ -617,8 +618,43 @@ func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity)
 	if info.Language != "" {
 		fmt.Fprintf(&out, "Language: %s\n", info.Language)
 	}
-	fmt.Fprintf(&out, "Search: %s\n\n%s", info.Search, view.Sections)
+	fmt.Fprintf(&out, "Search: %s", info.Search)
+	lanes, err := w.framingLanes()
+	if err != nil {
+		return "", err
+	}
+	if lanes != "" {
+		out.WriteString("\n\n")
+		out.WriteString(lanes)
+	}
 	return out.String(), nil
+}
+
+// framingLanes renders the shell procedure's declared framing lanes through
+// the engine's inject query mechanism and joins them. An empty result — no
+// shell, or a shell that declares none — leaves framing as the info block
+// alone.
+func (w *WorkflowSession) framingLanes() (string, error) {
+	if w.shell == "" {
+		return "", nil
+	}
+	inst, ok := w.session.Instance(w.shell)
+	if !ok {
+		return "", nil
+	}
+	var lanes []string
+	for _, call := range inst.Spec.Framing {
+		result, err := w.session.Inject(w.shell, call)
+		if err != nil {
+			return "", fmt.Errorf("framing lane %s: %w", call.Fn, err)
+		}
+		if text, ok := result.(string); ok {
+			if text = strings.TrimSpace(text); text != "" {
+				lanes = append(lanes, text)
+			}
+		}
+	}
+	return strings.Join(lanes, "\n\n"), nil
 }
 
 func (w *WorkflowSession) Release(ctx context.Context, identity RequestIdentity, cause AttachmentCause, reason string) error {

@@ -493,7 +493,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "a5f324f52b6319e17eea8b19f658e0ed8993a218ddc6a2d27a64861fa09a4246"
+	const want = "5585fbfc3d61dde01ba4993915a5dea101e17e55434bb363c59066250f78c48d"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1558,6 +1558,205 @@ func TestResumeNoSessionUnboundListsParked(t *testing.T) {
 	}
 }
 
+// jsonSize marshals v and returns its byte length — the rendered wire size a
+// reorientation/door serve costs the client's context.
+func jsonSize(t *testing.T, v any) int {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(raw)
+}
+
+// TestConvergingReorientation pins I6: repeated no-args resumes converge —
+// blocks this connection already saw stub, so payloads are monotonically
+// non-increasing and framing is never re-served (the replay-amplification the
+// old clear-and-replay produced). Removing the forgetConnection from the
+// same-session path is what makes this hold.
+func TestConvergingReorientation(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "converge"}, &serve)
+
+	var prev mcpserver.ResumeSessionResult
+	var prevSize int
+	for i := range 3 {
+		var resumed mcpserver.ResumeSessionResult
+		call(t, cs, "resume_session", map[string]any{}, &resumed)
+		// Framing was already served at the door — a reorient never re-pays it.
+		if resumed.Framing != "" {
+			t.Fatalf("reorient %d re-served framing (%d bytes) — convergence broken", i, len(resumed.Framing))
+		}
+		size := jsonSize(t, resumed)
+		if i > 0 && size > prevSize {
+			t.Fatalf("reorient %d payload grew (%d > %d) — reorientation must be non-increasing", i, size, prevSize)
+		}
+		prev, prevSize = resumed, size
+	}
+	// The move is still re-served at its step so a converged reorient stays
+	// actionable — convergence trims repetition, not the position.
+	found := false
+	for _, open := range prev.Open {
+		if open.Instance == serve.Instance {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a converged reorient must still re-serve the in-flight move, got %+v", prev.Open)
+	}
+}
+
+// TestFullReplayReservesOnce pins the compaction escape: a no-args reorient
+// converges (framing stubbed), fullReplay serves the complete position exactly
+// once, and the next no-args reorient converges again — and the converged
+// response never exceeds the full replay (I6: a reorientation never exceeds the
+// original serve).
+func TestFullReplayReservesOnce(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "replay"}, &mcpserver.ServeResult{})
+
+	var converged mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{}, &converged)
+	if converged.Framing != "" {
+		t.Fatalf("a plain reorient should stub framing, got %d bytes", len(converged.Framing))
+	}
+
+	var full mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{"fullReplay": true}, &full)
+	if full.Framing == "" {
+		t.Fatal("fullReplay must re-serve the complete framing")
+	}
+	if jsonSize(t, converged) > jsonSize(t, full) {
+		t.Fatalf("a converged reorient (%d) must not exceed the full replay (%d)", jsonSize(t, converged), jsonSize(t, full))
+	}
+
+	// Full replay is one-shot: the very next no-args reorient converges again.
+	var again mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{}, &again)
+	if again.Framing != "" {
+		t.Fatalf("fullReplay must be one-shot — the next reorient should stub framing, got %d bytes", len(again.Framing))
+	}
+}
+
+// TestShellComposedFraming pins the framing composition (I6, A1): the engine
+// supplies the info block and the shell's spec-declared lanes render through
+// the injection mechanism — including the byte-capped recent-moves lane —
+// with no hardcoded Go layout constant behind it.
+func TestShellComposedFraming(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+	if !strings.Contains(door.Framing, "Local participant:") {
+		t.Fatalf("framing must carry the engine-supplied info block, got %q", door.Framing)
+	}
+	if !strings.Contains(door.Framing, "Recent graph movement") {
+		t.Fatalf("framing must carry the shell's declared recent-moves lane, got %q", door.Framing)
+	}
+}
+
+// TestShellWithoutFramingServesInfoOnly pins the fail-loud fallback: a shell
+// that declares no framing lanes serves the info block alone — never a silent
+// fallback to a deleted Go constant.
+func TestShellWithoutFramingServesInfoOnly(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	path := filepath.Join(graphDir, "2026/07/04-130000-d-prc-bare.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(bareShellProcedure), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_session", map[string]any{"shell": "bare-shell"}, &serve)
+	if !strings.Contains(serve.Framing, "Local participant:") {
+		t.Fatalf("an info-only framing must still carry the info block, got %q", serve.Framing)
+	}
+	if strings.Contains(serve.Framing, "Recent graph movement") || strings.Contains(serve.Framing, "Guiding directives") {
+		t.Fatalf("a shell with no declared lanes must serve info only, got %q", serve.Framing)
+	}
+}
+
+// TestDoorPayloadUnder25KB asserts the default shell's door serve — info block,
+// declared lanes, the other-work count line, and the shell instructions —
+// stays within the 25KB contract against a representative graph (A1, AC10).
+func TestDoorPayloadUnder25KB(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	// A representative graph: many entries with realistic summaries, plus a few
+	// aspirations and guiding directives so every framing lane has content.
+	for i := range 60 {
+		typeCode, layerCode, kind, extra := "s", "tac", "gap", "layer: tactical\n"
+		switch i % 5 {
+		case 0:
+			typeCode, layerCode, kind, extra = "d", "stg", "aspiration", "layer: strategic\n"
+		case 1:
+			typeCode, layerCode, kind, extra = "d", "cpt", "directive", "layer: conceptual\nintent: guiding\n"
+		}
+		path := filepath.Join(graphDir, fmt.Sprintf("2026/06/%02d-%06d-%s-%s-x%02d.md", (i%28)+1, 100000+i, typeCode, layerCode, i))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := fmt.Sprintf(`---
+type: %s
+kind: %s
+%sconfidence: medium
+summary: Representative entry %02d records a realistic-length observation about the flux subsystem, the kind of one-sentence summary the graph accumulates over a busy week of dialogue and capture.
+---
+
+Body of entry %02d: a paragraph of realistic content that the door serve never renders in full but that inflates the graph the framing lanes rank over.
+`, typeName(typeCode), kind, extra, i, i)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+	if size := jsonSize(t, door); size > 25000 {
+		t.Fatalf("default shell door payload is %d bytes, exceeds the 25KB contract", size)
+	}
+}
+
+// typeName maps a filename type code to its frontmatter type for the fixture.
+func typeName(code string) string {
+	if code == "d" {
+		return "decision"
+	}
+	return "signal"
+}
+
+// bareShellProcedure is a minimal session shell declaring no framing lanes —
+// used to pin the info-only framing fallback.
+const bareShellProcedure = `---
+type: decision
+layer: process
+kind: procedure
+canonical: bare-shell
+class: shell
+confidence: medium
+summary: A minimal shell that declares no framing lanes.
+steps:
+    - id: junction
+      chooser: user
+      render: open
+      goal: "dialogue freely"
+      options:
+          - {choice: conclude, to: end(completed)}
+---
+
+A bare shell.
+
+## unit: open
+
+You are in a bare session shell.
+`
+
 // TestChooserSequenceValidation exercises the trust property over MCP: a
 // chooser cannot be answered before it is pending.
 func TestChooserSequenceValidation(t *testing.T) {
@@ -2078,9 +2277,11 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 }
 
 // TestParkedSessionsAcrossConnections pins the leave rule and the discovery
-// contract: every session with open work is visible — an active one is listed
-// and labeled active, never hidden — while attaching to one a live client
-// holds still refuses; switching away from a quiescent session auto-ends it.
+// contract: every session with open work is discoverable through list_sessions
+// (an active one labeled active with its client, never hidden), while a serve
+// never pushes other dialogues — session entry carries a one-line count of
+// them instead (I6, A1). Attaching to one a live client holds still refuses;
+// switching away from a quiescent session auto-ends it.
 func TestParkedSessionsAcrossConnections(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 
@@ -2090,12 +2291,16 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 	var serveA mcpserver.ServeResult
 	call(t, csA, "start_procedure", map[string]any{"session": sessionA, "canonical": "capture", "label": "parked capture A"}, &serveA)
 
-	// Connection B on the same server: A is active — it is listed and
-	// surfaced (never hidden), labeled active with its client name.
+	// Connection B on the same server: A is active. The door serve carries a
+	// one-line count of the other open dialogue — never its label or handle —
+	// and list_sessions is where the full labeled listing lives.
 	csB := connect(t, env.srv)
 	shellB := openSession(t, csB)
-	if !strings.Contains(shellB.OpenThreads, sessionA) || !strings.Contains(shellB.OpenThreads, "parked capture A") {
-		t.Fatalf("an active session must surface as an open thread, got %q", shellB.OpenThreads)
+	if !strings.Contains(shellB.OpenThreads, "1 other open dialogue") || !strings.Contains(shellB.OpenThreads, "list_sessions") {
+		t.Fatalf("session entry should carry a one-line count of other open dialogues, got %q", shellB.OpenThreads)
+	}
+	if strings.Contains(shellB.OpenThreads, sessionA) || strings.Contains(shellB.OpenThreads, "parked capture A") {
+		t.Fatalf("other dialogues must never be listed on a serve, got %q", shellB.OpenThreads)
 	}
 	var listed mcpserver.ListSessionsResult
 	call(t, csB, "list_sessions", map[string]any{}, &listed)
@@ -2122,16 +2327,16 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 	}
 
 	// A fresh server over the same sessions dir sees A as parked: the door
-	// surfaces it as an open thread with the intro text, and resuming it
-	// auto-ends the quiescent session the connection came from.
+	// carries the other-work count (never the label), and resuming A auto-ends
+	// the quiescent session the connection came from.
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	csC := connect(t, env2.srv)
 	shellC := openSession(t, csC)
-	if !strings.Contains(shellC.OpenThreads, sessionA) || !strings.Contains(shellC.OpenThreads, "parked capture A") {
-		t.Fatalf("the door should surface the parked dialogue, got %q", shellC.OpenThreads)
+	if !strings.Contains(shellC.OpenThreads, "1 other open dialogue") || !strings.Contains(shellC.OpenThreads, "list_sessions") {
+		t.Fatalf("the door should carry the other-work count, got %q", shellC.OpenThreads)
 	}
-	if !strings.Contains(shellC.OpenThreads, "never as an obligation") {
-		t.Fatalf("the first block should carry the intro instruction, got %q", shellC.OpenThreads)
+	if strings.Contains(shellC.OpenThreads, sessionA) || strings.Contains(shellC.OpenThreads, "parked capture A") {
+		t.Fatalf("other dialogues must never be listed on a serve, got %q", shellC.OpenThreads)
 	}
 
 	var resumed mcpserver.ResumeSessionResult

@@ -39,6 +39,15 @@ func newShellEnv(t *testing.T) *shellEnv {
 			return "- capture — record a signal or decision.\n- engage — anchor on an entry.", nil
 		},
 	})
+	// The shell declares its framing lanes as viewLayout injects; the MCP shell
+	// registers the real query in production. Stub it so the base entry loads.
+	mustRegisterQuery(reg, Query{
+		Doc: FuncDoc{Name: "viewLayout", Doc: "fake view layout"},
+		Fn: func(_ *Context, args map[string]any) (any, error) {
+			layout, _ := args["layout"].(string)
+			return "view: " + layout, nil
+		},
+	})
 	mustRegisterPredicate(reg, Predicate{
 		Doc: FuncDoc{Name: "sessionQuiescent", Doc: "fake quiescence"},
 		Fn: func(_ *Context) (bool, error) {

@@ -242,6 +242,37 @@ steps:
 	}
 }
 
+// TestParseSpec_Framing pins the shell framing-lane declaration: framing
+// parses into typed inject calls, and validation requires each fn to be a
+// registered query (a shell's declared lane cannot name a phantom query).
+func TestParseSpec_Framing(t *testing.T) {
+	reg := NewRegistry()
+	mustRegisterQuery(reg, Query{
+		Doc: FuncDoc{Name: "viewLayout", Doc: "test"},
+		Fn:  func(_ *Context, _ map[string]any) (any, error) { return "", nil },
+	})
+	entry := specFixture(t, `framing:
+    - {fn: viewLayout, args: {layout: 'focus:brief', maxBytes: 2500}}
+    - {fn: ghostLane}
+`+minimalSteps+`state:
+    note: {type: text, desc: x}
+`, "")
+	spec, err := ParseSpec(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spec.Framing) != 2 || spec.Framing[0].Fn != "viewLayout" {
+		t.Fatalf("framing did not parse into inject calls, got %+v", spec.Framing)
+	}
+	if got := spec.Framing[0].Args["layout"]; got != "focus:brief" {
+		t.Fatalf("framing lane args did not parse, got %v", spec.Framing[0].Args)
+	}
+	problems := strings.Join(spec.Validate(reg), "\n")
+	if !strings.Contains(problems, `framing[1]: inject fn "ghostLane" is not a registered query`) {
+		t.Fatalf("framing must validate lane fns against the registry, got:\n%s", problems)
+	}
+}
+
 func TestParseSpec_UnitsAndOptionalCollect(t *testing.T) {
 	entry := specFixture(t, `state:
     note: {type: text, desc: x}

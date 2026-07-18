@@ -52,7 +52,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
-		Doc: engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store."},
+		Doc: engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store. Optional arg maxBytes: cap the rendered result on a line boundary (0 = uncapped), for a framing lane that must stay bounded."},
 		Fn: func(_ *engine.Context, args map[string]any) (any, error) {
 			layout, _ := args["layout"].(string)
 			if strings.TrimSpace(layout) == "" {
@@ -62,7 +62,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 			if err != nil {
 				return nil, err
 			}
-			return result.Sections, nil
+			return capOnLineBoundary(result.Sections, workflowIntArg(args, "maxBytes", 0)), nil
 		},
 	}); err != nil {
 		return err
@@ -298,6 +298,19 @@ func workflowStoreStrings(store *engine.Store, name string) []string {
 		}
 	}
 	return result
+}
+
+// capOnLineBoundary truncates s to at most max bytes on a line boundary,
+// appending a one-line elision notice. A non-positive max leaves s untouched.
+func capOnLineBoundary(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	truncated := s[:max]
+	if i := strings.LastIndexByte(truncated, '\n'); i > 0 {
+		truncated = truncated[:i]
+	}
+	return strings.TrimRight(truncated, "\n") + "\n… (lane truncated to fit its byte cap)"
 }
 
 func workflowIntArg(args map[string]any, name string, fallback int) int {

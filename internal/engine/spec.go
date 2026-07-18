@@ -40,6 +40,11 @@ type Spec struct {
 	// Units are the body's instruction units by name (`## unit: <name>`
 	// sections), rendered as Go templates against the store at serve time.
 	Units map[string]string
+	// Framing declares a shell's session-framing lanes: inject query calls the
+	// shell renders into its serve alongside the engine-supplied info block,
+	// through the same query mechanism a step's inject uses. Empty on moves and
+	// on shells that declare none (which then serve info-only framing).
+	Framing []InjectCall
 }
 
 // VarDecl declares one typed variable. The desc seeds both the generated
@@ -260,6 +265,17 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 	var stepsYAML []stepYAML
 	if err := decodeStrict(&raw.Steps, &stepsYAML); err != nil {
 		return nil, fmt.Errorf("procedure %s: steps: %w", entry.Canonical, err)
+	}
+	var framingYAML []injectYAML
+	if err := decodeStrict(&raw.Framing, &framingYAML); err != nil {
+		return nil, fmt.Errorf("procedure %s: framing: %w", entry.Canonical, err)
+	}
+	for i, iy := range framingYAML {
+		if iy.Fn == "" {
+			addProblem("framing[%d]: missing fn", i)
+			continue
+		}
+		spec.Framing = append(spec.Framing, InjectCall(iy))
 	}
 
 	for name, d := range paramsYAML {
@@ -591,6 +607,12 @@ func (s *Spec) Validate(reg *Registry) []string {
 			if _, isState := s.State[w]; isState {
 				addProblem("%s: command %q writes %q, which collides with declared state — engine-written fields are never declared", prefix, name, w)
 			}
+		}
+	}
+
+	for i, inj := range s.Framing {
+		if _, ok := reg.Query(inj.Fn); !ok {
+			addProblem("framing[%d]: inject fn %q is not a registered query", i, inj.Fn)
 		}
 	}
 
