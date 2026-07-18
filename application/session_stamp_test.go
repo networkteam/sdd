@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -158,23 +159,98 @@ func TestDisplacedWriterFailsTypedImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Another client attaches to the same session, displacing A's attachment.
-	if _, _, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b"}); err != nil {
+	// Another client attaches to the same session, displacing A's attachment. The
+	// session was just opened, so A's attachment reads recent: the consenting
+	// attach carries the user's words and takes over.
+	if _, _, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b", UserWords: "pick up where the other one left off", Takeover: true}); err != nil {
 		t.Fatal(err)
 	}
 	// A's next write — a non-completing advance — must fail typed on this call,
-	// with zero durable appends.
+	// with zero durable appends, naming the displacement (not a bare ownership
+	// violation).
 	before := sessions.appends.Load()
 	_, advErr := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}})
 	if advErr == nil {
 		t.Fatal("displaced writer's advance should fail, got success")
 	}
 	var appErr *sdd.ApplicationError
-	if !errors.As(advErr, &appErr) || appErr.Code != sdd.ErrorSessionOwnership {
-		t.Fatalf("displaced advance error = %v, want typed ErrorSessionOwnership on the first call", advErr)
+	if !errors.As(advErr, &appErr) || appErr.Code != sdd.ErrorSessionDisplaced {
+		t.Fatalf("displaced advance error = %v, want typed ErrorSessionDisplaced on the first call", advErr)
 	}
 	if got := sessions.appends.Load() - before; got != 0 {
 		t.Fatalf("displaced advance persisted %d appends, want 0", got)
+	}
+}
+
+// TestSameWriterVersionRaceRetriesInvisibly covers decision 12's benign race:
+// when the stored version advances under a writer whose attachment is unchanged,
+// the next append resyncs and retries once — no error surfaces and the write
+// lands.
+func TestSameWriterVersionRaceRetriesInvisibly(t *testing.T) {
+	application, sessions, _, _ := newStampWorkflowApp(t, "", "", time.Now)
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Advance the stored version behind the binding's back, keeping the same
+	// attachment: a benign same-writer version drift, not a displacement.
+	stored, err := sessions.Load(t.Context(), w.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := stored.Metadata
+	if _, err := sessions.Append(t.Context(), w.ID(), stored.Version, sdd.SessionAppend{Metadata: &metadata}); err != nil {
+		t.Fatal(err)
+	}
+	// The binding's observed version is now stale. A same-writer advance must
+	// resync and retry invisibly — no error, and the write persists.
+	before := sessions.appends.Load()
+	if _, err := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}}); err != nil {
+		t.Fatalf("same-writer version race should retry invisibly, got %v", err)
+	}
+	if got := sessions.appends.Load() - before; got == 0 {
+		t.Fatal("the retried advance did not persist its append")
+	}
+}
+
+// TestAbandonedWhileAttachedNamesActorTimeReason covers D1: after a session is
+// torn down by handle, the still-attached client's next write fails typed and
+// the interpreted error names who abandoned it, when, and why.
+func TestAbandonedWhileAttachedNamesActorTimeReason(t *testing.T) {
+	t0 := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
+	application, sessions, _, _ := newStampWorkflowApp(t, "", "", func() time.Time { return t0 })
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Another connection tears the session down by handle with a reason.
+	if _, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b"}, "stale branch"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := sessions.Load(t.Context(), w.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, advErr := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}})
+	var appErr *sdd.ApplicationError
+	if !errors.As(advErr, &appErr) || appErr.Code != sdd.ErrorSessionDisplaced {
+		t.Fatalf("abandoned-while-attached advance error = %v, want ErrorSessionDisplaced", advErr)
+	}
+	msg := advErr.Error()
+	for _, want := range []string{"abandoned by " + stored.Metadata.Participant, t0.Format(time.RFC3339), "reason: stale branch"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("abandon message %q missing %q (actor/time/reason)", msg, want)
+		}
 	}
 }
 

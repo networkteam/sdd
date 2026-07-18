@@ -179,8 +179,7 @@ func (f *failOnceFinalizer) Finalize(context.Context, sdd.AppliedMutation) error
 }
 
 // openBinding creates a durable session with an attachment and returns the
-// matching write binding — the attachment-model replacement for the deleted
-// BindSession bootstrap. verifyBinding matches the binding's MCP session id
+// matching write binding. verifyBinding matches the binding's MCP session id
 // against the stored attachment, so both carry "mcp".
 func openBinding(t *testing.T, sessions sdd.SessionStore, subject string, id sdd.SessionID) sdd.SessionBinding {
 	t.Helper()
@@ -223,7 +222,7 @@ func TestReleaseRecordsSpecificCauseAndClearsAttachment(t *testing.T) {
 	application, sessions, _, _ := newDurableApplication(t, time.Now, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
 	binding := openBinding(t, sessions, identity.Subject, "release-cause")
-	if err := application.ReleaseSession(t.Context(), identity, "example", binding, sdd.CauseDisconnect); err != nil {
+	if err := application.ReleaseSession(t.Context(), identity, "example", binding, sdd.CauseDisconnect, ""); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := sessions.Load(t.Context(), "release-cause")

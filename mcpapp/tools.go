@@ -135,7 +135,9 @@ type ListSessionsResult struct {
 }
 
 type ResumeSessionArgs struct {
-	Session string `json:"session,omitempty" jsonschema:"a session handle (from list_sessions) to attach this connection to — works on a fresh unbound connection, and switches away from a currently attached session (parking or concluding it per the leave rule). Omit to reorient the session this connection is already attached to; omit while unattached and the rejection carries the sessions with open work to attach to"`
+	Session   string `json:"session,omitempty" jsonschema:"a session handle (from list_sessions) to attach this connection to — works on a fresh unbound connection, and switches away from a currently attached session (parking or concluding it per the leave rule). Omit to reorient the session this connection is already attached to; omit while unattached and the rejection carries the sessions with open work to attach to"`
+	UserWords string `json:"userWords,omitempty" jsonschema:"the user's verbatim request to move into this session; required when attaching to a session this connection did not open. A fresh request that merely resembles the work is not consent — relay what the user actually said"`
+	Takeover  bool   `json:"takeover,omitempty" jsonschema:"pass true to take over a session another client is actively driving (a recent attachment); needed only when the refusal says so. Only recorded session state resumes — not the other conversation's context"`
 }
 
 type ResumeSessionResult struct {
@@ -304,9 +306,13 @@ func (s *Server) registerTools() {
 		Description: "The attach door, and the compaction escape. Pass a session handle (from list_sessions) " +
 			"to attach this connection to it — works on a fresh unbound connection, and switches away from " +
 			"a currently attached session (parking it when moves are open, concluding it when quiescent). " +
-			"Omit session to reorient the session you are already attached to: its framing plus every " +
-			"running move at its current step, each with the report schema to continue it. Omit it while " +
-			"unattached and the rejection carries the sessions with open work to attach to.",
+			"Attaching to a session this connection did not open requires userWords (the user's verbatim " +
+			"request to move into it); if another client is actively driving it (a recent attachment), the " +
+			"refusal names the holder and takeover:true is additionally required. Only recorded session " +
+			"state resumes on a takeover — not the other conversation's context. Omit session to reorient " +
+			"the session you are already attached to (no consent needed): its framing plus every running " +
+			"move at its current step, each with the report schema to continue it. Omit it while unattached " +
+			"and the rejection carries the sessions with open work to attach to.",
 	}, s.resumeSession)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -652,6 +658,7 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 	if args.Session != "" && (current == nil || args.Session != string(current.root.ID())) {
 		workflow, result, err := s.app.ResumeWorkflow(ctx, identity, s.project, sdd.WorkflowResumeRequest{
 			SessionID: sdd.SessionID(args.Session), MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
+			UserWords: args.UserWords, Takeover: args.Takeover,
 		})
 		if err != nil {
 			return nil, ResumeSessionResult{}, err
@@ -1003,10 +1010,29 @@ func rootBaseServe(result ServeResult) *BaseServe {
 	}
 }
 
+// attachNote prefixes the resume instructions when this attach displaced a
+// prior attachment: it names the displaced holder (both idle and takeover) and,
+// on a takeover of a recent attachment, states the fidelity limit — only
+// recorded state resumes, not the other conversation's context (d-cpt-9of I5).
+func attachNote(source sdd.WorkflowResumeResult) string {
+	if source.Displaced == nil {
+		return ""
+	}
+	who := source.Displaced.ClientName
+	if strings.TrimSpace(who) == "" {
+		who = "another client"
+	}
+	note := fmt.Sprintf("Attached over the previous holder %s (last active %s).", who, source.Displaced.LastActivity.Format(time.RFC3339))
+	if source.TookOver {
+		note += " Only recorded session state resumes — step position, collected fields, staged files — not the other conversation's context."
+	}
+	return note + "\n\n"
+}
+
 func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, source sdd.WorkflowResumeResult) (ResumeSessionResult, error) {
 	result := ResumeSessionResult{
 		Session: string(source.Session), Participant: source.Participant, Label: source.Label,
-		Instructions: resumeInstructions,
+		Instructions: attachNote(source) + resumeInstructions,
 	}
 	framing, err := ss.root.Framing(ctx, s.requestIdentity(req))
 	if err != nil {

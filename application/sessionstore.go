@@ -34,13 +34,14 @@ type Attachment struct {
 }
 
 // AttachmentRecord closes out a past attachment with the specific cause it
-// ended. UserWords records the consenting ask on a claim (populated in a later
-// slice).
+// ended. UserWords records the consenting ask on a claim; Reason records the
+// abandon note, so a displaced writer's next call can be told why.
 type AttachmentRecord struct {
 	Attachment Attachment
 	EndedAt    time.Time
 	Cause      AttachmentCause
 	UserWords  string `json:",omitempty"`
+	Reason     string `json:",omitempty"`
 }
 
 // AttachmentCause is the closed set of reasons an attachment ends.

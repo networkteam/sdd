@@ -2,8 +2,14 @@ package application
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 )
+
+// attachmentTimeFormat renders an attachment's last activity or ending in a
+// stable, unambiguous form for the interpreted-conflict and consent messages.
+const attachmentTimeFormat = time.RFC3339
 
 const SessionCodecVersion uint32 = 1
 
@@ -30,7 +36,7 @@ type SessionBinding struct {
 // with the given cause. Releasing means "end MY attachment", so when the current
 // attachment is absent or belongs to another MCP session — already displaced,
 // concluded, or taken over — it is a no-op: there is nothing of mine to end.
-func (a *Application) ReleaseSession(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, cause AttachmentCause) error {
+func (a *Application) ReleaseSession(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, cause AttachmentCause, reason string) error {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return err
@@ -48,7 +54,9 @@ func (a *Application) ReleaseSession(ctx context.Context, identity RequestIdenti
 	}
 	now := runtime.options.Now().UTC().Round(0)
 	metadata := stored.Metadata
-	metadata.AttachmentHistory = append(metadata.AttachmentHistory, endAttachment(*current, now, cause))
+	record := endAttachment(*current, now, cause)
+	record.Reason = strings.TrimSpace(reason)
+	metadata.AttachmentHistory = append(metadata.AttachmentHistory, record)
 	metadata.Attachment = nil
 	metadata.UpdatedAt = now
 	_, err = runtime.options.Sessions.Append(ctx, binding.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
@@ -95,19 +103,87 @@ func validateStoredSession(stored StoredSession) error {
 
 // verifyBinding enforces subject/project immutability, the attachment-identity
 // check (my MCP session is still the current attachment), and the version CAS.
-// A displaced writer fails the identity check; a benign version race fails the
-// CAS check.
+// A displaced writer fails typed as ErrorSessionDisplaced (naming who advanced
+// the session and how); a genuine identity/project violation is
+// ErrorSessionOwnership; a benign same-writer version race is
+// ErrorSessionConflict.
 func verifyBinding(stored StoredSession, binding SessionBinding) error {
-	if err := validateStoredSession(stored); err != nil {
+	if err := verifyAttachment(stored, binding); err != nil {
 		return err
-	}
-	att := stored.Metadata.Attachment
-	if stored.Metadata.ID != binding.SessionID || stored.Metadata.Subject != binding.Subject || stored.Metadata.Project != binding.Project ||
-		att == nil || att.MCPSessionID != binding.MCPSessionID {
-		return &ApplicationError{Code: ErrorSessionOwnership, Message: "session attachment was displaced"}
 	}
 	if stored.Version != binding.Version {
 		return &ApplicationError{Code: ErrorSessionConflict, Message: "session binding is stale"}
 	}
 	return nil
+}
+
+// verifyAttachment checks immutable identity and that this binding's MCP session
+// is still the current attachment, without the version CAS. It is the shared
+// front half of verifyBinding and the resync retry.
+func verifyAttachment(stored StoredSession, binding SessionBinding) error {
+	if err := validateStoredSession(stored); err != nil {
+		return err
+	}
+	m := stored.Metadata
+	if m.ID != binding.SessionID || m.Subject != binding.Subject || m.Project != binding.Project {
+		return &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
+	}
+	if att := m.Attachment; att == nil || att.MCPSessionID != binding.MCPSessionID {
+		return displacedError(stored)
+	}
+	return nil
+}
+
+// displacedError interprets a lost attachment for the writer that lost it: who
+// holds it now (a takeover), or how it ended (abandoned, concluded, or left).
+// The message names who/when/why so the displaced client can reorient or start
+// fresh; the attachment and cause ride the typed error.
+func displacedError(stored StoredSession) error {
+	m := stored.Metadata
+	if att := m.Attachment; att != nil {
+		return &ApplicationError{
+			Code: ErrorSessionDisplaced, Attachment: att, AttachmentCause: CauseClaim,
+			Message: fmt.Sprintf("taken over by %s at %s (claim); your position may be stale — reorient with resume_session(%s) or start fresh",
+				clientLabel(att.ClientName), att.LastActivity.Format(attachmentTimeFormat), m.ID),
+		}
+	}
+	if n := len(m.AttachmentHistory); n > 0 {
+		rec := m.AttachmentHistory[n-1]
+		when := rec.EndedAt.Format(attachmentTimeFormat)
+		switch rec.Cause {
+		case CauseAbandon:
+			msg := fmt.Sprintf("abandoned by %s at %s", actorLabel(m, rec), when)
+			if rec.Reason != "" {
+				msg += ", reason: " + rec.Reason
+			}
+			msg += " — this session is torn down; start fresh"
+			return &ApplicationError{Code: ErrorSessionDisplaced, Attachment: &rec.Attachment, AttachmentCause: rec.Cause, Message: msg}
+		case CauseConclude:
+			return &ApplicationError{Code: ErrorSessionDisplaced, Attachment: &rec.Attachment, AttachmentCause: rec.Cause,
+				Message: fmt.Sprintf("this session was concluded at %s — start fresh", when)}
+		default:
+			return &ApplicationError{Code: ErrorSessionDisplaced, Attachment: &rec.Attachment, AttachmentCause: rec.Cause,
+				Message: fmt.Sprintf("this session's attachment ended (%s) at %s — reorient with resume_session(%s) or start fresh", rec.Cause, when, m.ID)}
+		}
+	}
+	return &ApplicationError{Code: ErrorSessionDisplaced,
+		Message: fmt.Sprintf("this session's attachment was displaced — reorient with resume_session(%s) or start fresh", m.ID)}
+}
+
+// clientLabel names a client for a conflict message, falling back when the
+// transport carried no client name (e.g. bare stdio).
+func clientLabel(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "another client"
+	}
+	return name
+}
+
+// actorLabel names who acted on the session for an abandon message: the
+// session's participant, else the client that recorded the record.
+func actorLabel(m SessionMetadata, rec AttachmentRecord) string {
+	if p := strings.TrimSpace(m.Participant); p != "" {
+		return p
+	}
+	return clientLabel(rec.Attachment.ClientName)
 }
