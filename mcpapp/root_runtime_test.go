@@ -82,30 +82,31 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 	if search.Results == "" {
 		t.Fatal("root runtime search returned no result")
 	}
+	session := opened.Session
 	var staged mcpserver.StageAttachmentResult
-	call(t, client, "stage_attachment", map[string]any{"name": "root-evidence.md", "content": "root-owned attachment"}, &staged)
+	call(t, client, "stage_attachment", map[string]any{"session": session, "name": "root-evidence.md", "content": "root-owned attachment"}, &staged)
 	if staged.Handle == "" {
 		t.Fatal("root runtime returned no staged blob handle")
 	}
 
 	var capture mcpserver.ServeResult
-	call(t, client, "start_procedure", map[string]any{"canonical": "capture", "label": "root-owned capture"}, &capture)
+	call(t, client, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "root-owned capture"}, &capture)
 	if capture.Procedure != "capture" || capture.Status != "running" {
 		t.Fatalf("root runtime capture = %+v", capture)
 	}
 	report := assembleReport()
 	report["attachments"] = []string{staged.Handle}
-	call(t, client, "next", map[string]any{"instance": capture.Instance, "report": report}, &capture)
+	call(t, client, "next", map[string]any{"session": session, "instance": capture.Instance, "report": report}, &capture)
 	if capture.Step != "playback" {
 		t.Fatalf("root runtime report stopped at %q: %+v", capture.Step, capture)
 	}
-	call(t, client, "next", map[string]any{"instance": capture.Instance, "report": map[string]any{
+	call(t, client, "next", map[string]any{"session": session, "instance": capture.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "confirm root write",
 	}}, &capture)
 	if capture.Step != "verifySummary" {
 		t.Fatalf("root write gate stopped at %q: %+v", capture.Step, capture)
 	}
-	call(t, client, "next", map[string]any{"instance": capture.Instance, "report": map[string]any{
+	call(t, client, "next", map[string]any{"session": session, "instance": capture.Instance, "report": map[string]any{
 		"chooser": "verifySummary", "choice": "faithful", "fields": map[string]any{"fidelityNote": "faithful"},
 	}}, &capture)
 	if capture.Status != "completed" {

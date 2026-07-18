@@ -105,7 +105,9 @@ type sessionDescriptor struct {
 	Participant  string               `json:"participant,omitempty"`
 	Anchor       string               `json:"anchor,omitempty" jsonschema:"entry the session's work is anchored on, when a procedure param carried one"`
 	Open         []instanceDescriptor `json:"open_instances" jsonschema:"running move instances with their current step (the session shell is not listed)"`
+	ClientName   string               `json:"client_name,omitempty" jsonschema:"name of the client currently holding the session, when one does"`
 	LastActivity string               `json:"last_activity,omitempty"`
+	Activity     string               `json:"activity" jsonschema:"active (a live client holds it) or idle — a hint for whether attaching may interrupt someone"`
 }
 
 type instanceDescriptor struct {

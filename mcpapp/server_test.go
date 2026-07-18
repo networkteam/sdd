@@ -413,7 +413,7 @@ func TestVocabularyBlockForNonEnglishGraphs(t *testing.T) {
 	}
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &serve)
 	if serve.Vocabulary != "" {
 		t.Fatalf("the vocabulary serves once per connection, got it again: %q", serve.Vocabulary)
 	}
@@ -485,7 +485,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "ffcec574c529be86ef98462b6c347dc9381ff49c5e06fc1acb02affbb8e096dc"
+	const want = "c62b74b49f6b80addaa784c85f78e1d8e556a67803f444087b33d525f5941621"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -523,10 +523,11 @@ func TestOrientationListsMoveParamSignatures(t *testing.T) {
 func TestCaptureProcedureLoop(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var staged mcpserver.StageAttachmentResult
 	call(t, cs, "stage_attachment", map[string]any{
+		"session": session,
 		"name":    "evidence.md",
 		"content": "# Evidence\n\nStaged before the capture ran.",
 	}, &staged)
@@ -535,7 +536,7 @@ func TestCaptureProcedureLoop(t *testing.T) {
 	}
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
 	if serve.Step != "assemble" || serve.Status != "running" {
 		t.Fatalf("expected running at assemble, got %s at %q", serve.Status, serve.Step)
 	}
@@ -548,7 +549,7 @@ func TestCaptureProcedureLoop(t *testing.T) {
 
 	report := assembleReport()
 	report["attachments"] = []string{staged.Handle}
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": report}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": report}, &serve)
 	if serve.Step != "playback" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
 		t.Fatalf("expected pending user chooser at playback, got step %q chooser %+v", serve.Step, serve.PendingChooser)
 	}
@@ -566,7 +567,7 @@ func TestCaptureProcedureLoop(t *testing.T) {
 	// no per-step memory; d-tac-dbk).
 	const tightened = "Test capture entry, tightened: the fixture oscillation gap also " +
 		"shows up in integration tests, verifying the engine write path end to end."
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "adjust", "userWords": "tighten the first sentence",
 		"fields": map[string]any{"body": tightened},
 	}}, &serve)
@@ -579,7 +580,7 @@ func TestCaptureProcedureLoop(t *testing.T) {
 
 	// A second adjust that changes nothing re-renders identical bytes — the
 	// serve stubs to the one-line reminder.
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "adjust", "userWords": "no, keep it",
 		"fields": map[string]any{"body": tightened},
 	}}, &serve)
@@ -590,14 +591,14 @@ func TestCaptureProcedureLoop(t *testing.T) {
 		t.Fatalf("an unchanged playback re-serve should stub to the reminder, got %q", serve.Instructions)
 	}
 
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "yes, capture it",
 	}}, &serve)
 	if serve.Step != "verifySummary" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "agent" {
 		t.Fatalf("confirm should write and reach verifySummary, got step %q status %s (%s)", serve.Step, serve.Status, serve.Instructions)
 	}
 
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "verifySummary", "choice": "faithful", "userWords": "",
 		"fields": map[string]any{"fidelityNote": "summary matches the confirmed body"},
 	}}, &serve)
@@ -645,10 +646,10 @@ func TestEmbeddedCaptureProcedure(t *testing.T) {
 	}
 	env := newTestServer(t, nil, graphDir, "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
 	if serve.Step != "assemble" || serve.Status != "running" {
 		t.Fatalf("expected running at assemble, got %s at %q", serve.Status, serve.Step)
 	}
@@ -661,7 +662,7 @@ func TestEmbeddedCaptureProcedure(t *testing.T) {
 
 	// A draft ref'ing an entry never served in full holds the assemble gate —
 	// the rejection names exactly the un-inspected ID (d-tac-dbk).
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": assembleReport()}, &serve)
 	if serve.Step != "assemble" {
 		t.Fatalf("un-inspected ref should hold the gate at assemble, got %q", serve.Step)
 	}
@@ -673,7 +674,7 @@ func TestEmbeddedCaptureProcedure(t *testing.T) {
 	// re-report.
 	var shown mcpserver.ShowResult
 	call(t, cs, "show", map[string]any{"ids": []string{fixtureGapID}}, &shown)
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": assembleReport()}, &serve)
 	if serve.Step != "playback" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
 		t.Fatalf("expected pending user chooser at playback, got step %q", serve.Step)
 	}
@@ -681,14 +682,14 @@ func TestEmbeddedCaptureProcedure(t *testing.T) {
 		t.Fatalf("playback unit should render the drafted body verbatim, got %q", serve.Instructions)
 	}
 
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "yes, capture it",
 	}}, &serve)
 	if serve.Step != "verifySummary" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "agent" {
 		t.Fatalf("confirm should write and reach verifySummary, got step %q status %s (%s)", serve.Step, serve.Status, serve.Instructions)
 	}
 
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "verifySummary", "choice": "faithful", "userWords": "",
 		"fields": map[string]any{"fidelityNote": "summary matches the confirmed body"},
 	}}, &serve)
@@ -718,13 +719,14 @@ func TestEmbeddedEvaluateToCaptureHandoff(t *testing.T) {
 	}
 	env := newTestServer(t, nil, graphDir, "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	// A known anchor passed as a start input seeds the anchor state and
 	// auto-advances the resolver straight to scope (the uniform anchor
 	// contract — no separate resolver turn for a known entry).
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{
+		"session":   session,
 		"canonical": "evaluate",
 		"params":    map[string]any{"anchor": fixtureGapID},
 	}, &serve)
@@ -737,7 +739,7 @@ func TestEmbeddedEvaluateToCaptureHandoff(t *testing.T) {
 	// batched report cascades scope → carryOut → junction in one call.
 	const widen = "searched post-landing signals and neighbors; inspected " + fixtureGapID +
 		" — the teardown edge is the only new thing bearing on the work."
-	call(t, cs, "next", map[string]any{"instance": evalInstance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": evalInstance, "report": map[string]any{
 		"plan":            "Inner only: verify the work against its ACs; outer coverage left for a later run.",
 		"widenReport":     widen,
 		"innerEvidence":   "read the done's claims against the ACs; smoke check run",
@@ -749,7 +751,7 @@ func TestEmbeddedEvaluateToCaptureHandoff(t *testing.T) {
 
 	// Record a finding — the evaluation completes, its grounding retained in
 	// its store for the dispatched capture to inherit.
-	call(t, cs, "next", map[string]any{"instance": evalInstance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": evalInstance, "report": map[string]any{
 		"chooser": "junction", "choice": "record", "userWords": "record the teardown finding",
 		"fields": map[string]any{"selectedFindings": "the teardown rough edge"},
 	}}, &serve)
@@ -761,6 +763,7 @@ func TestEmbeddedEvaluateToCaptureHandoff(t *testing.T) {
 	captureCalls := 1
 	var cap mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{
+		"session":   session,
 		"canonical": "capture",
 		"parent":    evalInstance,
 		"params":    map[string]any{"anchor": fixtureGapID, "kind": "gap"},
@@ -778,7 +781,7 @@ func TestEmbeddedEvaluateToCaptureHandoff(t *testing.T) {
 	// Capture #2: draft with NO widenReport — the handoff already satisfied
 	// it, so one report cascades assemble → playback.
 	captureCalls++
-	call(t, cs, "next", map[string]any{"instance": cap.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": cap.Instance, "report": map[string]any{
 		"body":       "Record the teardown rough edge from the evaluation as a follow-up gap to fix next.",
 		"entryKind":  "gap",
 		"layer":      "tactical",
@@ -792,7 +795,7 @@ func TestEmbeddedEvaluateToCaptureHandoff(t *testing.T) {
 
 	// Capture #3: confirm — writes through the (stubbed) gate to verifySummary.
 	captureCalls++
-	call(t, cs, "next", map[string]any{"instance": cap.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": cap.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "yes, capture it",
 	}}, &cap)
 	if cap.Step != "verifySummary" {
@@ -801,7 +804,7 @@ func TestEmbeddedEvaluateToCaptureHandoff(t *testing.T) {
 
 	// Capture #4: verify the summary — completes.
 	captureCalls++
-	call(t, cs, "next", map[string]any{"instance": cap.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": cap.Instance, "report": map[string]any{
 		"chooser": "verifySummary", "choice": "faithful",
 		"fields": map[string]any{"fidelityNote": "summary matches the confirmed body"},
 	}}, &cap)
@@ -823,19 +826,19 @@ func TestBlockedWriteRoutesToOverride(t *testing.T) {
 		Observation: "canned high finding",
 	}}, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": assembleReport()}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "capture it",
 	}}, &serve)
 	if serve.Step != "reviseOrOverride" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
 		t.Fatalf("high findings should route to the reviseOrOverride user chooser, got %q", serve.Step)
 	}
 
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "reviseOrOverride", "choice": "override", "userWords": "override it — the finding is wrong",
 	}}, &serve)
 	if serve.Step != "verifySummary" {
@@ -854,10 +857,10 @@ func TestBlockedWriteRoutesToOverride(t *testing.T) {
 func TestSessionLabelFallbackAndValidation(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
 
 	// A live-bound session never lists on its own connection; the descriptor
 	// is observed the way another participant would see it — a fresh server
@@ -878,7 +881,7 @@ func TestSessionLabelFallbackAndValidation(t *testing.T) {
 	}
 
 	// A drafted body backfills the label from its first line.
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": assembleReport()}, &serve)
 	listed = descriptor()
 	if !strings.HasPrefix(listed.Sessions[0].Label, "Test capture entry") {
 		t.Fatalf("label should fall back to the drafted body's first line, got %q", listed.Sessions[0].Label)
@@ -886,6 +889,7 @@ func TestSessionLabelFallbackAndValidation(t *testing.T) {
 
 	// An explicit label wins over the derived fallback.
 	call(t, cs, "next", map[string]any{
+		"session":  session,
 		"instance": serve.Instance,
 		"report": map[string]any{"chooser": "playback", "choice": "adjust", "userWords": "keep going",
 			"fields": map[string]any{"confidence": "medium"}},
@@ -898,13 +902,13 @@ func TestSessionLabelFallbackAndValidation(t *testing.T) {
 
 	// Validation: multi-line and oversized labels are rejected.
 	if msg := callExpectError(t, cs, "next", map[string]any{
-		"instance": serve.Instance, "report": map[string]any{"confidence": "low"},
+		"session": session, "instance": serve.Instance, "report": map[string]any{"confidence": "low"},
 		"label": "two\nlines",
 	}); !strings.Contains(msg, "single line") {
 		t.Fatalf("multi-line label should be rejected, got %q", msg)
 	}
 	if msg := callExpectError(t, cs, "next", map[string]any{
-		"instance": serve.Instance, "report": map[string]any{"confidence": "low"},
+		"session": session, "instance": serve.Instance, "report": map[string]any{"confidence": "low"},
 		"label": strings.Repeat("x", 200),
 	}); !strings.Contains(msg, "120") {
 		t.Fatalf("oversized label should be rejected, got %q", msg)
@@ -914,16 +918,18 @@ func TestSessionLabelFallbackAndValidation(t *testing.T) {
 func TestSessionResumeAcrossServers(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{
+		"session":   session,
 		"canonical": "capture",
 		"params":    map[string]any{"anchor": fixtureGapID},
 		"label":     "Capture: something about oscillation",
 	}, &serve)
 	// The label update rides an ordinary next call as the subject sharpens.
 	call(t, cs, "next", map[string]any{
+		"session":  session,
 		"instance": serve.Instance,
 		"report":   assembleReport(),
 		"label":    "Capture: oscillation gap in integration tests",
@@ -992,10 +998,10 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 		t.Fatalf("a connection that paid orientation must not re-pay it on resume, got %q", resumed.Framing)
 	}
 
-	call(t, cs2, "next", map[string]any{"instance": rehydrated.Instance, "report": map[string]any{
+	call(t, cs2, "next", map[string]any{"session": sessionID, "instance": rehydrated.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "capture it",
 	}}, &serve)
-	call(t, cs2, "next", map[string]any{"instance": rehydrated.Instance, "report": map[string]any{
+	call(t, cs2, "next", map[string]any{"session": sessionID, "instance": rehydrated.Instance, "report": map[string]any{
 		"chooser": "verifySummary", "choice": "faithful",
 		"fields": map[string]any{"fidelityNote": "matches"},
 	}}, &serve)
@@ -1021,13 +1027,13 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 func TestAbandonLeavesLogStanding(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
 
 	var abandoned mcpserver.AbandonResult
-	call(t, cs, "abandon", map[string]any{"instance": serve.Instance, "reason": "test teardown"}, &abandoned)
+	call(t, cs, "abandon", map[string]any{"session": session, "instance": serve.Instance, "reason": "test teardown"}, &abandoned)
 	if !abandoned.Abandoned {
 		t.Fatal("abandon should confirm")
 	}
@@ -1052,19 +1058,20 @@ func TestAbandonLeavesLogStanding(t *testing.T) {
 func TestParkMove(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	// A mid-dialogue capture-worthy item: start the capture, seed what is
 	// known through the normal start params, and park it.
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{
+		"session":   session,
 		"canonical": "capture",
 		"params":    map[string]any{"anchor": fixtureGapID, "body": "A draft noted for later."},
 		"label":     "noted for later",
 	}, &serve)
 
 	var parked mcpserver.ParkResult
-	call(t, cs, "park", map[string]any{"instance": serve.Instance, "note": "user wants this after the main work"}, &parked)
+	call(t, cs, "park", map[string]any{"session": session, "instance": serve.Instance, "note": "user wants this after the main work"}, &parked)
 	if !parked.Parked || parked.Procedure != "capture" || parked.Step != serve.Step {
 		t.Fatalf("park should confirm the shelved move, got %+v", parked)
 	}
@@ -1123,10 +1130,10 @@ func TestParkMove(t *testing.T) {
 	if shellServe == nil {
 		t.Fatalf("resume should rehydrate the shell, got %+v", resumed.Open)
 	}
-	if msg := callExpectError(t, cs2, "park", map[string]any{"instance": shellServe.Instance}); !strings.Contains(msg, "park is for moves") {
+	if msg := callExpectError(t, cs2, "park", map[string]any{"session": serve.Session, "instance": shellServe.Instance}); !strings.Contains(msg, "park is for moves") {
 		t.Fatalf("parking the shell should be refused, got %q", msg)
 	}
-	if msg := callExpectError(t, cs2, "park", map[string]any{"instance": "i_99"}); !strings.Contains(msg, "not found") {
+	if msg := callExpectError(t, cs2, "park", map[string]any{"session": serve.Session, "instance": "i_99"}); !strings.Contains(msg, "not found") {
 		t.Fatalf("unknown instance should be named, got %q", msg)
 	}
 }
@@ -1138,10 +1145,11 @@ func TestParkMove(t *testing.T) {
 func TestAbandonSessionByHandle_Parked(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{
+		"session":   session,
 		"canonical": "capture",
 		"label":     "Stale capture to tear down",
 	}, &serve)
@@ -1184,10 +1192,10 @@ func TestAbandonSessionByHandle_Parked(t *testing.T) {
 func TestAbandonSessionByHandle_InMemory(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture", "label": "parked draft"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "parked draft"}, &serve)
 	parkedID := serve.Session
 	_ = cs.Close() // disconnect with an open move: the session parks in memory
 
@@ -1273,11 +1281,13 @@ func TestAbandonSessionByHandle_Rejections(t *testing.T) {
 	cs := connect(t, env.srv)
 	serve := openSession(t, cs)
 
-	if msg := callExpectError(t, cs, "abandon", map[string]any{}); !strings.Contains(msg, "exactly one") {
+	if msg := callExpectError(t, cs, "abandon", map[string]any{}); !strings.Contains(msg, "pass instance") {
 		t.Fatalf("neither instance nor session should be rejected, got %q", msg)
 	}
-	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": "i_1", "session": "s_x"}); !strings.Contains(msg, "exactly one") {
-		t.Fatalf("both instance and session should be rejected, got %q", msg)
+	// Instance mode requires the session the move belongs to; a handle this
+	// connection is not attached to funnels into resume_session.
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": "i_1", "session": "s_x"}); !strings.Contains(msg, "not attached to s_x") {
+		t.Fatalf("a move abandon naming an unattached session should funnel to resume_session, got %q", msg)
 	}
 	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": serve.Session}); !strings.Contains(msg, "own junction") {
 		t.Fatalf("tearing down the bound session should point at conclude, got %q", msg)
@@ -1301,18 +1311,78 @@ func TestAbandonSessionByHandle_Rejections(t *testing.T) {
 func TestUnboundRejectionInlinesParkedSessions(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture", "label": "the parked one"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "the parked one"}, &serve)
 
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
 	msg := callExpectError(t, cs2, "next", map[string]any{"instance": "i_2", "report": map[string]any{"x": "y"}})
-	if !strings.Contains(msg, "start_session is the door") {
-		t.Fatalf("unbound rejection should point at the door, got %q", msg)
+	if !strings.Contains(msg, "start_session") || !strings.Contains(msg, "resume_session") {
+		t.Fatalf("a work tool without a handle should name both doors, got %q", msg)
 	}
 	if !strings.Contains(msg, serve.Session) || !strings.Contains(msg, "the parked one") {
-		t.Fatalf("unbound rejection should inline the parked session (handle + label), got %q", msg)
+		t.Fatalf("the no-handle rejection should inline the open session (handle + label), got %q", msg)
+	}
+}
+
+// TestWorkToolWrongSessionFunnels: a work tool naming a session this connection
+// is not attached to funnels into resume_session — the single attach point
+// (d-cpt-9of). The handle must name the connection's own attachment.
+func TestWorkToolWrongSessionFunnels(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
+
+	msg := callExpectError(t, cs, "next", map[string]any{
+		"session": "s_not-mine", "instance": serve.Instance, "report": assembleReport(),
+	})
+	if !strings.Contains(msg, "not attached to s_not-mine") || !strings.Contains(msg, "resume_session") {
+		t.Fatalf("a work tool naming a foreign session should funnel to resume_session, got %q", msg)
+	}
+}
+
+// TestNamedResumeOnUnboundConnection: resume_session by explicit handle attaches
+// and serves the session's position on a fresh, never-opened connection — the
+// slice-2 attach door works unbound (d-cpt-9of). Consent for a foreign session
+// arrives in slice 4; here the session is parked on disk with no live holder.
+func TestNamedResumeOnUnboundConnection(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"session": session, "canonical": "capture", "label": "resume me unbound",
+	}, &serve)
+	handle := serve.Session
+
+	// Fresh server, fresh connection, never opened a session: attach by handle.
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs2, "resume_session", map[string]any{"session": handle}, &resumed)
+	if resumed.Session != handle {
+		t.Fatalf("named resume on an unbound connection should attach to %s, got %s", handle, resumed.Session)
+	}
+	var capServe *mcpserver.ServeResult
+	for i := range resumed.Open {
+		if resumed.Open[i].Procedure == "capture" {
+			capServe = &resumed.Open[i]
+		}
+	}
+	if capServe == nil || capServe.Step != serve.Step {
+		t.Fatalf("attach should serve the parked move at its step, got %+v", resumed.Open)
+	}
+	if len(capServe.ReportSchema) == 0 {
+		t.Fatalf("attach should serve the running move's report schema, got %+v", capServe)
+	}
+
+	// The connection is now attached: a work tool with the same handle advances.
+	call(t, cs2, "next", map[string]any{"session": handle, "instance": capServe.Instance, "report": assembleReport()}, &serve)
+	if serve.Step != "playback" {
+		t.Fatalf("the attached connection should advance the move, got %q", serve.Step)
 	}
 }
 
@@ -1325,11 +1395,12 @@ func TestUnboundRejectionInlinesParkedSessions(t *testing.T) {
 func TestResumeReorientsCurrentSession(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	// A move is in flight, standing at a step that serves a report schema.
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{
+		"session":   session,
 		"canonical": "capture",
 		"params":    map[string]any{"anchor": fixtureGapID, "kind": "gap"},
 		"label":     "mid-flight capture",
@@ -1381,18 +1452,18 @@ func TestResumeReorientsCurrentSession(t *testing.T) {
 func TestResumeNoSessionUnboundListsParked(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture", "label": "parked work"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "parked work"}, &serve)
 
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
 	msg := callExpectError(t, cs2, "resume_session", map[string]any{})
-	if !strings.Contains(msg, "start_session is the door") {
-		t.Fatalf("unbound no-session resume should point at the door, got %q", msg)
+	if !strings.Contains(msg, "start_session") || !strings.Contains(msg, "resume_session") {
+		t.Fatalf("unbound no-session resume should name both doors, got %q", msg)
 	}
 	if !strings.Contains(msg, serve.Session) || !strings.Contains(msg, "parked work") {
-		t.Fatalf("unbound no-session resume should inline the parked session, got %q", msg)
+		t.Fatalf("unbound no-session resume should inline the open session, got %q", msg)
 	}
 }
 
@@ -1401,12 +1472,12 @@ func TestResumeNoSessionUnboundListsParked(t *testing.T) {
 func TestChooserSequenceValidation(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
 
-	msg := callExpectError(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	msg := callExpectError(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "early answer",
 	}})
 	if !strings.Contains(msg, "gate") && !strings.Contains(msg, "pending") {
@@ -1536,24 +1607,24 @@ func TestEmbeddedEngageExploreProcedures(t *testing.T) {
 	}
 	env := newTestServer(t, nil, graphDir, "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	// Engage: anchor step stalls a made-up anchor, accepts the fixture gap.
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "engage"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "engage"}, &serve)
 	if serve.Step != "anchor" || serve.Status != "running" {
 		t.Fatalf("expected running at anchor, got %s at %q", serve.Status, serve.Step)
 	}
 	engageInstance := serve.Instance
 
-	call(t, cs, "next", map[string]any{"instance": engageInstance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": engageInstance, "report": map[string]any{
 		"anchor": "20260601-110000-s-tac-zzz",
 	}}, &serve)
 	if serve.Step != "anchor" || !strings.Contains(serve.Instructions, "does not resolve") {
 		t.Fatalf("unresolved anchor should hold the gate naming it, got step %q: %q", serve.Step, serve.Instructions)
 	}
 
-	call(t, cs, "next", map[string]any{"instance": engageInstance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": engageInstance, "report": map[string]any{
 		"anchor": fixtureGapID,
 		"goal":   "orient on the oscillation gap",
 	}}, &serve)
@@ -1565,7 +1636,7 @@ func TestEmbeddedEngageExploreProcedures(t *testing.T) {
 		t.Fatalf("brief unit should serve the anchor's full body via entryChains, got %q", serve.Instructions)
 	}
 
-	call(t, cs, "next", map[string]any{"instance": engageInstance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": engageInstance, "report": map[string]any{
 		"brief":       "Narrative: open gap, no downstream activity; needs a decision.",
 		"widenReport": "searched oscillation and pre-flight angles; chain already saturates",
 	}}, &serve)
@@ -1578,7 +1649,7 @@ func TestEmbeddedEngageExploreProcedures(t *testing.T) {
 		t.Fatalf("pending_chooser must name its step id, got %q", serve.PendingChooser.Chooser)
 	}
 
-	call(t, cs, "next", map[string]any{"instance": engageInstance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": engageInstance, "report": map[string]any{
 		"chooser": "moves", "choice": "move", "userWords": "let's explore around it first",
 		"fields": map[string]any{"selectedMove": "explore the neighborhood"},
 	}}, &serve)
@@ -1588,6 +1659,7 @@ func TestEmbeddedEngageExploreProcedures(t *testing.T) {
 
 	// Explore as a sub-move of the finished engage, parent-linked.
 	call(t, cs, "start_procedure", map[string]any{
+		"session":   session,
 		"canonical": "explore",
 		"parent":    engageInstance,
 		"params": map[string]any{
@@ -1611,7 +1683,7 @@ func TestEmbeddedEngageExploreProcedures(t *testing.T) {
 	}
 	exploreInstance := serve.Instance
 
-	call(t, cs, "next", map[string]any{"instance": exploreInstance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": exploreInstance, "report": map[string]any{
 		"widenReport":  "two angles searched, nothing beyond the target",
 		"inspectedIds": []string{fixtureGapID},
 		"briefing":     "## Goal\noverview: what surrounds the oscillation gap\n\n## Targets\n" + fixtureGapID,
@@ -1641,6 +1713,7 @@ func TestEmbeddedEngageExploreProcedures(t *testing.T) {
 
 	// An unknown parent is rejected by the engine's single validation path.
 	msg := callExpectError(t, cs, "start_procedure", map[string]any{
+		"session":   session,
 		"canonical": "explore",
 		"parent":    "i_nope",
 		"params": map[string]any{
@@ -1660,23 +1733,33 @@ func TestDoorGatingAndShellLifecycle(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 
-	// Every loop tool rejects without a session, pointing at the door.
+	// Every work tool rejects without a session handle, naming both doors.
 	for tool, args := range map[string]map[string]any{
 		"start_procedure":  {"canonical": "capture"},
 		"next":             {"instance": "i_1", "report": map[string]any{"x": "y"}},
+		"park":             {"instance": "i_1"},
 		"abandon":          {"instance": "i_1"},
-		"list_sessions":    {},
-		"resume_session":   {"session": "s_nope"},
 		"stage_attachment": {"name": "a.md", "content": "x"},
 	} {
-		if msg := callExpectError(t, cs, tool, args); !strings.Contains(msg, "start_session") {
-			t.Fatalf("%s without a session should point at the door, got %q", tool, msg)
+		msg := callExpectError(t, cs, tool, args)
+		if !strings.Contains(msg, "start_session") || !strings.Contains(msg, "resume_session") {
+			t.Fatalf("%s without a handle should name both doors, got %q", tool, msg)
 		}
+	}
+
+	// Discovery is free: list_sessions works on the fresh unbound connection,
+	// and a named resume of an unknown handle fails on its own terms — never
+	// the no-handle door error.
+	var discovered mcpserver.ListSessionsResult
+	call(t, cs, "list_sessions", map[string]any{}, &discovered)
+	if msg := callExpectError(t, cs, "resume_session", map[string]any{"session": "s_nope"}); !strings.Contains(msg, "unknown session") {
+		t.Fatalf("a named resume of an unknown handle should name it, got %q", msg)
 	}
 
 	// The door serves the shell's orientation: standing goal, session info,
 	// and the live move enumeration (shells excluded from it).
 	shell := openSession(t, cs)
+	session := shell.Session
 	if shell.Goal != "dialogue freely; start a move when something crystallizes" {
 		t.Fatalf("shell junction should carry the standing goal, got %q", shell.Goal)
 	}
@@ -1703,13 +1786,13 @@ func TestDoorGatingAndShellLifecycle(t *testing.T) {
 	}
 
 	// Shells never start through the move path.
-	if msg := callExpectError(t, cs, "start_procedure", map[string]any{"canonical": "user-dialogue"}); !strings.Contains(msg, "start_session") {
+	if msg := callExpectError(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "user-dialogue"}); !strings.Contains(msg, "start_session") {
 		t.Fatalf("starting a shell as a move should point at the door, got %q", msg)
 	}
 
 	// Moves auto-parent to the shell instance.
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
 	events, err := readSessionLog(t, env.sessionsDir, serve.Session)
 	if err != nil {
 		t.Fatal(err)
@@ -1728,16 +1811,16 @@ func TestDoorGatingAndShellLifecycle(t *testing.T) {
 	}
 
 	// Mid-procedure serves carry no open-threads block.
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": assembleReport()}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": assembleReport()}, &serve)
 	if serve.OpenThreads != "" {
 		t.Fatalf("mid-procedure serve must not carry open threads, got %q", serve.OpenThreads)
 	}
 
 	// A move that ends lands back on the shell junction — nested serve.
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "capture it",
 	}}, &serve)
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "verifySummary", "choice": "faithful", "userWords": "",
 		"fields": map[string]any{"fidelityNote": "matches"},
 	}}, &serve)
@@ -1752,12 +1835,12 @@ func TestDoorGatingAndShellLifecycle(t *testing.T) {
 	}
 
 	// The shell itself never abandons.
-	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": shell.Instance}); !strings.Contains(msg, "conclude") {
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": session, "instance": shell.Instance}); !strings.Contains(msg, "conclude") {
 		t.Fatalf("abandoning the shell should point at conclude, got %q", msg)
 	}
 
 	// Conclude with nothing open ends the session directly.
-	call(t, cs, "next", map[string]any{"instance": shell.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": shell.Instance, "report": map[string]any{
 		"chooser": "junction", "choice": "conclude", "userWords": "we're done here",
 	}}, &serve)
 	if serve.Status != "completed" || serve.Procedure != "user-dialogue" {
@@ -1772,14 +1855,15 @@ func TestShellConcludeWalksOpenThreads(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	shell := openSession(t, cs)
+	session := shell.Session
 
 	var capture mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "capture"}, &capture)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &capture)
 
 	// Conclude with an open capture: the quiescence gate holds and routes to
 	// the threads step, whose serve carries the open work.
 	var serve mcpserver.ServeResult
-	call(t, cs, "next", map[string]any{"instance": shell.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": shell.Instance, "report": map[string]any{
 		"chooser": "junction", "choice": "conclude", "userWords": "wrap it up",
 	}}, &serve)
 	if serve.Step != "threads" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
@@ -1790,7 +1874,7 @@ func TestShellConcludeWalksOpenThreads(t *testing.T) {
 	}
 
 	// Park keeps everything and returns to the resident junction.
-	call(t, cs, "next", map[string]any{"instance": shell.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": shell.Instance, "report": map[string]any{
 		"chooser": "threads", "choice": "park", "userWords": "keep it for later",
 	}}, &serve)
 	if serve.Step != "junction" || serve.Status != "running" {
@@ -1799,8 +1883,8 @@ func TestShellConcludeWalksOpenThreads(t *testing.T) {
 
 	// Settle the thread (abandon it), then conclude for real.
 	var ab mcpserver.AbandonResult
-	call(t, cs, "abandon", map[string]any{"instance": capture.Instance, "reason": "not needed"}, &ab)
-	call(t, cs, "next", map[string]any{"instance": shell.Instance, "report": map[string]any{
+	call(t, cs, "abandon", map[string]any{"session": session, "instance": capture.Instance, "reason": "not needed"}, &ab)
+	call(t, cs, "next", map[string]any{"session": session, "instance": shell.Instance, "report": map[string]any{
 		"chooser": "junction", "choice": "conclude", "userWords": "done now",
 	}}, &serve)
 	if serve.Status != "completed" {
@@ -1808,36 +1892,37 @@ func TestShellConcludeWalksOpenThreads(t *testing.T) {
 	}
 }
 
-// TestParkedSessionsAcrossConnections pins the leave rule and the parked
-// discrimination: the door surfaces parked dialogues as open threads,
-// live-bound sessions neither list nor resume, and switching away from a
-// quiescent session auto-ends it.
+// TestParkedSessionsAcrossConnections pins the leave rule and the discovery
+// contract: every session with open work is visible — an active one is listed
+// and labeled active, never hidden — while attaching to one a live client
+// holds still refuses; switching away from a quiescent session auto-ends it.
 func TestParkedSessionsAcrossConnections(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 
-	// Server 1, connection A: park a capture (stays live-bound here).
+	// Server 1, connection A: start a capture (stays live-bound here).
 	csA := connect(t, env.srv)
-	shellA := openSession(t, csA)
+	sessionA := openSession(t, csA).Session
 	var serveA mcpserver.ServeResult
-	call(t, csA, "start_procedure", map[string]any{"canonical": "capture", "label": "parked capture A"}, &serveA)
-	sessionA := serveA.Session
+	call(t, csA, "start_procedure", map[string]any{"session": sessionA, "canonical": "capture", "label": "parked capture A"}, &serveA)
 
-	// Connection B on the same server: A is live-bound — it must not appear
-	// as an open thread, must not list, and must not resume.
+	// Connection B on the same server: A is live-held — it is listed and
+	// surfaced (never hidden), labeled active, but attaching to it refuses.
 	csB := connect(t, env.srv)
 	shellB := openSession(t, csB)
-	if strings.Contains(shellB.OpenThreads, sessionA) {
-		t.Fatalf("a live-bound session must not surface as an open thread, got %q", shellB.OpenThreads)
+	if !strings.Contains(shellB.OpenThreads, sessionA) || !strings.Contains(shellB.OpenThreads, "parked capture A") {
+		t.Fatalf("an active session must surface as an open thread, got %q", shellB.OpenThreads)
 	}
 	var listed mcpserver.ListSessionsResult
 	call(t, csB, "list_sessions", map[string]any{}, &listed)
-	if len(listed.Sessions) != 0 {
-		t.Fatalf("live-bound sessions must not list, got %+v", listed.Sessions)
+	if len(listed.Sessions) != 1 || listed.Sessions[0].Session != sessionA {
+		t.Fatalf("the active session must list, got %+v", listed.Sessions)
+	}
+	if listed.Sessions[0].Activity != "active" || listed.Sessions[0].ClientName != "test-client" {
+		t.Fatalf("a live-held session should list as active with its client name, got %+v", listed.Sessions[0])
 	}
 	if msg := callExpectError(t, csB, "resume_session", map[string]any{"session": sessionA}); !strings.Contains(msg, "live") {
-		t.Fatalf("resuming a live-bound session should refuse, got %q", msg)
+		t.Fatalf("attaching to a live-held session should refuse, got %q", msg)
 	}
-	_ = shellA
 
 	// A fresh server over the same sessions dir sees A as parked: the door
 	// surfaces it as an open thread with the intro text, and resuming it
@@ -1908,10 +1993,10 @@ func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 func TestEmbeddedCatchupProcedure(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	openSession(t, cs)
+	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"canonical": "catch-up"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "catch-up"}, &serve)
 	if serve.Step != "compose" || serve.Status != "running" {
 		t.Fatalf("expected running at compose, got %s at %q", serve.Status, serve.Step)
 	}
@@ -1923,14 +2008,14 @@ func TestEmbeddedCatchupProcedure(t *testing.T) {
 		}
 	}
 
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"briefing": "**One open gap.**\n\n1. Decide the oscillation gap (`s-tac-aaa`).\n\n**What do you want to move forward?**",
 	}}, &serve)
 	if serve.Step != "junction" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
 		t.Fatalf("briefing should reach the junction user chooser, got %q", serve.Step)
 	}
 
-	call(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "junction", "choice": "pursue", "userWords": "the oscillation gap",
 		"fields": map[string]any{"selectedThread": "decide the oscillation gap"},
 	}}, &serve)
