@@ -64,7 +64,7 @@ func (*failAtPrincipalResolver) ResolveDependency(context.Context, sdd.Principal
 
 func (r *failAtPrincipalResolver) failSecondResolution() {
 	r.mu.Lock()
-	r.failAt = r.calls + 2
+	r.failAt = r.calls + 1
 	r.mu.Unlock()
 }
 

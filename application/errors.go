@@ -18,7 +18,6 @@ const (
 	ErrorReadDenied             ErrorCode = "read_denied"
 	ErrorWriteDenied            ErrorCode = "write_denied"
 	ErrorSessionOwnership       ErrorCode = "session_ownership_mismatch"
-	ErrorSessionInUse           ErrorCode = "session_in_use"
 	ErrorSessionConflict        ErrorCode = "session_conflict"
 	ErrorGraphConflict          ErrorCode = "graph_conflict"
 	ErrorMigrationRequired      ErrorCode = "migration_required"
@@ -33,7 +32,6 @@ type ApplicationError struct {
 	ApplyState ApplyState
 	Revision   string
 	Version    uint32
-	Holder     *SessionHolder
 	Cause      error
 }
 

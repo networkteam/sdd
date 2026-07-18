@@ -38,7 +38,6 @@ type WorkflowResumeRequest struct {
 	MCPSessionID  string
 	ClientName    string
 	ClientVersion string
-	Takeover      bool
 }
 
 type WorkflowStartRequest struct {
@@ -106,8 +105,8 @@ type WorkflowSessionSummary struct {
 	Anchor       string
 	Open         []WorkflowInstanceSummary
 	LastActivity time.Time
-	Holder       *SessionHolder
-	HolderLive   bool
+	Attachment   *Attachment
+	Active       bool
 }
 
 type WorkflowResumeResult struct {
@@ -143,7 +142,6 @@ type WorkflowSession struct {
 	identity RequestIdentity
 	ctx      context.Context
 	binding  SessionBinding
-	client   BindSessionRequest
 	engine   *engine.Engine
 	session  *engine.Session
 	graphs   *workflowGraphs
@@ -163,16 +161,22 @@ func (a *Application) OpenWorkflow(ctx context.Context, identity RequestIdentity
 	if strings.TrimSpace(info.Participant) == "" {
 		return nil, nil, fmt.Errorf("sdd: resolved principal participant is required to open a workflow")
 	}
-	id := newWorkflowSessionID(time.Now())
-	bind := BindSessionRequest{
-		SessionID: id, MCPSessionID: request.MCPSessionID, ClientName: request.ClientName,
-		ClientVersion: request.ClientVersion, Chooser: ChooserUser,
-	}
-	bound, err := a.BindSession(ctx, identity, info.Project.ID, bind)
+	principal, runtime, err := a.resolve(ctx, identity, info.Project.ID, AccessRead)
 	if err != nil {
 		return nil, nil, err
 	}
-	w, err := a.newWorkflow(ctx, identity, info.Project.ID, bind, bound.Binding)
+	id := newWorkflowSessionID(time.Now())
+	now := runtime.options.Now().UTC().Round(0)
+	metadata := SessionMetadata{
+		CodecVersion: SessionCodecVersion, ID: id, Subject: principal.Subject,
+		Project: runtime.options.Project.ID, Participant: principal.Participant, UpdatedAt: now,
+		Attachment: newAttachment(principal.Subject, request.MCPSessionID, request.ClientName, request.ClientVersion, now),
+	}
+	created, err := runtime.options.Sessions.Create(ctx, metadata)
+	if err != nil {
+		return nil, nil, err
+	}
+	w, err := a.newWorkflow(ctx, identity, info.Project.ID, sessionBindingFrom(created))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -203,29 +207,41 @@ func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdenti
 	if request.SessionID == "" || request.MCPSessionID == "" {
 		return nil, WorkflowResumeResult{}, fmt.Errorf("sdd: session ID and MCP session ID are required")
 	}
-	bind := BindSessionRequest{
-		SessionID: request.SessionID, MCPSessionID: request.MCPSessionID, ClientName: request.ClientName,
-		ClientVersion: request.ClientVersion, Chooser: ChooserUser, Takeover: request.Takeover,
-	}
-	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
+	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return nil, WorkflowResumeResult{}, err
 	}
-	if _, err := runtime.options.Sessions.Load(ctx, request.SessionID); err != nil {
+	stored, err := runtime.options.Sessions.Load(ctx, request.SessionID)
+	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			return nil, WorkflowResumeResult{}, fmt.Errorf("unknown session %q", request.SessionID)
 		}
 		return nil, WorkflowResumeResult{}, err
 	}
-	bound, err := a.BindSession(ctx, identity, project, bind)
+	if err := validateStoredSession(stored); err != nil {
+		return nil, WorkflowResumeResult{}, err
+	}
+	if stored.Metadata.Subject != principal.Subject || stored.Metadata.Project != runtime.options.Project.ID {
+		return nil, WorkflowResumeResult{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
+	}
+	now := runtime.options.Now().UTC().Round(0)
+	metadata := stored.Metadata
+	if current := metadata.Attachment; current != nil && current.MCPSessionID != request.MCPSessionID {
+		metadata.AttachmentHistory = append(metadata.AttachmentHistory, AttachmentRecord{Attachment: *current, EndedAt: now, Cause: CauseClaim})
+	}
+	metadata.Attachment = newAttachment(principal.Subject, request.MCPSessionID, request.ClientName, request.ClientVersion, now)
+	metadata.UpdatedAt = now
+	version, err := runtime.options.Sessions.Append(ctx, request.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
 	if err != nil {
 		return nil, WorkflowResumeResult{}, err
 	}
-	w, err := a.newWorkflow(ctx, identity, bound.Project.ID, bind, bound.Binding)
+	stored.Metadata = metadata
+	stored.Version = version
+	w, err := a.newWorkflow(ctx, identity, runtime.options.Project.ID, sessionBindingFrom(stored))
 	if err != nil {
 		return nil, WorkflowResumeResult{}, err
 	}
-	stored, err := w.loadStoredSession(ctx)
+	stored, err = w.loadStoredSession(ctx)
 	if err != nil {
 		return nil, WorkflowResumeResult{}, err
 	}
@@ -248,8 +264,12 @@ func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdenti
 	return w, result, err
 }
 
-func (a *Application) newWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, request BindSessionRequest, binding SessionBinding) (*WorkflowSession, error) {
-	w := &WorkflowSession{app: a, project: project, identity: identity, ctx: ctx, binding: binding, client: request, staged: map[string]string{}}
+func newAttachment(subject, mcpSessionID, clientName, clientVersion string, now time.Time) *Attachment {
+	return &Attachment{Subject: subject, MCPSessionID: mcpSessionID, ClientName: clientName, ClientVersion: clientVersion, LastActivity: now}
+}
+
+func (a *Application) newWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding) (*WorkflowSession, error) {
+	w := &WorkflowSession{app: a, project: project, identity: identity, ctx: ctx, binding: binding, staged: map[string]string{}}
 	w.graphs = &workflowGraphs{workflow: w}
 	w.sink = &workflowSink{workflow: w}
 	registry, err := w.buildRegistry()
@@ -279,9 +299,7 @@ func (w *WorkflowSession) OpenInstances() []WorkflowInstanceSummary {
 func (w *WorkflowSession) IsShell(instance string) bool { return instance != "" && instance == w.shell }
 
 func (w *WorkflowSession) Reopen(ctx context.Context, identity RequestIdentity, label string) (*WorkflowServe, error) {
-	if err := w.begin(ctx, identity, ChooserUser); err != nil {
-		return nil, err
-	}
+	w.setOperation(ctx, identity)
 	if err := w.setLabel(label); err != nil {
 		return nil, err
 	}
@@ -296,9 +314,7 @@ func (w *WorkflowSession) Start(ctx context.Context, identity RequestIdentity, r
 	if strings.TrimSpace(request.Canonical) == "" {
 		return nil, fmt.Errorf("canonical is required")
 	}
-	if err := w.begin(ctx, identity, ChooserAgent); err != nil {
-		return nil, err
-	}
+	w.setOperation(ctx, identity)
 	w.graphs.Invalidate()
 	spec, err := w.loadProcedure(request.Canonical)
 	if err != nil {
@@ -325,9 +341,7 @@ func (w *WorkflowSession) Advance(ctx context.Context, identity RequestIdentity,
 	if request.Instance == "" || len(request.Report) == 0 {
 		return nil, fmt.Errorf("instance and report are required")
 	}
-	if err := w.begin(ctx, identity, w.currentChooser(request.Instance)); err != nil {
-		return nil, err
-	}
+	w.setOperation(ctx, identity)
 	w.graphs.Invalidate()
 	if err := w.setLabel(request.Label); err != nil {
 		return nil, err
@@ -362,9 +376,7 @@ func (w *WorkflowSession) ServeShell(ctx context.Context, identity RequestIdenti
 	if w.shell == "" {
 		return nil, nil
 	}
-	if err := w.begin(ctx, identity, ChooserUser); err != nil {
-		return nil, err
-	}
+	w.setOperation(ctx, identity)
 	serve, err := w.session.Serve(w.shell)
 	if err != nil {
 		return nil, err
@@ -373,9 +385,7 @@ func (w *WorkflowSession) ServeShell(ctx context.Context, identity RequestIdenti
 }
 
 func (w *WorkflowSession) ServeAll(ctx context.Context, identity RequestIdentity) (WorkflowResumeResult, error) {
-	if err := w.begin(ctx, identity, ChooserUser); err != nil {
-		return WorkflowResumeResult{}, err
-	}
+	w.setOperation(ctx, identity)
 	return w.resumeResult()
 }
 
@@ -395,9 +405,7 @@ func (w *WorkflowSession) resumeResult() (WorkflowResumeResult, error) {
 }
 
 func (w *WorkflowSession) Abandon(ctx context.Context, identity RequestIdentity, instance, reason string) (WorkflowAbandonResult, error) {
-	if err := w.begin(ctx, identity, ChooserAgent); err != nil {
-		return WorkflowAbandonResult{}, err
-	}
+	w.setOperation(ctx, identity)
 	if instance == w.shell {
 		return WorkflowAbandonResult{}, fmt.Errorf("the session shell concludes through its own junction")
 	}
@@ -419,9 +427,7 @@ func (w *WorkflowSession) Abandon(ctx context.Context, identity RequestIdentity,
 }
 
 func (w *WorkflowSession) Park(ctx context.Context, identity RequestIdentity, instance, note string) (WorkflowParkResult, error) {
-	if err := w.begin(ctx, identity, ChooserAgent); err != nil {
-		return WorkflowParkResult{}, err
-	}
+	w.setOperation(ctx, identity)
 	if instance == w.shell {
 		return WorkflowParkResult{}, fmt.Errorf("park is for moves; the session shell is the junction they park back to")
 	}
@@ -440,9 +446,7 @@ func (w *WorkflowSession) Park(ctx context.Context, identity RequestIdentity, in
 }
 
 func (w *WorkflowSession) StageAttachment(ctx context.Context, identity RequestIdentity, filename string, content []byte) (string, error) {
-	if err := w.begin(ctx, identity, ChooserAgent); err != nil {
-		return "", err
-	}
+	w.setOperation(ctx, identity)
 	blob, err := w.app.StageBlob(ctx, identity, w.project, BlobOwner{Subject: w.binding.Subject, Session: w.binding.SessionID}, filename, content)
 	if err != nil {
 		return "", err
@@ -459,9 +463,7 @@ func (w *WorkflowSession) StageAttachment(ctx context.Context, identity RequestI
 }
 
 func (w *WorkflowSession) LogRead(ctx context.Context, identity RequestIdentity, tool string, full, summary []string) error {
-	if err := w.begin(ctx, identity, ChooserAgent); err != nil {
-		return err
-	}
+	w.setOperation(ctx, identity)
 	w.session.LogRead(tool, full, summary)
 	return nil
 }
@@ -484,25 +486,25 @@ func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity)
 	return out.String(), nil
 }
 
-func (w *WorkflowSession) Release(ctx context.Context, identity RequestIdentity) error {
+func (w *WorkflowSession) Release(ctx context.Context, identity RequestIdentity, cause AttachmentCause) error {
 	w.setOperation(ctx, identity)
-	return w.app.ReleaseSession(ctx, identity, w.project, w.binding)
+	return w.app.ReleaseSession(ctx, identity, w.project, w.binding, cause)
 }
 
-// Leave releases the durable holder. A session with no open moves is also
-// auto-concluded so it does not remain as an empty parked dialogue.
-func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity) error {
-	if err := w.begin(ctx, identity, ChooserUser); err != nil {
-		return err
-	}
+// Leave ends the connection's attachment with the transport cause. A session
+// with no open moves is auto-concluded (cause conclude) so it does not remain
+// as an empty parked dialogue.
+func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity, cause AttachmentCause) error {
+	w.setOperation(ctx, identity)
 	if len(w.OpenInstances()) == 0 && w.shell != "" {
 		if inst, ok := w.session.Instance(w.shell); ok && inst.Status == engine.StatusRunning {
 			if err := w.session.Abandon(w.shell, "auto-concluded: session left with no open work"); err != nil {
 				return err
 			}
 		}
+		cause = CauseConclude
 	}
-	return w.Release(ctx, identity)
+	return w.Release(ctx, identity, cause)
 }
 
 func (a *Application) ListWorkflowSessions(ctx context.Context, identity RequestIdentity, project ProjectID) ([]WorkflowSessionSummary, error) {
@@ -536,10 +538,10 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 		if item.Metadata.UpdatedAt.After(summary.LastActivity) {
 			summary.LastActivity = item.Metadata.UpdatedAt
 		}
-		if item.Metadata.Holder != nil {
-			holder := *item.Metadata.Holder
-			summary.Holder = &holder
-			summary.HolderLive = holder.ExpiresAt.After(now)
+		if item.Metadata.Attachment != nil {
+			attachment := *item.Metadata.Attachment
+			summary.Attachment = &attachment
+			summary.Active = attachmentActive(&attachment, now)
 		}
 		result = append(result, summary)
 	}
@@ -567,48 +569,15 @@ func (a *Application) AbandonWorkflowSession(ctx context.Context, identity Reque
 			return WorkflowAbandonResult{}, err
 		}
 	}
-	if err := w.Release(ctx, identity); err != nil {
+	if err := w.Release(ctx, identity, CauseAbandon); err != nil {
 		return WorkflowAbandonResult{}, err
 	}
 	return result, nil
 }
 
-func (w *WorkflowSession) begin(ctx context.Context, identity RequestIdentity, chooser ChooserKind) error {
-	w.setOperation(ctx, identity)
-	req := w.client
-	req.SessionID = w.ID()
-	req.Chooser = chooser
-	req.Takeover = false
-	bound, err := w.app.BindSession(ctx, identity, w.project, req)
-	if err != nil {
-		return err
-	}
-	w.binding = bound.Binding
-	return nil
-}
-
 func (w *WorkflowSession) setOperation(ctx context.Context, identity RequestIdentity) {
 	w.ctx = ctx
 	w.identity = identity
-}
-
-func (w *WorkflowSession) currentChooser(instance string) ChooserKind {
-	inst, ok := w.session.Instance(instance)
-	if !ok || inst.Status != engine.StatusRunning {
-		return ChooserAgent
-	}
-	step := inst.Spec.StepByID[inst.Step]
-	if step == nil {
-		return ChooserAgent
-	}
-	switch step.Chooser {
-	case engine.ChooserUser:
-		return ChooserUser
-	case engine.ChooserAgent:
-		return ChooserAgent
-	default:
-		return ChooserGate
-	}
 }
 
 func (w *WorkflowSession) setLabel(label string) error {
@@ -768,6 +737,12 @@ func (w *WorkflowSession) readTarget(store *engine.Store) MutationTarget {
 type workflowSink struct{ workflow *WorkflowSession }
 
 func (s *workflowSink) Append(event engine.Event) error {
+	// A serve is a pure read: its forensic served marker never reaches the
+	// durable log, so re-serving (Reopen/ServeShell/ServeAll) writes nothing
+	// and each engine operation appends only its own event with the stamp.
+	if event.Event == engine.EventServed {
+		return nil
+	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		return err
@@ -788,7 +763,13 @@ func (w *WorkflowSession) appendStoredEvent(code string, payload json.RawMessage
 		return err
 	}
 	metadata := stored.Metadata
-	metadata.UpdatedAt = runtime.options.Now().UTC().Round(0)
+	now := runtime.options.Now().UTC().Round(0)
+	metadata.UpdatedAt = now
+	if metadata.Attachment != nil {
+		attachment := *metadata.Attachment
+		attachment.LastActivity = now
+		metadata.Attachment = &attachment
+	}
 	if code == WorkflowEventCode {
 		var event engine.Event
 		if err := json.Unmarshal(payload, &event); err != nil {

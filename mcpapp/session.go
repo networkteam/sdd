@@ -20,18 +20,16 @@ type shellSession struct {
 }
 
 // sessionStore owns only MCP connection bindings. Durable session state,
-// holder leases, labels, and workflow events live behind Application ports.
+// attachment stamps, labels, and workflow events live behind Application ports.
 type sessionStore struct {
 	mu      sync.Mutex
 	byMCP   map[*mcp.ServerSession]*shellSession
-	byID    map[string]*shellSession
 	watched map[*mcp.ServerSession]bool
 }
 
 func newSessionStore() *sessionStore {
 	return &sessionStore{
 		byMCP:   make(map[*mcp.ServerSession]*shellSession),
-		byID:    make(map[string]*shellSession),
 		watched: make(map[*mcp.ServerSession]bool),
 	}
 }
@@ -57,7 +55,6 @@ func (st *sessionStore) bind(session *mcp.ServerSession, workflow *shellSession)
 	defer st.mu.Unlock()
 	previous := st.byMCP[session]
 	st.byMCP[session] = workflow
-	st.byID[workflow.id] = workflow
 	if previous == workflow {
 		return nil
 	}
@@ -71,12 +68,6 @@ func (st *sessionStore) unbind(session *mcp.ServerSession) *shellSession {
 	delete(st.byMCP, session)
 	delete(st.watched, session)
 	return workflow
-}
-
-func (st *sessionStore) drop(id string) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	delete(st.byID, id)
 }
 
 func (st *sessionStore) liveIDs() map[string]bool {
@@ -105,9 +96,9 @@ type sessionDescriptor struct {
 	Participant  string               `json:"participant,omitempty"`
 	Anchor       string               `json:"anchor,omitempty" jsonschema:"entry the session's work is anchored on, when a procedure param carried one"`
 	Open         []instanceDescriptor `json:"open_instances" jsonschema:"running move instances with their current step (the session shell is not listed)"`
-	ClientName   string               `json:"client_name,omitempty" jsonschema:"name of the client currently holding the session, when one does"`
+	ClientName   string               `json:"client_name,omitempty" jsonschema:"name of the client whose attachment last drove the session, when one has"`
 	LastActivity string               `json:"last_activity,omitempty"`
-	Activity     string               `json:"activity" jsonschema:"active (a live client holds it) or idle — a hint for whether attaching may interrupt someone"`
+	Activity     string               `json:"activity" jsonschema:"active (an attachment stamped within the recency window) or idle — a hint for whether attaching may interrupt someone"`
 }
 
 type instanceDescriptor struct {

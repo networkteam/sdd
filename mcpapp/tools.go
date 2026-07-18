@@ -2,7 +2,6 @@ package mcpapp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -450,7 +449,7 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 	if err := s.watchDisconnect(req.Session); err != nil {
 		return nil, ServeResult{}, err
 	}
-	if err := s.leaveSession(ctx, prev); err != nil {
+	if err := s.leaveSession(ctx, prev, sdd.CauseSwitch); err != nil {
 		return nil, ServeResult{}, err
 	}
 	result, err := s.toRootServeResult(ctx, req, ss, serve)
@@ -616,10 +615,10 @@ func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ L
 		}
 		desc := sessionDescriptor{
 			Session: string(item.Session), Label: item.Label, Participant: item.Participant,
-			Anchor: item.Anchor, Activity: activityTag(item.HolderLive),
+			Anchor: item.Anchor, Activity: activityTag(item.Active),
 		}
-		if item.Holder != nil {
-			desc.ClientName = item.Holder.ClientName
+		if item.Attachment != nil {
+			desc.ClientName = item.Attachment.ClientName
 		}
 		if !item.LastActivity.IsZero() {
 			desc.LastActivity = item.LastActivity.Format(time.RFC3339)
@@ -632,36 +631,12 @@ func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ L
 	return nil, result, nil
 }
 
-// activityTag derives the listing label from whether a live client currently
-// holds the session.
-func activityTag(holderLive bool) string {
-	if holderLive {
+// activityTag derives the listing label from attachment recency.
+func activityTag(active bool) string {
+	if active {
 		return "active"
 	}
 	return "idle"
-}
-
-// enrichSessionInUse rewrites an attach rejection to name the current holder —
-// client and last activity, the same facts list_sessions advertises — so a
-// refusal tells the agent whom to check with before taking the session over.
-// The application error shape is unchanged; only the surfaced message grows.
-func enrichSessionInUse(err error) error {
-	var appErr *sdd.ApplicationError
-	if !errors.As(err, &appErr) || appErr.Code != sdd.ErrorSessionInUse || appErr.Holder == nil {
-		return err
-	}
-	msg := appErr.Message
-	var parts []string
-	if name := appErr.Holder.ClientName; name != "" {
-		parts = append(parts, "held by "+name)
-	}
-	if last := appErr.Holder.LastActivity; !last.IsZero() {
-		parts = append(parts, "last active "+last.UTC().Format(time.RFC3339))
-	}
-	if len(parts) > 0 {
-		msg += " — " + strings.Join(parts, ", ")
-	}
-	return toolError("%s", msg)
 }
 
 // resumeSession is the attach door and the compaction escape. Its session
@@ -679,11 +654,11 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 			SessionID: sdd.SessionID(args.Session), MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
 		})
 		if err != nil {
-			return nil, ResumeSessionResult{}, enrichSessionInUse(err)
+			return nil, ResumeSessionResult{}, err
 		}
 		ss := &shellSession{id: string(workflow.ID()), participant: result.Participant, root: workflow, rootIdentity: identity, lastActivity: time.Now()}
 		prev := s.sessions.bind(req.Session, ss)
-		if err := s.leaveSession(ctx, prev); err != nil {
+		if err := s.leaveSession(ctx, prev, sdd.CauseSwitch); err != nil {
 			return nil, ResumeSessionResult{}, err
 		}
 		mapped, err := s.mapRootResume(ctx, req, ss, result)

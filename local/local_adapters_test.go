@@ -78,6 +78,7 @@ func TestFilesystemSessionStoreConformance(t *testing.T) {
 			Store: store,
 			Metadata: sdd.SessionMetadata{
 				ID: "session-1", Subject: "christopher", Project: "example", Participant: "Christopher",
+				Attachment: &sdd.Attachment{Subject: "christopher", MCPSessionID: "mcp-1", ClientName: "test-client", LastActivity: time.Now().UTC().Round(0)},
 			},
 			Append: sdd.SessionAppend{Events: []sdd.StoredEvent{{CodecVersion: 1, Code: "started", Payload: json.RawMessage(`{"instance":"i_1"}`)}}},
 		}
@@ -281,15 +282,15 @@ func TestAccessResolverConformance(t *testing.T) {
 	})
 }
 
-func TestSessionHolderMetadataRoundTrips(t *testing.T) {
+func TestSessionAttachmentMetadataRoundTrips(t *testing.T) {
 	store, err := localadapter.NewFilesystemSessionStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Round(0)
 	metadata := sdd.SessionMetadata{
-		ID: "held", Subject: "christopher", Project: "example",
-		Holder: &sdd.SessionHolder{Subject: "christopher", MCPSessionID: "mcp-1", Generation: 1, LastActivity: now, ExpiresAt: now.Add(time.Minute)},
+		CodecVersion: 1, ID: "attached", Subject: "christopher", Project: "example",
+		Attachment: &sdd.Attachment{Subject: "christopher", MCPSessionID: "mcp-1", ClientName: "test-client", LastActivity: now},
 	}
 	created, err := store.Create(t.Context(), metadata)
 	if err != nil {
@@ -299,8 +300,31 @@ func TestSessionHolderMetadataRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Version != created.Version || loaded.Metadata.Holder == nil || loaded.Metadata.Holder.Generation != 1 {
-		t.Fatalf("holder did not round trip: %+v", loaded)
+	if loaded.Version != created.Version || loaded.Metadata.Attachment == nil || loaded.Metadata.Attachment.MCPSessionID != "mcp-1" {
+		t.Fatalf("attachment did not round trip: %+v", loaded)
+	}
+}
+
+// TestSessionLoadToleratesLegacyHolderMetadata proves the in-place store
+// evolution (codec version unchanged): a session file written by an older
+// binary carrying the removed holder JSON still loads — the unknown fields are
+// ignored and the attachment reads nil.
+func TestSessionLoadToleratesLegacyHolderMetadata(t *testing.T) {
+	dir := t.TempDir()
+	store, err := localadapter.NewFilesystemSessionStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":1,"metadata":{"CodecVersion":1,"ID":"legacy-holder","Subject":"christopher","Project":"example","Participant":"Christopher","Holder":{"Subject":"christopher","MCPSessionID":"mcp-1","Generation":1,"ExpiresAt":"2026-07-13T05:01:00Z"},"HolderHistory":[{"Reason":"released"}]}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "legacy-holder.jsonl"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load(t.Context(), "legacy-holder")
+	if err != nil {
+		t.Fatalf("legacy holder session failed to load: %v", err)
+	}
+	if loaded.Metadata.Subject != "christopher" || loaded.Metadata.Attachment != nil {
+		t.Fatalf("legacy holder metadata did not load tolerantly: %+v", loaded.Metadata)
 	}
 }
 

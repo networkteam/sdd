@@ -49,17 +49,14 @@ func TestApplyPreparedRetriesRevisionConflictThenMerges(t *testing.T) {
 	var injector *conflictInjectingStore
 	// Two lost races followed by success proves the engine-internal retry lands
 	// within its three-attempt bound, invisible to the caller.
-	application, _, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
+	application, sessions, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
 		injector = &conflictInjectingStore{GraphStore: store, remaining: 2}
 		return injector
 	}, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "retry-merge", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "retry-merge", "2026/07/13-054000-s-tac-rty.md")
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	binding := openBinding(t, sessions, identity.Subject, "retry-merge")
+	prepared := preparedEntry(t, graph.GraphStore, binding, "retry-merge", "2026/07/13-054000-s-tac-rty.md")
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 	if err != nil || result.Apply.State != sdd.MutationApplied {
 		t.Fatalf("bounded retry apply = %+v, %v", result, err)
 	}
@@ -81,16 +78,13 @@ func TestApplyPreparedRetriesRevisionConflictThenMerges(t *testing.T) {
 func TestApplyPreparedExhaustedConflictFailsTypedNeverRecovery(t *testing.T) {
 	// Exactly three injected conflicts exhaust the cap: paired with the two-loss
 	// merge case (which lands), this pins the retry bound at exactly three.
-	application, _, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
+	application, sessions, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
 		return &conflictInjectingStore{GraphStore: store, remaining: 3}
 	}, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "exhausted", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "exhausted", "2026/07/13-054100-s-tac-exh.md")
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	binding := openBinding(t, sessions, identity.Subject, "exhausted")
+	prepared := preparedEntry(t, graph.GraphStore, binding, "exhausted", "2026/07/13-054100-s-tac-exh.md")
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 	if errorCode(err) != sdd.ErrorGraphConflict || result.Apply.State != sdd.MutationNotApplied {
 		t.Fatalf("exhausted retries = %+v, %v; want typed graph conflict", result, err)
 	}
@@ -113,26 +107,20 @@ func TestApplyPreparedExhaustedConflictFailsTypedNeverRecovery(t *testing.T) {
 }
 
 func TestApplyPreparedGenuineWIPMarkerPathCollisionFailsTyped(t *testing.T) {
-	application, _, _, graph := newDurableApplication(t, time.Now, nil, nil)
+	application, sessions, _, graph := newDurableApplication(t, time.Now, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
 	anchorPath := "2026/07/13-055400-s-tac-anc.md"
 	anchorID, err := model.RelPathToID(anchorPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writerA, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "writer-a", MCPSessionID: "mcp-a", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	anchor := preparedEntry(t, graph.GraphStore, writerA.Binding, "anchor", anchorPath)
-	created, err := application.ApplyPrepared(t.Context(), identity, "example", writerA.Binding, anchor)
+	writerA := openBinding(t, sessions, identity.Subject, "writer-a")
+	anchor := preparedEntry(t, graph.GraphStore, writerA, "anchor", anchorPath)
+	created, err := application.ApplyPrepared(t.Context(), identity, "example", writerA, anchor)
 	if err != nil || created.Apply.State != sdd.MutationApplied {
 		t.Fatalf("anchor apply = %+v, %v", created, err)
 	}
-	writerB, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "writer-b", MCPSessionID: "mcp-b", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
+	writerB := openBinding(t, sessions, identity.Subject, "writer-b")
 
 	// Two writers start exclusive WIP on the same entry in the same second, so
 	// they share the deterministic marker ID — hence the same marker path and
@@ -144,8 +132,8 @@ func TestApplyPreparedGenuineWIPMarkerPathCollisionFailsTyped(t *testing.T) {
 	if err != nil || firstResult.Apply.State != sdd.MutationApplied {
 		t.Fatalf("first WIP apply = %+v, %v", firstResult, err)
 	}
-	second := preparedWIP(t, graph.GraphStore, writerB.Binding, markerID, anchorID, "writer B takes the entry")
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", writerB.Binding, second)
+	second := preparedWIP(t, graph.GraphStore, writerB, markerID, anchorID, "writer B takes the entry")
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", writerB, second)
 	if errorCode(err) != sdd.ErrorRecoveryRequired || result.Apply.State != sdd.MutationNotApplied {
 		t.Fatalf("same WIP marker path collision = %+v, %v; want typed not-applied", result, err)
 	}
@@ -156,22 +144,19 @@ func TestApplyPreparedGenuineWIPMarkerPathCollisionFailsTyped(t *testing.T) {
 
 func TestReplaceSummaryMergesUnderRetry(t *testing.T) {
 	var injector *conflictInjectingStore
-	application, _, _, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
+	application, sessions, _, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
 		injector = &conflictInjectingStore{GraphStore: store}
 		return injector
 	}, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "replace-summary", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
+	binding := openBinding(t, sessions, identity.Subject, "replace-summary")
 	entryPath := "2026/07/13-055600-s-tac-sum.md"
 	entryID, err := model.RelPathToID(entryPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "summary-target", entryPath)
-	created, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	prepared := preparedEntry(t, graph.GraphStore, binding, "summary-target", entryPath)
+	created, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 	if err != nil || created.Apply.State != sdd.MutationApplied {
 		t.Fatalf("summary target apply = %+v, %v", created, err)
 	}
@@ -270,13 +255,7 @@ func TestInterleavedCapturesBothLandWithoutRecovery(t *testing.T) {
 
 	bindings := make([]sdd.SessionBinding, captures)
 	for i := range bindings {
-		bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{
-			SessionID: sdd.SessionID(fmt.Sprintf("capture-%d", i)), MCPSessionID: fmt.Sprintf("mcp-%d", i), Chooser: sdd.ChooserAgent,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		bindings[i] = bound.Binding
+		bindings[i] = openBinding(t, sessions, identity.Subject, sdd.SessionID(fmt.Sprintf("capture-%d", i)))
 	}
 
 	type outcome struct {

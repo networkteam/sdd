@@ -11,32 +11,49 @@ type SessionID string
 // SessionMetadata is structured routing and ownership data. Dialogue events
 // remain opaque to the store.
 type SessionMetadata struct {
-	CodecVersion  uint32
-	ID            SessionID
-	Subject       string
-	Project       ProjectID
-	Participant   string
-	Label         string
-	Holder        *SessionHolder
-	HolderHistory []SessionHolderRecord
-	UpdatedAt     time.Time
+	CodecVersion      uint32
+	ID                SessionID
+	Subject           string
+	Project           ProjectID
+	Participant       string
+	Label             string
+	Attachment        *Attachment
+	AttachmentHistory []AttachmentRecord
+	UpdatedAt         time.Time
 }
 
-type SessionHolderRecord struct {
-	Holder  SessionHolder
-	EndedAt time.Time
-	Reason  string
-}
-
-type SessionHolder struct {
+// Attachment is the informational stamp of the client currently driving the
+// session. It carries no lease: integrity comes from CAS on append, and status
+// is derived from LastActivity recency, never from an expiry.
+type Attachment struct {
 	Subject       string
-	MCPSessionID  string
 	ClientName    string
 	ClientVersion string
-	Generation    uint64
+	MCPSessionID  string
 	LastActivity  time.Time
-	ExpiresAt     time.Time
 }
+
+// AttachmentRecord closes out a past attachment with the specific cause it
+// ended. UserWords records the consenting ask on a claim (populated in a later
+// slice).
+type AttachmentRecord struct {
+	Attachment Attachment
+	EndedAt    time.Time
+	Cause      AttachmentCause
+	UserWords  string `json:",omitempty"`
+}
+
+// AttachmentCause is the closed set of reasons an attachment ends.
+type AttachmentCause string
+
+const (
+	CauseDisconnect AttachmentCause = "disconnect"
+	CauseSwitch     AttachmentCause = "switch"
+	CauseShutdown   AttachmentCause = "shutdown"
+	CauseClaim      AttachmentCause = "claim"
+	CauseConclude   AttachmentCause = "conclude"
+	CauseAbandon    AttachmentCause = "abandon"
+)
 
 type StoredEvent struct {
 	CodecVersion uint32

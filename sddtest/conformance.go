@@ -147,6 +147,12 @@ func RunSessionStoreTests(t *testing.T, factory func(*testing.T) SessionStoreFix
 	if loaded.Version != next || len(loaded.Events) != len(fixture.Append.Events) {
 		t.Fatalf("Load = version %d events %d, want %d/%d", loaded.Version, len(loaded.Events), next, len(fixture.Append.Events))
 	}
+	if want := fixture.Metadata.Attachment; want != nil {
+		got := loaded.Metadata.Attachment
+		if got == nil || got.MCPSessionID != want.MCPSessionID || got.ClientName != want.ClientName {
+			t.Fatalf("attachment did not round-trip: got %+v, want %+v", got, want)
+		}
+	}
 	listed, err := fixture.Store.List(t.Context(), sdd.SessionFilter{Project: fixture.Metadata.Project})
 	if err != nil {
 		t.Fatalf("List: %v", err)

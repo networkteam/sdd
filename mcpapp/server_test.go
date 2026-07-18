@@ -485,7 +485,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "38a51a6388671672b2803ae4882d61ce9e3a7d3c22c0a51bc693aee0c055d9eb"
+	const want = "74e1fd100d3195a1a2cfb4bd58feaeb1968b77aef2e52427fe9db701d0019c15"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1301,11 +1301,15 @@ func TestAbandonSessionByHandle_Rejections(t *testing.T) {
 		t.Fatalf("unknown session should be named, got %q", msg)
 	}
 
-	// A session live on another connection refuses teardown.
+	// Slice 3: tearing down a session another connection holds is allowed —
+	// abandon attaches by handle, displaces, and tears it down (Slice 4 gates
+	// this with consent).
 	cs2 := connect(t, env.srv)
 	other := openSession(t, cs2)
-	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": other.Session}); !strings.Contains(msg, "live on another connection") {
-		t.Fatalf("live session should refuse teardown, got %q", msg)
+	var torn mcpserver.AbandonResult
+	call(t, cs, "abandon", map[string]any{"session": other.Session}, &torn)
+	if !torn.Abandoned || torn.Session != other.Session {
+		t.Fatalf("tearing down another connection's session should succeed, got %+v", torn)
 	}
 }
 
@@ -1974,8 +1978,8 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 	var serveA mcpserver.ServeResult
 	call(t, csA, "start_procedure", map[string]any{"session": sessionA, "canonical": "capture", "label": "parked capture A"}, &serveA)
 
-	// Connection B on the same server: A is live-held — it is listed and
-	// surfaced (never hidden), labeled active, but attaching to it refuses.
+	// Connection B on the same server: A is active — it is listed and
+	// surfaced (never hidden), labeled active with its client name.
 	csB := connect(t, env.srv)
 	shellB := openSession(t, csB)
 	if !strings.Contains(shellB.OpenThreads, sessionA) || !strings.Contains(shellB.OpenThreads, "parked capture A") {
@@ -1987,12 +1991,19 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 		t.Fatalf("the active session must list, got %+v", listed.Sessions)
 	}
 	if listed.Sessions[0].Activity != "active" || listed.Sessions[0].ClientName != "test-client" {
-		t.Fatalf("a live-held session should list as active with its client name, got %+v", listed.Sessions[0])
+		t.Fatalf("an active session should list as active with its client name, got %+v", listed.Sessions[0])
 	}
-	// The refusal names the holder — client and last activity — the same facts
-	// the listing advertises, so the agent knows whom to check with.
-	if msg := callExpectError(t, csB, "resume_session", map[string]any{"session": sessionA}); !strings.Contains(msg, "live") || !strings.Contains(msg, "held by test-client") {
-		t.Fatalf("attaching to a live-held session should refuse and name the holder, got %q", msg)
+	// Attaching to an active session is allowed here and displaces the
+	// incumbent (Slice 4 gates this with consent). The displaced client, A,
+	// learns of the takeover at its next append: it fails typed rather than
+	// corrupting the shared session log.
+	var claimed mcpserver.ResumeSessionResult
+	call(t, csB, "resume_session", map[string]any{"session": sessionA}, &claimed)
+	if claimed.Session != sessionA {
+		t.Fatalf("attaching to an active session should succeed and displace, got %+v", claimed)
+	}
+	if msg := callExpectError(t, csA, "stage_attachment", map[string]any{"session": sessionA, "name": "note.md", "content": "x"}); !strings.Contains(msg, "displaced") {
+		t.Fatalf("a displaced client's next append should fail typed naming the displacement, got %q", msg)
 	}
 
 	// A fresh server over the same sessions dir sees A as parked: the door
