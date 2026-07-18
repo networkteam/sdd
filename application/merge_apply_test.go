@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/model"
 	localadapter "github.com/networkteam/sdd/local"
 )
 
@@ -35,6 +37,12 @@ func (s *conflictInjectingStore) Apply(ctx context.Context, revision string, bat
 		return sdd.ApplyResult{State: sdd.MutationNotApplied, Revision: moved}, &sdd.ApplicationError{Code: sdd.ErrorGraphConflict, Message: "graph revision changed", Revision: moved}
 	}
 	return s.GraphStore.Apply(ctx, revision, batch, blobs)
+}
+
+func (s *conflictInjectingStore) injectConflicts(n int) {
+	s.mu.Lock()
+	s.remaining = n
+	s.mu.Unlock()
 }
 
 func TestApplyPreparedRetriesRevisionConflictThenMerges(t *testing.T) {
@@ -71,9 +79,10 @@ func TestApplyPreparedRetriesRevisionConflictThenMerges(t *testing.T) {
 }
 
 func TestApplyPreparedExhaustedConflictFailsTypedNeverRecovery(t *testing.T) {
-	// remaining exceeds the retry bound, so every attempt loses the race.
+	// Exactly three injected conflicts exhaust the cap: paired with the two-loss
+	// merge case (which lands), this pins the retry bound at exactly three.
 	application, _, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
-		return &conflictInjectingStore{GraphStore: store, remaining: 5}
+		return &conflictInjectingStore{GraphStore: store, remaining: 3}
 	}, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
 	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "exhausted", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
@@ -103,35 +112,113 @@ func TestApplyPreparedExhaustedConflictFailsTypedNeverRecovery(t *testing.T) {
 	}
 }
 
-func TestApplyPreparedGenuineLogicalPathCollisionFailsTyped(t *testing.T) {
+func TestApplyPreparedGenuineWIPMarkerPathCollisionFailsTyped(t *testing.T) {
 	application, _, _, graph := newDurableApplication(t, time.Now, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "collision", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
+	anchorPath := "2026/07/13-055400-s-tac-anc.md"
+	anchorID, err := model.RelPathToID(anchorPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := preparedEntry(t, graph.GraphStore, bound.Binding, "collide", "2026/07/13-055000-s-tac-col.md")
-	applied, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, first)
-	if err != nil || applied.Apply.State != sdd.MutationApplied {
-		t.Fatalf("first apply = %+v, %v", applied, err)
-	}
-	// A second write reusing the mutation ID at the same logical path with
-	// different content — the shape of two writers racing the same WIP marker
-	// path — is a genuine collision the adapter's batch ledger rejects typed;
-	// merge-clean retries do not silently clobber it.
-	second := preparedEntry(t, graph.GraphStore, applied.Binding, "collide", "2026/07/13-055000-s-tac-col.md")
-	second.Batch.Changes[0].CanonicalBytes = []byte("---\ntype: signal\nkind: done\nlayer: tactical\nsummary: Durable transition fixture.\n---\n\nColliding body.\n")
-	second.Batch.Changes[0].Document.Body = "Colliding body."
-	second.Batch.Digest, err = sdd.MutationBatchDigest(second.Batch)
+	writerA, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "writer-a", MCPSessionID: "mcp-a", Chooser: sdd.ChooserAgent})
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", applied.Binding, second)
+	anchor := preparedEntry(t, graph.GraphStore, writerA.Binding, "anchor", anchorPath)
+	created, err := application.ApplyPrepared(t.Context(), identity, "example", writerA.Binding, anchor)
+	if err != nil || created.Apply.State != sdd.MutationApplied {
+		t.Fatalf("anchor apply = %+v, %v", created, err)
+	}
+	writerB, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "writer-b", MCPSessionID: "mcp-b", Chooser: sdd.ChooserAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Two writers start exclusive WIP on the same entry in the same second, so
+	// they share the deterministic marker ID — hence the same marker path and
+	// the same batch ID — while describing the work differently. The adapter's
+	// batch ledger rejects the second write typed; merge retries never clobber.
+	const markerID = "20260713-055500-christopher"
+	first := preparedWIP(t, graph.GraphStore, created.Binding, markerID, anchorID, "writer A takes the entry")
+	firstResult, err := application.ApplyPrepared(t.Context(), identity, "example", created.Binding, first)
+	if err != nil || firstResult.Apply.State != sdd.MutationApplied {
+		t.Fatalf("first WIP apply = %+v, %v", firstResult, err)
+	}
+	second := preparedWIP(t, graph.GraphStore, writerB.Binding, markerID, anchorID, "writer B takes the entry")
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", writerB.Binding, second)
 	if errorCode(err) != sdd.ErrorRecoveryRequired || result.Apply.State != sdd.MutationNotApplied {
-		t.Fatalf("genuine collision = %+v, %v; want typed not-applied", result, err)
+		t.Fatalf("same WIP marker path collision = %+v, %v; want typed not-applied", result, err)
 	}
 	if !strings.Contains(err.Error(), "reused") {
 		t.Fatalf("collision error message = %q", err.Error())
+	}
+}
+
+func TestReplaceSummaryMergesUnderRetry(t *testing.T) {
+	var injector *conflictInjectingStore
+	application, _, _, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
+		injector = &conflictInjectingStore{GraphStore: store}
+		return injector
+	}, nil)
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "replace-summary", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryPath := "2026/07/13-055600-s-tac-sum.md"
+	entryID, err := model.RelPathToID(entryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "summary-target", entryPath)
+	created, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	if err != nil || created.Apply.State != sdd.MutationApplied {
+		t.Fatalf("summary target apply = %+v, %v", created, err)
+	}
+	// Force two lost races on the summary-replacement apply: it must retry and
+	// land through the same merge path as capture, not a bespoke apply.
+	injector.injectConflicts(2)
+	if _, err := application.ReplaceSummary(t.Context(), identity, "example", created.Binding, sdd.MutationTarget{Project: "example", Branch: "main"}, entryID, "Replacement summary text."); err != nil {
+		t.Fatalf("ReplaceSummary under retry = %v", err)
+	}
+	injector.mu.Lock()
+	remaining := injector.remaining
+	injector.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("ReplaceSummary retry left %d injected conflicts unconsumed, want 0", remaining)
+	}
+	pending, err := application.ListRecoveries(t.Context(), identity, "example", false)
+	if err != nil || len(pending.Items) != 0 {
+		t.Fatalf("ReplaceSummary recovery projection = %+v, %v; want none", pending, err)
+	}
+}
+
+// preparedWIP builds a durable intent mirroring what StartWIP produces: a WIP
+// marker change at the deterministic marker path with the "wip-start-{id}"
+// batch ID, so two writers sharing a marker ID share the batch ID.
+func preparedWIP(t *testing.T, graph sdd.GraphStore, binding sdd.SessionBinding, markerID, entryID, description string) sdd.PreparedTransition {
+	t.Helper()
+	snapshot, err := graph.Current(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := &model.WIPMarker{
+		ID: markerID, Entry: entryID, Participant: "Christopher", Exclusive: true, Content: description,
+		Time: time.Date(2026, 7, 13, 5, 55, 0, 0, time.UTC),
+	}
+	batch := sdd.MutationBatch{
+		ID: "wip-start-" + markerID, Message: "sdd: wip start " + entryID,
+		Changes: []sdd.DocumentChange{{LogicalPath: filepath.ToSlash(model.WIPMarkerPath(markerID)), CanonicalBytes: []byte(model.FormatWIPMarker(marker))}},
+	}
+	digest, err := sdd.MutationBatchDigest(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch.Digest = digest
+	return sdd.PreparedTransition{
+		Version: sdd.PreparedTransitionVersion, Target: sdd.MutationTarget{Project: "example", Branch: "main"},
+		ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
+		BlobOwner: sdd.BlobOwner{Subject: binding.Subject, Session: binding.SessionID},
 	}
 }
 

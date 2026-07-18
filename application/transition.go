@@ -19,11 +19,9 @@ const (
 	eventFinalizerOutcome = "finalizer_outcome"
 )
 
-// maxApplyAttempts bounds the read-fresh → revalidate → apply loop inside a
-// single acquired target. The graph adapter's lock is per-call, so a
-// concurrent process can move the revision between our fresh read and the CAS
-// apply; a lost race simply re-reads and re-applies. The retry is mechanical —
-// neither pre-flight nor summary re-runs (both complete before ApplyPrepared).
+// maxApplyAttempts bounds the read-fresh → revalidate → apply loop: the graph
+// adapter's lock is per-call, so a concurrent process can move the revision
+// between our fresh read and the CAS apply.
 const maxApplyAttempts = 3
 
 // PreparedTransition is the storage-neutral write-gate output. It contains
@@ -125,8 +123,6 @@ func (a *Application) applyOnAcquired(ctx context.Context, runtime *ProjectRunti
 		if revalidateErr := revalidatePreparedTransition(ctx, snapshot, prepared); revalidateErr != nil {
 			return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationNotApplied, Revision: snapshot.Revision()}}, revalidateErr
 		}
-		// Apply against the revision just revalidated rather than the
-		// prepare-time pin, so a concurrent unrelated append merges cleanly.
 		apply, applyErr = acquired.Graph.Apply(ctx, snapshot.Revision(), prepared.Batch, ownedBlobReader{store: runtime.options.StagedBlobs, owner: prepared.BlobOwner})
 		if !isGraphConflict(applyErr) || attempt >= maxApplyAttempts {
 			break
@@ -219,20 +215,17 @@ func isGraphConflict(err error) bool {
 // discardContendedTransition closes a durable intent whose bounded apply
 // retries were all lost to concurrent writers. A revision conflict fails the
 // CAS before any file write, so the intent carries no partial graph state:
-// release its retained blobs, record a discard terminal so it never surfaces
-// as a pending recovery, and return the typed conflict inviting a plain
-// re-try (which re-reads, re-validates, and re-applies from scratch).
+// tear it down as a discard so it never surfaces as a pending recovery, and
+// return the typed conflict inviting a plain re-try.
 func (a *Application) discardContendedTransition(ctx context.Context, runtime *ProjectRuntime, result TransitionResult, prepared PreparedTransition, actor string) (TransitionResult, error) {
-	if err := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID); err != nil {
-		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "contended mutation could not release retained blobs", Cause: err}
-	}
-	next, err := appendRecoveryTerminal(ctx, runtime.options.Sessions, result.Binding, recoveryTerminalEvent{
+	next, err := releaseAndRecordTerminal(ctx, runtime, result.Binding, prepared, recoveryTerminalEvent{
 		MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
 		OriginalSubject: prepared.BlobOwner.Subject, OriginalSession: prepared.BlobOwner.Session,
-		Actor: actor, Verb: RecoveryDiscard, Reason: "graph contention: bounded apply retries exhausted",
+		Actor: actor, Verb: RecoveryDiscard, Cause: recoveryCauseGraphContention,
+		Reason: "graph contention: bounded apply retries exhausted",
 	})
 	if err != nil {
-		return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "contended mutation discard was not persisted", Cause: err}
+		return result, err
 	}
 	result.Binding.Version = next
 	return result, &ApplicationError{

@@ -607,8 +607,7 @@ func TestFilesystemLegacySessionMigrationLeavesMalformedRecordUntouched(t *testi
 }
 
 func errorCode(err error) sdd.ErrorCode {
-	var applicationError *sdd.ApplicationError
-	if errors.As(err, &applicationError) {
+	if applicationError, ok := errors.AsType[*sdd.ApplicationError](err); ok {
 		return applicationError.Code
 	}
 	return ""

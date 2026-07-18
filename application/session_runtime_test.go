@@ -907,8 +907,7 @@ func preparedEntry(t *testing.T, graph sdd.GraphStore, binding sdd.SessionBindin
 }
 
 func errorCode(err error) sdd.ErrorCode {
-	var applicationErr *sdd.ApplicationError
-	if errors.As(err, &applicationErr) {
+	if applicationErr, ok := errors.AsType[*sdd.ApplicationError](err); ok {
 		return applicationErr.Code
 	}
 	return ""
