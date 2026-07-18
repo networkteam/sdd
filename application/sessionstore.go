@@ -24,23 +24,25 @@ type SessionMetadata struct {
 
 // Attachment is the informational stamp of the client currently driving the
 // session: integrity comes from CAS on append, and status is derived from
-// LastActivity recency.
+// LastActivity recency. UserWords records the user's verbatim ask that
+// authorized this attachment — the live stamp carries its own consent, and any
+// history record embedding it preserves the words automatically.
 type Attachment struct {
 	Subject       string
 	ClientName    string
 	ClientVersion string
 	MCPSessionID  string
 	LastActivity  time.Time
+	UserWords     string `json:",omitempty"`
 }
 
 // AttachmentRecord closes out a past attachment with the specific cause it
-// ended. UserWords records the consenting ask on a claim; Reason records the
-// abandon note, so a displaced writer's next call can be told why.
+// ended. The embedded Attachment carries the words that authorized it; Reason
+// records the abandon note, so a displaced writer's next call can be told why.
 type AttachmentRecord struct {
 	Attachment Attachment
 	EndedAt    time.Time
 	Cause      AttachmentCause
-	UserWords  string `json:",omitempty"`
 	Reason     string `json:",omitempty"`
 }
 

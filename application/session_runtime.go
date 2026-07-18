@@ -11,6 +11,15 @@ import (
 // stable, unambiguous form for the interpreted-conflict and consent messages.
 const attachmentTimeFormat = time.RFC3339
 
+// RecordedStateOnlyNote is the single statement of the takeover fidelity limit,
+// composed into the consent refusal and the successful-attach note so both
+// runtime surfaces read identically.
+const RecordedStateOnlyNote = "Only recorded session state resumes — step position, collected fields, staged files — not the other conversation's context."
+
+// reorientSuffix is the shared next-step guidance appended to displacement and
+// surfaced-conflict messages.
+const reorientSuffix = "reorient with resume_session or start fresh"
+
 const SessionCodecVersion uint32 = 1
 
 // SessionRecencyWindow is the single threshold separating an active attachment
@@ -134,19 +143,14 @@ func verifyAttachment(stored StoredSession, binding SessionBinding) error {
 	return nil
 }
 
-// displacedError interprets a lost attachment for the writer that lost it: who
-// holds it now (a takeover), or how it ended (abandoned, concluded, or left).
-// The message names who/when/why so the displaced client can reorient or start
-// fresh; the attachment and cause ride the typed error.
+// displacedError interprets a lost attachment for the writer that lost it: how
+// its world ended (abandoned, concluded) or who holds it now (a takeover). A
+// terminal end as the most recent record wins even if a newer attachment
+// exists, so a writer whose dialogue was destroyed hears that, not "taken over"
+// by whoever reopened afterward. The message names who/when/why; the attachment
+// and cause ride the typed error.
 func displacedError(stored StoredSession) error {
 	m := stored.Metadata
-	if att := m.Attachment; att != nil {
-		return &ApplicationError{
-			Code: ErrorSessionDisplaced, Attachment: att, AttachmentCause: CauseClaim,
-			Message: fmt.Sprintf("taken over by %s at %s (claim); your position may be stale — reorient with resume_session(%s) or start fresh",
-				clientLabel(att.ClientName), att.LastActivity.Format(attachmentTimeFormat), m.ID),
-		}
-	}
 	if n := len(m.AttachmentHistory); n > 0 {
 		rec := m.AttachmentHistory[n-1]
 		when := rec.EndedAt.Format(attachmentTimeFormat)
@@ -161,18 +165,27 @@ func displacedError(stored StoredSession) error {
 		case CauseConclude:
 			return &ApplicationError{Code: ErrorSessionDisplaced, Attachment: &rec.Attachment, AttachmentCause: rec.Cause,
 				Message: fmt.Sprintf("this session was concluded at %s — start fresh", when)}
-		default:
-			return &ApplicationError{Code: ErrorSessionDisplaced, Attachment: &rec.Attachment, AttachmentCause: rec.Cause,
-				Message: fmt.Sprintf("this session's attachment ended (%s) at %s — reorient with resume_session(%s) or start fresh", rec.Cause, when, m.ID)}
 		}
 	}
+	if att := m.Attachment; att != nil {
+		return &ApplicationError{
+			Code: ErrorSessionDisplaced, Attachment: att, AttachmentCause: CauseClaim,
+			Message: fmt.Sprintf("taken over by %s at %s (claim); your position may be stale — %s",
+				ClientLabel(att.ClientName), att.LastActivity.Format(attachmentTimeFormat), reorientSuffix),
+		}
+	}
+	if n := len(m.AttachmentHistory); n > 0 {
+		rec := m.AttachmentHistory[n-1]
+		return &ApplicationError{Code: ErrorSessionDisplaced, Attachment: &rec.Attachment, AttachmentCause: rec.Cause,
+			Message: fmt.Sprintf("this session's attachment ended (%s) at %s — %s", rec.Cause, rec.EndedAt.Format(attachmentTimeFormat), reorientSuffix)}
+	}
 	return &ApplicationError{Code: ErrorSessionDisplaced,
-		Message: fmt.Sprintf("this session's attachment was displaced — reorient with resume_session(%s) or start fresh", m.ID)}
+		Message: fmt.Sprintf("this session's attachment was displaced — %s", reorientSuffix)}
 }
 
-// clientLabel names a client for a conflict message, falling back when the
-// transport carried no client name (e.g. bare stdio).
-func clientLabel(name string) string {
+// ClientLabel names a client for a conflict or consent message, falling back
+// when the transport carried no client name (e.g. bare stdio).
+func ClientLabel(name string) string {
 	if strings.TrimSpace(name) == "" {
 		return "another client"
 	}
@@ -185,5 +198,5 @@ func actorLabel(m SessionMetadata, rec AttachmentRecord) string {
 	if p := strings.TrimSpace(m.Participant); p != "" {
 		return p
 	}
-	return clientLabel(rec.Attachment.ClientName)
+	return ClientLabel(rec.Attachment.ClientName)
 }

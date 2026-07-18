@@ -493,7 +493,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "2ee3be4920d4f3e30d06f2f72b894ef318094d636268da3b5659d3619b794e35"
+	const want = "a5f324f52b6319e17eea8b19f658e0ed8993a218ddc6a2d27a64861fa09a4246"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1312,15 +1312,16 @@ func TestAbandonSessionByHandle_Rejections(t *testing.T) {
 		t.Fatalf("unknown session should be named, got %q", msg)
 	}
 
-	// Slice 3: tearing down a session another connection holds is allowed —
-	// abandon attaches by handle, displaces, and tears it down (Slice 4 gates
-	// this with consent).
+	// Tearing down a session another connection is actively driving is refused:
+	// destruction must not be cheaper than attachment (I5). The refusal names the
+	// holder and points at the alternatives.
 	cs2 := connect(t, env.srv)
 	other := openSession(t, cs2)
-	var torn mcpserver.AbandonResult
-	call(t, cs, "abandon", map[string]any{"session": other.Session}, &torn)
-	if !torn.Abandoned || torn.Session != other.Session {
-		t.Fatalf("tearing down another connection's session should succeed, got %+v", torn)
+	msg := callExpectError(t, cs, "abandon", map[string]any{"session": other.Session})
+	for _, want := range []string{"test-client", "actively driven", "take it over"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("recent teardown refusal %q missing %q", msg, want)
+		}
 	}
 }
 
@@ -2038,8 +2039,10 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		csA := connect(t, env.srv)
 		a := openSession(t, csA).Session
 		startMove(t, csA, a)
-		csB := connect(t, env.srv)
-		openSession(t, csB)
+		// A later server reads a as idle, so teardown by handle proceeds (a recent
+		// session would be refused).
+		env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+		csB := connect(t, env2.srv)
 		var torn mcpserver.AbandonResult
 		call(t, csB, "abandon", map[string]any{"session": a}, &torn)
 		if c := lastCause(t, env, a); c != sdd.CauseAbandon {
@@ -2225,7 +2228,21 @@ func TestResumeConsentDecisionTable(t *testing.T) {
 		}
 	})
 
-	t.Run("idle attach with userWords lands, claim carries the words", func(t *testing.T) {
+	t.Run("missing userWords rejected against an idle target too", func(t *testing.T) {
+		env := newTestServer(t, nil, "", "")
+		cs1 := connect(t, env.srv)
+		a := openSession(t, cs1).Session
+		// A later server reads a as idle: userWords is still required — consent is
+		// about crossing dialogues, not about liveness.
+		env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+		cs2 := connect(t, env2.srv)
+		msg := callExpectError(t, cs2, "resume_session", map[string]any{"session": a})
+		if !strings.Contains(msg, "userWords") || !strings.Contains(msg, "verbatim") {
+			t.Fatalf("missing-userWords rejection should hold for an idle target, got %q", msg)
+		}
+	})
+
+	t.Run("idle attach with userWords lands, current attachment carries the words", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		cs1 := connect(t, env.srv)
 		a := openSession(t, cs1).Session
@@ -2242,23 +2259,41 @@ func TestResumeConsentDecisionTable(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		found := false
-		for _, rec := range stored.Metadata.AttachmentHistory {
-			if rec.Cause == sdd.CauseClaim && rec.UserWords == words {
-				found = true
-			}
+		if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.UserWords != words {
+			t.Fatalf("the live stamp should carry the consenting words, attachment: %+v", stored.Metadata.Attachment)
 		}
-		if !found {
-			t.Fatalf("the claim record should carry the consenting words, history: %+v", stored.Metadata.AttachmentHistory)
+	})
+
+	t.Run("parked (no-attachment) attach with userWords records the words durably (row a)", func(t *testing.T) {
+		env := newTestServer(t, nil, "", "")
+		cs, ss := connectPair(t, env.srv)
+		a := openSession(t, cs).Session
+		// The holder disconnects: a's attachment is released to none — a parked
+		// session with no current attachment, the most common attach target.
+		if err := env.srv.Disconnect(t.Context(), ss); err != nil {
+			t.Fatalf("disconnect: %v", err)
+		}
+		cs2 := connect(t, env.srv)
+		const words = "resume the parked dialogue"
+		var resumed mcpserver.ResumeSessionResult
+		call(t, cs2, "resume_session", map[string]any{"session": a, "userWords": words}, &resumed)
+		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(a))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.UserWords != words {
+			t.Fatalf("attaching a parked session should stamp the consenting words on the live attachment, got %+v", stored.Metadata.Attachment)
 		}
 	})
 }
 
 // TestDisplacedWriterReorientsEndToEnd pins the 2sp regression over MCP: after a
 // consented takeover, the displaced connection's next write fails typed naming
-// who advanced the session and when; a fresh connection carrying the same handle
-// then re-attaches with the user's ask and advances — divergence surfaces at the
-// write and reorientation succeeds, instead of a silent lockout.
+// who advanced the session and when. The displaced writer itself then reorients
+// — its cached binding is stale, so a no-args reorient points it at re-attach,
+// and re-attaching with the user's ask takes the session back and continues.
+// Divergence surfaces at the write and reorientation succeeds, instead of the
+// old silent lockout.
 func TestDisplacedWriterReorientsEndToEnd(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	csA := connect(t, env.srv)
@@ -2277,25 +2312,32 @@ func TestDisplacedWriterReorientsEndToEnd(t *testing.T) {
 		t.Fatalf("displaced write should name the takeover and when, got %q", msg)
 	}
 
-	// A fresh connection carrying the same handle reorients with the user's ask
-	// (a is active under csB, so takeover) and continues the move.
-	csC := connect(t, env.srv)
-	var reC mcpserver.ResumeSessionResult
-	call(t, csC, "resume_session", map[string]any{"session": a, "userWords": "come back to branch A", "takeover": true}, &reC)
-	if reC.Session != a {
-		t.Fatalf("reorientation should re-attach to %s, got %+v", a, reC)
+	// The displaced writer's no-args reorient no longer serves its poisoned,
+	// stale in-memory session — the store shows it is not the holder, so it is
+	// pointed back at the doors to re-establish.
+	reorientMsg := callExpectError(t, csA, "resume_session", map[string]any{})
+	if !strings.Contains(reorientMsg, "resume_session") || !strings.Contains(reorientMsg, a) {
+		t.Fatalf("a displaced writer's no-args reorient should point at re-attach, got %q", reorientMsg)
 	}
-	var capC *mcpserver.ServeResult
-	for i := range reC.Open {
-		if reC.Open[i].Procedure == "capture" {
-			capC = &reC.Open[i]
+
+	// csA reorients for real: re-attach with the user's ask (a is active under
+	// csB, so takeover) and continue the move.
+	var reA mcpserver.ResumeSessionResult
+	call(t, csA, "resume_session", map[string]any{"session": a, "userWords": "come back to branch A", "takeover": true}, &reA)
+	if reA.Session != a {
+		t.Fatalf("reorientation should re-attach to %s, got %+v", a, reA)
+	}
+	var capA *mcpserver.ServeResult
+	for i := range reA.Open {
+		if reA.Open[i].Procedure == "capture" {
+			capA = &reA.Open[i]
 		}
 	}
-	if capC == nil {
-		t.Fatalf("reorientation should re-serve the capture, got %+v", reC.Open)
+	if capA == nil {
+		t.Fatalf("reorientation should re-serve the capture, got %+v", reA.Open)
 	}
 	var serve mcpserver.ServeResult
-	call(t, csC, "next", map[string]any{"session": a, "instance": capC.Instance, "report": assembleReport()}, &serve)
+	call(t, csA, "next", map[string]any{"session": a, "instance": capA.Instance, "report": assembleReport()}, &serve)
 	if serve.Step != "playback" {
 		t.Fatalf("the reoriented writer should advance the move, got %q", serve.Step)
 	}

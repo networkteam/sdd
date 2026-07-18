@@ -24,9 +24,9 @@ opens a fresh one and returns its opening serve — your orientation, how the
 dialogue should feel, and the moves you can start; resume_session attaches to
 an existing session by its handle. Attaching to a session this connection did
 not open carries the user's verbatim request in userWords (a fresh ask that
-merely resembles the work is not consent); taking over one another client is
-actively driving additionally needs takeover:true, and only recorded state
-transfers — not the other conversation's context.
+merely resembles the work is not consent); taking over one that another client
+is actively driving additionally needs takeover:true, and only recorded session
+state resumes — not the other conversation's context.
 
 The session handle is the dialogue's identity. Every work tool (start_procedure,
 next, park, stage_attachment, and abandon of a move) carries it as a required

@@ -180,7 +180,7 @@ func (a *Application) OpenWorkflow(ctx context.Context, identity RequestIdentity
 	metadata := SessionMetadata{
 		CodecVersion: SessionCodecVersion, ID: id, Subject: principal.Subject,
 		Project: runtime.options.Project.ID, Participant: principal.Participant, UpdatedAt: now,
-		Attachment: newAttachment(principal.Subject, request.MCPSessionID, request.ClientName, request.ClientVersion, now),
+		Attachment: newAttachment(principal.Subject, request.MCPSessionID, request.ClientName, request.ClientVersion, now, ""),
 	}
 	created, err := runtime.options.Sessions.Create(ctx, metadata)
 	if err != nil {
@@ -218,14 +218,6 @@ func (a *Application) OpenWorkflow(ctx context.Context, identity RequestIdentity
 // already hold requires the user's verbatim ask, and displacing a recent
 // attachment additionally requires an explicit takeover.
 func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, request WorkflowResumeRequest) (*WorkflowSession, WorkflowResumeResult, error) {
-	return a.resumeWorkflow(ctx, identity, project, request, true)
-}
-
-// resumeWorkflow is the attach path shared by the consenting resume door and
-// the abandon-by-handle teardown, which loads and replays a session to tear it
-// down and so bypasses consent (enforceConsent=false) — a teardown naming the
-// handle is not a crossing into the dialogue to continue it.
-func (a *Application) resumeWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, request WorkflowResumeRequest, enforceConsent bool) (*WorkflowSession, WorkflowResumeResult, error) {
 	if request.SessionID == "" || request.MCPSessionID == "" {
 		return nil, WorkflowResumeResult{}, fmt.Errorf("sdd: session ID and MCP session ID are required")
 	}
@@ -246,40 +238,19 @@ func (a *Application) resumeWorkflow(ctx context.Context, identity RequestIdenti
 	if stored.Metadata.Subject != principal.Subject || stored.Metadata.Project != runtime.options.Project.ID {
 		return nil, WorkflowResumeResult{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
 	}
-	now := runtime.options.Now().UTC().Round(0)
-	metadata := stored.Metadata
-	current := metadata.Attachment
 	// Own = this connection's MCP session is the current attachment (opened it,
 	// or already attached with consent). A same-client re-attach (the compaction
 	// reorientation) is own, needs no consent, and changes nothing in the store —
 	// no version bump, no stamp refresh; the next real operation stamps.
-	foreign := current == nil || current.MCPSessionID != request.MCPSessionID
 	var (
 		displaced *Attachment
 		tookOver  bool
 	)
-	if foreign {
-		if enforceConsent {
-			if err := consentToAttach(request, current, now); err != nil {
-				return nil, WorkflowResumeResult{}, err
-			}
+	if current := stored.Metadata.Attachment; current == nil || current.MCPSessionID != request.MCPSessionID {
+		stored, displaced, tookOver, err = a.claimAttachment(ctx, runtime, principal, request, stored)
+		if err != nil {
+			return nil, WorkflowResumeResult{}, err
 		}
-		if current != nil {
-			record := endAttachment(*current, now, CauseClaim)
-			record.UserWords = strings.TrimSpace(request.UserWords)
-			metadata.AttachmentHistory = append(metadata.AttachmentHistory, record)
-			copied := *current
-			displaced = &copied
-			tookOver = attachmentActive(current, now)
-		}
-		metadata.Attachment = newAttachment(principal.Subject, request.MCPSessionID, request.ClientName, request.ClientVersion, now)
-		metadata.UpdatedAt = now
-		version, appendErr := runtime.options.Sessions.Append(ctx, request.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
-		if appendErr != nil {
-			return nil, WorkflowResumeResult{}, appendErr
-		}
-		stored.Metadata = metadata
-		stored.Version = version
 	}
 	w, err := a.newWorkflow(ctx, identity, runtime.options.Project.ID, sessionBindingFrom(stored))
 	if err != nil {
@@ -310,6 +281,69 @@ func (a *Application) resumeWorkflow(ctx context.Context, identity RequestIdenti
 	return w, result, err
 }
 
+// claimAttachment performs a foreign attach: enforce consent, end any prior
+// attachment as a claim, and stamp this connection as the current attachment,
+// carrying the consenting words on the live stamp. A lost race on the append
+// never surfaces as a raw version conflict to a consenting user — it reloads,
+// re-checks consent against the fresh state (a competitor that just attached
+// now blocks with the typed consent error), and retries once; a second conflict
+// surfaces displaced-shaped.
+func (a *Application) claimAttachment(ctx context.Context, runtime *ProjectRuntime, principal Principal, request WorkflowResumeRequest, stored StoredSession) (StoredSession, *Attachment, bool, error) {
+	build := func(st StoredSession, now time.Time) (SessionMetadata, *Attachment, bool) {
+		md := st.Metadata
+		var displaced *Attachment
+		var tookOver bool
+		if cur := st.Metadata.Attachment; cur != nil {
+			md.AttachmentHistory = append(md.AttachmentHistory, endAttachment(*cur, now, CauseClaim))
+			copied := *cur
+			displaced = &copied
+			tookOver = attachmentActive(cur, now)
+		}
+		md.Attachment = newAttachment(principal.Subject, request.MCPSessionID, request.ClientName, request.ClientVersion, now, request.UserWords)
+		md.UpdatedAt = now
+		return md, displaced, tookOver
+	}
+	isConflict := func(err error) bool {
+		var appErr *ApplicationError
+		return errors.As(err, &appErr) && appErr.Code == ErrorSessionConflict
+	}
+	now := runtime.options.Now().UTC().Round(0)
+	if err := consentToAttach(request, stored.Metadata.Attachment, now); err != nil {
+		return StoredSession{}, nil, false, err
+	}
+	metadata, displaced, tookOver := build(stored, now)
+	version, appendErr := runtime.options.Sessions.Append(ctx, request.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
+	if isConflict(appendErr) {
+		// Reload against the racing writer, re-consent, and retry once.
+		var loadErr error
+		if stored, loadErr = runtime.options.Sessions.Load(ctx, request.SessionID); loadErr != nil {
+			return StoredSession{}, nil, false, loadErr
+		}
+		if err := validateStoredSession(stored); err != nil {
+			return StoredSession{}, nil, false, err
+		}
+		now = runtime.options.Now().UTC().Round(0)
+		if err := consentToAttach(request, stored.Metadata.Attachment, now); err != nil {
+			return StoredSession{}, nil, false, err
+		}
+		metadata, displaced, tookOver = build(stored, now)
+		version, appendErr = runtime.options.Sessions.Append(ctx, request.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
+	}
+	if appendErr != nil {
+		// A consenting user never sees a raw version conflict: report the
+		// displaced-shaped truth from a fresh read instead.
+		if isConflict(appendErr) {
+			if reloaded, loadErr := runtime.options.Sessions.Load(ctx, request.SessionID); loadErr == nil {
+				return StoredSession{}, nil, false, displacedError(reloaded)
+			}
+		}
+		return StoredSession{}, nil, false, appendErr
+	}
+	stored.Metadata = metadata
+	stored.Version = version
+	return stored, displaced, tookOver, nil
+}
+
 // consentToAttach enforces I5 at the single attach point: a foreign attach
 // needs the user's verbatim ask (userWords), and a foreign attach over an
 // attachment still recent additionally needs an explicit takeover.
@@ -321,14 +355,14 @@ func consentToAttach(request WorkflowResumeRequest, current *Attachment, now tim
 	}
 	if attachmentActive(current, now) && !request.Takeover {
 		return &ApplicationError{Code: ErrorConsentRequired, Attachment: current, AttachmentCause: CauseClaim, Message: fmt.Sprintf(
-			"%s is currently held by %s (last active %s) and may be actively driven — to take it over pass takeover:true with the user's explicit ask. Only recorded session state resumes (step position, collected fields, staged files), not the other conversation's context.",
-			request.SessionID, clientLabel(current.ClientName), current.LastActivity.Format(attachmentTimeFormat))}
+			"%s is currently held by %s (last active %s) and may be actively driven — to take it over pass takeover:true with the user's explicit ask. %s",
+			request.SessionID, ClientLabel(current.ClientName), current.LastActivity.Format(attachmentTimeFormat), RecordedStateOnlyNote)}
 	}
 	return nil
 }
 
-func newAttachment(subject, mcpSessionID, clientName, clientVersion string, now time.Time) *Attachment {
-	return &Attachment{Subject: subject, MCPSessionID: mcpSessionID, ClientName: clientName, ClientVersion: clientVersion, LastActivity: now}
+func newAttachment(subject, mcpSessionID, clientName, clientVersion string, now time.Time, userWords string) *Attachment {
+	return &Attachment{Subject: subject, MCPSessionID: mcpSessionID, ClientName: clientName, ClientVersion: clientVersion, LastActivity: now, UserWords: strings.TrimSpace(userWords)}
 }
 
 func (a *Application) newWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding) (*WorkflowSession, error) {
@@ -344,6 +378,26 @@ func (a *Application) newWorkflow(ctx context.Context, identity RequestIdentity,
 }
 
 func (w *WorkflowSession) ID() SessionID { return w.binding.SessionID }
+
+// StillHeld reports whether this connection is still the store's current
+// attachment. A false answer means the cached binding is stale — displaced by
+// another client or torn down — so the connection must re-establish through the
+// attach path rather than serve its now-poisoned in-memory session.
+func (w *WorkflowSession) StillHeld(ctx context.Context, identity RequestIdentity) (bool, error) {
+	_, runtime, err := w.app.resolve(ctx, identity, w.project, AccessRead)
+	if err != nil {
+		return false, err
+	}
+	stored, err := runtime.options.Sessions.Load(ctx, w.ID())
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	att := stored.Metadata.Attachment
+	return att != nil && att.MCPSessionID == w.binding.MCPSessionID, nil
+}
 
 func (w *WorkflowSession) Project() ProjectID { return w.project }
 
@@ -630,20 +684,59 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 	return result, nil
 }
 
+// AbandonWorkflowSession tears down a session by handle without ever becoming
+// its attachment: it replays into a buffering sink (no claim, no stamp, no
+// displacement), abandons the instances, then ends the CURRENT attachment —
+// whoever holds it — with cause abandon, actor, and reason in one final append.
+// A mid-teardown failure returns before that append, so the victim's attachment
+// stays intact — honest state, no phantom hold. A session another client is
+// actively driving is refused: destruction must not be cheaper than attachment
+// (I5).
 func (a *Application) AbandonWorkflowSession(ctx context.Context, identity RequestIdentity, project ProjectID, request WorkflowResumeRequest, reason string) (WorkflowAbandonResult, error) {
-	// Teardown by handle bypasses consent: it does not cross into the dialogue to
-	// continue it. The abandon reason rides the release so the still-attached
-	// client's next write can be told who/when/why.
-	w, _, err := a.resumeWorkflow(ctx, identity, project, request, false)
+	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return WorkflowAbandonResult{}, err
 	}
-	result := WorkflowAbandonResult{Abandoned: true, Session: w.ID(), Label: w.session.Label}
+	stored, err := runtime.options.Sessions.Load(ctx, request.SessionID)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return WorkflowAbandonResult{}, fmt.Errorf("unknown session %q", request.SessionID)
+		}
+		return WorkflowAbandonResult{}, err
+	}
+	if err := validateStoredSession(stored); err != nil {
+		return WorkflowAbandonResult{}, err
+	}
+	if stored.Metadata.Subject != principal.Subject || stored.Metadata.Project != runtime.options.Project.ID {
+		return WorkflowAbandonResult{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
+	}
+	now := runtime.options.Now().UTC().Round(0)
+	current := stored.Metadata.Attachment
+	if attachmentActive(current, now) {
+		return WorkflowAbandonResult{}, &ApplicationError{Code: ErrorConsentRequired, Attachment: current, AttachmentCause: CauseAbandon, Message: fmt.Sprintf(
+			"%s is currently held by %s (last active %s) and may be actively driven — conclude it there, take it over first (resume_session with the user's ask), or wait.",
+			request.SessionID, ClientLabel(current.ClientName), current.LastActivity.Format(attachmentTimeFormat))}
+	}
+	w, err := a.newWorkflow(ctx, identity, runtime.options.Project.ID, sessionBindingFrom(stored))
+	if err != nil {
+		return WorkflowAbandonResult{}, err
+	}
+	events, err := decodeWorkflowEvents(stored.Events)
+	if err != nil {
+		return WorkflowAbandonResult{}, err
+	}
+	sink := &bufferSink{}
+	resolve := func(canonical string) (*engine.Spec, error) { return w.loadProcedure(canonical) }
+	w.session, err = w.engine.ReplaySession(string(request.SessionID), stored.Metadata.Participant, events, resolve, sink)
+	if err != nil {
+		return WorkflowAbandonResult{}, fmt.Errorf("replaying session %s: %w", request.SessionID, err)
+	}
+	result := WorkflowAbandonResult{Abandoned: true, Session: stored.Metadata.ID, Label: w.session.Label}
 	for _, inst := range w.session.Instances() {
 		if inst.Status != engine.StatusRunning {
 			continue
 		}
-		if inst.ID != w.shell {
+		if inst.Spec.Class != model.ProcedureClassShell {
 			result.Discarded = append(result.Discarded, WorkflowInstanceSummary{Instance: inst.ID, Procedure: inst.Spec.Canonical, Step: inst.Step})
 			if marker, ok := workflowStoreString(inst.Store, "wipMarker"); ok {
 				result.HeldMarkers = append(result.HeldMarkers, marker)
@@ -653,10 +746,40 @@ func (a *Application) AbandonWorkflowSession(ctx context.Context, identity Reque
 			return WorkflowAbandonResult{}, err
 		}
 	}
-	if err := w.Release(ctx, identity, CauseAbandon, reason); err != nil {
+	metadata := stored.Metadata
+	metadata.UpdatedAt = now
+	if current != nil {
+		record := endAttachment(*current, now, CauseAbandon)
+		record.Reason = strings.TrimSpace(reason)
+		metadata.AttachmentHistory = append(metadata.AttachmentHistory, record)
+		metadata.Attachment = nil
+	}
+	appendData := SessionAppend{Metadata: &metadata}
+	for _, event := range sink.events {
+		payload, marshalErr := json.Marshal(event)
+		if marshalErr != nil {
+			return WorkflowAbandonResult{}, marshalErr
+		}
+		appendData.Events = append(appendData.Events, StoredEvent{CodecVersion: SessionCodecVersion, Code: WorkflowEventCode, Payload: payload})
+	}
+	if _, err := runtime.options.Sessions.Append(ctx, request.SessionID, stored.Version, appendData); err != nil {
 		return WorkflowAbandonResult{}, err
 	}
 	return result, nil
+}
+
+// bufferSink collects engine events instead of persisting each, so a teardown
+// can abandon instances in memory and write the abandon events with the final
+// attachment-ending metadata in one atomic append (never per-instance, never
+// under a claimed attachment).
+type bufferSink struct{ events []engine.Event }
+
+func (b *bufferSink) Append(event engine.Event) error {
+	if event.Event == engine.EventServed {
+		return nil
+	}
+	b.events = append(b.events, event)
+	return nil
 }
 
 func (w *WorkflowSession) setOperation(ctx context.Context, identity RequestIdentity) {
@@ -848,7 +971,13 @@ func (w *WorkflowSession) appendStoredEvent(code string, payload json.RawMessage
 	if err := w.resyncBindingVersion(); err != nil {
 		return err
 	}
-	return w.appendStoredEventOnce(code, payload)
+	err = w.appendStoredEventOnce(code, payload)
+	if errors.As(err, &appErr) && appErr.Code == ErrorSessionConflict {
+		// The retry lost too — surface the conflict with a next step rather than a
+		// dead-end "version changed".
+		return &ApplicationError{Code: ErrorSessionConflict, Message: appErr.Message + " — " + reorientSuffix}
+	}
+	return err
 }
 
 // resyncBindingVersion reloads the session and, if this connection is still the

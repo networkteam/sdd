@@ -281,8 +281,10 @@ func (s *Server) registerTools() {
 		Description: "Abandon a running move instance (instance, plus session naming the session it belongs " +
 			"to), or tear down a session directly by handle (session alone) — one call, no resume, no " +
 			"framing; the response names the label and discarded threads. Nothing is cleaned up " +
-			"implicitly: held WIP markers are surfaced and left standing for resume or grooming. The " +
-			"session shell concludes through its own junction, never through abandon.",
+			"implicitly: held WIP markers are surfaced and left standing for resume or grooming. Tearing " +
+			"down a session another client is actively driving is refused (the response names the holder) " +
+			"— conclude it there, take it over first, or wait. The session shell concludes through its own " +
+			"junction, never through abandon.",
 	}, s.abandon)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -309,7 +311,8 @@ func (s *Server) registerTools() {
 			"Attaching to a session this connection did not open requires userWords (the user's verbatim " +
 			"request to move into it); if another client is actively driving it (a recent attachment), the " +
 			"refusal names the holder and takeover:true is additionally required. Only recorded session " +
-			"state resumes on a takeover — not the other conversation's context. Omit session to reorient " +
+			"state resumes — step position, collected fields, staged files — not the other conversation's " +
+			"context. Omit session to reorient " +
 			"the session you are already attached to (no consent needed): its framing plus every running " +
 			"move at its current step, each with the report schema to continue it. Omit it while unattached " +
 			"and the rejection carries the sessions with open work to attach to.",
@@ -654,6 +657,21 @@ func activityTag(active bool) string {
 func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, args ResumeSessionArgs) (*mcp.CallToolResult, ResumeSessionResult, error) {
 	identity := s.requestIdentity(req)
 	current := s.sessions.bound(req.Session)
+	// Server memory is a cache, not authority (I1): a binding the store no longer
+	// lists as the current attachment is stale — displaced or torn down. Drop it
+	// so a displaced writer re-establishes through the attach path (with consent)
+	// instead of serving its poisoned in-memory session.
+	if current != nil {
+		held, err := current.root.StillHeld(ctx, identity)
+		if err != nil {
+			return nil, ResumeSessionResult{}, err
+		}
+		if !held {
+			s.forgetConnection(req.Session)
+			s.sessions.unbind(req.Session)
+			current = nil
+		}
+	}
 
 	if args.Session != "" && (current == nil || args.Session != string(current.root.ID())) {
 		workflow, result, err := s.app.ResumeWorkflow(ctx, identity, s.project, sdd.WorkflowResumeRequest{
@@ -1018,13 +1036,9 @@ func attachNote(source sdd.WorkflowResumeResult) string {
 	if source.Displaced == nil {
 		return ""
 	}
-	who := source.Displaced.ClientName
-	if strings.TrimSpace(who) == "" {
-		who = "another client"
-	}
-	note := fmt.Sprintf("Attached over the previous holder %s (last active %s).", who, source.Displaced.LastActivity.Format(time.RFC3339))
+	note := fmt.Sprintf("Attached over the previous holder %s (last active %s).", sdd.ClientLabel(source.Displaced.ClientName), source.Displaced.LastActivity.Format(time.RFC3339))
 	if source.TookOver {
-		note += " Only recorded session state resumes — step position, collected fields, staged files — not the other conversation's context."
+		note += " " + sdd.RecordedStateOnlyNote
 	}
 	return note + "\n\n"
 }

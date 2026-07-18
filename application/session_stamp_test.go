@@ -54,7 +54,7 @@ func (s *countingSessionStore) Append(ctx context.Context, id sdd.SessionID, ver
 // dirs with a counting session store and the terminal-test procedure
 // available. It mirrors newShellFailureApplication but exposes the append
 // counter and lets the caller pin the clock and reuse dirs across runtimes.
-func newStampWorkflowApp(t *testing.T, graphDir, sessionsDir string, now func() time.Time) (*sdd.Application, *countingSessionStore, string, string) {
+func newStampWorkflowApp(t *testing.T, graphDir, sessionsDir string, now func() time.Time, wrap ...func(sdd.SessionStore) sdd.SessionStore) (*sdd.Application, *countingSessionStore, string, string) {
 	t.Helper()
 	if graphDir == "" {
 		graphDir = t.TempDir()
@@ -87,8 +87,15 @@ func newStampWorkflowApp(t *testing.T, graphDir, sessionsDir string, now func() 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The counting store is always returned for append assertions; an optional
+	// wrap layers over it (e.g. to inject version conflicts) and is what the app
+	// actually writes through.
+	var store sdd.SessionStore = sessions
+	for _, w := range wrap {
+		store = w(store)
+	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: now,
+		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Sessions: store, StagedBlobs: blobs, Now: now,
 		LLM: sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
 	})
 	if err != nil {
@@ -218,12 +225,150 @@ func TestSameWriterVersionRaceRetriesInvisibly(t *testing.T) {
 	}
 }
 
+// conflictSessionStore returns a version conflict on Append while armed, so a
+// test can force the retry loop to exhaust its single retry.
+type conflictSessionStore struct {
+	sdd.SessionStore
+	fail atomic.Bool
+}
+
+func (s *conflictSessionStore) Append(ctx context.Context, id sdd.SessionID, version uint64, appendData sdd.SessionAppend) (uint64, error) {
+	if s.fail.Load() {
+		return version, &sdd.ApplicationError{Code: sdd.ErrorSessionConflict, Message: "session version changed"}
+	}
+	return s.SessionStore.Append(ctx, id, version, appendData)
+}
+
+// TestSameWriterSecondConflictSurfaces covers the tail of the benign-race retry:
+// when the single reload+retry also conflicts, the conflict surfaces typed —
+// with reorient guidance appended rather than a dead-end "version changed".
+func TestSameWriterSecondConflictSurfaces(t *testing.T) {
+	conflict := &conflictSessionStore{}
+	application, _, _, _ := newStampWorkflowApp(t, "", "", time.Now, func(s sdd.SessionStore) sdd.SessionStore {
+		conflict.SessionStore = s
+		return conflict
+	})
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Arm perpetual conflicts: both the initial append and its retry lose.
+	conflict.fail.Store(true)
+	_, advErr := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}})
+	var appErr *sdd.ApplicationError
+	if !errors.As(advErr, &appErr) || appErr.Code != sdd.ErrorSessionConflict {
+		t.Fatalf("second conflict error = %v, want typed ErrorSessionConflict", advErr)
+	}
+	if !strings.Contains(advErr.Error(), "resume_session") {
+		t.Fatalf("the surfaced second conflict should carry reorient guidance, got %q", advErr.Error())
+	}
+}
+
+// failOnceSessionStore fails the next Append with a version conflict, then
+// disarms — the shape of a single lost race.
+type failOnceSessionStore struct {
+	sdd.SessionStore
+	armed atomic.Bool
+}
+
+func (s *failOnceSessionStore) Append(ctx context.Context, id sdd.SessionID, version uint64, appendData sdd.SessionAppend) (uint64, error) {
+	if s.armed.CompareAndSwap(true, false) {
+		return version, &sdd.ApplicationError{Code: sdd.ErrorSessionConflict, Message: "session version changed"}
+	}
+	return s.SessionStore.Append(ctx, id, version, appendData)
+}
+
+// TestConsentedAttachRetriesPastRace covers the consent-check→append race: a
+// consenting attach that loses the append to a racing writer reloads, re-checks
+// consent, and retries once — the user who did everything right never sees a raw
+// version conflict; the attach lands.
+func TestConsentedAttachRetriesPastRace(t *testing.T) {
+	t0 := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
+	now := t0
+	failOnce := &failOnceSessionStore{}
+	application, sessions, _, _ := newStampWorkflowApp(t, "", "", func() time.Time { return now }, func(s sdd.SessionStore) sdd.SessionStore {
+		failOnce.SessionStore = s
+		return failOnce
+	})
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"}); err != nil {
+		t.Fatal(err)
+	}
+	// Idle so the foreign attach needs only the user's words; arm one lost race.
+	now = t0.Add(sdd.SessionRecencyWindow + time.Minute)
+	failOnce.armed.Store(true)
+	_, result, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b", UserWords: "pick this up"})
+	if err != nil {
+		t.Fatalf("consented attach should retry past a version race, got %v", err)
+	}
+	if result.Session != w.ID() {
+		t.Fatalf("attach after retry should land on %s, got %s", w.ID(), result.Session)
+	}
+	stored, err := sessions.Load(t.Context(), w.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.MCPSessionID != "mcp-b" {
+		t.Fatalf("the retried claim should leave mcp-b as the attachment, got %+v", stored.Metadata.Attachment)
+	}
+}
+
+// TestAbandonMidTeardownLeavesVictimAttachmentIntact is the regression for 1a:
+// teardown never becomes the attachment, so a failure at its final append
+// leaves the victim's attachment untouched — no phantom hold, no abandon record.
+func TestAbandonMidTeardownLeavesVictimAttachmentIntact(t *testing.T) {
+	t0 := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
+	now := t0
+	conflict := &conflictSessionStore{}
+	application, sessions, _, _ := newStampWorkflowApp(t, "", "", func() time.Time { return now }, func(s sdd.SessionStore) sdd.SessionStore {
+		conflict.SessionStore = s
+		return conflict
+	})
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"}); err != nil {
+		t.Fatal(err)
+	}
+	// Idle so teardown is allowed; then force its final append to fail.
+	now = t0.Add(sdd.SessionRecencyWindow + time.Minute)
+	conflict.fail.Store(true)
+	if _, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b"}, "boom"); err == nil {
+		t.Fatal("expected the teardown's final append to fail")
+	}
+	conflict.fail.Store(false)
+	stored, err := sessions.Load(t.Context(), w.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.MCPSessionID != "mcp-a" {
+		t.Fatalf("a failed teardown must leave the victim's attachment intact, got %+v", stored.Metadata.Attachment)
+	}
+	for _, rec := range stored.Metadata.AttachmentHistory {
+		if rec.Cause == sdd.CauseAbandon {
+			t.Fatalf("a failed teardown must record no abandon, history: %+v", stored.Metadata.AttachmentHistory)
+		}
+	}
+}
+
 // TestAbandonedWhileAttachedNamesActorTimeReason covers D1: after a session is
 // torn down by handle, the still-attached client's next write fails typed and
 // the interpreted error names who abandoned it, when, and why.
 func TestAbandonedWhileAttachedNamesActorTimeReason(t *testing.T) {
 	t0 := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
-	application, sessions, _, _ := newStampWorkflowApp(t, "", "", func() time.Time { return t0 })
+	now := t0
+	application, sessions, _, _ := newStampWorkflowApp(t, "", "", func() time.Time { return now })
 	identity := sdd.RequestIdentity{Subject: "christopher"}
 	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
 	if err != nil {
@@ -233,12 +378,20 @@ func TestAbandonedWhileAttachedNamesActorTimeReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Another connection tears the session down by handle with a reason.
+	// Time passes past the recency window so the attachment reads idle: an active
+	// session would refuse teardown. Another connection then tears it down.
+	now = t0.Add(sdd.SessionRecencyWindow + time.Minute)
 	if _, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b"}, "stale branch"); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := sessions.Load(t.Context(), w.ID())
 	if err != nil {
+		t.Fatal(err)
+	}
+	// A fresh connection reopens the torn-down handle (item 5): even with this
+	// newer attachment present, the victim's write must still hear the abandon —
+	// its world was destroyed, not merely taken over.
+	if _, _, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-c", UserWords: "reopen the torn-down handle"}); err != nil {
 		t.Fatal(err)
 	}
 	_, advErr := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}})
@@ -247,7 +400,7 @@ func TestAbandonedWhileAttachedNamesActorTimeReason(t *testing.T) {
 		t.Fatalf("abandoned-while-attached advance error = %v, want ErrorSessionDisplaced", advErr)
 	}
 	msg := advErr.Error()
-	for _, want := range []string{"abandoned by " + stored.Metadata.Participant, t0.Format(time.RFC3339), "reason: stale branch"} {
+	for _, want := range []string{"abandoned by " + stored.Metadata.Participant, now.Format(time.RFC3339), "reason: stale branch"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("abandon message %q missing %q (actor/time/reason)", msg, want)
 		}
