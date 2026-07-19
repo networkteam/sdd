@@ -234,9 +234,6 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	}
 	draft.Confidence, _ = workflowStoreString(ctx.Store, "confidence")
 	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
-	// Identity-kind fields — mirror the CLI-side NewEntryCmd set onto the
-	// engine draft; empty on ordinary kinds, written onto the entry for the
-	// model-layer validator on actor/role captures.
 	draft.Canonical, _ = workflowStoreString(ctx.Store, "canonical")
 	draft.Actor, _ = workflowStoreString(ctx.Store, "roleActor")
 	draft.Aliases = workflowStoreStrings(ctx.Store, "aliases")
@@ -256,8 +253,7 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	// A structural validation failure re-serves as high findings instead of
 	// wedging the instance: the write step's `otherwise` routes to
 	// reviseOrOverride, whose revise returns to assemble to fix the named rule
-	// and field. No write happened, so the binding is left untouched (§7,
-	// closes half of s-prc-g0j).
+	// and field. No write happened, so the binding is left untouched.
 	var validationErr *ValidationError
 	if errors.As(err, &validationErr) {
 		findings := make([]query.Finding, 0, len(validationErr.Warnings))

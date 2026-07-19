@@ -87,6 +87,10 @@ func (s *Store) SetStart(inputs map[string]any) error {
 // field with a default therefore won't receive a later parent seed — the
 // default counts as already-set — which is exactly right for a constant a
 // procedure carries and seeds outward rather than one it inherits.
+//
+// A default is only safe on a NEW procedure or a NEW field: adding one to an
+// existing field retroactively would apply it on replay of sessions that ran
+// before it existed, silently rewriting their recovered state.
 func (s *Store) applyStateDefaults() error {
 	defaults := make(map[string]any)
 	for name, decl := range s.spec.State {

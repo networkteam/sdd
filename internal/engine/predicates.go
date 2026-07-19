@@ -424,9 +424,6 @@ func participantsCanonical(ctx *Context) (bool, error) {
 	return true, nil
 }
 
-// roleActorResolves checks the drafted roleActor names an actor-identity chain
-// the graph knows — the resolve-or-block invariant applied to role binding. An
-// absent roleActor passes; presence is hasRoleActor's job.
 func roleActorResolves(ctx *Context) (bool, error) {
 	if ctx.Graph == nil {
 		return false, fmt.Errorf("roleActorResolves needs a graph")
@@ -442,9 +439,6 @@ func roleActorResolves(ctx *Context) (bool, error) {
 	return ctx.Graph.ChainForCanonical(canonical) != nil, nil
 }
 
-// aliasesWellFormed checks the drafted aliases are each a non-empty, distinct
-// name, none repeating the canonical — a malformed alias set is caught before
-// the write rather than silently stored. Absent aliases pass.
 func aliasesWellFormed(ctx *Context) (bool, error) {
 	v, ok := ctx.Store.Get("aliases")
 	if !ok {
