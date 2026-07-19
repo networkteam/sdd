@@ -569,7 +569,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "2b4c0c1feb43f68a608b509c458ef0419c2b364aaa13dba6955eb1d017cc08e9"
+	const want = "c9924f3a3c106ddaf5e58cb61bdf0fb520f82299c11b4b1e4d203210022b85e6"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1174,6 +1174,202 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	// the orientation re-serves in full, on demand.
 	if reshell := openSession(t, cs2); reshell.Framing == "" {
 		t.Fatal("a repeated start_session should re-serve the framing in full")
+	}
+}
+
+// TestResumeProjectsCollectedState covers the honest-surfacing half of the
+// re-entry contract (d-cpt-0tm): a resuming agent sees the param and state
+// values an instance already collected — even when the current step's unit
+// does not render them — while internal trust machinery stays hidden and an
+// oversized value is truncated with an explicit notice rather than dropped.
+func TestResumeProjectsCollectedState(t *testing.T) {
+	// Mirrors the production per-value cap; the test package can't see the
+	// unexported constant.
+	const collectedCap = 2000
+
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+
+	// An oversized reported value exercises the per-value cap.
+	report := assembleReport()
+	report["body"] = "Oscillation gap detail. " + strings.Repeat("z", collectedCap)
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"session":   session,
+		"canonical": "capture",
+		"params":    map[string]any{"anchor": fixtureGapID},
+	}, &serve)
+	call(t, cs, "next", map[string]any{
+		"session":  session,
+		"instance": serve.Instance,
+		"report":   report,
+	}, &serve)
+	if serve.Step != "playback" {
+		t.Fatalf("setup: expected playback, got %q", serve.Step)
+	}
+	// Confirm the playback chooser so the engine writes the confirmation record
+	// (and, past the summarize gate, the engine-produced summary) — trust and
+	// engine fields the projection must exclude.
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
+		"chooser": "playback", "choice": "confirm", "userWords": "capture it",
+	}}, &serve)
+	if serve.Status != "running" {
+		t.Fatalf("setup: capture should still be running after confirm, got %s", serve.Status)
+	}
+	sessionID := serve.Session
+
+	// A fresh server + connection resumes from the persisted log alone, then
+	// attaches with the user's verbatim ask.
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	openSession(t, cs2)
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs2, "resume_session", map[string]any{"session": sessionID, "userWords": "pick the capture back up"}, &resumed)
+
+	var capture, shell *mcpserver.ServeResult
+	for i := range resumed.Open {
+		switch resumed.Open[i].Procedure {
+		case "capture":
+			capture = &resumed.Open[i]
+		case "user-dialogue":
+			shell = &resumed.Open[i]
+		}
+	}
+	if capture == nil || shell == nil {
+		t.Fatalf("resume should rehydrate the capture and the shell, got %+v", resumed.Open)
+	}
+
+	// The anchor param and reported state fields the current unit does not
+	// render are projected onto the resume serve.
+	if capture.Collected["anchor"] != fixtureGapID {
+		t.Fatalf("collected should carry the anchor param, got %q", capture.Collected["anchor"])
+	}
+	if !strings.Contains(capture.Collected["widenReport"], "no existing entry covers") {
+		t.Fatalf("collected should carry the reported widenReport, got %q", capture.Collected["widenReport"])
+	}
+	// Trust machinery and engine-produced fields never surface as collected.
+	if _, ok := capture.Collected["playbackConfirmation"]; ok {
+		t.Fatalf("collected must not leak the playback confirmation record: %+v", capture.Collected)
+	}
+	if _, ok := capture.Collected["preflightOverride"]; ok {
+		t.Fatalf("collected must not leak the pre-flight override: %+v", capture.Collected)
+	}
+
+	// The oversized value is truncated with an explicit notice — near the cap,
+	// never silently carrying the full payload.
+	body := capture.Collected["body"]
+	if !strings.Contains(body, "[collected value truncated at") {
+		t.Fatalf("oversized collected value should carry a truncation notice, got %q", body)
+	}
+	if len(body) > collectedCap+200 {
+		t.Fatalf("truncated value should sit near the cap, got %d bytes", len(body))
+	}
+	if strings.Contains(body, strings.Repeat("z", collectedCap)) {
+		t.Fatal("truncated value should not carry the full oversized payload")
+	}
+
+	// The projection is resume-only: an ordinary next serve carries no collected
+	// block, and the shell (no reported work of its own) contributes nothing of
+	// the capture's fields.
+	if _, ok := shell.Collected["anchor"]; ok {
+		t.Fatalf("the shell serve must not carry the capture's collected fields: %+v", shell.Collected)
+	}
+	call(t, cs2, "next", map[string]any{"session": sessionID, "instance": capture.Instance, "report": map[string]any{
+		"chooser": "verifySummary", "choice": "faithful",
+		"fields": map[string]any{"fidelityNote": "matches"},
+	}}, &serve)
+	if serve.Collected != nil {
+		t.Fatalf("collected must ride the resume path only, not an ordinary next serve: %+v", serve.Collected)
+	}
+}
+
+// TestResumeCollectedRespectsInstanceBudget pins the aggregate per-instance cap
+// on the collected projection: many near-cap fields must not stack into an
+// oversized resume response (s-tac-jom / s-tac-40d — the ~10K-token host output
+// ceiling). Fields are kept whole in sorted-key order until the budget is
+// spent; anything past it carries an explicit omission notice, never silently
+// vanishing (d-cpt-0tm).
+func TestResumeCollectedRespectsInstanceBudget(t *testing.T) {
+	// Mirrors the production constants; the test package can't see them.
+	const (
+		valueCap    = 2000
+		instanceCap = 8000
+	)
+
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+
+	// Four near-cap text fields, each capped to ~valueCap, together exceed the
+	// per-instance budget so at least one must be omitted. captureBranch is left
+	// alone — it drives graph resolution, not payload size.
+	report := assembleReport()
+	big := strings.Repeat("z", valueCap)
+	report["body"] = "body: " + big
+	report["widenReport"] = "widen: " + big
+	report["fidelityNote"] = "fidelity: " + big
+	report["correctedSummary"] = "corrected: " + big
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{
+		"session":   session,
+		"canonical": "capture",
+		"params":    map[string]any{"anchor": fixtureGapID},
+	}, &serve)
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": report}, &serve)
+	if serve.Step != "playback" {
+		t.Fatalf("setup: expected playback, got %q", serve.Step)
+	}
+	sessionID := serve.Session
+
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	openSession(t, cs2)
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs2, "resume_session", map[string]any{"session": sessionID, "userWords": "pick the capture back up"}, &resumed)
+
+	var capture *mcpserver.ServeResult
+	for i := range resumed.Open {
+		if resumed.Open[i].Procedure == "capture" {
+			capture = &resumed.Open[i]
+		}
+	}
+	if capture == nil {
+		t.Fatalf("resume should rehydrate the capture, got %+v", resumed.Open)
+	}
+
+	// Every collected field is still present as a key — nothing disappears
+	// silently — and every large field is either kept whole (truncation notice)
+	// or explicitly omitted (omission notice).
+	total := 0
+	omitted := 0
+	for _, name := range []string{"body", "widenReport", "fidelityNote", "correctedSummary"} {
+		v, ok := capture.Collected[name]
+		if !ok {
+			t.Fatalf("large field %q vanished from collected: %+v mapKeys", name, capture.Collected)
+		}
+		if strings.Contains(v, "[collected value omitted here for size") {
+			omitted++
+		}
+	}
+	for _, v := range capture.Collected {
+		total += len(v)
+	}
+	if omitted == 0 {
+		t.Fatalf("four near-cap fields should force at least one omission, got none: %+v", capture.Collected)
+	}
+	// The kept payload stays under the budget; the small omission-notice strings
+	// for dropped fields are the only overage, well within slack.
+	if total > instanceCap+1000 {
+		t.Fatalf("collected total %d bytes exceeds budget+slack (%d)", total, instanceCap+1000)
+	}
+	// The anchor and the small enum fields are never the ones dropped.
+	if capture.Collected["anchor"] != fixtureGapID {
+		t.Fatalf("anchor must survive the budget, got %q", capture.Collected["anchor"])
 	}
 }
 

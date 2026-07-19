@@ -84,6 +84,12 @@ type WorkflowServe struct {
 	Diagnostics     []string
 	InstructionUnit string
 	Base            *WorkflowServe
+	// Collected is the instance's already-gathered param and state values,
+	// projected only onto resume serves so a newly attached or reoriented
+	// agent sees what this instance holds — the anchor, chosen scope, and
+	// reported judgments that persist across a handover (d-cpt-0tm). Empty on
+	// door, next, and base-junction serves, which stay unchanged.
+	Collected map[string]any
 }
 
 // ReminderInstructions composes the short reminder used when a host has
@@ -530,7 +536,13 @@ func (w *WorkflowSession) resumeResult() (WorkflowResumeResult, error) {
 		if err != nil {
 			return WorkflowResumeResult{}, err
 		}
-		result.Open = append(result.Open, *w.publicServe(serve))
+		// The collected projection is the honest-surfacing half of the
+		// re-entry contract: a resuming agent sees the values this instance
+		// already holds. It rides the resume path alone — publicServe stays
+		// state-free so door, next, and base-junction serves are unchanged.
+		ws := w.publicServe(serve)
+		ws.Collected = inst.Store.Collected()
+		result.Open = append(result.Open, *ws)
 	}
 	return result, nil
 }

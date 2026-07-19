@@ -2,12 +2,15 @@ package mcpapp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -91,22 +94,23 @@ type ChooserResult struct {
 // ServeResult is the loop's uniform response shape: where the instance
 // stands, what advances it, and the material to work with.
 type ServeResult struct {
-	Session        string         `json:"session" jsonschema:"session handle; sessions survive restarts and resume via resume_session"`
-	Instance       string         `json:"instance"`
-	Procedure      string         `json:"procedure"`
-	Status         string         `json:"status" jsonschema:"running, completed, or abandoned"`
-	Step           string         `json:"step,omitempty"`
-	Goal           string         `json:"goal" jsonschema:"one line: what advances the instance from here"`
-	Instructions   string         `json:"instructions,omitempty"`
-	Missing        []string       `json:"missing,omitempty" jsonschema:"required report fields not yet provided"`
-	ReportSchema   map[string]any `json:"report_schema,omitempty" jsonschema:"JSON Schema for the current step's report"`
-	PendingChooser *ChooserResult `json:"pending_chooser,omitempty"`
-	Execution      string         `json:"execution,omitempty" jsonschema:"execution hint for this instance; fork-preferred means the procedure is a task best run in a disposable forked context"`
-	Produced       map[string]any `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
-	Framing        string         `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); served when its content is new to this connection, omitted while unchanged"`
-	Vocabulary     string         `json:"vocabulary,omitempty" jsonschema:"translation table for non-English graphs: canonical tokens stay English, user-facing narration renders in the configured language; served once per connection"`
-	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"this dialogue's own open threads, carried on the session shell's serves; at session entry a one-line count of OTHER open dialogues points at list_sessions. Other dialogues are never listed here"`
-	Base           *BaseServe     `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue lands now that this move has ended"`
+	Session        string            `json:"session" jsonschema:"session handle; sessions survive restarts and resume via resume_session"`
+	Instance       string            `json:"instance"`
+	Procedure      string            `json:"procedure"`
+	Status         string            `json:"status" jsonschema:"running, completed, or abandoned"`
+	Step           string            `json:"step,omitempty"`
+	Goal           string            `json:"goal" jsonschema:"one line: what advances the instance from here"`
+	Instructions   string            `json:"instructions,omitempty"`
+	Missing        []string          `json:"missing,omitempty" jsonschema:"required report fields not yet provided"`
+	ReportSchema   map[string]any    `json:"report_schema,omitempty" jsonschema:"JSON Schema for the current step's report"`
+	PendingChooser *ChooserResult    `json:"pending_chooser,omitempty"`
+	Execution      string            `json:"execution,omitempty" jsonschema:"execution hint for this instance; fork-preferred means the procedure is a task best run in a disposable forked context"`
+	Produced       map[string]any    `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
+	Framing        string            `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); served when its content is new to this connection, omitted while unchanged"`
+	Vocabulary     string            `json:"vocabulary,omitempty" jsonschema:"translation table for non-English graphs: canonical tokens stay English, user-facing narration renders in the configured language; served once per connection"`
+	OpenThreads    string            `json:"open_threads,omitempty" jsonschema:"this dialogue's own open threads, carried on the session shell's serves; at session entry a one-line count of OTHER open dialogues points at list_sessions. Other dialogues are never listed here"`
+	Base           *BaseServe        `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue lands now that this move has ended"`
+	Collected      map[string]string `json:"collected,omitempty" jsonschema:"state already collected by this instance — values persist across handover; do not re-derive them"`
 }
 
 // BaseServe is the session shell's serve as nested into landing responses
@@ -914,6 +918,80 @@ func guardViewSize(s string) string {
 	return fmt.Sprintf("%s\n\n[view output truncated at %d of %d bytes — narrow with n(K), tighter filters, or fewer sections]", truncated, len(truncated), len(s))
 }
 
+// maxCollectedValueBytes caps a single projected collected value in a resume
+// response. The values persist in full in the session store; the cap only
+// bounds what the re-entry serve carries so a large reported judgment cannot
+// blow the client's token budget.
+const maxCollectedValueBytes = 2000
+
+// maxCollectedInstanceBytes caps the total collected projection for one
+// instance. Per-value capping alone lets a field-heavy instance stack many
+// near-cap values into a payload that, across several resumed instances, can
+// reach the ~10K-token output ceiling where Codex CLI truncates a tool result
+// (s-tac-jom, s-tac-40d) — a silent cut is exactly what d-cpt-0tm forbids. The
+// budget keeps whole, high-signal values in sorted-key order and replaces the
+// rest with a labeled omission, so the resume serve stays comfortably under the
+// host ceiling while every dropped value is named, never silently gone.
+const maxCollectedInstanceBytes = 8000
+
+// capCollected renders each collected value to a display string, truncates any
+// over-cap value, and enforces a per-instance total budget by spending it on
+// whole values in sorted-key order — anything past the budget is replaced with
+// an explicit omission notice, so a resuming agent sees the compression rather
+// than losing a field silently (d-cpt-0tm). Returns nil for an empty projection
+// so the field is omitted (non-resume serves).
+func capCollected(values map[string]any) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make(map[string]string, len(values))
+	spent := 0
+	for _, name := range names {
+		value := capCollectedValue(collectedString(values[name]))
+		if spent+len(value) > maxCollectedInstanceBytes {
+			out[name] = "[collected value omitted here for size — persisted in full in the session store]"
+			continue
+		}
+		spent += len(value)
+		out[name] = value
+	}
+	return out
+}
+
+// collectedString renders a store value for the projection: strings pass
+// through; everything else is JSON-encoded so lists and scalars stay legible.
+// A marshal failure is stamped rather than silently rendered as Go syntax, so
+// an encoding error is visible (mirrors StateSnapshot's "!err:" marker).
+func collectedString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("[!json-encode-error: %v] %v", err, v)
+	}
+	return string(b)
+}
+
+// capCollectedValue truncates an over-cap value on a rune boundary and appends
+// a notice naming the cap, mirroring guardViewSize.
+func capCollectedValue(s string) string {
+	if len(s) <= maxCollectedValueBytes {
+		return s
+	}
+	cut := maxCollectedValueBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s\n\n[collected value truncated at %d of %d bytes — persisted in full, compressed here]", s[:cut], cut, len(s))
+}
+
 func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
@@ -1022,6 +1100,7 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 		Session: string(serve.Session), Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
 		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Execution: serve.Execution,
+		Collected: capCollected(serve.Collected),
 	}
 	if serve.InstructionUnit != "" && s.servedBefore(req.Session, serve.InstructionUnit) {
 		res.Instructions = serve.ReminderInstructions()
