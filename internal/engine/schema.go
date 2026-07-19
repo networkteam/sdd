@@ -154,6 +154,22 @@ func schemaForType(t VarType, desc string) map[string]any {
 			"required":             []string{"id", "kind"},
 			"additionalProperties": false,
 		}
+	case TypeInvolvement:
+		schema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"target": map[string]any{
+					"type":    "string",
+					"pattern": `^\d{8}-\d{6}-[sd]-(stg|cpt|tac|ops|prc)-[a-z0-9]+$`,
+				},
+				"actors": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"when":   involvementWhenSchema(),
+			},
+			"required":             []string{"target"},
+			"additionalProperties": false,
+		}
+	case TypeInvolvementWhen:
+		schema = involvementWhenSchema()
 	case TypeEntryKind:
 		schema = map[string]any{"type": "string", "enum": []any{
 			"gap", "fact", "question", "insight", "done", "actor", "annotation",
@@ -188,4 +204,17 @@ func schemaForType(t VarType, desc string) map[string]any {
 		schema["description"] = desc
 	}
 	return schema
+}
+
+// involvementWhenSchema is the {from, to} ISO-date object shared by the
+// involvement type's nested when and the standalone involvement-when type.
+func involvementWhenSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"from": map[string]any{"type": "string", "pattern": `^\d{4}-\d{2}-\d{2}$`},
+			"to":   map[string]any{"type": "string", "pattern": `^\d{4}-\d{2}-\d{2}$`},
+		},
+		"additionalProperties": false,
+	}
 }
