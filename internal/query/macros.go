@@ -47,14 +47,23 @@ func ExpandMacros(layout model.Layout) (model.Layout, error) {
 	return out, nil
 }
 
-// MacroNames returns the registered macro names sorted for deterministic
+// MacroNames returns the section-start macro names sorted for deterministic
 // help-text rendering. Exposed so the CLI's view help doesn't need to
-// import the registry directly.
+// import the registry directly. Layout macros are excluded — they are not
+// valid at section start; see LayoutMacroNames.
 func MacroNames() []string {
-	names := make([]string, 0, len(macros)+len(layoutMacros))
+	names := make([]string, 0, len(macros))
 	for n := range macros {
 		names = append(names, n)
 	}
+	sort.Strings(names)
+	return names
+}
+
+// LayoutMacroNames returns the layout macro names sorted — macros used alone
+// as a whole layout rather than at section start.
+func LayoutMacroNames() []string {
+	names := make([]string, 0, len(layoutMacros))
 	for n := range layoutMacros {
 		names = append(names, n)
 	}
@@ -98,21 +107,14 @@ var macros = map[string]func(args []model.FunctionArg) ([]model.Function, error)
 	"wip":          expandWIP,
 }
 
-// layoutMacros are layout-level macros: a lone macro name expands into a
-// multi-section layout, which section-level macro expansion then finishes.
-// `readiness` is the first — its four capped lanes (participants, aspirations,
-// strategic and conceptual guiding direction) cannot live in one section, so
-// it cannot be a section macro. Both orient's inject and refresh's pull name
-// `readiness`, so the four-lane string lives here once (d-tac-e55).
+// layoutMacros expand a lone macro name into a whole multi-section layout,
+// which a single-section macro cannot produce.
 var layoutMacros = map[string]func(args []model.FunctionArg) (model.Layout, error){
 	"readiness": expandReadinessLayout,
 }
 
-// readinessLayout is the capped bootstrap grounding read: who is known
-// (participants), what the project pulls toward (aspirations), and its guiding
-// direction (strategic) and shape (conceptual). Composed entirely from
-// existing filter/macro vocabulary; on a fresh graph every lane is empty,
-// which is the intended "nothing yet" signal.
+// readinessLayout is the four capped bootstrap grounding lanes: participants,
+// aspirations, strategic guiding, conceptual guiding.
 const readinessLayout = `participants:brief,` +
 	`aspirations:active:rank(heat(exp-14d)):n(6):name("Aspirations"):brief:as-list,` +
 	`kind(directive):intent(guiding):layer(strategic):active:rank(heat(exp-14d)):n(6):name("Direction — strategic guiding"):brief:as-list,` +

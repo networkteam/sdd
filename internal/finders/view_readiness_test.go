@@ -1,6 +1,7 @@
 package finders
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd/internal/model"
@@ -57,6 +58,26 @@ func TestView_Readiness_FourLanesParticipantsBriefAndLayerSplit(t *testing.T) {
 	conceptualIDs := laneIDs(result.Sections[3])
 	if !containsID(conceptualIDs, "20260501-110000-d-cpt-cpt") || containsID(conceptualIDs, "20260501-100000-d-stg-str") {
 		t.Errorf("conceptual lane = %v, want only the conceptual guiding directive", conceptualIDs)
+	}
+}
+
+func TestView_Readiness_NotOfferedAtSectionStart(t *testing.T) {
+	// readiness is a layout macro, invalid at section start. Using it there
+	// (readiness:brief is two functions, so the layout-macro path never fires)
+	// must error, and the section-start hint must not advertise readiness as a
+	// valid section macro — the self-contradicting hint the split fixes.
+	g := readinessGraph()
+	f := New(Options{})
+	_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayoutAndExpand(t, "readiness:brief")})
+	if err == nil {
+		t.Fatal("readiness at section start should error")
+	}
+	_, hint, ok := strings.Cut(err.Error(), "section start:")
+	if !ok {
+		t.Fatalf("error should carry a section-start macro hint, got %q", err)
+	}
+	if strings.Contains(hint, "readiness") {
+		t.Errorf("section-start macro hint must not list readiness, got %q", hint)
 	}
 }
 

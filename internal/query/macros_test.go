@@ -411,9 +411,15 @@ func TestExpandMacros_ReadinessExpandsToFourLanes(t *testing.T) {
 	}
 }
 
-func TestMacroNames_IncludesReadiness(t *testing.T) {
-	if !containsName(MacroNames(), "readiness") {
-		t.Fatalf("MacroNames must include the readiness layout macro, got %v", MacroNames())
+func TestMacroNames_ReadinessIsALayoutMacroNotSectionMacro(t *testing.T) {
+	// readiness is not valid at section start, so it must stay out of the
+	// section-start macro list (the one view.go renders in its hint) and live in
+	// the layout-macro list instead.
+	if containsName(MacroNames(), "readiness") {
+		t.Errorf("MacroNames (section-start) must not include readiness, got %v", MacroNames())
+	}
+	if !containsName(LayoutMacroNames(), "readiness") {
+		t.Fatalf("LayoutMacroNames must include readiness, got %v", LayoutMacroNames())
 	}
 }
 

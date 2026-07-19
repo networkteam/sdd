@@ -17,6 +17,9 @@ type Vocabulary struct {
 	Algorithms []string
 	Decays     []string
 	Macros     []string
+	// LayoutMacros are macros used alone as a whole layout (they expand into
+	// several sections), not at section start.
+	LayoutMacros []string
 }
 
 type item struct {
@@ -194,6 +197,17 @@ func ReferenceBody(v Vocabulary) string {
 		fmt.Fprintf(&b, "    %s\n", description)
 	}
 
+	if len(v.LayoutMacros) > 0 {
+		b.WriteString("\n  Layout macros (used alone as the whole layout, not at section start):\n")
+		for _, name := range v.LayoutMacros {
+			description := macroReference[name]
+			if description == "" {
+				description = name + " — query-defined layout macro"
+			}
+			fmt.Fprintf(&b, "    %s\n", description)
+		}
+	}
+
 	return b.String()
 }
 
@@ -224,6 +238,11 @@ func MissingReferenceNames(v Vocabulary) []string {
 		}
 	}
 	for _, name := range v.Macros {
+		if _, ok := macroReference[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	for _, name := range v.LayoutMacros {
 		if _, ok := macroReference[name]; !ok {
 			missing = append(missing, name)
 		}

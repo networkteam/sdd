@@ -61,6 +61,7 @@ func TestViewHelpCoversLiveVocabulary(t *testing.T) {
 		vocabulary.Algorithms,
 		vocabulary.Decays,
 		vocabulary.Macros,
+		vocabulary.LayoutMacros,
 	} {
 		for _, name := range names {
 			if !strings.Contains(out, name) {
