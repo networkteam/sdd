@@ -163,14 +163,23 @@ func TestReportSchema_AdvertisesInvolvementShape(t *testing.T) {
 	if _, ok := whenProps["from"]; !ok {
 		t.Errorf("involvement.when should advertise from/to, got %v", when)
 	}
+	// minProperties matches FocusWhen.Validate: an empty when {} is rejected,
+	// so the advertised contract must forbid it too.
+	if when["minProperties"] != 1 {
+		t.Errorf("involvement.when should advertise minProperties: 1, got %v", when["minProperties"])
+	}
 	required, _ := item["required"].([]string)
 	if len(required) != 1 || required[0] != "target" {
 		t.Errorf("involvement required = %v, want [target]", required)
 	}
 
-	// The standalone focusWhen type advertises the same {from, to} object.
+	// The standalone focusWhen type advertises the same {from, to} object,
+	// including the minProperties floor.
 	fw, _ := props["focusWhen"].(map[string]any)
 	if fw == nil || fw["type"] != "object" {
 		t.Errorf("focusWhen property = %v, want an object", props["focusWhen"])
+	}
+	if fw["minProperties"] != 1 {
+		t.Errorf("focusWhen should advertise minProperties: 1, got %v", fw["minProperties"])
 	}
 }
