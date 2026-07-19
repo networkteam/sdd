@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/networkteam/sdd/internal/finders"
@@ -41,7 +42,34 @@ type EntryDraft struct {
 	Confidence        string
 	Topics            []string
 	AttachmentHandles []string
-	SkipPreflight     bool
+	// Canonical and Aliases carry a kind: actor signal's identity; Actor carries
+	// a kind: role decision's bound actor canonical. Mirrors the CLI-side
+	// NewEntryCmd fields — ignored on other kinds, written onto the entry so the
+	// model-layer validator sees the required frontmatter.
+	Canonical     string
+	Aliases       []string
+	Actor         string
+	SkipPreflight bool
+}
+
+// ValidationError reports that model.ValidateEntry rejected a draft at the
+// write gate. It carries the structural warnings so the workflow gate can
+// re-serve them as actionable findings — naming the violated rule and the
+// field — and route the instance back to a step that can fix it, rather than
+// wedging behind an opaque hard error (closes half of s-prc-g0j).
+type ValidationError struct {
+	Warnings []model.Warning
+}
+
+func (e *ValidationError) Error() string {
+	if len(e.Warnings) == 0 {
+		return "validation failed"
+	}
+	parts := make([]string, 0, len(e.Warnings))
+	for _, w := range e.Warnings {
+		parts = append(parts, w.Message)
+	}
+	return "validation failed: " + strings.Join(parts, "; ")
 }
 
 type CreateEntryResult struct {
@@ -126,6 +154,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		ID: id, Type: entryType, Kind: kind, Layer: layer, Intent: model.Intent(draft.Intent),
 		Content: draft.Body, Participants: append([]string(nil), draft.Participants...),
 		Confidence: draft.Confidence, Topics: topics, Time: runtime.options.Now(),
+		Canonical: draft.Canonical, Aliases: append([]string(nil), draft.Aliases...), Actor: draft.Actor,
 	}
 	if len(entry.Participants) == 0 {
 		if principal.Participant != "" {
@@ -148,7 +177,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	}
 	model.ValidateEntry(entry, snapshot.graph)
 	if len(entry.Warnings) > 0 {
-		return CreateEntryResult{}, fmt.Errorf("validation failed: %s", entry.Warnings[0].Message)
+		return CreateEntryResult{}, &ValidationError{Warnings: append([]model.Warning(nil), entry.Warnings...)}
 	}
 
 	result := CreateEntryResult{Project: runtime.options.Project, Binding: binding, EntryID: id}

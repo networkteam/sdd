@@ -1,6 +1,7 @@
 package application
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -122,7 +123,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 	if err := registry.RegisterCommand(engine.Command{
 		Doc: engine.FuncDoc{
 			Name: "newEntry", Doc: "Creates the entry from the capture state fields (pre-flight inside; staged attachments materialized from handles; a recorded override skips pre-flight, durably logged).",
-			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "preflightOverride"}, Writes: []string{"entryId", "findings"},
+			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "canonical", "aliases", "roleActor", "preflightOverride"}, Writes: []string{"entryId", "findings"},
 		},
 		MutatesGraph: true,
 		Fn:           w.runWorkflowNewEntry,
@@ -233,6 +234,12 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	}
 	draft.Confidence, _ = workflowStoreString(ctx.Store, "confidence")
 	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
+	// Identity-kind fields — mirror the CLI-side NewEntryCmd set onto the
+	// engine draft; empty on ordinary kinds, written onto the entry for the
+	// model-layer validator on actor/role captures.
+	draft.Canonical, _ = workflowStoreString(ctx.Store, "canonical")
+	draft.Actor, _ = workflowStoreString(ctx.Store, "roleActor")
+	draft.Aliases = workflowStoreStrings(ctx.Store, "aliases")
 	if override, ok := ctx.Store.Get("preflightOverride"); ok {
 		draft.SkipPreflight, _ = override.(bool)
 	}
@@ -246,6 +253,28 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		}
 	}
 	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
+	// A structural validation failure re-serves as high findings instead of
+	// wedging the instance: the write step's `otherwise` routes to
+	// reviseOrOverride, whose revise returns to assemble to fix the named rule
+	// and field. No write happened, so the binding is left untouched (§7,
+	// closes half of s-prc-g0j).
+	var validationErr *ValidationError
+	if errors.As(err, &validationErr) {
+		findings := make([]query.Finding, 0, len(validationErr.Warnings))
+		for _, warning := range validationErr.Warnings {
+			observation := warning.Message
+			if warning.Field != "" {
+				observation = fmt.Sprintf("%s (field: %s)", warning.Message, warning.Field)
+			}
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "validation",
+				Observation: observation,
+			})
+		}
+		ctx.Store.WriteEngine("findings", findings)
+		return nil
+	}
 	w.binding = result.Binding
 	findings := make([]query.Finding, 0, len(result.Findings))
 	for _, finding := range result.Findings {
