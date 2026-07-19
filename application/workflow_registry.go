@@ -3,6 +3,7 @@ package application
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/query"
@@ -40,7 +41,8 @@ func (w *WorkflowSession) registerWorkflowPredicates(registry *engine.Registry) 
 
 func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) error {
 	if err := registry.RegisterQuery(engine.Query{
-		Doc: engine.FuncDoc{Name: "sessionInfo", Doc: "Session framing: local participant, configured language, available search modes, and actionable recovery notices."},
+		Doc:       engine.FuncDoc{Name: "sessionInfo", Doc: "Session framing: local participant, configured language, available search modes, and actionable recovery notices."},
+		ServeSafe: true,
 		Fn: func(*engine.Context, map[string]any) (any, error) {
 			info, err := w.app.Info(w.ctx, w.identity, w.project, InfoRequest{})
 			if err != nil {
@@ -52,7 +54,8 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
-		Doc: engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store."},
+		Doc:       engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store. Optional arg maxBytes: cap the rendered result on a line boundary (0 = uncapped), for a framing lane that must stay bounded."},
+		ServeSafe: true,
 		Fn: func(_ *engine.Context, args map[string]any) (any, error) {
 			layout, _ := args["layout"].(string)
 			if strings.TrimSpace(layout) == "" {
@@ -62,12 +65,15 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 			if err != nil {
 				return nil, err
 			}
-			return result.Sections, nil
+			return capOnLineBoundary(result.Sections, workflowIntArg(args, "maxBytes", 0)), nil
 		},
 	}); err != nil {
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
+		// Not serve-safe: it calls LogRead, so it writes a read event. It may
+		// inject into a step unit, but never as a framing lane (a serve must not
+		// write — I7); the spec loader enforces that.
 		Doc: engine.FuncDoc{Name: "entryChains", Doc: "Entries with upstream/downstream chains for the store's anchor (or targets). Args up, down: expansion depths.", Reads: []string{"anchor", "targets"}},
 		Fn: func(ctx *engine.Context, args map[string]any) (any, error) {
 			var ids []string
@@ -91,7 +97,8 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
-		Doc: engine.FuncDoc{Name: "procedureList", Doc: "The live playbook moves, one line each: canonical, a compact signature of its accepted start params, and the first sentence of the head entry's summary. Shell-class procedures are excluded — they enter through start_session."},
+		Doc:       engine.FuncDoc{Name: "procedureList", Doc: "The live playbook moves, one line each: canonical, a compact signature of its accepted start params, and the first sentence of the head entry's summary. Shell-class procedures are excluded — they enter through start_session."},
+		ServeSafe: true,
 		Fn: func(*engine.Context, map[string]any) (any, error) {
 			result, err := w.app.Procedures(w.ctx, w.identity, w.project, ProcedureListRequest{})
 			if err != nil {
@@ -103,7 +110,8 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	return registry.RegisterQuery(engine.Query{
-		Doc: engine.FuncDoc{Name: "generatedSummary", Doc: "The stored summary of the entry named by the store's entryId, for fidelity review.", Reads: []string{"entryId"}},
+		Doc:       engine.FuncDoc{Name: "generatedSummary", Doc: "The stored summary of the entry named by the store's entryId, for fidelity review.", Reads: []string{"entryId"}},
+		ServeSafe: true,
 		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
 			id, ok := workflowStoreString(ctx.Store, "entryId")
 			if !ok {
@@ -246,7 +254,9 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		}
 	}
 	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
-	w.binding = result.Binding
+	if err == nil {
+		w.binding = result.Binding
+	}
 	findings := make([]query.Finding, 0, len(result.Findings))
 	for _, finding := range result.Findings {
 		findings = append(findings, query.Finding{Severity: query.Severity(finding.Severity), Category: finding.Category, Observation: finding.Observation})
@@ -298,6 +308,27 @@ func workflowStoreStrings(store *engine.Store, name string) []string {
 		}
 	}
 	return result
+}
+
+// capOnLineBoundary truncates s to at most max bytes, preferring a line
+// boundary and otherwise a UTF-8 rune boundary (never splitting a multi-byte
+// rune), then appends a one-line elision notice. A non-positive max leaves s
+// untouched.
+func capOnLineBoundary(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	truncated := s[:max]
+	if i := strings.LastIndexByte(truncated, '\n'); i > 0 {
+		truncated = truncated[:i]
+	} else {
+		// No newline to cut on — back up to a rune boundary so the byte cap
+		// never slices a multi-byte UTF-8 sequence in half.
+		for len(truncated) > 0 && !utf8.RuneStart(truncated[len(truncated)-1]) {
+			truncated = truncated[:len(truncated)-1]
+		}
+	}
+	return strings.TrimRight(truncated, "\n") + "\n… (lane truncated to fit its byte cap)"
 }
 
 func workflowIntArg(args map[string]any, name string, fallback int) int {

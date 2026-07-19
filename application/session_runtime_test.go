@@ -178,61 +178,74 @@ func (f *failOnceFinalizer) Finalize(context.Context, sdd.AppliedMutation) error
 	return nil
 }
 
-func TestSessionHoldersUseChooserTTLTakeoverAndCASFencing(t *testing.T) {
+// openBinding creates a durable session with an attachment and returns the
+// matching write binding. verifyBinding matches the binding's MCP session id
+// against the stored attachment, so both carry "mcp".
+func openBinding(t *testing.T, sessions sdd.SessionStore, subject string, id sdd.SessionID) sdd.SessionBinding {
+	t.Helper()
+	created, err := sessions.Create(t.Context(), sdd.SessionMetadata{
+		CodecVersion: sdd.SessionCodecVersion, ID: id, Subject: subject, Project: "example", Participant: subject,
+		Attachment: &sdd.Attachment{Subject: subject, MCPSessionID: "mcp", LastActivity: time.Now().UTC().Round(0)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sdd.SessionBinding{SessionID: id, Subject: subject, Project: "example", MCPSessionID: "mcp", Version: created.Version}
+}
+
+// TestIncumbentContinuityHoldsWithoutExpiry proves I3 by construction: with
+// arbitrary elapsed time and no competing claim, the driving client's next
+// write succeeds — there is no expiry to inject, so the assertion is
+// clock-free in the sense that no lease can revoke the incumbent.
+func TestIncumbentContinuityHoldsWithoutExpiry(t *testing.T) {
 	now := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
 	application, sessions, _, graph := newDurableApplication(t, func() time.Time { return now }, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	first, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "held", MCPSessionID: "mcp-1", Chooser: sdd.ChooserUser})
-	if err != nil || !first.Created || first.Binding.Generation != 1 {
-		t.Fatalf("first BindSession = %+v, %v", first, err)
+	binding := openBinding(t, sessions, identity.Subject, "incumbent")
+	first := preparedEntry(t, graph.GraphStore, binding, "incumbent-first", "2026/07/13-050000-s-tac-in1.md")
+	r1, err := application.ApplyPrepared(t.Context(), identity, "example", binding, first)
+	if err != nil || r1.Apply.State != sdd.MutationApplied {
+		t.Fatalf("first apply = %+v, %v", r1, err)
 	}
-	listed, err := application.ListSessions(t.Context(), identity, "example")
-	if err != nil || len(listed.Sessions) != 1 || !listed.Sessions[0].HolderLive {
-		t.Fatalf("live session listing = %+v, %v", listed, err)
+	now = now.Add(72 * time.Hour)
+	second := preparedEntry(t, graph.GraphStore, r1.Binding, "incumbent-second", "2026/07/13-050100-s-tac-in2.md")
+	r2, err := application.ApplyPrepared(t.Context(), identity, "example", r1.Binding, second)
+	if err != nil || r2.Apply.State != sdd.MutationApplied {
+		t.Fatalf("incumbent second apply after elapsed time = %+v, %v", r2, err)
 	}
-	_, err = application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "held", MCPSessionID: "mcp-2", Chooser: sdd.ChooserAgent})
-	var inUse *sdd.ApplicationError
-	if !errors.As(err, &inUse) || inUse.Code != sdd.ErrorSessionInUse || inUse.Holder == nil || inUse.Holder.MCPSessionID != "mcp-1" {
-		t.Fatalf("live competing bind error = %#v", err)
-	}
-	second, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "held", MCPSessionID: "mcp-2", Chooser: sdd.ChooserAgent, Takeover: true})
-	if err != nil || second.Binding.Generation != 2 {
-		t.Fatalf("explicit takeover = %+v, %v", second, err)
-	}
-	prepared := preparedEntry(t, graph.GraphStore, first.Binding, "old-holder", "2026/07/13-050000-s-tac-old.md")
-	if _, err := application.ApplyPrepared(t.Context(), identity, "example", first.Binding, prepared); errorCode(err) != sdd.ErrorSessionOwnership {
-		t.Fatalf("displaced holder ApplyPrepared error = %v", err)
-	}
-	now = now.Add(6 * time.Minute)
-	third, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "held", MCPSessionID: "mcp-3", Chooser: sdd.ChooserGate})
-	if err != nil || third.Binding.Generation != 3 {
-		t.Fatalf("expired takeover = %+v, %v", third, err)
-	}
-	stored, err := sessions.Load(t.Context(), "held")
-	if err != nil || len(stored.Metadata.HolderHistory) != 2 || stored.Metadata.HolderHistory[0].Reason != "explicit_takeover" || stored.Metadata.HolderHistory[1].Reason != "expired_takeover" {
-		t.Fatalf("holder history = %+v, %v", stored.Metadata.HolderHistory, err)
-	}
-	if err := application.ReleaseSession(t.Context(), identity, "example", third.Binding); err != nil {
+}
+
+// TestReleaseRecordsSpecificCauseAndClearsAttachment covers I7: every
+// lifecycle change records its specific cause, and the attachment is cleared
+// so status derives from the store alone.
+func TestReleaseRecordsSpecificCauseAndClearsAttachment(t *testing.T) {
+	application, sessions, _, _ := newDurableApplication(t, time.Now, nil, nil)
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	binding := openBinding(t, sessions, identity.Subject, "release-cause")
+	if err := application.ReleaseSession(t.Context(), identity, "example", binding, sdd.CauseDisconnect, ""); err != nil {
 		t.Fatal(err)
 	}
-	listed, err = application.ListSessions(t.Context(), identity, "example")
-	if err != nil || listed.Sessions[0].Holder != nil || listed.Sessions[0].HolderLive {
-		t.Fatalf("released session listing = %+v, %v", listed, err)
+	stored, err := sessions.Load(t.Context(), "release-cause")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata.Attachment != nil {
+		t.Fatalf("attachment not cleared: %+v", stored.Metadata.Attachment)
+	}
+	if len(stored.Metadata.AttachmentHistory) != 1 || stored.Metadata.AttachmentHistory[0].Cause != sdd.CauseDisconnect {
+		t.Fatalf("attachment history = %+v", stored.Metadata.AttachmentHistory)
 	}
 }
 
 func TestPreparedTransitionRecoversUnknownApplyAndFinalizer(t *testing.T) {
 	finalizer := &failOnceFinalizer{}
-	application, _, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
+	application, sessions, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
 		return unknownAfterApplyStore{GraphStore: store}
 	}, []sdd.MutationFinalizer{finalizer})
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "recover", MCPSessionID: "mcp-1", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "recover-unknown", "2026/07/13-051000-s-tac-rec.md")
-	unknown, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	binding := openBinding(t, sessions, identity.Subject, "recover")
+	prepared := preparedEntry(t, graph.GraphStore, binding, "recover-unknown", "2026/07/13-051000-s-tac-rec.md")
+	unknown, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 	if errorCode(err) != sdd.ErrorRecoveryRequired || unknown.Apply.State != sdd.MutationUnknown {
 		t.Fatalf("unknown ApplyPrepared = %+v, %v", unknown, err)
 	}
@@ -266,39 +279,30 @@ func TestPreparedTransitionRecoversUnknownApplyAndFinalizer(t *testing.T) {
 	}
 }
 
-func TestPreparedTransitionPersistsNotAppliedAndRejectsStaleBinding(t *testing.T) {
-	application, _, blobs, graph := newDurableApplication(t, time.Now, nil, nil)
+func TestPreparedTransitionMergesUnrelatedAppendAndRejectsStaleBinding(t *testing.T) {
+	application, sessions, blobs, graph := newDurableApplication(t, time.Now, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "stale", MCPSessionID: "mcp-1", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "stale-revision", "2026/07/13-052000-s-tac-stl.md")
-	advance := preparedEntry(t, graph.GraphStore, bound.Binding, "external", "2026/07/13-052100-s-tac-ext.md")
+	binding := openBinding(t, sessions, identity.Subject, "merge")
+	prepared := preparedEntry(t, graph.GraphStore, binding, "merge-revision", "2026/07/13-052000-s-tac-stl.md")
+	advance := preparedEntry(t, graph.GraphStore, binding, "external", "2026/07/13-052100-s-tac-ext.md")
 	if _, err := graph.Apply(t.Context(), advance.ExpectedGraphRevision, advance.Batch, nil); err != nil {
 		t.Fatal(err)
 	}
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
-	if errorCode(err) != sdd.ErrorGraphConflict || result.Apply.State != sdd.MutationNotApplied || blobs.released != 0 {
-		t.Fatalf("stale graph ApplyPrepared = %+v, %v; released=%d", result, err, blobs.released)
+	// The prepared write pins the pre-advance revision, but an unrelated append
+	// moved the store. It merges cleanly against the revalidated fresh revision
+	// instead of failing the stale pin, and never files a recovery.
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
+	if err != nil || result.Apply.State != sdd.MutationApplied || blobs.released != 1 {
+		t.Fatalf("merge-under-append ApplyPrepared = %+v, %v; released=%d", result, err, blobs.released)
 	}
 	pending, err := application.ListRecoveries(t.Context(), identity, "example", false)
-	if err != nil || len(pending.Items) != 1 || pending.Items[0].State != sdd.RecoveryNotAppliedAwaitingDecision {
-		t.Fatalf("not-applied recovery projection = %+v, %v", pending, err)
+	if err != nil || len(pending.Items) != 0 {
+		t.Fatalf("merge-under-append recovery projection = %+v, %v", pending, err)
 	}
-	if _, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
-		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryAbandonUnknown,
-	}); errorCode(err) != sdd.ErrorRecoveryRequired {
-		t.Fatalf("abandon after reconciled not-applied error = %v", err)
-	}
-	discarded, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
-		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard, Reason: "stale prepared graph",
-	})
-	if err != nil || discarded.Item.State != sdd.RecoveryDiscarded || blobs.released != 1 {
-		t.Fatalf("discard recovery = %+v, %v; released=%d", discarded, err, blobs.released)
-	}
-	other := preparedEntry(t, graph.GraphStore, bound.Binding, "stale-binding", "2026/07/13-052200-s-tac-bnd.md")
-	if _, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, other); errorCode(err) != sdd.ErrorSessionConflict {
+	// The successful write advanced the session; a second write presenting the
+	// pre-write binding version is fenced as a stale binding.
+	other := preparedEntry(t, graph.GraphStore, binding, "stale-binding", "2026/07/13-052200-s-tac-bnd.md")
+	if _, err := application.ApplyPrepared(t.Context(), identity, "example", binding, other); errorCode(err) != sdd.ErrorSessionConflict {
 		t.Fatalf("stale binding error = %v", err)
 	}
 }
@@ -311,12 +315,9 @@ func TestReconcileMutationRefreshesIntentOnlyProjectionBeforeVerbSelection(t *te
 	targets := &mutableTargetAcquirer{graph: graph, failNext: true}
 	application, sessions, blobs, _ := newDurableApplicationWithTargets(t, graph, targets)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "intent-only", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared := preparedEntry(t, graph, bound.Binding, "intent-only", "2026/07/13-052300-s-tac-int.md")
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	binding := openBinding(t, sessions, identity.Subject, "intent-only")
+	prepared := preparedEntry(t, graph, binding, "intent-only", "2026/07/13-052300-s-tac-int.md")
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 	if errorCode(err) != sdd.ErrorRecoveryRequired || result.Apply.State != sdd.MutationUnknown {
 		t.Fatalf("intent-only ApplyPrepared = %+v, %v", result, err)
 	}
@@ -327,7 +328,7 @@ func TestReconcileMutationRefreshesIntentOnlyProjectionBeforeVerbSelection(t *te
 	if err != nil || refreshed.Item.State != sdd.RecoveryNotAppliedAwaitingDecision || refreshed.Transition.Apply.State != sdd.MutationNotApplied {
 		t.Fatalf("ReconcileMutation = %+v, %v", refreshed, err)
 	}
-	stored, err := sessions.Load(t.Context(), bound.Binding.SessionID)
+	stored, err := sessions.Load(t.Context(), binding.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,37 +356,34 @@ func TestReconcileMutationRefreshesIntentOnlyProjectionBeforeVerbSelection(t *te
 func TestPreparedTransitionRejectsEmptyTargetAndStructuredDivergence(t *testing.T) {
 	application, sessions, _, graph := newDurableApplication(t, time.Now, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "validate-prepared", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
+	binding := openBinding(t, sessions, identity.Subject, "validate-prepared")
 
-	emptyTarget := preparedEntry(t, graph.GraphStore, bound.Binding, "empty-target", "2026/07/13-052301-s-tac-emp.md")
+	emptyTarget := preparedEntry(t, graph.GraphStore, binding, "empty-target", "2026/07/13-052301-s-tac-emp.md")
 	emptyTarget.Target.Branch = ""
-	if _, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, emptyTarget); errorCode(err) != sdd.ErrorWriteDenied {
+	if _, err := application.ApplyPrepared(t.Context(), identity, "example", binding, emptyTarget); errorCode(err) != sdd.ErrorWriteDenied {
 		t.Fatalf("empty target error = %v", err)
 	}
-	stored, err := sessions.Load(t.Context(), bound.Binding.SessionID)
+	stored, err := sessions.Load(t.Context(), binding.SessionID)
 	if err != nil || len(stored.Events) != 0 {
 		t.Fatalf("empty target persisted events = %d, %v", len(stored.Events), err)
 	}
-	foreignTarget := preparedEntry(t, graph.GraphStore, bound.Binding, "foreign-target", "2026/07/13-052306-s-tac-for.md")
+	foreignTarget := preparedEntry(t, graph.GraphStore, binding, "foreign-target", "2026/07/13-052306-s-tac-for.md")
 	foreignTarget.Target.Project = "connected.example/foreign"
-	if _, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, foreignTarget); errorCode(err) != sdd.ErrorWriteDenied {
+	if _, err := application.ApplyPrepared(t.Context(), identity, "example", binding, foreignTarget); errorCode(err) != sdd.ErrorWriteDenied {
 		t.Fatalf("connected target exposure error = %v", err)
 	}
-	stored, err = sessions.Load(t.Context(), bound.Binding.SessionID)
+	stored, err = sessions.Load(t.Context(), binding.SessionID)
 	if err != nil || len(stored.Events) != 0 {
 		t.Fatalf("foreign target persisted events = %d, %v", len(stored.Events), err)
 	}
 
-	diverged := preparedEntry(t, graph.GraphStore, bound.Binding, "diverged", "2026/07/13-052302-s-tac-div.md")
+	diverged := preparedEntry(t, graph.GraphStore, binding, "diverged", "2026/07/13-052302-s-tac-div.md")
 	diverged.Batch.Changes[0].Document.Body = "Different structured body."
 	diverged.Batch.Digest, err = sdd.MutationBatchDigest(diverged.Batch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, diverged)
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, diverged)
 	if errorCode(err) != sdd.ErrorRecoveryRequired || result.Apply.State != sdd.MutationNotApplied || !strings.Contains(err.Error(), "structured entry and canonical bytes diverge") {
 		t.Fatalf("structured divergence = %+v, %v", result, err)
 	}
@@ -431,12 +429,9 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 		t.Fatal(err)
 	}
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "create-default", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
+	binding := openBinding(t, sessions, identity.Subject, "create-default")
 	t.Chdir(t.TempDir())
-	created, err := application.CreateEntry(t.Context(), identity, "example", bound.Binding, sdd.EntryDraft{
+	created, err := application.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
 		Kind: "gap", Layer: "tactical", Body: "Concrete target resolution must remain independent of the process working directory.", Confidence: "high",
 	})
 	if err != nil || created.EntryID == "" {
@@ -448,7 +443,7 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 	if llmCalls != 2 || acquisitions != 2 || releases != 2 || active {
 		t.Fatalf("LLM calls=%d acquisitions=%d releases=%d active=%v", llmCalls, acquisitions, releases, active)
 	}
-	stored, err := sessions.Load(t.Context(), bound.Binding.SessionID)
+	stored, err := sessions.Load(t.Context(), binding.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,20 +453,18 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 }
 
 func TestPreparedRevalidationToleratesJSONRoundTripScalarTypes(t *testing.T) {
-	application, _, _, graph := newDurableApplication(t, time.Now, nil, nil)
+	application, sessions, _, graph := newDurableApplication(t, time.Now, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "scalar-round-trip", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "scalar-round-trip", "2026/07/13-052305-s-tac-sca.md")
+	binding := openBinding(t, sessions, identity.Subject, "scalar-round-trip")
+	prepared := preparedEntry(t, graph.GraphStore, binding, "scalar-round-trip", "2026/07/13-052305-s-tac-sca.md")
 	prepared.Batch.Changes[0].CanonicalBytes = []byte("---\ntype: signal\nkind: done\nlayer: tactical\nsummary: Durable transition fixture.\ntime: 2026-07-13T05:23:05Z\n---\n\nDurable transition fixture body.\n")
 	prepared.Batch.Changes[0].Document.Frontmatter["time"] = "2026-07-13T05:23:05Z"
-	prepared.Batch.Digest, err = sdd.MutationBatchDigest(prepared.Batch)
+	digest, err := sdd.MutationBatchDigest(prepared.Batch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	prepared.Batch.Digest = digest
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 	if err != nil || result.Apply.State != sdd.MutationApplied {
 		t.Fatalf("scalar round-trip apply = %+v, %v", result, err)
 	}
@@ -487,19 +480,16 @@ func TestPreparedAttachmentCrossesHomeStagingIntoTargetGraph(t *testing.T) {
 		t.Fatal(err)
 	}
 	targets := &mutableTargetAcquirer{graph: target}
-	application, _, blobs, _ := newDurableApplicationWithHomeAndTargets(t, home, targets)
+	application, sessions, blobs, _ := newDurableApplicationWithHomeAndTargets(t, home, targets)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "cross-target-attachment", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner := sdd.BlobOwner{Subject: bound.Binding.Subject, Session: bound.Binding.SessionID}
+	binding := openBinding(t, sessions, identity.Subject, "cross-target-attachment")
+	owner := sdd.BlobOwner{Subject: binding.Subject, Session: binding.SessionID}
 	want := []byte("evidence from the home session\n")
 	blob, err := application.StageBlob(t.Context(), identity, "example", owner, "evidence.txt", want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := preparedEntry(t, target, bound.Binding, "cross-target", "2026/07/13-052303-s-tac-att.md")
+	prepared := preparedEntry(t, target, binding, "cross-target", "2026/07/13-052303-s-tac-att.md")
 	prepared.Target.Branch = "work"
 	prepared.BlobIDs = []string{blob.ID}
 	prepared.Batch.Attachments = []sdd.AttachmentMaterialization{{
@@ -510,7 +500,7 @@ func TestPreparedAttachmentCrossesHomeStagingIntoTargetGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 	if err != nil || result.Apply.State != sdd.MutationApplied {
 		t.Fatalf("cross-target apply = %+v, %v", result, err)
 	}
@@ -585,20 +575,20 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 		targets := &mutableTargetAcquirer{graph: graph}
-		application, _, _, _ := newDurableApplicationWithTargets(t, graph, targets)
+		application, sessions, _, _ := newDurableApplicationWithTargets(t, graph, targets)
 		identity := sdd.RequestIdentity{Subject: "christopher"}
-		bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "release-discard", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
+		binding := openBinding(t, sessions, identity.Subject, "release-discard")
+		// A structurally diverged intent files a discardable not-applied
+		// recovery without ever reaching the graph store.
+		prepared := preparedEntry(t, graph, binding, "release-discard", "2026/07/13-052310-s-tac-dis.md")
+		prepared.Batch.Changes[0].Document.Body = "Diverged structured body."
+		prepared.Batch.Digest, err = sdd.MutationBatchDigest(prepared.Batch)
 		if err != nil {
 			t.Fatal(err)
 		}
-		prepared := preparedEntry(t, graph, bound.Binding, "release-discard", "2026/07/13-052310-s-tac-dis.md")
-		advance := preparedEntry(t, graph, bound.Binding, "release-discard-advance", "2026/07/13-052311-s-tac-ext.md")
-		if _, err := graph.Apply(t.Context(), advance.ExpectedGraphRevision, advance.Batch, nil); err != nil {
-			t.Fatal(err)
-		}
-		result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
-		if errorCode(err) != sdd.ErrorGraphConflict {
-			t.Fatalf("stale apply = %+v, %v", result, err)
+		result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
+		if errorCode(err) != sdd.ErrorRecoveryRequired {
+			t.Fatalf("diverged apply = %+v, %v", result, err)
 		}
 		targets.setReleaseError(errors.New("injected target release failure"))
 		discarded, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard})
@@ -614,14 +604,11 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 		}
 		graph := &pendingUnknownStore{GraphStore: base}
 		targets := &mutableTargetAcquirer{graph: graph}
-		application, _, _, _ := newDurableApplicationWithTargets(t, graph, targets)
+		application, sessions, _, _ := newDurableApplicationWithTargets(t, graph, targets)
 		identity := sdd.RequestIdentity{Subject: "christopher"}
-		bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "release-abandon", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-		if err != nil {
-			t.Fatal(err)
-		}
-		prepared := preparedEntry(t, base, bound.Binding, "release-abandon", "2026/07/13-052320-s-tac-abn.md")
-		result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+		binding := openBinding(t, sessions, identity.Subject, "release-abandon")
+		prepared := preparedEntry(t, base, binding, "release-abandon", "2026/07/13-052320-s-tac-abn.md")
+		result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 		if errorCode(err) != sdd.ErrorRecoveryRequired {
 			t.Fatalf("unknown apply = %+v, %v", result, err)
 		}
@@ -640,14 +627,11 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 		graph := unknownAfterApplyStore{GraphStore: base}
 		finalizer := &failOnceFinalizer{}
 		targets := &mutableTargetAcquirer{graph: graph, finalizers: []sdd.MutationFinalizer{finalizer}}
-		application, _, _, _ := newDurableApplicationWithTargets(t, graph, targets)
+		application, sessions, _, _ := newDurableApplicationWithTargets(t, graph, targets)
 		identity := sdd.RequestIdentity{Subject: "christopher"}
-		bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "release-finalize", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-		if err != nil {
-			t.Fatal(err)
-		}
-		prepared := preparedEntry(t, base, bound.Binding, "release-finalize", "2026/07/13-052330-s-tac-fin.md")
-		result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+		binding := openBinding(t, sessions, identity.Subject, "release-finalize")
+		prepared := preparedEntry(t, base, binding, "release-finalize", "2026/07/13-052330-s-tac-fin.md")
+		result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 		if errorCode(err) != sdd.ErrorRecoveryRequired {
 			t.Fatalf("unknown apply = %+v, %v", result, err)
 		}
@@ -661,17 +645,14 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 
 func TestReadSurfacesNeverReplayPendingMutation(t *testing.T) {
 	var pendingStore *pendingUnknownStore
-	application, _, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
+	application, sessions, blobs, graph := newDurableApplication(t, time.Now, func(store sdd.GraphStore) sdd.GraphStore {
 		pendingStore = &pendingUnknownStore{GraphStore: store}
 		return pendingStore
 	}, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "no-replay", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "pending-unknown", "2026/07/13-052500-s-tac-unk.md")
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	binding := openBinding(t, sessions, identity.Subject, "no-replay")
+	prepared := preparedEntry(t, graph.GraphStore, binding, "pending-unknown", "2026/07/13-052500-s-tac-unk.md")
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 	if errorCode(err) != sdd.ErrorRecoveryRequired || result.Apply.State != sdd.MutationUnknown {
 		t.Fatalf("pending ApplyPrepared = %+v, %v", result, err)
 	}
@@ -718,20 +699,21 @@ func TestReadSurfacesNeverReplayPendingMutation(t *testing.T) {
 
 func TestRecoveryAuthorizationReceivesActorOwnerTargetAndDistinctVerb(t *testing.T) {
 	authorizer := &recordingRecoveryAuthorizer{}
-	application, _, _, graph := newDurableApplication(t, time.Now, nil, nil, authorizer)
+	application, sessions, _, graph := newDurableApplication(t, time.Now, nil, nil, authorizer)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "authorize-recovery", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
+	binding := openBinding(t, sessions, identity.Subject, "authorize-recovery")
+	// A structurally diverged intent yields an actionable recovery item to
+	// discard, without depending on a graph revision race.
+	prepared := preparedEntry(t, graph.GraphStore, binding, "authorize-discard", "2026/07/13-052600-s-tac-aut.md")
+	prepared.Batch.Changes[0].Document.Body = "Diverged structured body."
+	digest, err := sdd.MutationBatchDigest(prepared.Batch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := preparedEntry(t, graph.GraphStore, bound.Binding, "authorize-discard", "2026/07/13-052600-s-tac-aut.md")
-	advance := preparedEntry(t, graph.GraphStore, bound.Binding, "authorize-external", "2026/07/13-052700-s-tac-ext.md")
-	if _, err := graph.Apply(t.Context(), advance.ExpectedGraphRevision, advance.Batch, nil); err != nil {
-		t.Fatal(err)
-	}
-	result, err := application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
-	if errorCode(err) != sdd.ErrorGraphConflict {
-		t.Fatalf("stale apply = %+v, %v", result, err)
+	prepared.Batch.Digest = digest
+	result, err := application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
+	if errorCode(err) != sdd.ErrorRecoveryRequired {
+		t.Fatalf("diverged apply = %+v, %v", result, err)
 	}
 	if _, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard, Reason: "operator chose discard",
@@ -773,14 +755,11 @@ func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *te
 		t.Fatal(err)
 	}
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "append-failure", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	prepared := preparedEntry(t, graph, bound.Binding, "append-failure", "2026/07/13-053000-s-tac-fai.md")
+	binding := openBinding(t, sessions, identity.Subject, "append-failure")
+	prepared := preparedEntry(t, graph, binding, "append-failure", "2026/07/13-053000-s-tac-fai.md")
 	sessions.fail(errors.New("injected intent append failure"))
 
-	_, err = application.ApplyPrepared(t.Context(), identity, "example", bound.Binding, prepared)
+	_, err = application.ApplyPrepared(t.Context(), identity, "example", binding, prepared)
 	if err == nil || !strings.Contains(err.Error(), "injected intent append failure") || !strings.Contains(err.Error(), "injected release failure") {
 		t.Fatalf("ApplyPrepared error = %v, want both append and release failures", err)
 	}
@@ -792,7 +771,7 @@ func TestSessionReplayFailsClosedForUnsupportedCodec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = application.BindSession(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, "example", sdd.BindSessionRequest{SessionID: "future", MCPSessionID: "mcp", Chooser: sdd.ChooserUser})
+	_, _, err = application.ResumeWorkflow(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, "example", sdd.WorkflowResumeRequest{SessionID: "future", MCPSessionID: "mcp"})
 	var migration *sdd.ApplicationError
 	if !errors.As(err, &migration) || migration.Code != sdd.ErrorMigrationRequired || migration.Version != 99 {
 		t.Fatalf("unsupported codec error = %#v", err)
@@ -907,8 +886,7 @@ func preparedEntry(t *testing.T, graph sdd.GraphStore, binding sdd.SessionBindin
 }
 
 func errorCode(err error) sdd.ErrorCode {
-	var applicationErr *sdd.ApplicationError
-	if errors.As(err, &applicationErr) {
+	if applicationErr, ok := errors.AsType[*sdd.ApplicationError](err); ok {
 		return applicationErr.Code
 	}
 	return ""

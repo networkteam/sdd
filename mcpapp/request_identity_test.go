@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -66,7 +67,6 @@ func TestStreamableHTTPUsesCurrentRequestIdentity(t *testing.T) {
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "identity-spike", Version: "test"}, nil)
 	for _, lane := range []string{"project_resolution", "engine_query", "mutation_authorization"} {
-		lane := lane
 		mcp.AddTool(server, &mcp.Tool{Name: lane}, func(_ context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
 			mu.Lock()
 			observations = append(observations, observation{lane: lane, identity: identityFromRequest(req)})
@@ -180,10 +180,8 @@ func (a *observingAccess) ResolveProject(_ context.Context, principal sdd.Princi
 		want = "project:write"
 		code = sdd.ErrorWriteDenied
 	}
-	for _, scope := range scopes {
-		if scope == want {
-			return a.runtime, nil
-		}
+	if slices.Contains(scopes, want) {
+		return a.runtime, nil
 	}
 	return nil, &sdd.ApplicationError{Code: code, Message: "scope denied"}
 }
@@ -275,9 +273,9 @@ The HTTP identity test anchors its real mutation here.
 		t.Fatal(err)
 	}
 	defer func() { _ = clientSession.Close() }()
-	if _, err := clientSession.CallTool(t.Context(), &mcp.CallToolParams{Name: "start_session", Arguments: map[string]any{}}); err != nil {
-		t.Fatal(err)
-	}
+	var door ServeResult
+	callIdentityTool(t, clientSession, "start_session", map[string]any{}, &door)
+	session := door.Session
 	var shown ShowResult
 	callIdentityTool(t, clientSession, "show", map[string]any{"ids": []string{"20260713-120000-s-tac-idt"}}, &shown)
 	if !strings.Contains(shown.Entries, "anchors its real mutation") {
@@ -285,8 +283,8 @@ The HTTP identity test anchors its real mutation here.
 	}
 	transport.set("write")
 	var capture ServeResult
-	callIdentityTool(t, clientSession, "start_procedure", map[string]any{"canonical": "capture"}, &capture)
-	callIdentityTool(t, clientSession, "next", map[string]any{"instance": capture.Instance, "report": map[string]any{
+	callIdentityTool(t, clientSession, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &capture)
+	callIdentityTool(t, clientSession, "next", map[string]any{"session": session, "instance": capture.Instance, "report": map[string]any{
 		"body":        "The real HTTP identity path authorizes this durable mutation using the current write-bearing request.",
 		"entryKind":   "gap",
 		"layer":       "tactical",
@@ -298,7 +296,7 @@ The HTTP identity test anchors its real mutation here.
 	if capture.Step != "playback" {
 		t.Fatalf("capture assemble reached %q, want playback; missing=%v instructions=%q", capture.Step, capture.Missing, capture.Instructions)
 	}
-	callIdentityTool(t, clientSession, "next", map[string]any{"instance": capture.Instance, "report": map[string]any{
+	callIdentityTool(t, clientSession, "next", map[string]any{"session": session, "instance": capture.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "confirm the identity-authorized mutation",
 	}}, &capture)
 	if capture.Step != "verifySummary" {

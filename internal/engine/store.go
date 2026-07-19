@@ -227,6 +227,30 @@ func (s *Store) StateSnapshot() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// Collected returns the param- and state-provenance values that are present
+// and non-empty, excluding internal trust machinery. It is a resuming agent's
+// view of what this instance has already gathered — the anchor, chosen scope,
+// and reported judgments that persist across a handover and must not be
+// re-derived. Engine-produced trust records are structurally excluded by the
+// provenance filter; the explicit trust-machinery skip keeps that guarantee
+// even if such a field were ever param- or state-declared.
+func (s *Store) Collected() map[string]any {
+	out := make(map[string]any)
+	for name, sv := range s.values {
+		if sv.Provenance != ProvenanceParam && sv.Provenance != ProvenanceState {
+			continue
+		}
+		if isTrustMachineryField(name) {
+			continue
+		}
+		if !s.Has(name) {
+			continue
+		}
+		out[name] = sv.Value
+	}
+	return out
+}
+
 // Export returns all values with provenance for session-log persistence.
 func (s *Store) Export() map[string]ExportedValue {
 	out := make(map[string]ExportedValue, len(s.values))

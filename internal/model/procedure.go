@@ -7,15 +7,17 @@ import (
 )
 
 // ProcedureSpecRaw retains the machine part of a procedure entry's
-// frontmatter — params, state, steps — as raw YAML nodes. The model does not
-// interpret them: the type-system revision contract places structural
-// validation at engine load time, so the engine decodes these nodes into its
-// typed spec and reports spec errors there. Keeping the raw nodes on the
-// entry lets FormatFrontmatter round-trip a procedure losslessly.
+// frontmatter — params, state, steps, and a shell's framing lanes — as raw
+// YAML nodes. The model does not interpret them: the type-system revision
+// contract places structural validation at engine load time, so the engine
+// decodes these nodes into its typed spec and reports spec errors there.
+// Keeping the raw nodes on the entry lets FormatFrontmatter round-trip a
+// procedure losslessly.
 type ProcedureSpecRaw struct {
-	Params yaml.Node
-	State  yaml.Node
-	Steps  yaml.Node
+	Params  yaml.Node
+	State   yaml.Node
+	Steps   yaml.Node
+	Framing yaml.Node
 }
 
 // ProcedureChain represents a supersession chain of kind: procedure

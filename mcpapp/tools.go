@@ -2,12 +2,15 @@ package mcpapp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -28,6 +31,7 @@ type StartSessionArgs struct {
 }
 
 type StartProcedureArgs struct {
+	Session   string         `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — carry it across context compaction"`
 	Canonical string         `json:"canonical" jsonschema:"the procedure to start, by its stable name (e.g. capture)"`
 	Params    map[string]any `json:"params,omitempty" jsonschema:"typed start inputs per the procedure's declaration: declared params, plus any declared state field the caller wants to seed at start (e.g. a known anchor)"`
 	Label     string         `json:"label,omitempty" jsonschema:"short single-line subject label for the session (the dialogue); set it early, update when the subject sharpens"`
@@ -35,6 +39,7 @@ type StartProcedureArgs struct {
 }
 
 type NextArgs struct {
+	Session  string `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — carry it across context compaction"`
 	Instance string `json:"instance" jsonschema:"instance handle from start_procedure"`
 	// Report carries either state fields for the current step (per the served
 	// report_schema) or a chooser answer {chooser, choice, userWords?, fields?}.
@@ -43,8 +48,8 @@ type NextArgs struct {
 }
 
 type AbandonArgs struct {
-	Instance string `json:"instance,omitempty" jsonschema:"instance handle to abandon (a move in the bound session)"`
-	Session  string `json:"session,omitempty" jsonschema:"parked session handle to tear down directly — no resume, no framing; pass exactly one of instance or session"`
+	Instance string `json:"instance,omitempty" jsonschema:"instance handle to abandon (a move); pass session too, naming the session the move belongs to"`
+	Session  string `json:"session,omitempty" jsonschema:"with instance: the attached session the move belongs to (required). Alone: a session handle to tear down directly — no resume, no framing"`
 	Reason   string `json:"reason,omitempty" jsonschema:"why the instance or session is being abandoned"`
 }
 
@@ -61,6 +66,7 @@ type AbandonResult struct {
 }
 
 type ParkArgs struct {
+	Session  string `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — carry it across context compaction"`
 	Instance string `json:"instance" jsonschema:"running move instance to park"`
 	Note     string `json:"note,omitempty" jsonschema:"one line on why the move is shelved — carried in the session log for whoever resumes it"`
 }
@@ -88,22 +94,23 @@ type ChooserResult struct {
 // ServeResult is the loop's uniform response shape: where the instance
 // stands, what advances it, and the material to work with.
 type ServeResult struct {
-	Session        string         `json:"session" jsonschema:"session handle; sessions survive restarts and resume via resume_session"`
-	Instance       string         `json:"instance"`
-	Procedure      string         `json:"procedure"`
-	Status         string         `json:"status" jsonschema:"running, completed, or abandoned"`
-	Step           string         `json:"step,omitempty"`
-	Goal           string         `json:"goal" jsonschema:"one line: what advances the instance from here"`
-	Instructions   string         `json:"instructions,omitempty"`
-	Missing        []string       `json:"missing,omitempty" jsonschema:"required report fields not yet provided"`
-	ReportSchema   map[string]any `json:"report_schema,omitempty" jsonschema:"JSON Schema for the current step's report"`
-	PendingChooser *ChooserResult `json:"pending_chooser,omitempty"`
-	Execution      string         `json:"execution,omitempty" jsonschema:"execution hint for this instance; fork-preferred means the procedure is a task best run in a disposable forked context"`
-	Produced       map[string]any `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
-	Framing        string         `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); served when its content is new to this connection, omitted while unchanged"`
-	Vocabulary     string         `json:"vocabulary,omitempty" jsonschema:"translation table for non-English graphs: canonical tokens stay English, user-facing narration renders in the configured language; served once per connection"`
-	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"open work, carried on the session shell's serves only: this dialogue's other threads, then other parked dialogues"`
-	Base           *BaseServe     `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue lands now that this move has ended"`
+	Session        string            `json:"session" jsonschema:"session handle; sessions survive restarts and resume via resume_session"`
+	Instance       string            `json:"instance"`
+	Procedure      string            `json:"procedure"`
+	Status         string            `json:"status" jsonschema:"running, completed, or abandoned"`
+	Step           string            `json:"step,omitempty"`
+	Goal           string            `json:"goal" jsonschema:"one line: what advances the instance from here"`
+	Instructions   string            `json:"instructions,omitempty"`
+	Missing        []string          `json:"missing,omitempty" jsonschema:"required report fields not yet provided"`
+	ReportSchema   map[string]any    `json:"report_schema,omitempty" jsonschema:"JSON Schema for the current step's report"`
+	PendingChooser *ChooserResult    `json:"pending_chooser,omitempty"`
+	Execution      string            `json:"execution,omitempty" jsonschema:"execution hint for this instance; fork-preferred means the procedure is a task best run in a disposable forked context"`
+	Produced       map[string]any    `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
+	Framing        string            `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); served when its content is new to this connection, omitted while unchanged"`
+	Vocabulary     string            `json:"vocabulary,omitempty" jsonschema:"translation table for non-English graphs: canonical tokens stay English, user-facing narration renders in the configured language; served once per connection"`
+	OpenThreads    string            `json:"open_threads,omitempty" jsonschema:"this dialogue's own open threads, carried on the session shell's serves; at session entry a one-line count of OTHER open dialogues points at list_sessions. Other dialogues are never listed here"`
+	Base           *BaseServe        `json:"base_junction,omitempty" jsonschema:"the session shell's current serve — where the dialogue lands now that this move has ended"`
+	Collected      map[string]string `json:"collected,omitempty" jsonschema:"state already collected by this instance — values persist across handover; do not re-derive them"`
 }
 
 // BaseServe is the session shell's serve as nested into landing responses
@@ -120,7 +127,7 @@ type BaseServe struct {
 	Instructions   string         `json:"instructions,omitempty"`
 	PendingChooser *ChooserResult `json:"pending_chooser,omitempty"`
 	Framing        string         `json:"framing,omitempty"`
-	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"open work: this dialogue's other threads, then other parked dialogues"`
+	OpenThreads    string         `json:"open_threads,omitempty" jsonschema:"this dialogue's own open threads; other dialogues are never listed here"`
 }
 
 // --- sessions & staging ----------------------------------------------------
@@ -132,7 +139,15 @@ type ListSessionsResult struct {
 }
 
 type ResumeSessionArgs struct {
-	Session string `json:"session,omitempty" jsonschema:"a parked session handle (from list_sessions) to switch this connection to; omit to reorient the session this connection is already in"`
+	Session   string `json:"session,omitempty" jsonschema:"a session handle (from list_sessions) to attach this connection to — works on a fresh unbound connection, and switches away from a currently attached session (parking or concluding it per the leave rule). Omit to reorient the session this connection is already attached to; omit while unattached and the rejection carries the sessions with open work to attach to"`
+	UserWords string `json:"userWords,omitempty" jsonschema:"the user's verbatim request to move into this session; required when attaching to a session this connection did not open. A fresh request that merely resembles the work is not consent — relay what the user actually said"`
+	Takeover  bool   `json:"takeover,omitempty" jsonschema:"pass true to take over a session another client is actively driving (a recent attachment); needed only when the refusal says so. Only recorded session state resumes — not the other conversation's context"`
+	// FullReplay forces a one-shot full re-serve of the currently attached
+	// session's orientation. A no-args reorient normally converges — repeated
+	// calls stub blocks this connection has already seen. Set it when the agent
+	// has genuinely lost that context (a compaction that dropped the framing and
+	// instructions) and needs the complete position again.
+	FullReplay bool `json:"fullReplay,omitempty" jsonschema:"pass true to force a one-shot full re-serve of the session you are already attached to — the escape when a no-args reorient stubs blocks you no longer hold after context loss. Ignored when attaching to a different session"`
 }
 
 type ResumeSessionResult struct {
@@ -145,6 +160,7 @@ type ResumeSessionResult struct {
 }
 
 type StageAttachmentArgs struct {
+	Session string `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — carry it across context compaction"`
 	Name    string `json:"name" jsonschema:"target filename (plain name, no paths)"`
 	Content string `json:"content,omitempty" jsonschema:"file content to stage (UTF-8 text)"`
 	Path    string `json:"path,omitempty" jsonschema:"local file path to stage instead of inline content"`
@@ -246,64 +262,79 @@ type RegistryResult struct {
 func (s *Server) registerTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "start_session",
-		Description: "Open the dialogue session — the door every session enters through. Auto-starts the " +
-			"session shell (user-dialogue by default) and returns its opening serve: your orientation, " +
-			"the available moves, and any parked work as continuation options. Call it once at the start; " +
-			"call it again to have the orientation re-served.",
+		Description: "Open a fresh dialogue session — one of the two doors. Auto-starts the session shell " +
+			"(user-dialogue by default) and returns its opening serve: your orientation, the available " +
+			"moves, and the returned session handle. That handle is the dialogue's identity — retain it " +
+			"across context compaction and pass it to every work tool. Call it again to re-serve the " +
+			"orientation in full.",
 	}, s.startSession)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "start_procedure",
-		Description: "Start a procedure instance (a playbook move such as capture) inside the open session. " +
-			"Returns the current step's instructions, the report schema to answer with, and the goal that " +
-			"advances it. This is the only path that leads to graph writes — writes happen inside " +
-			"procedure transitions, never through a direct tool.",
+		Description: "Start a procedure instance (a playbook move such as capture) in the session named by " +
+			"session (required). Returns the current step's instructions, the report schema to answer " +
+			"with, and the goal that advances it. This is the only path that leads to graph writes — " +
+			"writes happen inside procedure transitions, never through a direct tool.",
 	}, s.startProcedure)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "next",
-		Description: "Advance a procedure instance: send state fields per the served report_schema, or " +
-			"answer a pending chooser with {chooser, choice, userWords?, fields?}. User choosers must " +
-			"carry the user's answer relayed verbatim in userWords. When a move ends, the response " +
-			"carries the session shell's serve — where the dialogue lands.",
+		Description: "Advance a procedure instance in the session named by session (required): send state " +
+			"fields per the served report_schema, or answer a pending chooser with {chooser, choice, " +
+			"userWords?, fields?}. User choosers must carry the user's answer relayed verbatim in " +
+			"userWords. When a move ends, the response carries the session shell's serve — where the " +
+			"dialogue lands.",
 	}, s.next)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "abandon",
-		Description: "Abandon a running move instance (instance), or tear down a parked session " +
-			"directly by handle (session) — one call, no resume, no framing; the response names the " +
-			"label and discarded threads. Nothing is cleaned up implicitly: held WIP markers are " +
-			"surfaced and left standing for resume or grooming. The session shell concludes through " +
-			"its own junction, never through abandon.",
+		Description: "Abandon a running move instance (instance, plus session naming the session it belongs " +
+			"to), or tear down a session directly by handle (session alone) — one call, no resume, no " +
+			"framing; the response names the label and discarded threads. Nothing is cleaned up " +
+			"implicitly: held WIP markers are surfaced and left standing for resume or grooming. Tearing " +
+			"down a session another client is actively driving is refused (the response names the holder) " +
+			"— conclude it there, take it over first, or wait. The session shell concludes through its own " +
+			"junction, never through abandon.",
 	}, s.abandon)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "park",
-		Description: "Park a running move back to the session junction: state and step position keep, " +
-			"the move lists as an open thread (at junctions and on conclude), and next resumes it. " +
-			"Use it when the user shelves work mid-dialogue — a seeded draft parks as a graph-visible " +
-			"thread instead of living in conversation memory as an agent promise.",
+		Description: "Park a running move back to the session junction (session required): state and step " +
+			"position keep, the move lists as an open thread (at junctions and on conclude), and next " +
+			"resumes it. Use it when the user shelves work mid-dialogue — a seeded draft parks as a " +
+			"graph-visible thread instead of living in conversation memory as an agent promise.",
 	}, s.park)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "list_sessions",
-		Description: "List parked dialogue sessions (open moves, not bound to a live connection) with participant, anchor, and last activity.",
+		Name: "list_sessions",
+		Description: "List every session with open work — free discovery, no session needed. Each carries " +
+			"participant, label, last activity, an active/idle tag, and the holding client's name when a " +
+			"client currently holds it; active sessions are listed, never hidden. Attach to one with " +
+			"resume_session.",
 	}, s.listSessions)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "resume_session",
-		Description: "Reorient after losing your place in a session — your working context was compacted " +
-			"or summarized mid-session, or you no longer hold your session or instance handles. Call " +
-			"with no session to re-serve the session this connection is already in: its framing plus " +
-			"every running move at its current step, each with the report schema to continue it. Pass a " +
-			"parked session's handle instead (from list_sessions) to switch to and replay a different " +
-			"one; leaving the current session ends it when nothing is open, parks it when moves are open.",
+		Description: "The attach door, and the compaction escape. Pass a session handle (from list_sessions) " +
+			"to attach this connection to it — works on a fresh unbound connection, and switches away from " +
+			"a currently attached session (parking it when moves are open, concluding it when quiescent). " +
+			"Attaching to a session this connection did not open requires userWords (the user's verbatim " +
+			"request to move into it); if another client is actively driving it (a recent attachment), the " +
+			"refusal names the holder and takeover:true is additionally required. Only recorded session " +
+			"state resumes — step position, collected fields, staged files — not the other conversation's " +
+			"context. Omit session to reorient " +
+			"the session you are already attached to (no consent needed): its framing plus every running " +
+			"move at its current step, each with the report schema to continue it. A plain reorient stubs " +
+			"blocks you were already served — it assumes you still hold them; if a context compaction " +
+			"dropped them, pass fullReplay:true for the complete re-serve. Omit session while unattached " +
+			"and the rejection carries the sessions with open work to attach to.",
 	}, s.resumeSession)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "stage_attachment",
-		Description: "Stage a file into the session scratch and get back a handle to pass in a report's " +
-			"attachments field. Never a graph write — the write gate materializes staged files with the entry.",
+		Description: "Stage a file into the session scratch (session required) and get back a handle to pass " +
+			"in a report's attachments field. Never a graph write — the write gate materializes staged " +
+			"files with the entry.",
 	}, s.stageAttachment)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -341,39 +372,48 @@ func (s *Server) registerTools() {
 	}, s.registryDocs)
 }
 
-// boundSession returns the SDD session bound to the calling connection, or
-// a door-pointing error — every stateful tool requires the session that
-// start_session opens. The rejection inlines the parked-sessions list
-// (handle + label), so a fresh-context agent poking at a stale handle gets
-// its bearings in the same round trip (d-tac-dbk).
-func (s *Server) boundSession(ctx context.Context, req *mcp.CallToolRequest) (*shellSession, error) {
-	if ss := s.sessions.bound(req.Session); ss != nil {
-		return ss, nil
+// attachedSession resolves the session a work tool names, requiring that this
+// connection is attached to it. The handle is the dialogue's identity — a
+// missing one names both doors with the open-session list inlined; a handle
+// this connection is not attached to funnels into resume_session, the single
+// attach point (d-cpt-9of).
+func (s *Server) attachedSession(ctx context.Context, req *mcp.CallToolRequest, session string) (*shellSession, error) {
+	if strings.TrimSpace(session) == "" {
+		return nil, s.noHandleError(ctx, req)
 	}
-	msg := "no session is open — start_session is the door (reads stay free)"
-	var descs []sessionDescriptor
+	bound := s.sessions.bound(req.Session)
+	if bound == nil || string(bound.root.ID()) != session {
+		return nil, toolError("this connection is not attached to %s — attach with resume_session", session)
+	}
+	return bound, nil
+}
+
+// noHandleError is the typed rejection for a work tool called without a valid
+// session handle. It names both doors — start_session for a fresh session,
+// resume_session to attach to an existing one — and inlines the sessions with
+// open work (handle + label), so the follow-up call can already be the attach
+// (d-tac-dbk).
+func (s *Server) noHandleError(ctx context.Context, req *mcp.CallToolRequest) error {
+	msg := "no session handle — start_session opens a fresh session, resume_session attaches to an existing one (reads stay free)"
 	items, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	var lines []string
 	for _, item := range items {
-		if item.HolderLive || len(item.Open) == 0 {
+		if len(item.Open) == 0 {
 			continue
 		}
-		descs = append(descs, sessionDescriptor{Session: string(item.Session), Label: item.Label})
-	}
-	if len(descs) > 0 {
-		lines := make([]string, 0, len(descs))
-		for _, d := range descs {
-			line := d.Session
-			if d.Label != "" {
-				line += " " + strconv.Quote(d.Label)
-			}
-			lines = append(lines, line)
+		line := string(item.Session)
+		if item.Label != "" {
+			line += " " + strconv.Quote(item.Label)
 		}
-		msg += "; parked sessions (resume_session picks one up): " + strings.Join(lines, ", ")
+		lines = append(lines, line)
 	}
-	return nil, toolError("%s", msg)
+	if len(lines) > 0 {
+		msg += "; sessions with open work (resume_session attaches): " + strings.Join(lines, ", ")
+	}
+	return toolError("%s", msg)
 }
 
 func mcpSessionID(session *mcp.ServerSession) string {
@@ -416,7 +456,13 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 		current.rootIdentity = identity
 		s.forgetConnection(req.Session)
 		result, err := s.toRootServeResult(ctx, req, current, serve)
-		return nil, result, err
+		if err != nil {
+			return nil, ServeResult{}, err
+		}
+		if err := s.addDoorCount(ctx, req, current, &result); err != nil {
+			return nil, ServeResult{}, err
+		}
+		return nil, result, nil
 	}
 	workflow, serve, err := s.app.OpenWorkflow(ctx, identity, s.project, sdd.WorkflowOpenRequest{
 		MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
@@ -425,23 +471,29 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
-	ss := &shellSession{id: string(workflow.ID()), participant: "", root: workflow, rootIdentity: identity, lastActivity: time.Now()}
+	ss := &shellSession{id: string(workflow.ID()), root: workflow, rootIdentity: identity}
 	prev := s.sessions.bind(req.Session, ss)
 	if err := s.watchDisconnect(req.Session); err != nil {
 		return nil, ServeResult{}, err
 	}
-	if err := s.leaveSession(ctx, prev); err != nil {
+	if err := s.leaveSession(ctx, prev, sdd.CauseSwitch); err != nil {
 		return nil, ServeResult{}, err
 	}
 	result, err := s.toRootServeResult(ctx, req, ss, serve)
-	return nil, result, err
+	if err != nil {
+		return nil, ServeResult{}, err
+	}
+	if err := s.addDoorCount(ctx, req, ss, &result); err != nil {
+		return nil, ServeResult{}, err
+	}
+	return nil, result, nil
 }
 
 func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, args StartProcedureArgs) (*mcp.CallToolResult, ServeResult, error) {
 	if strings.TrimSpace(args.Canonical) == "" {
 		return nil, ServeResult{}, toolError("canonical is required")
 	}
-	ss, err := s.boundSession(ctx, req)
+	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
@@ -456,7 +508,7 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 }
 
 func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextArgs) (*mcp.CallToolResult, ServeResult, error) {
-	ss, err := s.boundSession(ctx, req)
+	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
@@ -477,13 +529,13 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 }
 
 func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
-	if (args.Instance == "") == (args.Session == "") {
-		return nil, AbandonResult{}, toolError("pass exactly one of instance (abandon a move in the bound session) or session (tear down a parked session)")
-	}
-	if args.Session != "" {
+	if args.Instance == "" {
+		if args.Session == "" {
+			return nil, AbandonResult{}, toolError("pass instance (a move to abandon, with its session) or session alone (tear down a session by handle)")
+		}
 		return s.abandonSession(ctx, req, args)
 	}
-	ss, err := s.boundSession(ctx, req)
+	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, AbandonResult{}, err
 	}
@@ -514,7 +566,7 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 // (d-tac-dbk). Seeded drafts ride the normal dispatch path; park adds no
 // side channel.
 func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkArgs) (*mcp.CallToolResult, ParkResult, error) {
-	ss, err := s.boundSession(ctx, req)
+	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, ParkResult{}, err
 	}
@@ -581,20 +633,26 @@ func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, a
 	return nil, out, nil
 }
 
+// listSessions is free discovery — no attached session required. It lists
+// every session with open work, active ones included (never hidden), each
+// tagged active or idle so the caller can weigh attaching (d-cpt-9of).
 func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ ListSessionsArgs) (*mcp.CallToolResult, ListSessionsResult, error) {
-	if _, err := s.boundSession(ctx, req); err != nil {
-		return nil, ListSessionsResult{}, err
-	}
 	items, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
 	if err != nil {
 		return nil, ListSessionsResult{}, err
 	}
 	var result ListSessionsResult
 	for _, item := range items {
-		if item.HolderLive || len(item.Open) == 0 {
+		if len(item.Open) == 0 {
 			continue
 		}
-		desc := sessionDescriptor{Session: string(item.Session), Label: item.Label, Participant: item.Participant, Anchor: item.Anchor}
+		desc := sessionDescriptor{
+			Session: string(item.Session), Label: item.Label, Participant: item.Participant,
+			Anchor: item.Anchor, Activity: activityTag(item.Active),
+		}
+		if item.Attachment != nil {
+			desc.ClientName = item.Attachment.ClientName
+		}
 		if !item.LastActivity.IsZero() {
 			desc.LastActivity = item.LastActivity.Format(time.RFC3339)
 		}
@@ -606,39 +664,75 @@ func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ L
 	return nil, result, nil
 }
 
-func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, args ResumeSessionArgs) (*mcp.CallToolResult, ResumeSessionResult, error) {
-	current, err := s.boundSession(ctx, req)
-	if err != nil {
-		// No session bound to this connection: boundSession's error already
-		// names the parked sessions to resume by handle — the bootstrap for a
-		// connection with nothing to reorient back into.
-		return nil, ResumeSessionResult{}, err
+// activityTag derives the listing label from attachment recency.
+func activityTag(active bool) string {
+	if active {
+		return "active"
 	}
+	return "idle"
+}
+
+// resumeSession is the attach door and the compaction escape. Its session
+// handle is the deliberate exception to the required-handle rule: omitting it
+// reorients the currently attached session (or, unattached, lists what to
+// attach to); a named handle attaches — working on a fresh unbound connection,
+// and switching (leave rule on the previous) when already attached elsewhere
+// (d-cpt-9of).
+func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, args ResumeSessionArgs) (*mcp.CallToolResult, ResumeSessionResult, error) {
 	identity := s.requestIdentity(req)
-	if args.Session == "" || args.Session == string(current.root.ID()) {
-		s.forgetConnection(req.Session)
-		result, err := current.root.ServeAll(ctx, identity)
+	current := s.sessions.bound(req.Session)
+	// Server memory is a cache, not authority (I1): a binding the store no longer
+	// lists as the current attachment is stale — displaced or torn down. Drop it
+	// so a displaced writer re-establishes through the attach path (with consent)
+	// instead of serving its poisoned in-memory session.
+	if current != nil {
+		held, err := current.root.StillHeld(ctx, identity)
 		if err != nil {
 			return nil, ResumeSessionResult{}, err
 		}
-		current.rootIdentity = identity
-		mapped, err := s.mapRootResume(ctx, req, current, result)
+		if !held {
+			s.forgetConnection(req.Session)
+			s.sessions.unbind(req.Session)
+			current = nil
+		}
+	}
+
+	if args.Session != "" && (current == nil || args.Session != string(current.root.ID())) {
+		workflow, result, err := s.app.ResumeWorkflow(ctx, identity, s.project, sdd.WorkflowResumeRequest{
+			SessionID: sdd.SessionID(args.Session), MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
+			UserWords: args.UserWords, Takeover: args.Takeover,
+		})
+		if err != nil {
+			return nil, ResumeSessionResult{}, err
+		}
+		ss := &shellSession{id: string(workflow.ID()), root: workflow, rootIdentity: identity}
+		prev := s.sessions.bind(req.Session, ss)
+		if err := s.leaveSession(ctx, prev, sdd.CauseSwitch); err != nil {
+			return nil, ResumeSessionResult{}, err
+		}
+		mapped, err := s.mapRootResume(ctx, req, ss, result)
 		return nil, mapped, err
 	}
-	workflow, result, err := s.app.ResumeWorkflow(ctx, identity, s.project, sdd.WorkflowResumeRequest{
-		SessionID: sdd.SessionID(args.Session), MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
-	})
+
+	if current == nil {
+		// Unattached with no handle: name the sessions to attach to — the
+		// bootstrap for a connection with nothing to reorient back into.
+		return nil, ResumeSessionResult{}, s.noHandleError(ctx, req)
+	}
+	// Same-session reorientation converges by content-hash dedup: blocks this
+	// connection already saw stub, so repeated reorients shrink to nothing
+	// (I6). fullReplay is the agent-declared one-shot escape — clear served
+	// memory once so the complete position re-serves after context loss.
+	if args.FullReplay {
+		s.forgetConnection(req.Session)
+	}
+	result, err := current.root.ServeAll(ctx, identity)
 	if err != nil {
 		return nil, ResumeSessionResult{}, err
 	}
-	ss := &shellSession{id: string(workflow.ID()), participant: result.Participant, root: workflow, rootIdentity: identity, lastActivity: time.Now()}
-	prev := s.sessions.bind(req.Session, ss)
-	if err := s.leaveSession(ctx, prev); err != nil {
-		return nil, ResumeSessionResult{}, err
-	}
-	mapped, err := s.mapRootResume(ctx, req, ss, result)
+	current.rootIdentity = identity
+	mapped, err := s.mapRootResume(ctx, req, current, result)
 	return nil, mapped, err
-
 }
 
 // ensureShellInstance re-derives the session's shell instance after replay
@@ -652,7 +746,7 @@ func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, 
 	if (args.Content == "") == (args.Path == "") {
 		return nil, StageAttachmentResult{}, toolError("pass exactly one of content or path")
 	}
-	ss, err := s.boundSession(ctx, req)
+	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, StageAttachmentResult{}, err
 	}
@@ -690,7 +784,7 @@ func (s *Server) readHint(ms *mcp.ServerSession) string {
 	if s.sessions.bound(ms) != nil {
 		return ""
 	}
-	return "no dialogue session is open — start_session is the door; reads stay free"
+	return "no dialogue session on this connection — start_session opens a fresh one, resume_session attaches to an existing one (list_sessions to discover); reads stay free"
 }
 
 // viewHintServedKey is the served-once sentinel for the first-view breadcrumb,
@@ -824,6 +918,80 @@ func guardViewSize(s string) string {
 	return fmt.Sprintf("%s\n\n[view output truncated at %d of %d bytes — narrow with n(K), tighter filters, or fewer sections]", truncated, len(truncated), len(s))
 }
 
+// maxCollectedValueBytes caps a single projected collected value in a resume
+// response. The values persist in full in the session store; the cap only
+// bounds what the re-entry serve carries so a large reported judgment cannot
+// blow the client's token budget.
+const maxCollectedValueBytes = 2000
+
+// maxCollectedInstanceBytes caps the total collected projection for one
+// instance. Per-value capping alone lets a field-heavy instance stack many
+// near-cap values into a payload that, across several resumed instances, can
+// reach the ~10K-token output ceiling where Codex CLI truncates a tool result
+// (s-tac-jom, s-tac-40d) — a silent cut is exactly what d-cpt-0tm forbids. The
+// budget keeps whole, high-signal values in sorted-key order and replaces the
+// rest with a labeled omission, so the resume serve stays comfortably under the
+// host ceiling while every dropped value is named, never silently gone.
+const maxCollectedInstanceBytes = 8000
+
+// capCollected renders each collected value to a display string, truncates any
+// over-cap value, and enforces a per-instance total budget by spending it on
+// whole values in sorted-key order — anything past the budget is replaced with
+// an explicit omission notice, so a resuming agent sees the compression rather
+// than losing a field silently (d-cpt-0tm). Returns nil for an empty projection
+// so the field is omitted (non-resume serves).
+func capCollected(values map[string]any) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make(map[string]string, len(values))
+	spent := 0
+	for _, name := range names {
+		value := capCollectedValue(collectedString(values[name]))
+		if spent+len(value) > maxCollectedInstanceBytes {
+			out[name] = "[collected value omitted here for size — persisted in full in the session store]"
+			continue
+		}
+		spent += len(value)
+		out[name] = value
+	}
+	return out
+}
+
+// collectedString renders a store value for the projection: strings pass
+// through; everything else is JSON-encoded so lists and scalars stay legible.
+// A marshal failure is stamped rather than silently rendered as Go syntax, so
+// an encoding error is visible (mirrors StateSnapshot's "!err:" marker).
+func collectedString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("[!json-encode-error: %v] %v", err, v)
+	}
+	return string(b)
+}
+
+// capCollectedValue truncates an over-cap value on a rune boundary and appends
+// a notice naming the cap, mirroring guardViewSize.
+func capCollectedValue(s string) string {
+	if len(s) <= maxCollectedValueBytes {
+		return s
+	}
+	cut := maxCollectedValueBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s\n\n[collected value truncated at %d of %d bytes — persisted in full, compressed here]", s[:cut], cut, len(s))
+}
+
 func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
@@ -906,11 +1074,33 @@ func (s *Server) registryDocs(ctx context.Context, req *mcp.CallToolRequest, arg
 // exact rendered bytes, a one-line stub after — identical bytes stub,
 // changed content always serves in full (d-tac-dbk).
 
+// composeFraming renders the framing blocks with per-lane served-once dedup:
+// each block this connection has already seen is omitted, so only blocks whose
+// content is new to the connection serve in full. A graph write that changes
+// one lane (the recent-moves lane) re-serves that lane alone, never the stable
+// aspirations or directives — the per-lane dedup that keeps a reorientation
+// from exceeding the original serve (I6).
+func (s *Server) composeFraming(ms *mcp.ServerSession, blocks []string) string {
+	var served []string
+	for _, block := range blocks {
+		if block == "" || s.servedBefore(ms, block) {
+			continue
+		}
+		served = append(served, block)
+	}
+	return strings.Join(served, "\n\n")
+}
+
+// toRootServeResult converts an engine serve into the tool response. The shell's
+// open-work block lists this dialogue's own threads only; other dialogues never
+// appear here (the door's one-line count is composed at the start_session call
+// sites, not in this shared converter).
 func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res := ServeResult{
 		Session: string(serve.Session), Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
 		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Execution: serve.Execution,
+		Collected: capCollected(serve.Collected),
 	}
 	if serve.InstructionUnit != "" && s.servedBefore(req.Session, serve.InstructionUnit) {
 		res.Instructions = serve.ReminderInstructions()
@@ -926,14 +1116,9 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return ServeResult{}, err
 	}
-	if !s.servedBefore(req.Session, framing) {
-		res.Framing = framing
-	}
+	res.Framing = s.composeFraming(req.Session, framing)
 	if ss.root.IsShell(serve.Instance) {
-		res.OpenThreads, err = s.openThreadsRoot(ctx, req, ss)
-		if err != nil {
-			return ServeResult{}, err
-		}
+		res.OpenThreads = s.openThreadsRoot(req, ss)
 	}
 	vocabulary, err := s.app.Vocabulary(ctx, s.requestIdentity(req), s.project)
 	if err != nil {
@@ -964,18 +1149,31 @@ func rootBaseServe(result ServeResult) *BaseServe {
 	}
 }
 
+// attachNote prefixes the resume instructions when this attach displaced a
+// prior attachment: it names the displaced holder (both idle and takeover) and,
+// on a takeover of a recent attachment, states the fidelity limit — only
+// recorded state resumes, not the other conversation's context (d-cpt-9of I5).
+func attachNote(source sdd.WorkflowResumeResult) string {
+	if source.Displaced == nil {
+		return ""
+	}
+	note := fmt.Sprintf("Attached over the previous holder %s (last active %s).", sdd.ClientLabel(source.Displaced.ClientName), source.Displaced.LastActivity.Format(time.RFC3339))
+	if source.TookOver {
+		note += " " + sdd.RecordedStateOnlyNote
+	}
+	return note + "\n\n"
+}
+
 func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, source sdd.WorkflowResumeResult) (ResumeSessionResult, error) {
 	result := ResumeSessionResult{
 		Session: string(source.Session), Participant: source.Participant, Label: source.Label,
-		Instructions: resumeInstructions,
+		Instructions: attachNote(source) + resumeInstructions,
 	}
 	framing, err := ss.root.Framing(ctx, s.requestIdentity(req))
 	if err != nil {
 		return ResumeSessionResult{}, err
 	}
-	if !s.servedBefore(req.Session, framing) {
-		result.Framing = framing
-	}
+	result.Framing = s.composeFraming(req.Session, framing)
 	for i := range source.Open {
 		mapped, err := s.toRootServeResult(ctx, req, ss, &source.Open[i])
 		if err != nil {
@@ -987,43 +1185,67 @@ func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss
 	return result, nil
 }
 
-func (s *Server) openThreadsRoot(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession) (string, error) {
+// openThreadsRoot renders the session shell's open-work block: this dialogue's
+// own open threads only. Other dialogues are never pushed onto any serve (I6,
+// A1): the full labeled listing exists solely via list_sessions, and the door
+// serve (composed at the start_session call sites) carries only a one-line
+// count of them.
+func (s *Server) openThreadsRoot(req *mcp.CallToolRequest, ss *shellSession) string {
 	var lines []string
 	for _, instance := range ss.root.OpenInstances() {
-		lines = append(lines, fmt.Sprintf("- (this dialogue) %s: %s at %s", instance.Instance, instance.Procedure, instance.Step))
-	}
-	sessions, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
-	if err != nil {
-		return "", err
-	}
-	for _, item := range sessions {
-		if item.Session == ss.root.ID() || len(item.Open) == 0 || item.HolderLive {
-			continue
-		}
-		var line strings.Builder
-		fmt.Fprintf(&line, "- %s", item.Session)
-		if item.Label != "" {
-			fmt.Fprintf(&line, " %q", item.Label)
-		}
-		if item.Participant != "" {
-			fmt.Fprintf(&line, " (%s)", item.Participant)
-		}
-		var open []string
-		for _, instance := range item.Open {
-			open = append(open, instance.Procedure+" at "+instance.Step)
-		}
-		fmt.Fprintf(&line, " — open: %s", strings.Join(open, ", "))
-		if !item.LastActivity.IsZero() {
-			fmt.Fprintf(&line, ", last active %s", item.LastActivity.Format(time.RFC3339))
-		}
-		lines = append(lines, line.String())
+		lines = append(lines, fmt.Sprintf("- %s: %s at %s", instance.Instance, instance.Procedure, instance.Step))
 	}
 	if len(lines) == 0 {
-		return "", nil
+		return ""
 	}
 	header := openThreadsReminder
 	if !s.servedBefore(req.Session, openThreadsIntro) {
 		header = openThreadsIntro
 	}
-	return header + "\n" + strings.Join(lines, "\n"), nil
+	return header + "\n" + strings.Join(lines, "\n")
+}
+
+// addDoorCount appends the session-entry one-line count of OTHER open dialogues
+// to a door serve's open-threads block. Composed only at the start_session call
+// sites (never inside the shared converter), so a junction serve — where other
+// dialogues must not appear at all — never carries it.
+func (s *Server) addDoorCount(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, result *ServeResult) error {
+	count, err := s.otherWorkCount(ctx, req, ss)
+	if err != nil {
+		return err
+	}
+	if count == "" {
+		return nil
+	}
+	if result.OpenThreads == "" {
+		result.OpenThreads = count
+	} else {
+		result.OpenThreads += "\n\n" + count
+	}
+	return nil
+}
+
+// otherWorkCount is the session-entry one-liner: how many OTHER sessions carry
+// open work, pointing at list_sessions. A count, never a listing — other
+// dialogues are the user's to ask about, not offered here (I6, A1).
+func (s *Server) otherWorkCount(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession) (string, error) {
+	sessions, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
+	if err != nil {
+		return "", err
+	}
+	n := 0
+	for _, item := range sessions {
+		if item.Session == ss.root.ID() || len(item.Open) == 0 {
+			continue
+		}
+		n++
+	}
+	if n == 0 {
+		return "", nil
+	}
+	noun := "dialogue"
+	if n > 1 {
+		noun = "dialogues"
+	}
+	return fmt.Sprintf("%d other open %s — list_sessions to see them (they are the user's to ask about, not offered here)", n, noun), nil
 }

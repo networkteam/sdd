@@ -18,8 +18,9 @@ const (
 	ErrorReadDenied             ErrorCode = "read_denied"
 	ErrorWriteDenied            ErrorCode = "write_denied"
 	ErrorSessionOwnership       ErrorCode = "session_ownership_mismatch"
-	ErrorSessionInUse           ErrorCode = "session_in_use"
 	ErrorSessionConflict        ErrorCode = "session_conflict"
+	ErrorSessionDisplaced       ErrorCode = "session_displaced"
+	ErrorConsentRequired        ErrorCode = "consent_required"
 	ErrorGraphConflict          ErrorCode = "graph_conflict"
 	ErrorMigrationRequired      ErrorCode = "migration_required"
 	ErrorRecoveryRequired       ErrorCode = "recovery_required"
@@ -33,8 +34,12 @@ type ApplicationError struct {
 	ApplyState ApplyState
 	Revision   string
 	Version    uint32
-	Holder     *SessionHolder
 	Cause      error
+	// Attachment and AttachmentCause carry the interpreted conflict on an
+	// ErrorSessionDisplaced: who now holds the session (or the record that ended
+	// it) and how it ended, so the displaced writer can be told who/when/why.
+	Attachment      *Attachment
+	AttachmentCause AttachmentCause
 }
 
 func (e *ApplicationError) Error() string {

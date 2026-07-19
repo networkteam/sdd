@@ -272,6 +272,8 @@ steps:
       chooser: user
       options:
         - {choice: confirm, call: confirmPlayback, to: end(completed)}
+framing:
+    - {fn: viewLayout, args: {layout: 'focus:brief'}}
 ---
 
 Procedure body.
@@ -287,8 +289,8 @@ Draft the entry.
 	if e.ProcedureSpec == nil {
 		t.Fatal("ProcedureSpec not retained on procedure entry")
 	}
-	if e.ProcedureSpec.Params.IsZero() || e.ProcedureSpec.State.IsZero() || e.ProcedureSpec.Steps.IsZero() {
-		t.Fatal("expected params, state, and steps nodes to be retained")
+	if e.ProcedureSpec.Params.IsZero() || e.ProcedureSpec.State.IsZero() || e.ProcedureSpec.Steps.IsZero() || e.ProcedureSpec.Framing.IsZero() {
+		t.Fatal("expected params, state, steps, and framing nodes to be retained")
 	}
 
 	// Round trip: format, re-parse, and check the machine part survives.
@@ -306,6 +308,16 @@ Draft the entry.
 	}
 	if len(steps) != 2 || steps[0]["id"] != "assemble" || steps[1]["id"] != "playback" {
 		t.Fatalf("round-tripped steps lost structure: %v", steps)
+	}
+	if e2.ProcedureSpec.Framing.IsZero() {
+		t.Fatal("framing lost in round trip")
+	}
+	var framing []map[string]any
+	if err := e2.ProcedureSpec.Framing.Decode(&framing); err != nil {
+		t.Fatalf("decoding round-tripped framing: %v", err)
+	}
+	if len(framing) != 1 || framing[0]["fn"] != "viewLayout" {
+		t.Fatalf("round-tripped framing lost structure: %v", framing)
 	}
 }
 
