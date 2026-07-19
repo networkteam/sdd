@@ -2,6 +2,9 @@ package application_test
 
 import (
 	"bytes"
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
+	localadapter "github.com/networkteam/sdd/local"
 )
 
 // End-to-end write-path coverage for the slice-2 focus kind: a focus flows
@@ -150,5 +154,132 @@ func TestCreateEntry_FocusRendersThroughAsFocusBlock(t *testing.T) {
 	}
 	if !strings.Contains(out, "2026-01-01") {
 		t.Errorf("focus block should render the focus when, got %q", out)
+	}
+}
+
+// TestWorkflowCaptureFocusPersistsThroughRealNewEntry drives a focus draft
+// through the real capture procedure over the workflow engine — report,
+// playback confirm, summary verify — so the store→model type assertions in
+// runWorkflowNewEntry that read involvement/focusActors/focusWhen off the engine
+// store are exercised for real, not just proven by the compiler. A wrong
+// assertion would silently drop the optional focus fields; this catches it.
+func TestWorkflowCaptureFocusPersistsThroughRealNewEntry(t *testing.T) {
+	const targetID = "20260717-120000-d-tac-tgt"
+	dir := t.TempDir()
+	writeFocusWorkflowTarget(t, dir, targetID)
+
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		LLM: sdd.LLMExecutorFuncs{
+			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
+			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
+				if request.Purpose == "preflight" {
+					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
+				}
+				return sdd.LLMResult{Output: []byte("A focus advancing the target directive this cycle.")}, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "focus-workflow"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	started, err := workflow.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "capture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance := started.Instance
+
+	serve := advanceWorkflow(t, workflow, identity, instance, map[string]any{
+		"body":        "Advance the target directive to done this cycle — the current focus.",
+		"entryKind":   "focus",
+		"layer":       "tactical",
+		"confidence":  "high",
+		"widenReport": "checked the graph for an active focus over this target before drafting",
+		"focusActors": []any{"Christopher"},
+		"focusWhen":   map[string]any{"from": "2026-01-01", "to": "2026-03-01"},
+		"involvement": []any{
+			// Actors omitted: inherits the focus-level default.
+			map[string]any{"target": targetID},
+			// Explicit empty: deliberately unattributed / pull-available.
+			map[string]any{"target": targetID, "actors": []any{}},
+		},
+	})
+	if serve.Step != "playback" {
+		t.Fatalf("focus report should reach playback, got %q", serve.Step)
+	}
+
+	serve = advanceWorkflow(t, workflow, identity, instance, map[string]any{
+		"chooser": "playback", "choice": "confirm", "userWords": "confirm",
+	})
+	if serve.Step != "verifySummary" {
+		t.Fatalf("focus confirm should reach verifySummary, got %q", serve.Step)
+	}
+
+	serve = advanceWorkflow(t, workflow, identity, instance, map[string]any{
+		"chooser": "verifySummary", "choice": "faithful", "fields": map[string]any{"fidelityNote": "faithful"},
+	})
+	focusID, _ := serve.Produced["entryId"].(string)
+	if focusID == "" {
+		t.Fatalf("capture produced no entryId: %+v", serve.Produced)
+	}
+
+	e := loadEntryByID(t, dir, focusID)
+	if !e.IsFocus() {
+		t.Fatalf("persisted entry is not a focus: kind=%s", e.Kind)
+	}
+	// The optional focus-level fields must survive the store→model seam — a
+	// wrong type assertion in runWorkflowNewEntry would drop them silently.
+	if len(e.FocusActors) != 1 || e.FocusActors[0] != "Christopher" {
+		t.Errorf("focus actors = %v, want [Christopher]", e.FocusActors)
+	}
+	if e.FocusWhen == nil || e.FocusWhen.From != "2026-01-01" || e.FocusWhen.To != "2026-03-01" {
+		t.Errorf("focus when = %+v, want 2026-01-01→2026-03-01", e.FocusWhen)
+	}
+	if len(e.Involvement) != 2 {
+		t.Fatalf("involvement = %v, want two triples", e.Involvement)
+	}
+	if e.Involvement[0].ActorsSet {
+		t.Errorf("first involvement should inherit (unset actors), got ActorsSet=true")
+	}
+	if !e.Involvement[1].ActorsSet || len(e.Involvement[1].Actors) != 0 {
+		t.Errorf("second involvement should be explicit-empty (pull-available), got set=%v actors=%v", e.Involvement[1].ActorsSet, e.Involvement[1].Actors)
+	}
+}
+
+func writeFocusWorkflowTarget(t *testing.T, dir, id string) {
+	t.Helper()
+	rel, err := model.IDToRelPath(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\ntype: decision\nkind: directive\nlayer: tactical\nintent: pending\nsummary: A directive the focus advances.\n---\n\nThe target directive a focus involvement resolves against.\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
