@@ -73,7 +73,12 @@ func (f *fakeEmbedder) embed(texts []string) ([][]float32, error) {
 	return out, nil
 }
 func (f *fakeEmbedder) Dimensions() int { return 4 }
-func (f *fakeEmbedder) BatchSize() int  { return 64 }
+
+// BatchSize is sized to hold the whole shipped base-procedure/base-fact set
+// plus these tests' small project fixtures in a single embed round-trip, so the
+// batch-count assertions stay stable as the base set grows (e.g. adding the
+// bootstrap procedure). Raise it if the embedded set ever outgrows this.
+func (f *fakeEmbedder) BatchSize() int { return 128 }
 func (f *fakeEmbedder) Fingerprint() string {
 	if f.fingerprint == "" {
 		return "fake/v1/4"
