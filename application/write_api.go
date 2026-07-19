@@ -46,9 +46,16 @@ type EntryDraft struct {
 	// a kind: role decision's bound actor canonical. Mirrors the CLI-side
 	// NewEntryCmd fields — ignored on other kinds, written onto the entry so the
 	// model-layer validator sees the required frontmatter.
-	Canonical     string
-	Aliases       []string
-	Actor         string
+	Canonical string
+	Aliases   []string
+	Actor     string
+	// FocusActors, FocusWhen, and Involvement carry a kind: focus decision's
+	// advances list and its focus-level defaults. Mirrors the CLI-side
+	// NewEntryCmd fields — ignored on other kinds, written onto the entry so
+	// the model-layer validator sees the required involvement frontmatter.
+	FocusActors   []string
+	FocusWhen     *model.FocusWhen
+	Involvement   []model.Involvement
 	SkipPreflight bool
 }
 
@@ -155,6 +162,8 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		Content: draft.Body, Participants: append([]string(nil), draft.Participants...),
 		Confidence: draft.Confidence, Topics: topics, Time: runtime.options.Now(),
 		Canonical: draft.Canonical, Aliases: append([]string(nil), draft.Aliases...), Actor: draft.Actor,
+		FocusActors: append([]string(nil), draft.FocusActors...), FocusWhen: draft.FocusWhen,
+		Involvement: append([]model.Involvement(nil), draft.Involvement...),
 	}
 	if len(entry.Participants) == 0 {
 		if principal.Participant != "" {

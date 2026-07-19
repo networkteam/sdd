@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/networkteam/sdd/internal/engine"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
 
@@ -123,7 +124,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 	if err := registry.RegisterCommand(engine.Command{
 		Doc: engine.FuncDoc{
 			Name: "newEntry", Doc: "Creates the entry from the capture state fields (pre-flight inside; staged attachments materialized from handles; a recorded override skips pre-flight, durably logged).",
-			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "canonical", "aliases", "roleActor", "preflightOverride"}, Writes: []string{"entryId", "findings"},
+			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "canonical", "aliases", "roleActor", "involvement", "focusActors", "focusWhen", "preflightOverride"}, Writes: []string{"entryId", "findings"},
 		},
 		MutatesGraph: true,
 		Fn:           w.runWorkflowNewEntry,
@@ -237,6 +238,26 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	draft.Canonical, _ = workflowStoreString(ctx.Store, "canonical")
 	draft.Actor, _ = workflowStoreString(ctx.Store, "roleActor")
 	draft.Aliases = workflowStoreStrings(ctx.Store, "aliases")
+	draft.FocusActors = workflowStoreStrings(ctx.Store, "focusActors")
+	if v, ok := ctx.Store.Get("focusWhen"); ok {
+		if w, ok := v.(*engine.When); ok {
+			draft.FocusWhen = modelFocusWhen(w)
+		}
+	}
+	if v, ok := ctx.Store.Get("involvement"); ok {
+		if items, ok := v.([]any); ok {
+			for _, item := range items {
+				if inv, ok := item.(engine.Involvement); ok {
+					draft.Involvement = append(draft.Involvement, model.Involvement{
+						Target:    inv.Target,
+						Actors:    append([]string(nil), inv.Actors...),
+						ActorsSet: inv.ActorsSet,
+						When:      modelFocusWhen(inv.When),
+					})
+				}
+			}
+		}
+	}
 	if override, ok := ctx.Store.Get("preflightOverride"); ok {
 		draft.SkipPreflight, _ = override.(bool)
 	}
@@ -296,6 +317,13 @@ func (w *WorkflowSession) mutationTarget(store *engine.Store, branchField string
 		return MutationTarget{}
 	}
 	return MutationTarget{Project: w.project, Branch: branch}
+}
+
+func modelFocusWhen(w *engine.When) *model.FocusWhen {
+	if w == nil {
+		return nil
+	}
+	return &model.FocusWhen{From: w.From, To: w.To}
 }
 
 func workflowStoreString(store *engine.Store, name string) (string, bool) {

@@ -1,0 +1,154 @@
+package application_test
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/finders"
+	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/presenters"
+	"github.com/networkteam/sdd/internal/query"
+)
+
+// End-to-end write-path coverage for the slice-2 focus kind: a focus flows
+// through CreateEntry carrying involvement triples, focus-level actors, and a
+// when range onto the entry; it persists, parses back with full fidelity
+// (including the unset-vs-explicit-empty actors distinction), and renders
+// through the existing as-focus-block view with no new rendering semantics.
+
+// createFocusTarget writes a directive the focus involvement can resolve
+// against, returning its ID and the advanced binding (each write bumps the
+// binding generation — the next write must carry the fresh one).
+func createFocusTarget(t *testing.T, app *sdd.Application, identity sdd.RequestIdentity, binding sdd.SessionBinding) (string, sdd.SessionBinding) {
+	t.Helper()
+	target, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
+		Kind: "directive", Layer: "tactical", Intent: "pending", Confidence: "high",
+		Body: "A directive the focus advances.",
+	})
+	if err != nil || target.EntryID == "" {
+		t.Fatalf("target CreateEntry = %+v, err %v", target, err)
+	}
+	return target.EntryID, target.Binding
+}
+
+func TestCreateEntry_FocusPersistsInvolvementActorsAndWhen(t *testing.T) {
+	app, identity, binding, dir := newIdentityWriteApp(t)
+	targetID, binding := createFocusTarget(t, app, identity, binding)
+
+	focus, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
+		Kind: "focus", Layer: "tactical", Confidence: "high",
+		Body:        "Advance the target directive this cycle — the current focus.",
+		FocusActors: []string{"Christopher"},
+		FocusWhen:   &model.FocusWhen{From: "2026-01-01", To: "2026-03-01"},
+		Involvement: []model.Involvement{{
+			Target: targetID,
+			Actors: []string{"Christopher"}, ActorsSet: true,
+			When: &model.FocusWhen{From: "2026-02-01"},
+		}},
+	})
+	if err != nil || focus.EntryID == "" {
+		t.Fatalf("focus CreateEntry = %+v, err %v", focus, err)
+	}
+
+	e := loadEntryByID(t, dir, focus.EntryID)
+	if !e.IsFocus() {
+		t.Fatalf("persisted entry is not a focus: kind=%s", e.Kind)
+	}
+	if len(e.FocusActors) != 1 || e.FocusActors[0] != "Christopher" {
+		t.Errorf("focus actors = %v, want [Christopher]", e.FocusActors)
+	}
+	if e.FocusWhen == nil || e.FocusWhen.From != "2026-01-01" || e.FocusWhen.To != "2026-03-01" {
+		t.Errorf("focus when = %+v, want 2026-01-01→2026-03-01", e.FocusWhen)
+	}
+	if len(e.Involvement) != 1 {
+		t.Fatalf("involvement = %v, want one triple", e.Involvement)
+	}
+	inv := e.Involvement[0]
+	if inv.Target != targetID {
+		t.Errorf("involvement target = %q, want %q", inv.Target, targetID)
+	}
+	if !inv.ActorsSet || len(inv.Actors) != 1 || inv.Actors[0] != "Christopher" {
+		t.Errorf("involvement actors = %v (set %v), want [Christopher]", inv.Actors, inv.ActorsSet)
+	}
+	if inv.When == nil || inv.When.From != "2026-02-01" {
+		t.Errorf("involvement when = %+v, want from 2026-02-01", inv.When)
+	}
+}
+
+func TestCreateEntry_FocusPreservesActorsSetDistinction(t *testing.T) {
+	app, identity, binding, dir := newIdentityWriteApp(t)
+	targetID, binding := createFocusTarget(t, app, identity, binding)
+
+	focus, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
+		Kind: "focus", Layer: "tactical", Confidence: "high",
+		Body: "A focus spanning two targets with different actor postures.",
+		Involvement: []model.Involvement{
+			// Unset: inherits the focus-level default (no actors here → nil).
+			{Target: targetID},
+			// Explicit empty: deliberately unattributed / pull-available.
+			{Target: targetID, Actors: []string{}, ActorsSet: true},
+		},
+	})
+	if err != nil || focus.EntryID == "" {
+		t.Fatalf("focus CreateEntry = %+v, err %v", focus, err)
+	}
+
+	e := loadEntryByID(t, dir, focus.EntryID)
+	if len(e.Involvement) != 2 {
+		t.Fatalf("involvement = %v, want two triples", e.Involvement)
+	}
+	if e.Involvement[0].ActorsSet {
+		t.Errorf("first involvement should be unset (inherit), got ActorsSet=true actors=%v", e.Involvement[0].Actors)
+	}
+	if !e.Involvement[1].ActorsSet {
+		t.Errorf("second involvement should be explicit-empty (pull-available), got ActorsSet=false")
+	}
+	if len(e.Involvement[1].Actors) != 0 {
+		t.Errorf("second involvement actors = %v, want explicit empty", e.Involvement[1].Actors)
+	}
+}
+
+func TestCreateEntry_FocusRendersThroughAsFocusBlock(t *testing.T) {
+	app, identity, binding, dir := newIdentityWriteApp(t)
+	targetID, binding := createFocusTarget(t, app, identity, binding)
+
+	focus, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
+		Kind: "focus", Layer: "tactical", Confidence: "high",
+		Body:        "Advance the target directive — rendered through the existing focus block.",
+		FocusWhen:   &model.FocusWhen{From: "2026-01-01", To: "2026-03-01"},
+		Involvement: []model.Involvement{{Target: targetID}},
+	})
+	if err != nil || focus.EntryID == "" {
+		t.Fatalf("focus CreateEntry = %+v, err %v", focus, err)
+	}
+
+	// Build a graph from the two engine-written entries and render it through
+	// the existing view pipeline — no focus-specific presenter code is added by
+	// this slice; the write path just has to feed the established surface.
+	g := model.NewGraph([]*model.Entry{
+		loadEntryByID(t, dir, targetID),
+		loadEntryByID(t, dir, focus.EntryID),
+	})
+	layout, err := query.ParseLayout("kind(focus):active:expand(involvement):as-focus-block")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := finders.New(finders.Options{}).View(query.ViewQuery{Graph: g, Layout: layout})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	presenters.RenderView(&buf, result)
+	out := buf.String()
+	if !strings.Contains(out, focus.EntryID) {
+		t.Errorf("focus block should render the focus, got %q", out)
+	}
+	if !strings.Contains(out, targetID) {
+		t.Errorf("focus block should render the involvement target, got %q", out)
+	}
+	if !strings.Contains(out, "2026-01-01") {
+		t.Errorf("focus block should render the focus when, got %q", out)
+	}
+}
