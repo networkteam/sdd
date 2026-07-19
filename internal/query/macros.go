@@ -20,6 +20,22 @@ import (
 // parsing so each can be tested in isolation. The CLI calls ParseLayout
 // then ExpandMacros; tests can target either step.
 func ExpandMacros(layout model.Layout) (model.Layout, error) {
+	// A lone layout macro expands into several sections first; the per-section
+	// pass below then finishes any section macros they introduce (participants,
+	// aspirations). A layout macro only triggers when it is the whole layout —
+	// one section, one function — so a stray `readiness` mid-layout falls
+	// through to the section pass and the executor's unknown-function error.
+	if len(layout.Sections) == 1 && len(layout.Sections[0].Functions) == 1 {
+		first := layout.Sections[0].Functions[0]
+		if expand, ok := layoutMacros[first.Name]; ok {
+			expanded, err := expand(first.Args)
+			if err != nil {
+				return model.Layout{}, fmt.Errorf("%s: %w", first.Name, err)
+			}
+			layout = expanded
+		}
+	}
+
 	out := model.Layout{Sections: make([]model.Section, 0, len(layout.Sections))}
 	for i, section := range layout.Sections {
 		expanded, err := expandSection(section)
@@ -35,8 +51,11 @@ func ExpandMacros(layout model.Layout) (model.Layout, error) {
 // help-text rendering. Exposed so the CLI's view help doesn't need to
 // import the registry directly.
 func MacroNames() []string {
-	names := make([]string, 0, len(macros))
+	names := make([]string, 0, len(macros)+len(layoutMacros))
 	for n := range macros {
+		names = append(names, n)
+	}
+	for n := range layoutMacros {
 		names = append(names, n)
 	}
 	sort.Strings(names)
@@ -77,6 +96,33 @@ var macros = map[string]func(args []model.FunctionArg) ([]model.Function, error)
 	"contracts":    expandContracts,
 	"participants": expandParticipants,
 	"wip":          expandWIP,
+}
+
+// layoutMacros are layout-level macros: a lone macro name expands into a
+// multi-section layout, which section-level macro expansion then finishes.
+// `readiness` is the first — its four capped lanes (participants, aspirations,
+// strategic and conceptual guiding direction) cannot live in one section, so
+// it cannot be a section macro. Both orient's inject and refresh's pull name
+// `readiness`, so the four-lane string lives here once (d-tac-e55).
+var layoutMacros = map[string]func(args []model.FunctionArg) (model.Layout, error){
+	"readiness": expandReadinessLayout,
+}
+
+// readinessLayout is the capped bootstrap grounding read: who is known
+// (participants), what the project pulls toward (aspirations), and its guiding
+// direction (strategic) and shape (conceptual). Composed entirely from
+// existing filter/macro vocabulary; on a fresh graph every lane is empty,
+// which is the intended "nothing yet" signal.
+const readinessLayout = `participants:brief,` +
+	`aspirations:active:rank(heat(exp-14d)):n(6):name("Aspirations"):brief:as-list,` +
+	`kind(directive):intent(guiding):layer(strategic):active:rank(heat(exp-14d)):n(6):name("Direction — strategic guiding"):brief:as-list,` +
+	`kind(directive):intent(guiding):layer(conceptual):active:rank(heat(exp-14d)):n(6):name("Shape — conceptual guiding"):brief:as-list`
+
+func expandReadinessLayout(args []model.FunctionArg) (model.Layout, error) {
+	if len(args) > 0 {
+		return model.Layout{}, fmt.Errorf("takes no arguments")
+	}
+	return ParseLayout(readinessLayout)
 }
 
 // expandTop expands `top(N)` with a baked `name-prefix("Top")` so the

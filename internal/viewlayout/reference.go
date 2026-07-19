@@ -89,6 +89,7 @@ var macroReference = map[string]string{
 	"contracts":    "contracts — active contracts",
 	"participants": "participants — active actors with bound roles",
 	"wip":          "wip — active WIP markers",
+	"readiness":    "readiness — capped bootstrap grounding: participants, aspirations, strategic and conceptual guiding",
 }
 
 var categoryOrder = []string{"Sources", "Filters", "Rank", "Page", "Aggregate", "Transform", "Output", "Other primitives"}
