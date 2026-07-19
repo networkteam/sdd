@@ -271,6 +271,13 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 	}
 
 	for name, d := range paramsYAML {
+		// default applies only to state (applyStateDefaults iterates State); a
+		// default on a param would validate but never be applied — reject it
+		// loudly rather than let it look effective.
+		if d.Default != nil {
+			addProblem("params.%s: default is not supported on params — params are supplied at start", name)
+			continue
+		}
 		decl, err := parseVarDecl(name, d)
 		if err != nil {
 			addProblem("params.%s: %v", name, err)
