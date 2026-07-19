@@ -19,8 +19,10 @@ func TestCatchup_HappyPath(t *testing.T) {
 	if sv.Step != "compose" {
 		t.Fatalf("start step = %s, want compose", sv.Step)
 	}
-	// The injected multi-section layout carries every lane, focus included.
-	for _, lane := range []string{"focus,", "Recent done", "Active and hot", "Open loops", "Open and warm", ",wip"} {
+	// The injected multi-section layout carries every lane, focus included,
+	// each rendered brief so the compose serve stays inside host tool-output
+	// budgets (s-tac-jom).
+	for _, lane := range []string{"focus:brief,", "Recent done", "Active and hot", "Open loops", "Open and warm", ",wip"} {
 		if !strings.Contains(sv.Instructions, lane) {
 			t.Errorf("compose unit should inject the %q lane, got %q", lane, sv.Instructions)
 		}
