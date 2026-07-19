@@ -244,6 +244,64 @@ func TestCapture_OneShotHappyPath(t *testing.T) {
 	}
 }
 
+func TestCapture_FactIndexSetThenClearSurvivesReplay(t *testing.T) {
+	env := newFixtureEnv(t)
+	var log strings.Builder
+	env.session.sink = NewWriterSink(&log)
+
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := fullDraft()
+	draft["entryKind"] = "fact"
+	draft["index"] = map[string]any{"title": "How to compose graph views", "topic": "cli/ux"}
+	sv, err = env.session.Report(sv.Instance, draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const playback = "- index:\n    title: How to compose graph views\n    topic: cli/ux"
+	if !strings.Contains(sv.Instructions, playback) {
+		t.Fatalf("playback missing nested fact index:\n%s", sv.Instructions)
+	}
+	index, ok := env.session.instances[sv.Instance].Store.Get("index")
+	if !ok || index != (FactIndex{Title: "How to compose graph views", Topic: "cli/ux"}) {
+		t.Fatalf("stored index = %#v", index)
+	}
+	sv, err = env.session.Answer(sv.Instance, "playback", "adjust", map[string]any{"index": nil}, "remove the index")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sv.Instructions, "- index:") {
+		t.Fatalf("playback retained cleared fact index:\n%s", sv.Instructions)
+	}
+
+	events, err := ReadEvents(strings.NewReader(log.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedEnv := newFixtureEnv(t)
+	replayed, err := replayedEnv.engine.ReplaySession("s_test", "christopher", events,
+		func(string) (*Spec, error) { return replayedEnv.spec, nil }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, ok := replayed.Instance(sv.Instance)
+	if !ok {
+		t.Fatal("replayed capture instance missing")
+	}
+	if index, ok := instance.Store.Get("index"); ok {
+		t.Fatalf("replayed index = %#v, want cleared", index)
+	}
+	replayedServe, err := replayed.Serve(sv.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(replayedServe.Instructions, "- index:") {
+		t.Fatalf("replayed playback retained cleared fact index:\n%s", replayedServe.Instructions)
+	}
+}
+
 func TestCapture_StallNamesExactlyWhatIsMissing(t *testing.T) {
 	env := newFixtureEnv(t)
 	sv, err := env.session.Start(env.spec, nil, "")

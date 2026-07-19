@@ -129,6 +129,14 @@ func (s *Store) WriteState(fields map[string]any) ([]string, error) {
 			}
 			return nil, fmt.Errorf("field %q is not declared in state — reports can only write declared state fields", name)
 		}
+		if raw == nil {
+			if !decl.Optional {
+				return nil, fmt.Errorf("field %q is required and cannot be cleared", name)
+			}
+			delete(s.values, name)
+			written = append(written, name)
+			continue
+		}
 		v, err := decl.Type.ValidateValue(raw)
 		if err != nil {
 			return nil, fmt.Errorf("field %q: %w", name, err)

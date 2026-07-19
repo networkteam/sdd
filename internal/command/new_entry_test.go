@@ -168,6 +168,37 @@ func TestBuildEntry_MapsIntent(t *testing.T) {
 	}
 }
 
+func TestNewEntryCmdFactIndex(t *testing.T) {
+	index, err := model.NewFactIndex("How to compose graph views", "cli/view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := &command.NewEntryCmd{
+		Type: model.TypeSignal, Layer: model.LayerTactical, Kind: model.KindFact,
+		TopicLabels: []string{"cli/view"}, Index: index,
+	}
+	if err := cmd.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	entry, err := cmd.BuildEntry("20260719-120000-s-tac-idx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Index != index || entry.Index.Title != "How to compose graph views" {
+		t.Fatalf("entry.Index = %+v", entry.Index)
+	}
+
+	cmd.Kind = model.KindInsight
+	if err := cmd.Validate(); err == nil {
+		t.Fatal("Validate accepted index on non-fact")
+	}
+	cmd.Kind = model.KindFact
+	cmd.TopicLabels = []string{"agent/ux"}
+	if err := cmd.Validate(); err == nil {
+		t.Fatal("Validate accepted index topic absent from topics")
+	}
+}
+
 func TestBuildEntry_ResolvesAttachmentPaths(t *testing.T) {
 	cmd := &command.NewEntryCmd{
 		Type:        model.TypeDecision,

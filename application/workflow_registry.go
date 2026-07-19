@@ -130,7 +130,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 	if err := registry.RegisterCommand(engine.Command{
 		Doc: engine.FuncDoc{
 			Name: "newEntry", Doc: "Creates the entry from the capture state fields (pre-flight inside; staged attachments materialized from handles; a recorded override skips pre-flight, durably logged).",
-			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "preflightOverride"}, Writes: []string{"entryId", "findings"},
+			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "index", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "preflightOverride"}, Writes: []string{"entryId", "findings"},
 		},
 		MutatesGraph: true,
 		Fn:           w.runWorkflowNewEntry,
@@ -241,6 +241,13 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	}
 	draft.Confidence, _ = workflowStoreString(ctx.Store, "confidence")
 	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
+	if value, ok := ctx.Store.Get("index"); ok {
+		index, valid := value.(engine.FactIndex)
+		if !valid {
+			return fmt.Errorf("newEntry: index has invalid stored type")
+		}
+		draft.Index = &FactIndex{Title: index.Title, Topic: index.Topic}
+	}
 	if override, ok := ctx.Store.Get("preflightOverride"); ok {
 		draft.SkipPreflight, _ = override.(bool)
 	}

@@ -554,6 +554,10 @@ func newCmd() *cli.Command {
 				Name:  "topics",
 				Usage: "Comma-separated topic labels (any kind) — inline topic membership written as `topics:` strings",
 			},
+			&cli.StringFlag{
+				Name:  "index",
+				Usage: "Fact retrieval cue — JSON object {\"title\":\"<standalone title>\",\"topic\":\"<topic also in --topics>\"}",
+			},
 			&cli.StringSliceFlag{
 				Name:  "topic",
 				Usage: "Topic cluster (kind: annotation only) — JSON object {\"label\":\"path\",\"members\":[\"id\",...]}; repeatable. A plain string in --topics works too for whole-refs membership.",
@@ -700,6 +704,10 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			factIndex, err := parseFactIndexFlag(cmd.String("index"))
+			if err != nil {
+				return err
+			}
 			refs, err := parseRefFlags(cmd.StringSlice("refs"))
 			if err != nil {
 				return err
@@ -725,6 +733,7 @@ func newCmd() *cli.Command {
 				Class:            strings.TrimSpace(cmd.String("class")),
 				Actor:            strings.TrimSpace(cmd.String("actor")),
 				TopicLabels:      splitCSV(cmd.String("topics")),
+				Index:            factIndex,
 				AnnotationTopics: annotationTopics,
 				FocusActors:      focusActors,
 				FocusWhen:        focusWhen,
@@ -2201,6 +2210,30 @@ func parseWhenFlag(s string) (*model.FocusWhen, error) {
 		return nil, fmt.Errorf("--when: %w", err)
 	}
 	return &w, nil
+}
+
+func parseFactIndexFlag(s string) (*model.FactIndex, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(s))
+	decoder.DisallowUnknownFields()
+	var raw struct {
+		Title string `json:"title"`
+		Topic string `json:"topic"`
+	}
+	if err := decoder.Decode(&raw); err != nil {
+		return nil, fmt.Errorf("--index: invalid JSON object: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("--index: expected one JSON object")
+	}
+	index, err := model.NewFactIndex(raw.Title, raw.Topic)
+	if err != nil {
+		return nil, fmt.Errorf("--index: %w", err)
+	}
+	return index, nil
 }
 
 // parseInvolvementFlags parses each --involvement JSON value into a

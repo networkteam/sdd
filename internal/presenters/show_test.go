@@ -297,6 +297,22 @@ func TestRenderShow_SummaryShownWithFlag(t *testing.T) {
 	}
 }
 
+func TestRenderShow_NestedFactIndex(t *testing.T) {
+	index, err := model.NewFactIndex("How to compose graph views", "cli/view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic, _ := model.ParseTopicPath("cli/view")
+	e := entry("20260719-120000-s-tac-idx", withKind(model.KindFact), withContent("Reference body."))
+	e.Topics = []model.TopicPath{topic}
+	e.Index = index
+	g := model.NewGraph([]*model.Entry{e})
+	out := renderShow(t, g, []string{e.ID})
+	if !contains(out, "index:\n    title: How to compose graph views\n    topic: cli/view\n") {
+		t.Fatalf("show output missing nested index:\n%s", out)
+	}
+}
+
 func TestRenderShowStyled_ColorDisabled(t *testing.T) {
 	// Writing to a non-TTY buffer downsamples to Ascii through the colorprofile
 	// writer, so the styled output arrives color-free — we assert on its plain

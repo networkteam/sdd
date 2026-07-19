@@ -28,6 +28,11 @@ type EntryRef struct {
 	Desc string
 }
 
+type FactIndex struct {
+	Title string `json:"title"`
+	Topic string `json:"topic"`
+}
+
 type EntryDraft struct {
 	Target            MutationTarget
 	Kind              string
@@ -40,6 +45,7 @@ type EntryDraft struct {
 	Participants      []string
 	Confidence        string
 	Topics            []string
+	Index             *FactIndex
 	AttachmentHandles []string
 	SkipPreflight     bool
 }
@@ -122,10 +128,17 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		}
 		topics = append(topics, topic)
 	}
+	var index *model.FactIndex
+	if draft.Index != nil {
+		index, err = model.NewFactIndex(draft.Index.Title, draft.Index.Topic)
+		if err != nil {
+			return CreateEntryResult{}, err
+		}
+	}
 	entry := &model.Entry{
 		ID: id, Type: entryType, Kind: kind, Layer: layer, Intent: model.Intent(draft.Intent),
 		Content: draft.Body, Participants: append([]string(nil), draft.Participants...),
-		Confidence: draft.Confidence, Topics: topics, Time: runtime.options.Now(),
+		Confidence: draft.Confidence, Topics: topics, Index: index, Time: runtime.options.Now(),
 	}
 	if len(entry.Participants) == 0 {
 		if principal.Participant != "" {

@@ -107,6 +107,20 @@ func TestTopicPath_Equal(t *testing.T) {
 	}
 }
 
+func TestTopicPathFoldKeyMatchesEqualFold(t *testing.T) {
+	sigma, err := ParseTopicPath("Σ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalSigma, err := ParseTopicPath("ς")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sigma.Equal(finalSigma) || sigma.FoldKey() != finalSigma.FoldKey() {
+		t.Fatalf("equal-fold paths have keys %q and %q", sigma.FoldKey(), finalSigma.FoldKey())
+	}
+}
+
 func TestTopicPath_HasPrefix(t *testing.T) {
 	cases := []struct {
 		path, prefix string

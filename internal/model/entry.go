@@ -263,6 +263,7 @@ type Entry struct {
 	// Warnings rather than failing the parse, matching how other shape rules
 	// are handled.
 	Topics []TopicPath
+	Index  *FactIndex
 	// AnnotationTopics carries the topic assignments declared by a
 	// kind: annotation entry. Each item is either a plain label (Members nil
 	// — applies to all of the annotation's Refs) or a label with explicit
@@ -400,6 +401,7 @@ type frontmatter struct {
 	Class        string            `yaml:"class,omitempty"`
 	Actor        string            `yaml:"actor,omitempty"`
 	Topics       []AnnotationTopic `yaml:"topics,omitempty"`
+	Index        *FactIndex        `yaml:"index,omitempty"`
 	FocusActors  []string          `yaml:"actors,omitempty"`
 	FocusWhen    *FocusWhen        `yaml:"when,omitempty"`
 	Involvement  []involvementYAML `yaml:"involvement,omitempty"`
@@ -461,6 +463,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Aliases:      fm.Aliases,
 		Class:        ProcedureClass(fm.Class),
 		Actor:        fm.Actor,
+		Index:        fm.Index,
 		FocusActors:  fm.FocusActors,
 		FocusWhen:    fm.FocusWhen,
 		Preflight:    fm.Preflight,
@@ -672,6 +675,7 @@ func FormatFrontmatter(e *Entry) string {
 		Aliases:      e.Aliases,
 		Class:        string(e.Class),
 		Actor:        e.Actor,
+		Index:        e.Index,
 		FocusActors:  e.FocusActors,
 		FocusWhen:    e.FocusWhen,
 		Preflight:    e.Preflight,

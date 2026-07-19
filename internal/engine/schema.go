@@ -21,7 +21,7 @@ func (s *Spec) ReportSchemaForStep(step *Step) map[string]any {
 		if !ok {
 			return // load validation rejects undeclared collect names
 		}
-		properties[name] = schemaForType(decl.Type, decl.Desc)
+		properties[name] = schemaForState(decl)
 	}
 
 	if step != nil {
@@ -68,7 +68,7 @@ func (s *Spec) AnswerSchemaForStep(step *Step) map[string]any {
 				continue
 			}
 			if decl, ok := s.State[cf.Name]; ok {
-				fieldProps[cf.Name] = schemaForType(decl.Type, decl.Desc)
+				fieldProps[cf.Name] = schemaForState(decl)
 			}
 		}
 	}
@@ -108,6 +108,17 @@ func (s *Spec) AnswerSchemaForStep(step *Step) map[string]any {
 		"required":             required,
 		"additionalProperties": false,
 	}
+}
+
+func schemaForState(decl VarDecl) map[string]any {
+	schema := schemaForType(decl.Type, "")
+	if decl.Optional {
+		schema = map[string]any{"anyOf": []any{schema, map[string]any{"type": "null"}}}
+	}
+	if decl.Desc != "" {
+		schema["description"] = decl.Desc
+	}
+	return schema
 }
 
 // schemaForType maps a domain type to its JSON Schema fragment. Validation
@@ -168,6 +179,16 @@ func schemaForType(t VarType, desc string) map[string]any {
 		schema = map[string]any{"type": "string", "enum": []any{"high", "medium", "low"}}
 	case TypeIntent:
 		schema = map[string]any{"type": "string", "enum": []any{"pending", "guiding", "settled"}}
+	case TypeFactIndex:
+		schema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"title": map[string]any{"type": "string", "minLength": 1},
+				"topic": map[string]any{"type": "string", "minLength": 1},
+			},
+			"required":             []string{"title", "topic"},
+			"additionalProperties": false,
+		}
 	case TypePreflightFindings:
 		schema = map[string]any{
 			"type": "array",

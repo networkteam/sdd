@@ -35,6 +35,7 @@ const (
 	TypeConfidence        BaseType = "confidence"
 	TypeIntent            BaseType = "intent"
 	TypeAttachmentHandle  BaseType = "attachment-handle"
+	TypeFactIndex         BaseType = "fact-index"
 	TypePreflightFindings BaseType = "preflight-findings"
 )
 
@@ -50,6 +51,7 @@ var baseTypes = map[BaseType]bool{
 	TypeConfidence:        true,
 	TypeIntent:            true,
 	TypeAttachmentHandle:  true,
+	TypeFactIndex:         true,
 	TypePreflightFindings: true,
 }
 
@@ -217,6 +219,34 @@ func validateBaseValue(base BaseType, v any) (any, error) {
 		}
 		return s, nil
 
+	case TypeFactIndex:
+		m, ok := v.(map[string]any)
+		if !ok {
+			if index, typed := v.(FactIndex); typed {
+				m = map[string]any{"title": index.Title, "topic": index.Topic}
+				ok = true
+			}
+		}
+		if !ok {
+			return nil, fmt.Errorf("expected fact-index object {title, topic}")
+		}
+		if len(m) != 2 {
+			return nil, fmt.Errorf("expected fact-index object with exactly title and topic")
+		}
+		title, titleOK := m["title"].(string)
+		topic, topicOK := m["topic"].(string)
+		if !titleOK {
+			return nil, fmt.Errorf("fact-index title must be a string")
+		}
+		if !topicOK {
+			return nil, fmt.Errorf("fact-index topic must be a string")
+		}
+		index, err := model.NewFactIndex(title, topic)
+		if err != nil {
+			return nil, fmt.Errorf("fact-index: %w", err)
+		}
+		return FactIndex{Title: index.Title, Topic: index.Topic.String()}, nil
+
 	case TypePreflightFindings:
 		// Engine-written by the write gate; accept the typed form and the
 		// replay/JSON form. Validation is shape-only — severity vocabulary is
@@ -260,6 +290,11 @@ type Ref struct {
 	ID   string `json:"id"`
 	Kind string `json:"kind"`
 	Desc string `json:"desc,omitempty"`
+}
+
+type FactIndex struct {
+	Title string `json:"title"`
+	Topic string `json:"topic"`
 }
 
 func refFromMap(m map[string]any) (Ref, error) {

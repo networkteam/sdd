@@ -914,8 +914,15 @@ func ValidateEntry(e *Entry, g *Graph) {
 	validateAnnotationFrontmatter(e)
 	validateFocusFrontmatter(e, g)
 	validateInlineTopics(e)
+	validateFactIndex(e)
 	validateDoneSignalRefs(e)
 	validateAttachmentLinks(e)
+}
+
+func validateFactIndex(e *Entry) {
+	if err := e.Index.ValidateForEntry(e.Kind, e.Topics); err != nil {
+		e.Warnings = append(e.Warnings, Warning{Field: "index", Message: err.Error()})
+	}
 }
 
 // validateRefs checks the refs field with kind awareness. Cross-repo refs
