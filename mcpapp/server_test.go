@@ -125,6 +125,82 @@ Pre-flight findings to resolve or override.
 Verify the generated summary: {{.generatedSummary}}
 `
 
+// captureProbeProcedure is a minimal capture-shaped fixture whose assemble
+// gate deliberately omits the refsResolve / refsInspected predicates the
+// shipped base capture carries. Dropping them lets a report with a dangling ref sail through
+// assemble to the newEntry write op, where CreateEntry rejects it with the real
+// dangling-ref validation error — the legitimate write-gate rejection that
+// exposed s-tac-tq7. It exists only to drive that write failure on a single
+// graph, without staging the branch-divergence trigger of the live report.
+const captureProbeProcedure = `---
+type: decision
+layer: process
+kind: procedure
+canonical: capture-probe
+participants:
+    - Tester
+confidence: medium
+summary: Minimal capture-shaped fixture driving an unresolvable ref to the write op.
+state:
+    body: {type: text, desc: entry description}
+    entryKind: {type: entry-kind, desc: signal or decision kind}
+    layer: {type: layer, desc: strategic | conceptual | tactical | operational | process}
+    refs: {type: list<ref>, desc: "each {id, kind, desc?}"}
+    topics: {type: list<label>, desc: topic labels}
+    confidence: {type: confidence, desc: honest confidence}
+    widenReport: {type: text, desc: searches run and entries inspected before drafting}
+    fidelityNote: {type: text, optional: true, desc: one-line fidelity note}
+steps:
+    - id: assemble
+      collect: [body, entryKind, layer, refs, topics, confidence, widenReport]
+      transitions:
+          - when: hasBody and hasRefs and hasTopics and hasWidenReport
+            to: playback
+    - id: playback
+      chooser: user
+      options:
+          - {choice: confirm, call: confirmPlayback, to: write}
+          - {choice: abort, to: end(abandoned)}
+    - id: write
+      guard: playbackConfirmed
+      op: newEntry
+      transitions:
+          - when: noHighFindings
+            to: verifySummary
+          - otherwise: reviseOrOverride
+    - id: reviseOrOverride
+      chooser: user
+      render: findings
+      options:
+          - {choice: revise, collect: ["body?", "refs?"], to: assemble}
+          - {choice: abort, to: end(abandoned)}
+    - id: verifySummary
+      chooser: agent
+      inject:
+          - {fn: generatedSummary}
+      options:
+          - {choice: faithful, collect: [fidelityNote], to: end(completed)}
+---
+
+Minimal capture probe spine.
+
+## unit: assemble
+
+Draft the entry: {{.body}}
+
+## unit: playback
+
+Play back: {{.body}}
+
+## unit: findings
+
+Pre-flight findings to resolve or override.
+
+## unit: verifySummary
+
+Verify the generated summary: {{.generatedSummary}}
+`
+
 const gapEntry = `---
 type: signal
 layer: tactical
@@ -851,6 +927,74 @@ func TestBlockedWriteRoutesToOverride(t *testing.T) {
 	}}, &serve)
 	if serve.Step != "verifySummary" {
 		t.Fatalf("override should re-run the write with pre-flight skipped, got %q (%s)", serve.Step, serve.Instructions)
+	}
+}
+
+// TestRejectedWriteKeepsConnectionUsable pins s-tac-tq7: a newEntry write that
+// fails validation (a dangling ref rejected at the write gate — a normal,
+// expected event) must NOT poison the connection's session binding. A wiped
+// binding kills every subsequent tool on the connection — reads, recovery, and
+// mutations alike — and only a transport reconnect heals it, so the invariant
+// is that the failed write leaves the binding fully intact. The regression
+// drives a real dangling-ref rejection, then asserts the same connection's
+// show and resume_session still work.
+func TestRejectedWriteKeepsConnectionUsable(t *testing.T) {
+	graphDir := writeFixtureGraph(t)
+	probePath := filepath.Join(graphDir, "2026/07/04-130000-d-prc-prb.md")
+	if err := os.WriteFile(probePath, []byte(captureProbeProcedure), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture-probe"}, &serve)
+
+	// A syntactically valid but non-existent ID: it parses as a full entry ID
+	// (so the collect schema accepts it) yet resolves to nothing in the graph.
+	const danglingRef = "20990101-000000-s-tac-zzz"
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
+		"body": "Probe capture whose ref does not resolve, so the write gate rejects it. " +
+			"This exists to exercise the newEntry failure path end to end.",
+		"entryKind":   "gap",
+		"layer":       "tactical",
+		"refs":        []map[string]any{{"id": danglingRef, "kind": "related", "desc": "a ref that does not resolve"}},
+		"topics":      []string{"testing/fixture"},
+		"confidence":  "low",
+		"widenReport": "searched the fixture graph; nothing covers this and " + danglingRef + " does not exist.",
+	}}, &serve)
+	if serve.Step != "playback" {
+		t.Fatalf("assemble should cascade to playback, got %q (missing %v)", serve.Step, serve.Missing)
+	}
+
+	// Confirm drives the write op; CreateEntry rejects the dangling ref — the
+	// legitimate write-gate rejection that exposed the binding wipe.
+	msg := callExpectError(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
+		"chooser": "playback", "choice": "confirm", "userWords": "capture it",
+	}})
+	if !strings.Contains(msg, "dangling ref") {
+		t.Fatalf("the write should fail with the dangling-ref validation error, got %q", msg)
+	}
+
+	// The connection must stay usable. A free read appends to the session read
+	// log through the binding — before the fix this failed with `invalid session
+	// ID ""` because the wiped binding's session ID had gone empty.
+	var show mcpserver.ShowResult
+	call(t, cs, "show", map[string]any{"ids": []string{fixtureGapID}}, &show)
+	if len(show.Entries) == 0 {
+		t.Fatalf("show after the rejected write returned no entries — the connection is poisoned")
+	}
+
+	// resume_session with no args reorients the attached session — the recovery
+	// tool the poisoned-binding error recommends, yet the one the wipe broke: its
+	// still-held pre-check called Load("") and died with `invalid session ID ""`.
+	// It must re-serve the SAME session, proving the binding is fully intact, not
+	// merely non-empty.
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{}, &resumed)
+	if resumed.Session != session {
+		t.Fatalf("resume_session after the rejected write should re-serve %s, got %q", session, resumed.Session)
 	}
 }
 

@@ -254,7 +254,9 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		}
 	}
 	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
-	w.binding = result.Binding
+	if err == nil {
+		w.binding = result.Binding
+	}
 	findings := make([]query.Finding, 0, len(result.Findings))
 	for _, finding := range result.Findings {
 		findings = append(findings, query.Finding{Severity: query.Severity(finding.Severity), Category: finding.Category, Observation: finding.Observation})
