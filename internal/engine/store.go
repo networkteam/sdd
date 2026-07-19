@@ -78,7 +78,31 @@ func (s *Store) SetStart(inputs map[string]any) error {
 			return err
 		}
 	}
-	return nil
+	return s.applyStateDefaults()
+}
+
+// applyStateDefaults writes each declared state field's Default for fields the
+// caller left unset. Deterministic from the spec, so live start and replay
+// (both routed through SetStart) agree without the value ever being logged. A
+// field with a default therefore won't receive a later parent seed — the
+// default counts as already-set — which is exactly right for a constant a
+// procedure carries and seeds outward rather than one it inherits.
+func (s *Store) applyStateDefaults() error {
+	defaults := make(map[string]any)
+	for name, decl := range s.spec.State {
+		if decl.Default == nil {
+			continue
+		}
+		if _, ok := s.values[name]; ok {
+			continue
+		}
+		defaults[name] = decl.Default
+	}
+	if len(defaults) == 0 {
+		return nil
+	}
+	_, err := s.WriteState(defaults)
+	return err
 }
 
 func (s *Store) isParam(name string) bool {
