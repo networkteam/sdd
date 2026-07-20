@@ -600,6 +600,41 @@ func TestOrientationListsMoveParamSignatures(t *testing.T) {
 	}
 }
 
+func TestOpeningServeIncludesDerivedFactIndex(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	serve := openSession(t, connect(t, env.srv))
+	const pointer = "- `20260717-110000-s-prc-vwg` — How to compose graph views (view tool): layout grammar, filters, ranking, quoting, and examples"
+	if !strings.Contains(serve.Instructions, pointer) {
+		t.Fatalf("opening serve missing fact pointer %q:\n%s", pointer, serve.Instructions)
+	}
+}
+
+func TestOpeningServeOmitsEmptyDerivedFactIndex(t *testing.T) {
+	graphDir := writeFixtureGraph(t)
+	path := filepath.Join(graphDir, "2026/07/17-110000-s-prc-vwg.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const override = `---
+type: signal
+layer: process
+kind: fact
+topics: [cli/view]
+summary: Project override deliberately leaves this fact out of session discovery.
+---
+
+Project-local reference override.
+`
+	if err := os.WriteFile(path, []byte(override), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	serve := openSession(t, connect(t, env.srv))
+	if strings.Contains(serve.Instructions, "Reference facts available") {
+		t.Fatalf("opening serve rendered an empty fact-index block:\n%s", serve.Instructions)
+	}
+}
+
 // TestCaptureProcedureLoop drives the full capture spine over MCP: batch
 // report, playback chooser with served-instruction memory, staged
 // attachment materialized by the write gate, summary verification, and the

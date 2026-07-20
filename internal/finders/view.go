@@ -110,7 +110,7 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "indexed", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
 
 // ViewFunctionNames returns the function names accepted by the layout
 // executor. Reference surfaces use this instead of maintaining their own
@@ -240,6 +240,9 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	// post-Graph.Filter() narrowings doesn't affect the result; chosen
 	// here to keep cheaper structural checks before time/topic walks.
 	entries := g.Filter(spec.filter)
+	if spec.indexed {
+		entries = model.FilterIndexed(entries)
+	}
 	for _, kinds := range spec.kindFilters {
 		entries = filterByKinds(entries, kinds)
 	}
@@ -384,6 +387,12 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 			return fmt.Errorf("active takes no arguments")
 		}
 		spec.filter.OpenOnly = true
+
+	case fn.Name == "indexed":
+		if len(fn.Args) > 0 {
+			return fmt.Errorf("indexed takes no arguments")
+		}
+		spec.indexed = true
 
 	case fn.Name == "kind":
 		kinds, err := parseKindArgs(fn.Args)

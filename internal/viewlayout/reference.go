@@ -1,6 +1,3 @@
-// Package viewlayout renders the user-facing reference for the composable
-// view layout language. Callers supply the live executor vocabularies so CLI,
-// MCP, and embedded reference surfaces share names instead of copying them.
 package viewlayout
 
 import (
@@ -9,8 +6,7 @@ import (
 	"strings"
 )
 
-// Vocabulary is the live layout vocabulary exposed by the packages that
-// execute each part of the language.
+// Vocabulary lists names accepted by the live view executors.
 type Vocabulary struct {
 	Functions  []string
 	Renders    []string
@@ -19,15 +15,27 @@ type Vocabulary struct {
 	Macros     []string
 }
 
-type item struct {
+type referenceItem struct {
 	category    string
 	syntax      string
 	description string
 }
 
-var functionReference = map[string]item{
+type referenceSection struct {
+	title string
+	items []referenceItem
+}
+
+type referenceModel struct {
+	sections []referenceSection
+	grammar  []string
+	examples []string
+}
+
+var functionReference = map[string]referenceItem{
 	"source":      {"Sources", "source(graph|wip)", "Select graph entries (default) or active WIP markers."},
 	"active":      {"Filters", "active", "Keep entries that are neither closed nor superseded."},
+	"indexed":     {"Filters", "indexed", "Keep entries that carry fact-index metadata; lifecycle state is unchanged."},
 	"kind":        {"Filters", "kind(K[, K2, ...])", "Keep entries matching any listed kind; repeated calls intersect."},
 	"intent":      {"Filters", "intent(I[, I2, ...])", "Keep directives with pending, guiding, or settled intent."},
 	"type":        {"Filters", "type(T)", "Keep decisions/signals; accepts d, s, decision, or signal."},
@@ -78,127 +86,181 @@ var decayReference = map[string]string{
 }
 
 var macroReference = map[string]string{
-	"top":          "top(N) — active entries ranked by heat",
-	"topic":        "topic(L) — one topic neighborhood ranked by heat",
-	"focus":        "focus — active focuses with involvement state",
-	"decisions":    "decisions — active decisions grouped by kind",
-	"signals":      "signals — active gaps and questions grouped by kind",
-	"insights":     "insights — recent active insights by date",
-	"done":         "done — recent done signals by date",
-	"aspirations":  "aspirations — active aspirations",
-	"contracts":    "contracts — active contracts",
-	"participants": "participants — active actors with bound roles",
-	"wip":          "wip — active WIP markers",
+	"top":          "active entries ranked by heat",
+	"topic":        "one topic neighborhood ranked by heat",
+	"focus":        "active focuses with involvement state",
+	"decisions":    "active decisions grouped by kind",
+	"signals":      "active gaps and questions grouped by kind",
+	"insights":     "recent active insights by date",
+	"done":         "recent done signals by date",
+	"aspirations":  "active aspirations",
+	"contracts":    "active contracts",
+	"participants": "active actors with bound roles",
+	"wip":          "active WIP markers",
+}
+
+var macroSyntax = map[string]string{
+	"top": "top(N)", "topic": "topic(L)", "focus": "focus", "decisions": "decisions",
+	"signals": "signals", "insights": "insights", "done": "done", "aspirations": "aspirations",
+	"contracts": "contracts", "participants": "participants", "wip": "wip",
 }
 
 var categoryOrder = []string{"Sources", "Filters", "Rank", "Page", "Aggregate", "Transform", "Output", "Other primitives"}
 
-// Reference renders the complete CLI-shaped layout reference around the
-// host-neutral vocabulary body.
-func Reference(v Vocabulary) string {
-	var b strings.Builder
-	b.WriteString("Usage: sdd view --layout=<spec>\n\n")
-	b.WriteString(ReferenceBody(v))
-	b.WriteString("\nExamples:\n")
-	b.WriteString("  sdd view --layout='top(20)'\n")
-	b.WriteString("  sdd view --layout='active:kind(plan):rank(heat(exp-14d)):n(10):as-list'\n")
-	b.WriteString("  sdd view --layout='topic(\"infrastructure/cli\"):rank(by(date)):n(20):as-list'\n")
-	b.WriteString("  sdd view --layout='active:participant(\"Jonathan Philipp\"):as-list'\n")
-	b.WriteString("  sdd view --layout='decisions,signals,participants'\n")
-	b.WriteString("  sdd view --layout='top(20):not(kind(contract,aspiration))'\n")
-	b.WriteString("  sdd view --layout='wip'\n")
-	return b.String()
+var referenceGrammar = []string{
+	`layout  := section ("," section)*`,
+	`section := function (":" function)*`,
+	`function := name ("(" arguments? ")")?`,
 }
 
-// ReferenceBody renders the host-neutral grammar and categorized vocabulary.
-// Every live name is emitted even when descriptive metadata has not caught up,
-// making a newly added primitive discoverable instead of silently absent.
-func ReferenceBody(v Vocabulary) string {
+var referenceExamples = []string{
+	"top(20)",
+	"active:indexed:as-list",
+	"active:kind(plan):rank(heat(exp-14d)):n(10):as-list",
+	`topic("infrastructure/cli"):rank(by(date)):n(20):as-list`,
+	`active:participant("Jonathan Philipp"):as-list`,
+	"decisions,signals,participants",
+	"top(20):not(kind(contract,aspiration))",
+	"wip",
+}
+
+// ExampleSpecs returns the shared reference examples.
+func ExampleSpecs() []string {
+	return slices.Clone(referenceExamples)
+}
+
+func buildReference(v Vocabulary) referenceModel {
 	renders := make(map[string]struct{}, len(v.Renders))
 	for _, name := range v.Renders {
 		renders[name] = struct{}{}
 	}
-
-	byCategory := make(map[string][]string)
+	byCategory := make(map[string][]referenceItem)
 	for _, name := range v.Functions {
 		if _, isRender := renders[name]; isRender {
 			continue
 		}
-		ref, ok := functionReference[name]
+		item, ok := functionReference[name]
 		if !ok {
-			ref = item{category: "Other primitives", syntax: name, description: "See executor validation for accepted arguments."}
+			item = referenceItem{category: "Other primitives", syntax: name, description: "See executor validation for accepted arguments."}
 		}
-		byCategory[ref.category] = append(byCategory[ref.category], name)
+		byCategory[item.category] = append(byCategory[item.category], item)
 	}
 
+	model := referenceModel{grammar: slices.Clone(referenceGrammar), examples: slices.Clone(referenceExamples)}
+	for _, category := range categoryOrder {
+		if items := byCategory[category]; len(items) > 0 {
+			model.sections = append(model.sections, referenceSection{title: category, items: items})
+		}
+	}
+	model.sections = append(model.sections,
+		referenceSection{title: "Render (required terminator)", items: namedItems(v.Renders, renderReference, "Executor-defined render shape.")},
+		referenceSection{title: "Rank algorithms", items: namedItems(v.Algorithms, algorithmReference, "Executor-defined ranking algorithm.")},
+		referenceSection{title: "Decays", items: namedItems(v.Decays, decayReference, "Model-defined decay function.")},
+		referenceSection{title: "Macros (recognized at section start; later modifiers override defaults)", items: macroItems(v.Macros)},
+	)
+	return model
+}
+
+func macroItems(names []string) []referenceItem {
+	items := make([]referenceItem, 0, len(names))
+	for _, name := range names {
+		syntax := macroSyntax[name]
+		if syntax == "" {
+			syntax = name
+		}
+		description := macroReference[name]
+		if description == "" {
+			description = "Query-defined macro."
+		}
+		items = append(items, referenceItem{syntax: syntax, description: description})
+	}
+	return items
+}
+
+func namedItems(names []string, descriptions map[string]string, fallback string) []referenceItem {
+	items := make([]referenceItem, 0, len(names))
+	for _, name := range names {
+		description := descriptions[name]
+		if description == "" {
+			description = fallback
+		}
+		items = append(items, referenceItem{syntax: name, description: description})
+	}
+	return items
+}
+
+// Reference renders the terminal layout reference.
+func Reference(v Vocabulary) string {
+	model := buildReference(v)
+	var b strings.Builder
+	b.WriteString("Usage: sdd view --layout=<spec>\n\n")
+	b.WriteString(referenceBody(model))
+	b.WriteString("\nExamples:\n")
+	for _, example := range model.examples {
+		fmt.Fprintf(&b, "  sdd view --layout='%s'\n", example)
+	}
+	return b.String()
+}
+
+func referenceBody(model referenceModel) string {
 	var b strings.Builder
 	b.WriteString("Compose colon-chained functions into a section; separate multiple sections with commas.\n")
 	b.WriteString("Every section ends in a render function. Filters intersect; rank, page, name, and\n")
 	b.WriteString("render modifiers use the last call of their kind. No whitespace is allowed outside\n")
 	b.WriteString("quoted strings. Quote multi-word names, dates, durations, and topic paths.\n\n")
 	b.WriteString("Grammar:\n")
-	b.WriteString("  layout  := section (\",\" section)*\n")
-	b.WriteString("  section := function (\":\" function)*\n")
-	b.WriteString("  function := name (\"(\" arguments? \")\")?\n\n")
-	b.WriteString("Implemented pipeline vocabulary:\n")
-
-	for _, category := range categoryOrder {
-		names := byCategory[category]
-		if len(names) == 0 {
+	for _, line := range model.grammar {
+		fmt.Fprintf(&b, "  %s\n", line)
+	}
+	b.WriteString("\nImplemented pipeline vocabulary:\n")
+	for _, section := range model.sections {
+		if len(section.items) == 0 {
 			continue
 		}
-		fmt.Fprintf(&b, "\n  %s:\n", category)
-		for _, name := range names {
-			ref := functionReference[name]
-			if ref.syntax == "" {
-				ref.syntax = name
+		fmt.Fprintf(&b, "\n  %s:\n", section.title)
+		for _, item := range section.items {
+			if strings.HasPrefix(section.title, "Macros ") {
+				fmt.Fprintf(&b, "    %s — %s\n", item.syntax, item.description)
+			} else {
+				fmt.Fprintf(&b, "    %-30s %s\n", item.syntax, item.description)
 			}
-			fmt.Fprintf(&b, "    %-30s %s\n", ref.syntax, ref.description)
 		}
 	}
-
-	b.WriteString("\n  Render (required terminator):\n")
-	for _, name := range v.Renders {
-		description := renderReference[name]
-		if description == "" {
-			description = "Executor-defined render shape."
-		}
-		fmt.Fprintf(&b, "    %-30s %s\n", name, description)
-	}
-
-	b.WriteString("\n  Rank algorithms:\n")
-	for _, name := range v.Algorithms {
-		description := algorithmReference[name]
-		if description == "" {
-			description = "Executor-defined ranking algorithm."
-		}
-		fmt.Fprintf(&b, "    %-30s %s\n", name, description)
-	}
-
-	b.WriteString("\n  Decays:\n")
-	for _, name := range v.Decays {
-		description := decayReference[name]
-		if description == "" {
-			description = "Model-defined decay function."
-		}
-		fmt.Fprintf(&b, "    %-30s %s\n", name, description)
-	}
-
-	b.WriteString("\n  Macros (recognized at section start; later modifiers override defaults):\n")
-	for _, name := range v.Macros {
-		description := macroReference[name]
-		if description == "" {
-			description = name + " — query-defined macro"
-		}
-		fmt.Fprintf(&b, "    %s\n", description)
-	}
-
 	return b.String()
 }
 
-// MissingReferenceNames returns live vocabulary names that lack descriptive
-// metadata. Tests use it to keep the reference explanatory as well as
-// mechanically complete.
+// Markdown renders the host-neutral layout reference.
+func Markdown(v Vocabulary) string {
+	model := buildReference(v)
+	var b strings.Builder
+	b.WriteString("# How to compose graph views\n\n")
+	b.WriteString("Compose colon-chained functions into a section and separate multiple sections with commas. Every section ends in a render function. Filters intersect; rank, page, name, and render modifiers use the last call of their kind. No whitespace is allowed outside quoted strings. Quote multi-word names, dates, durations, and topic paths.\n\n")
+	b.WriteString("## Grammar\n\n```text\n")
+	for _, line := range model.grammar {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("```\n\n## Vocabulary\n\n| Category | Syntax | Meaning |\n| --- | --- | --- |\n")
+	for _, section := range model.sections {
+		if len(section.items) == 0 {
+			continue
+		}
+		for _, item := range section.items {
+			fmt.Fprintf(&b, "| %s | `%s` | %s |\n", escapeTable(section.title), escapeTable(item.syntax), escapeTable(item.description))
+		}
+	}
+	b.WriteString("\n## Example layout specifications\n\n```text\n")
+	for _, example := range model.examples {
+		b.WriteString(example + "\n")
+	}
+	b.WriteString("```\n")
+	return b.String()
+}
+
+func escapeTable(value string) string {
+	return strings.ReplaceAll(value, "|", `\|`)
+}
+
+// MissingReferenceNames reports live names without descriptive metadata.
 func MissingReferenceNames(v Vocabulary) []string {
 	var missing []string
 	for _, name := range v.Functions {

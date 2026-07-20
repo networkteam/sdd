@@ -40,6 +40,7 @@ type sectionSpec struct {
 	participantFilters [][]string
 	sinceCutoff        *time.Time // pointer so we can distinguish "no since()" from "since(0d)"
 	topicPrefix        model.TopicPath
+	indexed            bool
 	untagged           bool      // untagged: keep only entries whose effective topic set is empty
 	idFilter           []string  // id(<id>,...): keep only the listed entries (raw IDs, resolved at apply time)
 	rank               *rankSpec // last-write-wins per d-tac-uww §2
@@ -122,6 +123,8 @@ func (s *sectionSpec) rejectGraphPrimitivesForWip() error {
 		return fmt.Errorf("source(wip) does not support since(); slice 8 surfaces every active marker")
 	case !s.topicPrefix.IsZero():
 		return fmt.Errorf("source(wip) does not support topic() filters; markers do not carry topics")
+	case s.indexed:
+		return fmt.Errorf("source(wip) does not support indexed; markers are not graph entries")
 	case s.rank != nil:
 		return fmt.Errorf("source(wip) does not support rank(); markers are surfaced in chronological order")
 	case s.pageN >= 0:

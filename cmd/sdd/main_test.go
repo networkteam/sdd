@@ -402,6 +402,7 @@ func TestParseFactIndexFlag(t *testing.T) {
 		`{"title":"Missing topic"}`,
 		`{"title":" ","topic":"cli/view"}`,
 		`{"title":"Title","topic":"cli view"}`,
+		`{"title":"Title\n## Injected","topic":"cli/view"}`,
 		`{"title":"Title","topic":"cli/view","extra":true}`,
 		`{"title":"Title","topic":"cli/view"} {}`,
 	} {

@@ -113,6 +113,13 @@ func TestValidateValueNormalizesFactIndex(t *testing.T) {
 	}
 }
 
+func TestValidateValueRejectsMultilineFactIndexTitle(t *testing.T) {
+	_, err := (VarType{Base: TypeFactIndex}).ValidateValue(map[string]any{"title": "View grammar\n## Injected", "topic": "cli/view"})
+	if err == nil || !strings.Contains(err.Error(), "single-line") {
+		t.Fatalf("ValidateValue error = %v", err)
+	}
+}
+
 func TestValidateValueNormalizesLayer(t *testing.T) {
 	vt, _ := ParseVarType("layer")
 	v, err := vt.ValidateValue("tac")

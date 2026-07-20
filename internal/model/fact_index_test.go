@@ -96,6 +96,12 @@ func TestValidateEntryFactIndex(t *testing.T) {
 			want: "trimmed, non-empty",
 		},
 		{
+			name: "multiline title",
+			entry: &Entry{ID: "20260719-120005-s-tac-lin", Type: TypeSignal, Layer: LayerTactical, Kind: KindFact,
+				Topics: []TopicPath{topic}, Index: &FactIndex{Title: "Title\n## Injected", Topic: topic}},
+			want: "single-line",
+		},
+		{
 			name: "missing topic",
 			entry: &Entry{ID: "20260719-120002-s-tac-top", Type: TypeSignal, Layer: LayerTactical, Kind: KindFact,
 				Topics: []TopicPath{topic}, Index: &FactIndex{Title: "Title"}},
@@ -127,6 +133,14 @@ func TestValidateEntryFactIndex(t *testing.T) {
 				t.Fatalf("warnings = %+v, want index warning containing %q", tt.entry.Warnings, tt.want)
 			}
 		})
+	}
+}
+
+func TestNewFactIndexRejectsLineBreaks(t *testing.T) {
+	for _, title := range []string{"First\nSecond", "First\rSecond"} {
+		if _, err := NewFactIndex(title, "cli/view"); err == nil || !strings.Contains(err.Error(), "single-line") {
+			t.Fatalf("NewFactIndex(%q) error = %v", title, err)
+		}
 	}
 }
 
@@ -215,6 +229,14 @@ func TestIndexedFactsFailsOnActiveMalformedEnrollment(t *testing.T) {
 	_, err := graph.IndexedFacts()
 	if err == nil || !strings.Contains(err.Error(), malformed.ID) || !strings.Contains(err.Error(), "only valid on kind: fact") {
 		t.Fatalf("IndexedFacts error = %v", err)
+	}
+}
+
+func TestFilterIndexedSelectsMetadataWithoutLifecycleSemantics(t *testing.T) {
+	indexed := indexedFact(t, "20260719-102100-s-tac-idx", "Indexed", "cli/view")
+	plain := &Entry{ID: "20260719-102200-s-tac-off", Type: TypeSignal, Layer: LayerTactical, Kind: KindFact}
+	if got := FilterIndexed([]*Entry{plain, indexed}); len(got) != 1 || got[0] != indexed {
+		t.Fatalf("FilterIndexed = %+v", got)
 	}
 }
 

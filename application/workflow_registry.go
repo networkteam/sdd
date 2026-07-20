@@ -54,6 +54,15 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
+		Doc:       engine.FuncDoc{Name: "factIndex", Doc: "Active indexed facts from the current project graph, ordered for session discovery."},
+		ServeSafe: true,
+		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
+			return ctx.Graph.IndexedFacts()
+		},
+	}); err != nil {
+		return err
+	}
+	if err := registry.RegisterQuery(engine.Query{
 		Doc:       engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store. Optional arg maxBytes: cap the rendered result on a line boundary (0 = uncapped), for a framing lane that must stay bounded."},
 		ServeSafe: true,
 		Fn: func(_ *engine.Context, args map[string]any) (any, error) {

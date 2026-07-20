@@ -111,8 +111,7 @@ func TestLoadGraphMergesBaseFact(t *testing.T) {
 	if !fact.Embedded {
 		t.Error("base fact is not marked Embedded")
 	}
-	// Body is generated from the executor vocabulary, not hand-written.
-	if !strings.Contains(fact.Content, "Grammar:") {
+	if !strings.Contains(fact.Content, "## Grammar") {
 		t.Error("base fact body missing generated grammar reference")
 	}
 }

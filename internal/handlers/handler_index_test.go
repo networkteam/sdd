@@ -147,8 +147,9 @@ func TestIndexHandler_Build(t *testing.T) {
 	if got := withoutEmbedded(t, indexed); len(got) != 2 {
 		t.Errorf("expected 2 project entries indexed, got %d (%v)", len(got), got)
 	}
-	if emb.calls != 1 {
-		t.Errorf("expected 1 cross-entry batched embed call, got %d", emb.calls)
+	wantCalls := (emb.totalInputs + emb.BatchSize() - 1) / emb.BatchSize()
+	if emb.calls != wantCalls {
+		t.Errorf("batched embed calls = %d, want %d for %d inputs", emb.calls, wantCalls, emb.totalInputs)
 	}
 	// Each project entry: 1 summary + 1 body = 2 chunks.
 	for _, id := range withoutEmbedded(t, indexed) {
@@ -201,13 +202,17 @@ func TestIndexHandler_BuildFiresOnBatchStart(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	// Both entries' chunks fit one batch, so OnBatchStart fires once carrying
-	// both entry IDs — before the single embed round-trip.
-	if len(batches) != 1 {
-		t.Fatalf("expected 1 batch, got %d (%v)", len(batches), batches)
+	if len(batches) != emb.calls {
+		t.Fatalf("batch callbacks = %d, embed calls = %d", len(batches), emb.calls)
 	}
-	if got := withoutEmbedded(t, batches[0]); len(got) != 2 {
-		t.Errorf("batch carried %d project entry IDs, want 2 (%v)", len(got), batches[0])
+	var batchedIDs []string
+	var announcedChunks int
+	for i, ids := range batches {
+		batchedIDs = append(batchedIDs, ids...)
+		announcedChunks += batchChunks[i]
+	}
+	if got := withoutEmbedded(t, batchedIDs); len(got) != 2 {
+		t.Errorf("batches carried %d project entry IDs, want 2 (%v)", len(got), batchedIDs)
 	}
 	// The planned total is the chunk sum, and it must equal both the batch's
 	// announced chunk count and the chunks reported as entries complete — the
@@ -216,8 +221,8 @@ func TestIndexHandler_BuildFiresOnBatchStart(t *testing.T) {
 	if plannedChunks <= 0 {
 		t.Errorf("OnPlanned reported %d chunks, want > 0", plannedChunks)
 	}
-	if batchChunks[0] != plannedChunks {
-		t.Errorf("batch chunk count %d != planned total %d", batchChunks[0], plannedChunks)
+	if announcedChunks != plannedChunks {
+		t.Errorf("announced batch chunks %d != planned total %d", announcedChunks, plannedChunks)
 	}
 	if indexedChunks != plannedChunks {
 		t.Errorf("indexed chunks %d != planned total %d", indexedChunks, plannedChunks)
@@ -285,8 +290,8 @@ func TestIndexHandler_BuildForceReindexes(t *testing.T) {
 	if err := h.Build(context.Background(), &command.BuildIndexCmd{Force: true}); err != nil {
 		t.Fatalf("forced Build: %v", err)
 	}
-	if emb.calls != firstCalls+1 {
-		t.Errorf("Force=true should re-call embedder; got %d additional calls", emb.calls-firstCalls)
+	if emb.calls != firstCalls*2 {
+		t.Errorf("Force=true should repeat every embed batch; got %d additional calls, want %d", emb.calls-firstCalls, firstCalls)
 	}
 }
 

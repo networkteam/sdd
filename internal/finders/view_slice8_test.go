@@ -85,6 +85,7 @@ func TestView_SourceWip_RejectsGraphFilters(t *testing.T) {
 		{"layer", "source(wip):layer(tac):as-wip-list", "graph filters"},
 		{"since", "source(wip):since(\"7d\"):as-wip-list", "since()"},
 		{"topic", "source(wip):topic(catch-up-scaling):as-wip-list", "topic() filters"},
+		{"indexed", "source(wip):indexed:as-wip-list", "indexed"},
 		{"rank", "source(wip):rank(heat):as-wip-list", "rank()"},
 		{"n", "source(wip):n(5):as-wip-list", "n()"},
 		{"group", "source(wip):group(by(kind)):as-wip-list", "group()"},

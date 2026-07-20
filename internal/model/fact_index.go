@@ -34,6 +34,9 @@ func (i *FactIndex) Validate() error {
 	if i.Title == "" || strings.TrimSpace(i.Title) != i.Title {
 		return fmt.Errorf("index.title must be a trimmed, non-empty string")
 	}
+	if strings.ContainsAny(i.Title, "\r\n") {
+		return fmt.Errorf("index.title must be a single-line string")
+	}
 	topic := i.Topic.String()
 	if topic == "" {
 		topic = i.topicRaw
@@ -106,6 +109,17 @@ type FactIndexRow struct {
 	ID    string
 	Title string
 	Topic TopicPath
+}
+
+// FilterIndexed selects entries by index metadata alone.
+func FilterIndexed(entries []*Entry) []*Entry {
+	result := make([]*Entry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Index != nil {
+			result = append(result, entry)
+		}
+	}
+	return result
 }
 
 func (g *Graph) IndexedFacts() ([]FactIndexRow, error) {

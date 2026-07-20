@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd/internal/engine"
@@ -117,6 +118,56 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	}
 	if targets.acquisitions != 1 || targets.releases != 1 {
 		t.Fatalf("cached target lifecycle acquisitions=%d releases=%d", targets.acquisitions, targets.releases)
+	}
+}
+
+func TestFactIndexQueryReturnsModelRowsWithoutDependencies(t *testing.T) {
+	localIndex, err := model.NewFactIndex("Local cue", "cli/view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic, err := model.ParseTopicPath("cli/view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := model.NewGraph([]*model.Entry{{
+		ID: "20260719-120000-s-tac-loc", Type: model.TypeSignal, Layer: model.LayerTactical,
+		Kind: model.KindFact, Topics: []model.TopicPath{topic}, Index: localIndex,
+	}})
+	remoteIndex, err := model.NewFactIndex("Remote cue", "cli/view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := model.NewGraph([]*model.Entry{{
+		ID: "20260719-120100-s-tac-rem", Type: model.TypeSignal, Layer: model.LayerTactical,
+		Kind: model.KindFact, Topics: []model.TopicPath{topic}, Index: remoteIndex,
+	}})
+	model.NewMultiGraph(local, []string{"example/remote"}, func(string) (*model.Graph, error) { return remote, nil })
+
+	workflow := &WorkflowSession{}
+	registry := engine.NewRegistry()
+	if err := workflow.registerWorkflowQueries(registry); err != nil {
+		t.Fatal(err)
+	}
+	factIndex, ok := registry.Query("factIndex")
+	if !ok || !factIndex.ServeSafe {
+		t.Fatalf("factIndex registration = %+v", factIndex)
+	}
+	value, err := factIndex.Fn(&engine.Context{Graph: local}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, ok := value.([]model.FactIndexRow)
+	if !ok || len(rows) != 1 || rows[0].ID != "20260719-120000-s-tac-loc" {
+		t.Fatalf("factIndex rows = %#v", value)
+	}
+	malicious := model.NewGraph([]*model.Entry{{
+		ID: "20260719-120200-s-tac-bad", Type: model.TypeSignal, Layer: model.LayerTactical,
+		Kind: model.KindFact, Topics: []model.TopicPath{topic},
+		Index: &model.FactIndex{Title: "Cue\n\n## Injected block", Topic: topic},
+	}})
+	if _, err := factIndex.Fn(&engine.Context{Graph: malicious}, nil); err == nil || !strings.Contains(err.Error(), "single-line") {
+		t.Fatalf("factIndex accepted a block-injecting title: %v", err)
 	}
 }
 
