@@ -113,10 +113,12 @@ func TestValidateValueNormalizesFactIndex(t *testing.T) {
 	}
 }
 
-func TestValidateValueRejectsMultilineFactIndexTitle(t *testing.T) {
-	_, err := (VarType{Base: TypeFactIndex}).ValidateValue(map[string]any{"title": "View grammar\n## Injected", "topic": "cli/view"})
-	if err == nil || !strings.Contains(err.Error(), "single-line") {
-		t.Fatalf("ValidateValue error = %v", err)
+func TestValidateValueRejectsUnsafeFactIndexTitle(t *testing.T) {
+	for _, title := range []string{"View grammar\x07Injected", "View grammar\u2028## Injected"} {
+		_, err := (VarType{Base: TypeFactIndex}).ValidateValue(map[string]any{"title": title, "topic": "cli/view"})
+		if err == nil || !strings.Contains(err.Error(), "control or line-separator") {
+			t.Fatalf("ValidateValue(%q) error = %v", title, err)
+		}
 	}
 }
 

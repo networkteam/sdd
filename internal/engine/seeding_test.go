@@ -545,6 +545,56 @@ func TestHandoff_SeedNeverSkipsChooser(t *testing.T) {
 	}
 }
 
+func TestStartRejectsInvalidInheritedSeedWithoutPublishingInstance(t *testing.T) {
+	const parentFrontmatter = `state:
+    payload: {type: text, desc: value handed to the child}
+steps:
+    - id: dispatch
+      chooser: user
+      options:
+          - choice: child
+            dispatch:
+                seed:
+                    anchor: payload
+            to: end(completed)
+`
+	env := newSeedEnv(t)
+	parent, err := LoadSpec(procedureEntry(t, "20260721-100001-d-prc-isp", "invalid-seed-parent", "", parentFrontmatter, "parent"), NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentServe, err := env.session.Start(parent, map[string]any{"payload": "not-an-entry-id"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.session.Answer(parentServe.Instance, "dispatch", "child", nil, "start child"); err != nil {
+		t.Fatal(err)
+	}
+	beforeEvents := len(env.sink.events)
+	beforeInstances := len(env.session.Instances())
+	if _, err := env.session.Start(env.child, nil, parentServe.Instance); err == nil || !strings.Contains(err.Error(), "not a full entry ID") {
+		t.Fatalf("invalid inherited seed error = %v", err)
+	}
+	if len(env.session.Instances()) != beforeInstances {
+		t.Fatalf("failed start published an instance: before=%d after=%d", beforeInstances, len(env.session.Instances()))
+	}
+	if _, exists := env.session.Instance("i_2"); exists {
+		t.Fatal("failed start left a child instance")
+	}
+	if len(env.sink.events) != beforeEvents {
+		t.Fatal("failed start appended an event")
+	}
+	sv, err := env.session.Start(env.child, map[string]any{
+		"anchor": procAnchorID, "widenReport": "caller override", "body": "draft",
+	}, parentServe.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Instance != "i_2" {
+		t.Fatalf("instance after rejected start = %q, want i_2", sv.Instance)
+	}
+}
+
 // TestAnswerSchema_NestsFieldsUnderFields locks the chooser-answer schema
 // shape (s-tac-keb): the chooser is named by step id, collected fields nest
 // under `fields`, and none appear at the top level.

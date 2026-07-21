@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -49,6 +50,32 @@ func NewStore(spec *Spec) *Store {
 	}
 }
 
+// Clone creates an isolated store for candidate mutation.
+func (s *Store) Clone() *Store {
+	values := make(map[string]storeValue, len(s.values))
+	for name, value := range s.values {
+		value.Value = cloneStoreValue(value.Value)
+		values[name] = value
+	}
+	return &Store{spec: s.spec, values: values}
+}
+
+func (s *Store) transact(apply func(*Store) error) error {
+	if s.engineJournal != nil {
+		return fmt.Errorf("commands may mutate the store only through WriteEngine")
+	}
+	candidate := s.Clone()
+	if err := apply(candidate); err != nil {
+		return err
+	}
+	s.commit(candidate)
+	return nil
+}
+
+func (s *Store) commit(candidate *Store) {
+	s.values = candidate.Clone().values
+}
+
 // SetStart applies the start-time input map, the shared seeding primitive
 // (d-tac-tlo): a key naming a declared param sets that param (fixed at
 // start), a key naming a declared state field seeds it — a start-time state
@@ -70,15 +97,16 @@ func (s *Store) SetStart(inputs map[string]any) error {
 			return fmt.Errorf("unknown start input %q (params: %s; seedable state: %s)", name, joinNames(s.spec.paramNames()), joinNames(s.spec.stateNames()))
 		}
 	}
-	if err := s.SetParams(params); err != nil {
-		return err
-	}
-	if len(seed) > 0 {
-		if _, err := s.WriteState(seed); err != nil {
+	return s.transact(func(candidate *Store) error {
+		if err := candidate.setParams(params); err != nil {
 			return err
 		}
-	}
-	return nil
+		if len(seed) > 0 {
+			_, err := candidate.writeState(seed, nil)
+			return err
+		}
+		return nil
+	})
 }
 
 func (s *Store) isParam(name string) bool {
@@ -94,6 +122,12 @@ func (s *Store) isState(name string) bool {
 // SetParams validates and writes the start-time params. Required params must
 // be present; unknown params are rejected.
 func (s *Store) SetParams(params map[string]any) error {
+	return s.transact(func(candidate *Store) error {
+		return candidate.setParams(params)
+	})
+}
+
+func (s *Store) setParams(params map[string]any) error {
 	for name, raw := range params {
 		decl, ok := s.spec.Params[name]
 		if !ok {
@@ -120,41 +154,56 @@ func (s *Store) SetParams(params map[string]any) error {
 // declared in the spec's state block are writable — this is the report trust
 // boundary. Returns the names actually written, sorted.
 func (s *Store) WriteState(fields map[string]any) ([]string, error) {
-	written := make([]string, 0, len(fields))
-	for name, raw := range fields {
-		decl, ok := s.spec.State[name]
-		if !ok {
-			if _, isParam := s.spec.Params[name]; isParam {
-				return nil, fmt.Errorf("field %q is a param — params are set at start and not report-writable", name)
-			}
-			return nil, fmt.Errorf("field %q is not declared in state — reports can only write declared state fields", name)
-		}
-		if raw == nil {
-			if !decl.Optional {
-				return nil, fmt.Errorf("field %q is required and cannot be cleared", name)
-			}
-			delete(s.values, name)
-			written = append(written, name)
-			continue
-		}
-		v, err := decl.Type.ValidateValue(raw)
-		if err != nil {
-			return nil, fmt.Errorf("field %q: %w", name, err)
-		}
-		s.values[name] = storeValue{Value: v, Provenance: ProvenanceState}
-		written = append(written, name)
+	return s.writeState(fields, nil)
+}
+
+func (s *Store) writeState(fields map[string]any, validate func(*Store) error) ([]string, error) {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
 	}
-	sort.Strings(written)
-	return written, nil
+	sort.Strings(names)
+	err := s.transact(func(candidate *Store) error {
+		for _, name := range names {
+			raw := fields[name]
+			decl, ok := candidate.spec.State[name]
+			if !ok {
+				if _, isParam := candidate.spec.Params[name]; isParam {
+					return fmt.Errorf("field %q is a param — params are set at start and not report-writable", name)
+				}
+				return fmt.Errorf("field %q is not declared in state — reports can only write declared state fields", name)
+			}
+			if raw == nil {
+				if !decl.Optional {
+					return fmt.Errorf("field %q is required and cannot be cleared", name)
+				}
+				delete(candidate.values, name)
+				continue
+			}
+			v, err := decl.Type.ValidateValue(raw)
+			if err != nil {
+				return fmt.Errorf("field %q: %w", name, err)
+			}
+			candidate.values[name] = storeValue{Value: v, Provenance: ProvenanceState}
+		}
+		if validate != nil {
+			return validate(candidate)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 // WriteEngine writes an engine-produced value (an op result or chooser-call
 // effect) per the producing function's Go contract. Never reachable from a
 // report.
 func (s *Store) WriteEngine(name string, v any) {
-	s.values[name] = storeValue{Value: v, Provenance: ProvenanceEngine}
+	s.values[name] = storeValue{Value: cloneStoreValue(v), Provenance: ProvenanceEngine}
 	if s.engineJournal != nil {
-		s.engineJournal[name] = v
+		s.engineJournal[name] = cloneStoreValue(v)
 	}
 }
 
@@ -176,7 +225,7 @@ func (s *Store) Get(name string) (any, bool) {
 	if !ok {
 		return nil, false
 	}
-	return sv.Value, true
+	return cloneStoreValue(sv.Value), true
 }
 
 // Has reports whether the field is present and non-empty. Empty strings,
@@ -204,7 +253,7 @@ func (s *Store) Has(name string) bool {
 func (s *Store) TemplateContext() map[string]any {
 	ctx := make(map[string]any, len(s.values))
 	for name, sv := range s.values {
-		ctx[name] = sv.Value
+		ctx[name] = cloneStoreValue(sv.Value)
 	}
 	return ctx
 }
@@ -254,7 +303,7 @@ func (s *Store) Collected() map[string]any {
 		if !s.Has(name) {
 			continue
 		}
-		out[name] = sv.Value
+		out[name] = cloneStoreValue(sv.Value)
 	}
 	return out
 }
@@ -263,6 +312,7 @@ func (s *Store) Collected() map[string]any {
 func (s *Store) Export() map[string]ExportedValue {
 	out := make(map[string]ExportedValue, len(s.values))
 	for name, sv := range s.values {
+		sv.Value = cloneStoreValue(sv.Value)
 		out[name] = ExportedValue(sv)
 	}
 	return out
@@ -301,11 +351,164 @@ func (s *Store) importValue(name string, ev ExportedValue) error {
 		}
 		s.values[name] = storeValue{Value: v, Provenance: ProvenanceState}
 	case ProvenanceEngine:
-		s.values[name] = storeValue{Value: ev.Value, Provenance: ProvenanceEngine}
+		s.values[name] = storeValue{Value: cloneStoreValue(ev.Value), Provenance: ProvenanceEngine}
 	default:
 		return fmt.Errorf("replayed field %q has unknown provenance %q", name, ev.Provenance)
 	}
 	return nil
+}
+
+// StoreValueCloner lets domain values preserve their type-specific ownership.
+type StoreValueCloner interface {
+	CloneStoreValue() any
+}
+
+// Store values cross API boundaries by value so transactions own their state.
+func cloneStoreValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	return cloneStoreReflect(reflect.ValueOf(value), map[cloneVisit]bool{}).Interface()
+}
+
+type cloneVisit struct {
+	typeOf  reflect.Type
+	pointer uintptr
+}
+
+func cloneStoreReflect(value reflect.Value, active map[cloneVisit]bool) reflect.Value {
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		panic(fmt.Sprintf("engine store value kind %s is not JSON-persistable", value.Kind()))
+	}
+	if value.CanInterface() {
+		dynamic := reflect.ValueOf(value.Interface())
+		if dynamic.IsValid() && !isNilValue(dynamic) {
+			cloner, ok := dynamic.Interface().(StoreValueCloner)
+			if ok {
+				cloned := reflect.ValueOf(cloner.CloneStoreValue())
+				if !cloned.IsValid() || cloned.Type() != dynamic.Type() || !cloned.Type().AssignableTo(value.Type()) {
+					panic(fmt.Sprintf("StoreValueCloner for %s must preserve its concrete type", dynamic.Type()))
+				}
+				return cloned
+			}
+		}
+	}
+	if visit, ok := cloneReferenceVisit(value); ok {
+		if active[visit] {
+			panic("engine store value contains a reference cycle; values must be JSON-persistable")
+		}
+		active[visit] = true
+		defer delete(active, visit)
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		cloned := cloneStoreReflect(value.Elem(), active)
+		out := reflect.New(value.Type()).Elem()
+		out.Set(cloned)
+		return out
+	case reflect.Pointer:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		out := reflect.New(value.Type().Elem())
+		out.Elem().Set(cloneStoreReflect(value.Elem(), active))
+		return out
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		out := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			out.SetMapIndex(cloneStoreReflect(iter.Key(), active), cloneStoreReflect(iter.Value(), active))
+		}
+		return out
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		out := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for i := range value.Len() {
+			out.Index(i).Set(cloneStoreReflect(value.Index(i), active))
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(value.Type()).Elem()
+		for i := range value.Len() {
+			out.Index(i).Set(cloneStoreReflect(value.Index(i), active))
+		}
+		return out
+	case reflect.Struct:
+		out := reflect.New(value.Type()).Elem()
+		out.Set(value)
+		for i := range value.NumField() {
+			field := value.Type().Field(i)
+			if field.PkgPath != "" {
+				if carriesMutableAlias(field.Type, map[reflect.Type]bool{}) {
+					panic(fmt.Sprintf("engine store value %s has unexported mutable field %s; implement StoreValueCloner", value.Type(), field.Name))
+				}
+				continue
+			}
+			out.Field(i).Set(cloneStoreReflect(value.Field(i), active))
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func isNilValue(value reflect.Value) bool {
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func cloneReferenceVisit(value reflect.Value) (cloneVisit, bool) {
+	if isNilValue(value) {
+		return cloneVisit{}, false
+	}
+	var pointer uintptr
+	switch value.Kind() {
+	case reflect.Map:
+		pointer = uintptr(value.UnsafePointer())
+	case reflect.Pointer:
+		pointer = value.Pointer()
+	case reflect.Slice:
+		if value.Len() == 0 {
+			return cloneVisit{}, false
+		}
+		pointer = value.Pointer()
+	default:
+		return cloneVisit{}, false
+	}
+	return cloneVisit{typeOf: value.Type(), pointer: pointer}, true
+}
+
+func carriesMutableAlias(valueType reflect.Type, seen map[reflect.Type]bool) bool {
+	if seen[valueType] {
+		return false
+	}
+	seen[valueType] = true
+	switch valueType.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface, reflect.UnsafePointer:
+		return true
+	case reflect.Array:
+		return carriesMutableAlias(valueType.Elem(), seen)
+	case reflect.Struct:
+		for i := range valueType.NumField() {
+			if carriesMutableAlias(valueType.Field(i).Type, seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func joinNames(names []string) string {

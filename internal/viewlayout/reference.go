@@ -34,7 +34,7 @@ type referenceModel struct {
 
 var functionReference = map[string]referenceItem{
 	"source":      {"Sources", "source(graph|wip)", "Select graph entries (default) or active WIP markers."},
-	"active":      {"Filters", "active", "Keep entries that are neither closed nor superseded."},
+	"active":      {"Filters", "active", "Keep the derived active/open population, including terminal done signals; exclude closed, superseded, settled, cascade-closed, and orphaned entries."},
 	"indexed":     {"Filters", "indexed", "Keep entries that carry fact-index metadata; lifecycle state is unchanged."},
 	"kind":        {"Filters", "kind(K[, K2, ...])", "Keep entries matching any listed kind; repeated calls intersect."},
 	"intent":      {"Filters", "intent(I[, I2, ...])", "Keep directives with pending, guiding, or settled intent."},

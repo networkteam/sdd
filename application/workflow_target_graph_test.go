@@ -164,9 +164,9 @@ func TestFactIndexQueryReturnsModelRowsWithoutDependencies(t *testing.T) {
 	malicious := model.NewGraph([]*model.Entry{{
 		ID: "20260719-120200-s-tac-bad", Type: model.TypeSignal, Layer: model.LayerTactical,
 		Kind: model.KindFact, Topics: []model.TopicPath{topic},
-		Index: &model.FactIndex{Title: "Cue\n\n## Injected block", Topic: topic},
+		Index: &model.FactIndex{Title: "Cue\u2028## Injected block", Topic: topic},
 	}})
-	if _, err := factIndex.Fn(&engine.Context{Graph: malicious}, nil); err == nil || !strings.Contains(err.Error(), "single-line") {
+	if _, err := factIndex.Fn(&engine.Context{Graph: malicious}, nil); err == nil || !strings.Contains(err.Error(), "control or line-separator") {
 		t.Fatalf("factIndex accepted a block-injecting title: %v", err)
 	}
 }

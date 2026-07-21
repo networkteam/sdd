@@ -2,9 +2,104 @@ package engine
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestReportRejectsBatchWithoutStateOrLogDivergence(t *testing.T) {
+	env := newFixtureEnv(t)
+	var log bytes.Buffer
+	env.session.sink = NewWriterSink(&log)
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := fullDraft()
+	draft["index"] = map[string]any{"title": "View grammar", "topic": "cli/ux"}
+	if _, err := env.session.Report(sv.Instance, draft); err != nil {
+		t.Fatal(err)
+	}
+	inst, _ := env.session.Instance(sv.Instance)
+	before := inst.Store.Export()
+	beforeLog := log.String()
+	if _, err := env.session.Report(sv.Instance, map[string]any{
+		"body":  "Changed before the invalid field",
+		"index": map[string]any{"title": "Missing topic"},
+	}); err == nil {
+		t.Fatal("mixed invalid report succeeded")
+	}
+	if !reflect.DeepEqual(inst.Store.Export(), before) {
+		t.Fatalf("failed report changed live state: before=%#v after=%#v", before, inst.Store.Export())
+	}
+	if log.String() != beforeLog {
+		t.Fatal("failed report appended a log event")
+	}
+	events, err := ReadEvents(strings.NewReader(beforeLog))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env2 := newFixtureEnv(t)
+	replayed, err := env2.engine.ReplaySession("s_test", "christopher", events, func(string) (*Spec, error) { return env2.spec, nil }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedInst, _ := replayed.Instance(sv.Instance)
+	if !reflect.DeepEqual(replayedInst.Store.Export(), before) {
+		t.Fatalf("replayed state diverged: live=%#v replayed=%#v", before, replayedInst.Store.Export())
+	}
+}
+
+func TestAnswerRejectsIncompleteCollectedBatchWithoutStateOrLogDivergence(t *testing.T) {
+	const frontmatter = `state:
+    aNote: {type: text, desc: first required field}
+    zEvidence: {type: text, desc: second required field}
+steps:
+    - id: decide
+      chooser: agent
+      options:
+          - {choice: accept, collect: [aNote, zEvidence], to: end(completed)}
+`
+	reg := NewRegistry()
+	spec, err := LoadSpec(procedureEntry(t, "20260721-100000-d-prc-atm", "atomic-answer", "", frontmatter, "answer"), reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := New(reg, StaticGraphs{})
+	var log bytes.Buffer
+	session := engine.NewSession("s_atomic_answer", "christopher", NewWriterSink(&log))
+	sv, err := session.Start(spec, map[string]any{"aNote": "original"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, _ := session.Instance(sv.Instance)
+	before := inst.Store.Export()
+	beforeLog := log.String()
+	if _, err := session.Answer(sv.Instance, "decide", "accept", map[string]any{
+		"aNote": "changed before missing evidence",
+	}, "accept it"); err == nil || !strings.Contains(err.Error(), `requires field "zEvidence"`) {
+		t.Fatalf("incomplete answer error = %v", err)
+	}
+	if !reflect.DeepEqual(inst.Store.Export(), before) {
+		t.Fatalf("failed answer changed live state: before=%#v after=%#v", before, inst.Store.Export())
+	}
+	if log.String() != beforeLog {
+		t.Fatal("failed answer appended a log event")
+	}
+	events, err := ReadEvents(strings.NewReader(beforeLog))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := engine.ReplaySession("s_atomic_answer", "christopher", events,
+		func(string) (*Spec, error) { return spec, nil }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedInst, _ := replayed.Instance(sv.Instance)
+	if !reflect.DeepEqual(replayedInst.Store.Export(), before) {
+		t.Fatalf("replayed state diverged: live=%#v replayed=%#v", before, replayedInst.Store.Export())
+	}
+}
 
 // replayEnv runs a script against a JSONL buffer, then replays the log into
 // a fresh session on a fresh engine (fresh fake registry too, so command

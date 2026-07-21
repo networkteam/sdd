@@ -33,6 +33,15 @@ func TestReferenceRetainsTerminalShape(t *testing.T) {
 	}
 }
 
+func TestActiveReferenceDescribesDerivedLifecycleSemantics(t *testing.T) {
+	description := functionReference["active"].description
+	for _, want := range []string{"derived active/open", "settled", "cascade-closed", "orphaned"} {
+		if !strings.Contains(description, want) {
+			t.Errorf("active description missing %q: %s", want, description)
+		}
+	}
+}
+
 func TestMarkdownUsesNativeStructureAndSharedExamples(t *testing.T) {
 	vocabulary := Vocabulary{
 		Functions: []string{"active", "indexed", "as-list"}, Renders: []string{"as-list"},

@@ -75,6 +75,30 @@ func TestFactIndexYAMLRejectsNonExactMappings(t *testing.T) {
 	}
 }
 
+func TestFactIndexYAMLRejectsPresentNull(t *testing.T) {
+	for _, index := range []string{"index: null", "index: ~", "index:", "index: Null"} {
+		source := "---\ntype: signal\nlayer: tactical\nkind: fact\ntopics: [cli/view]\n" + index + "\n---\nbody"
+		_, err := ParseEntry("20260719-120000-s-tac-nul.md", source)
+		if err == nil || !strings.Contains(err.Error(), "index cannot be null") {
+			t.Errorf("%q error = %v", index, err)
+		}
+	}
+	aliased := "---\ntype: signal\nlayer: tactical\nkind: fact\ntopics: [cli/view]\nsummary: &empty null\nindex: *empty\n---\nbody"
+	if _, err := ParseEntry("20260719-120000-s-tac-als.md", aliased); err == nil || !strings.Contains(err.Error(), "index cannot be null") {
+		t.Errorf("aliased null error = %v", err)
+	}
+}
+
+func TestFactIndexYAMLAbsentRemainsAbsent(t *testing.T) {
+	entry, err := ParseEntry("20260719-120000-s-tac-off.md", "---\ntype: signal\nlayer: tactical\nkind: fact\n---\nbody")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.Index != nil || strings.Contains(FormatFrontmatter(entry), "index:") {
+		t.Fatalf("absent index round-trip = %+v\n%s", entry.Index, FormatFrontmatter(entry))
+	}
+}
+
 func TestValidateEntryFactIndex(t *testing.T) {
 	topic, _ := ParseTopicPath("cli/view")
 	other, _ := ParseTopicPath("engine/base-facts")
@@ -99,7 +123,7 @@ func TestValidateEntryFactIndex(t *testing.T) {
 			name: "multiline title",
 			entry: &Entry{ID: "20260719-120005-s-tac-lin", Type: TypeSignal, Layer: LayerTactical, Kind: KindFact,
 				Topics: []TopicPath{topic}, Index: &FactIndex{Title: "Title\n## Injected", Topic: topic}},
-			want: "single-line",
+			want: "control or line-separator",
 		},
 		{
 			name: "missing topic",
@@ -136,9 +160,9 @@ func TestValidateEntryFactIndex(t *testing.T) {
 	}
 }
 
-func TestNewFactIndexRejectsLineBreaks(t *testing.T) {
-	for _, title := range []string{"First\nSecond", "First\rSecond"} {
-		if _, err := NewFactIndex(title, "cli/view"); err == nil || !strings.Contains(err.Error(), "single-line") {
+func TestNewFactIndexRejectsControlsAndLineSeparators(t *testing.T) {
+	for _, title := range []string{"First\nSecond", "First\rSecond", "First\x00Second", "First\u0085Second", "First\u2028Second", "First\u2029Second"} {
+		if _, err := NewFactIndex(title, "cli/view"); err == nil || !strings.Contains(err.Error(), "control or line-separator") {
 			t.Fatalf("NewFactIndex(%q) error = %v", title, err)
 		}
 	}

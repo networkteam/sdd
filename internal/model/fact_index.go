@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -34,8 +35,10 @@ func (i *FactIndex) Validate() error {
 	if i.Title == "" || strings.TrimSpace(i.Title) != i.Title {
 		return fmt.Errorf("index.title must be a trimmed, non-empty string")
 	}
-	if strings.ContainsAny(i.Title, "\r\n") {
-		return fmt.Errorf("index.title must be a single-line string")
+	for _, r := range i.Title {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return fmt.Errorf("index.title must not contain control or line-separator characters")
+		}
 	}
 	topic := i.Topic.String()
 	if topic == "" {

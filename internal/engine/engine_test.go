@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -606,5 +607,99 @@ func TestSession_SinkFailureBlocksAdvance(t *testing.T) {
 	if _, err := env.session.Report(sv.Instance, fullDraft()); err == nil ||
 		!strings.Contains(err.Error(), "durability") {
 		t.Errorf("advance after a failed append must refuse, got %v", err)
+	}
+}
+
+func TestRunCommandDiscardsStoreWritesOnError(t *testing.T) {
+	env := newFixtureEnv(t)
+	mustRegisterCommand(env.engine.Registry, Command{
+		Doc: FuncDoc{Name: "failAfterWrite", Doc: "test failure", Writes: []string{"marker", "leaked", "composite"}},
+		Fn: func(ctx *Context) error {
+			composite, _ := ctx.Store.Get("composite")
+			composite.([]any)[0] = "changed"
+			ctx.Store.WriteEngine("marker", "changed")
+			ctx.Store.WriteEngine("leaked", true)
+			return fmt.Errorf("injected command failure")
+		},
+	})
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, _ := env.session.Instance(sv.Instance)
+	inst.Store.WriteEngine("marker", "original")
+	inst.Store.WriteEngine("composite", []any{"original"})
+	beforeEvents := len(env.sink.events)
+	if err := env.session.runCommand(inst, "failAfterWrite"); err == nil || !strings.Contains(err.Error(), "injected command failure") {
+		t.Fatalf("runCommand error = %v", err)
+	}
+	if marker, _ := inst.Store.Get("marker"); marker != "original" {
+		t.Fatalf("failed command changed existing value to %v", marker)
+	}
+	if _, exists := inst.Store.Get("leaked"); exists {
+		t.Fatal("failed command left a new engine value")
+	}
+	if composite, _ := inst.Store.Get("composite"); !reflect.DeepEqual(composite, []any{"original"}) {
+		t.Fatalf("failed command mutated composite value: %#v", composite)
+	}
+	if len(env.sink.events) != beforeEvents {
+		t.Fatal("failed command appended an op result")
+	}
+}
+
+func TestRunCommandCannotWriteReportState(t *testing.T) {
+	env := newFixtureEnv(t)
+	var writeErr error
+	mustRegisterCommand(env.engine.Registry, Command{
+		Doc: FuncDoc{Name: "attemptStateWrite", Doc: "test command boundary"},
+		Fn: func(ctx *Context) error {
+			_, writeErr = ctx.Store.WriteState(map[string]any{"body": "hidden state write"})
+			return nil
+		},
+	})
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, _ := env.session.Instance(sv.Instance)
+	beforeEvents := len(env.sink.events)
+	if err := env.session.runCommand(inst, "attemptStateWrite"); err != nil {
+		t.Fatal(err)
+	}
+	if writeErr == nil || !strings.Contains(writeErr.Error(), "only through WriteEngine") {
+		t.Fatalf("WriteState error = %v", writeErr)
+	}
+	if _, exists := inst.Store.Get("body"); exists {
+		t.Fatal("command produced an unlogged state write")
+	}
+	if len(env.sink.events) != beforeEvents+1 {
+		t.Fatalf("command events = %d, want one op result", len(env.sink.events)-beforeEvents)
+	}
+}
+
+func TestRunCommandCommitDetachesRetainedCandidate(t *testing.T) {
+	env := newFixtureEnv(t)
+	var retained *Store
+	mustRegisterCommand(env.engine.Registry, Command{
+		Doc: FuncDoc{Name: "retainCandidate", Doc: "test candidate ownership", Writes: []string{"composite"}},
+		Fn: func(ctx *Context) error {
+			retained = ctx.Store
+			ctx.Store.WriteEngine("composite", []any{"committed"})
+			return nil
+		},
+	})
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, _ := env.session.Instance(sv.Instance)
+	if err := env.session.runCommand(inst, "retainCandidate"); err != nil {
+		t.Fatal(err)
+	}
+	retained.values["composite"].Value.([]any)[0] = "late mutation"
+	retained.WriteEngine("composite", []any{"later replacement"})
+	got, _ := inst.Store.Get("composite")
+	if !reflect.DeepEqual(got, []any{"committed"}) {
+		t.Fatalf("retained candidate mutated committed state: %#v", got)
 	}
 }

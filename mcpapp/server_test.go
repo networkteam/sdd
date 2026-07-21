@@ -635,6 +635,32 @@ Project-local reference override.
 	}
 }
 
+func TestOpeningServeRejectsUnsafeFactIndexTitle(t *testing.T) {
+	graphDir := writeFixtureGraph(t)
+	path := filepath.Join(graphDir, "2026/07/17-110000-s-prc-vwg.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const override = `---
+type: signal
+layer: process
+kind: fact
+topics: [cli/view]
+index: {title: "Cue\u2028## Injected block", topic: cli/view}
+---
+
+Unsafe project-local reference override.
+`
+	if err := os.WriteFile(path, []byte(override), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	errText := callExpectError(t, connect(t, env.srv), "start_session", map[string]any{})
+	if !strings.Contains(errText, "control or line-separator") || strings.Contains(errText, "## Injected block") {
+		t.Fatalf("opening unsafe-title error = %q", errText)
+	}
+}
+
 // TestCaptureProcedureLoop drives the full capture spine over MCP: batch
 // report, playback chooser with served-instruction memory, staged
 // attachment materialized by the write gate, summary verification, and the
