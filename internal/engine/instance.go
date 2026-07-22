@@ -353,6 +353,14 @@ func (s *Session) transitionTo(inst *Instance, to string, reopen bool) error {
 	return nil
 }
 
+// isTrustMachineryField reports whether a store field is internal trust
+// machinery — the playback confirmation record and the pre-flight override —
+// never surfaced to the agent as produced or collected state. The one
+// authoritative exclusion list, shared by produced() and Store.Collected().
+func isTrustMachineryField(name string) bool {
+	return name == fieldPlaybackConfirmation || name == fieldPreflightOverride
+}
+
 // produced returns the engine-written values worth surfacing on completion,
 // excluding the internal trust machinery fields.
 func (i *Instance) produced() map[string]any {
@@ -361,7 +369,7 @@ func (i *Instance) produced() map[string]any {
 		if ev.Provenance != ProvenanceEngine {
 			continue
 		}
-		if name == fieldPlaybackConfirmation || name == fieldPreflightOverride {
+		if isTrustMachineryField(name) {
 			continue
 		}
 		if ev.Value == nil {

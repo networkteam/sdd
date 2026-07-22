@@ -11,32 +11,52 @@ type SessionID string
 // SessionMetadata is structured routing and ownership data. Dialogue events
 // remain opaque to the store.
 type SessionMetadata struct {
-	CodecVersion  uint32
-	ID            SessionID
-	Subject       string
-	Project       ProjectID
-	Participant   string
-	Label         string
-	Holder        *SessionHolder
-	HolderHistory []SessionHolderRecord
-	UpdatedAt     time.Time
+	CodecVersion      uint32
+	ID                SessionID
+	Subject           string
+	Project           ProjectID
+	Participant       string
+	Label             string
+	Attachment        *Attachment
+	AttachmentHistory []AttachmentRecord
+	UpdatedAt         time.Time
 }
 
-type SessionHolderRecord struct {
-	Holder  SessionHolder
-	EndedAt time.Time
-	Reason  string
-}
-
-type SessionHolder struct {
+// Attachment is the informational stamp of the client currently driving the
+// session: integrity comes from CAS on append, and status is derived from
+// LastActivity recency. UserWords records the user's verbatim ask that
+// authorized this attachment — the live stamp carries its own consent, and any
+// history record embedding it preserves the words automatically.
+type Attachment struct {
 	Subject       string
-	MCPSessionID  string
 	ClientName    string
 	ClientVersion string
-	Generation    uint64
+	MCPSessionID  string
 	LastActivity  time.Time
-	ExpiresAt     time.Time
+	UserWords     string `json:",omitempty"`
 }
+
+// AttachmentRecord closes out a past attachment with the specific cause it
+// ended. The embedded Attachment carries the words that authorized it; Reason
+// records the abandon note, so a displaced writer's next call can be told why.
+type AttachmentRecord struct {
+	Attachment Attachment
+	EndedAt    time.Time
+	Cause      AttachmentCause
+	Reason     string `json:",omitempty"`
+}
+
+// AttachmentCause is the closed set of reasons an attachment ends.
+type AttachmentCause string
+
+const (
+	CauseDisconnect AttachmentCause = "disconnect"
+	CauseSwitch     AttachmentCause = "switch"
+	CauseShutdown   AttachmentCause = "shutdown"
+	CauseClaim      AttachmentCause = "claim"
+	CauseConclude   AttachmentCause = "conclude"
+	CauseAbandon    AttachmentCause = "abandon"
+)
 
 type StoredEvent struct {
 	CodecVersion uint32

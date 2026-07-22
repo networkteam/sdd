@@ -185,8 +185,8 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 	}); applicationErrorCode(err) != sdd.ErrorSessionOwnership {
 		t.Fatalf("project binding changed = %v", err)
 	}
-	if _, err := application.BindSession(t.Context(), carol, "project-a", sdd.BindSessionRequest{
-		SessionID: aliceWorkflow.ID(), MCPSessionID: "carol-mcp", Chooser: sdd.ChooserUser,
+	if _, _, err := application.ResumeWorkflow(t.Context(), carol, "project-a", sdd.WorkflowResumeRequest{
+		SessionID: aliceWorkflow.ID(), MCPSessionID: "carol-mcp",
 	}); applicationErrorCode(err) != sdd.ErrorSessionOwnership {
 		t.Fatalf("principal binding changed = %v", err)
 	}

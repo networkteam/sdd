@@ -54,11 +54,7 @@ func newIdentityWriteApp(t *testing.T) (*sdd.Application, sdd.RequestIdentity, s
 		t.Fatal(err)
 	}
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	bound, err := application.BindSession(t.Context(), identity, "example", sdd.BindSessionRequest{SessionID: "identity-write", MCPSessionID: "mcp", Chooser: sdd.ChooserAgent})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return application, identity, bound.Binding, dir
+	return application, identity, openBinding(t, sessions, identity.Subject, "identity-write"), dir
 }
 
 func loadEntryByID(t *testing.T, dir, id string) *model.Entry {

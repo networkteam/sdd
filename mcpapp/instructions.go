@@ -19,23 +19,39 @@ The minimum to read it right:
 - An entry's one-line summary is a pointer, not a fact. Read entries in
   full (show) before relying on them.
 
-Everything else is served. Call start_session to begin: it opens the
-dialogue session and returns your orientation — the process core, how the
-dialogue should feel, and the moves you can start. All stateful tools
-require a session and point back to this door (one exception: abandon
-tears down a parked session by handle without opening one); the read
-tools (search, view, show, read_attachment, info, registry) are always
-free.
+Everything else is served. There are two doors into a dialogue: start_session
+opens a fresh one and returns its opening serve — your orientation, how the
+dialogue should feel, and the moves you can start; resume_session attaches to
+an existing session by its handle. Attaching to a session this connection did
+not open carries the user's verbatim request in userWords (a fresh ask that
+merely resembles the work is not consent); taking over one that another client
+is actively driving additionally needs takeover:true, and only recorded session
+state resumes — not the other conversation's context.
 
-If you lose your place mid-work — your context was compacted or summarized
-and you no longer hold your session or instance handles — call
-resume_session with no arguments: it re-serves the session this connection
-is already in, every running move at its current step with the schema to
-continue it.`
+The session handle is the dialogue's identity. Every work tool (start_procedure,
+next, park, stage_attachment, and abandon of a move) carries it as a required
+argument naming the session this connection is attached to — retain it across
+context compaction. The one exception is abandon's teardown mode (session alone,
+no instance): it tears down a session by handle without attaching, so the handle
+there names a session you need not be attached to. Discovery and reading stay
+free: list_sessions shows every session with open work (no handle needed), and
+the read tools (search, view, show, read_attachment, info, registry) are always
+ungated.
+
+If you lose the handle — your context was compacted or summarized — recover
+without guessing: resume_session with no arguments re-serves the session this
+connection is already attached to (every running move at its current step with
+the schema to continue it), or, if this connection is not attached to one,
+names the open sessions to attach to. list_sessions lists them too. A plain
+reorient stubs blocks you were already served — it assumes you still hold them;
+if a compaction dropped them, pass fullReplay:true for the complete re-serve.
+Then re-establish which one with the user before continuing.`
 
 const resumeInstructions = `Session resumed: step position and collected evidence persist; the
 open_instances list carries each running instance's current serve — the
 session shell (user-dialogue) among them, carrying the open-threads block.
 Brief the user on where the work stands (procedure, step, goal) before
-continuing, and continue through next. If you lose your place again later,
-resume_session with no session re-serves this list.`
+continuing, and continue through next, carrying this session's handle. If you
+lose your place again later, resume_session with no session re-serves this
+list; if a context compaction dropped the instructions a stub only points back
+to, add fullReplay:true for the full text.`

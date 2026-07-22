@@ -626,6 +626,30 @@ func (s *Session) Serve(instanceID string) (*Serve, error) {
 	return s.serve(inst)
 }
 
+// Inject runs one registered query against an instance's live context — the
+// same path renderUnit uses for a step's inject, exposed so a shell can render
+// declared framing lanes (which live outside any step unit) through the one
+// query mechanism. Args templates render against the instance store.
+func (s *Session) Inject(instanceID string, call InjectCall) (any, error) {
+	inst, ok := s.instances[instanceID]
+	if !ok {
+		return nil, fmt.Errorf("instance %q not found in session", instanceID)
+	}
+	q, found := s.engine.Registry.Query(call.Fn)
+	if !found {
+		return nil, fmt.Errorf("inject fn %q is not a registered query", call.Fn)
+	}
+	ctx, err := s.funcContext(inst)
+	if err != nil {
+		return nil, err
+	}
+	args, err := s.renderInjectArgs(inst, call.Args)
+	if err != nil {
+		return nil, err
+	}
+	return q.Fn(ctx, args)
+}
+
 // Abandon explicitly discards a running instance, logged as an abandonment
 // transition. It never cleans up implicitly — anything the instance holds
 // (a WIP marker, staged attachments) is left standing for resume or groom.
@@ -861,6 +885,13 @@ func instanceCounter(id string) int {
 }
 
 // checkSink surfaces a deferred log-append failure before advancing.
+// SinkErr returns a stashed durable-append failure without clearing it, so the
+// operation that caused it can surface the typed error synchronously while
+// subsequent operations still refuse through checkSink.
+func (s *Session) SinkErr() error {
+	return s.sinkErr
+}
+
 func (s *Session) checkSink() error {
 	if s.sinkErr != nil {
 		return fmt.Errorf("session log append failed earlier — refusing to advance without durability: %w", s.sinkErr)

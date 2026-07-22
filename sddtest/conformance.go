@@ -53,6 +53,10 @@ type GraphStoreFixture struct {
 	Blobs           sdd.StagedBlobReader
 	AttachmentEntry string
 	AttachmentName  string
+	// SecondBatch, when set, exercises the merge-under-append guarantee: it
+	// must target paths unrelated to Batch so it can apply cleanly against the
+	// revision Batch advanced the store to.
+	SecondBatch sdd.MutationBatch
 }
 
 func RunGraphStoreTests(t *testing.T, factory func(*testing.T) GraphStoreFixture) {
@@ -92,6 +96,25 @@ func RunGraphStoreTests(t *testing.T, factory func(*testing.T) GraphStoreFixture
 			t.Fatalf("ReadAttachmentPage = %+v", page)
 		}
 	}
+	if fixture.SecondBatch.ID != "" {
+		// Merge under append: SecondBatch was prepared against InitialRevision,
+		// but the first Apply advanced the store, so that pin is now stale and
+		// conflicts. Re-reading the fresh revision and applying there succeeds
+		// cleanly — the adapter guarantee the engine's bounded-retry merge
+		// depends on. A conflict must leave no ledger record blocking the retry.
+		stale, staleErr := fixture.Store.Apply(t.Context(), fixture.InitialRevision, fixture.SecondBatch, fixture.Blobs)
+		if stale.State != sdd.MutationNotApplied {
+			t.Fatalf("stale merge Apply = %+v (error %v), want not_applied conflict", stale, staleErr)
+		}
+		fresh, err := fixture.Store.Current(t.Context())
+		if err != nil {
+			t.Fatalf("Current before merge apply: %v", err)
+		}
+		merged, err := fixture.Store.Apply(t.Context(), fresh.Revision(), fixture.SecondBatch, fixture.Blobs)
+		if err != nil || merged.State != sdd.MutationApplied || merged.Revision == "" {
+			t.Fatalf("merge-under-append Apply = %+v, %v", merged, err)
+		}
+	}
 }
 
 type SessionStoreFixture struct {
@@ -123,6 +146,12 @@ func RunSessionStoreTests(t *testing.T, factory func(*testing.T) SessionStoreFix
 	}
 	if loaded.Version != next || len(loaded.Events) != len(fixture.Append.Events) {
 		t.Fatalf("Load = version %d events %d, want %d/%d", loaded.Version, len(loaded.Events), next, len(fixture.Append.Events))
+	}
+	if want := fixture.Metadata.Attachment; want != nil {
+		got := loaded.Metadata.Attachment
+		if got == nil || got.MCPSessionID != want.MCPSessionID || got.ClientName != want.ClientName {
+			t.Fatalf("attachment did not round-trip: got %+v, want %+v", got, want)
+		}
 	}
 	listed, err := fixture.Store.List(t.Context(), sdd.SessionFilter{Project: fixture.Metadata.Project})
 	if err != nil {

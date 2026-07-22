@@ -17,6 +17,11 @@ const (
 	eventLegacyTargetBound = "legacy_target_bound"
 )
 
+// recoveryCauseGraphContention marks a terminal the engine recorded itself when
+// a write lost every bounded apply retry, distinguishing it structurally from
+// an operator's recovery decision (which leaves Cause empty).
+const recoveryCauseGraphContention = "graph-contention"
+
 type RecoveryState string
 
 const (
@@ -39,6 +44,9 @@ type RecoveryItem struct {
 	Actionable       bool
 	EntryIDs         []string
 	LastEvidence     string
+	// Cause is the terminal's structured cause (e.g. graph-contention for an
+	// engine-recorded discard), empty for operator decisions and open items.
+	Cause string
 }
 
 type RecoveryList struct {
@@ -87,6 +95,7 @@ type recoveryTerminalEvent struct {
 	Actor           string         `json:"actor"`
 	Verb            RecoveryVerb   `json:"verb"`
 	Reason          string         `json:"reason,omitempty"`
+	Cause           string         `json:"cause,omitempty"`
 }
 
 type legacyTargetBoundEvent struct {
@@ -375,10 +384,7 @@ func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdent
 }
 
 func (a *Application) terminalRecovery(ctx context.Context, runtime *ProjectRuntime, stored StoredSession, prepared PreparedTransition, binding SessionBinding, actor string, request RecoveryRequest, state RecoveryState) (RecoveryResult, error) {
-	if err := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID); err != nil {
-		return RecoveryResult{}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "recovery could not release retained blobs", Cause: err}
-	}
-	next, err := appendRecoveryTerminal(ctx, runtime.options.Sessions, binding, recoveryTerminalEvent{
+	next, err := releaseAndRecordTerminal(ctx, runtime, binding, prepared, recoveryTerminalEvent{
 		MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
 		OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID,
 		Actor: actor, Verb: request.Verb, Reason: request.Reason,
@@ -470,6 +476,17 @@ func appendRecoveryTerminal(ctx context.Context, sessions SessionStore, binding 
 		return binding.Version, err
 	}
 	return sessions.Append(ctx, binding.SessionID, binding.Version, SessionAppend{Events: []StoredEvent{event}})
+}
+
+// releaseAndRecordTerminal is the shared teardown for a finished intent:
+// release its retained blobs, then append the terminal record and return the
+// advanced binding version. Used by operator recovery decisions and the
+// engine's own contention discard alike.
+func releaseAndRecordTerminal(ctx context.Context, runtime *ProjectRuntime, binding SessionBinding, prepared PreparedTransition, event recoveryTerminalEvent) (uint64, error) {
+	if err := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID); err != nil {
+		return binding.Version, &ApplicationError{Code: ErrorRecoveryRequired, Message: "recovery could not release retained blobs", Cause: err}
+	}
+	return appendRecoveryTerminal(ctx, runtime.options.Sessions, binding, event)
 }
 
 func recoveryStateError(verb RecoveryVerb, state ApplyState, cause error) error {
@@ -571,6 +588,7 @@ func recoveryItem(stored StoredSession, replay mutationRecoveryReplay) RecoveryI
 		item.LastEvidence = replay.attempt.Evidence
 	}
 	if replay.terminal != nil {
+		item.Cause = replay.terminal.Cause
 		switch replay.terminal.Verb {
 		case RecoveryDiscard:
 			item.State = RecoveryDiscarded
