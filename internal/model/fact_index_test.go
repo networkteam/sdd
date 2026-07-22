@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func indexedFact(t *testing.T, id, title, topic string) *Entry {
@@ -186,6 +188,31 @@ body`)
 	}
 }
 
+// TestFactIndexTopicRawRoundTrip pins the topicRaw fallback branch: when a
+// topic fails to parse, Topic stays zero and the raw string is retained, so
+// marshal must emit the raw topic (never silently drop it) while validation
+// still surfaces the parse error.
+func TestFactIndexTopicRawRoundTrip(t *testing.T) {
+	index := &FactIndex{Title: "Reference", topicRaw: "cli view"}
+	if !index.Topic.IsZero() {
+		t.Fatalf("precondition: Topic should be zero, got %q", index.Topic.String())
+	}
+	marshaled, err := index.MarshalYAML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := yaml.Marshal(marshaled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "topic: cli view") {
+		t.Fatalf("marshal dropped unparsed raw topic:\n%s", out)
+	}
+	if err := index.Validate(); err == nil || !strings.Contains(err.Error(), "invalid character") {
+		t.Fatalf("Validate error = %v, want invalid character", err)
+	}
+}
+
 func TestIndexedFactsLifecycleOrderingAndNoInheritance(t *testing.T) {
 	old := indexedFact(t, "20260719-100000-s-tac-old", "Old", "cli/view")
 	successor := indexedFact(t, "20260719-100100-s-tac-new", "beta", "cli/view")
@@ -196,10 +223,7 @@ func TestIndexedFactsLifecycleOrderingAndNoInheritance(t *testing.T) {
 	alphaEarlier := indexedFact(t, "20260719-100400-s-tac-a01", "alpha", "cli/view")
 	graph := NewGraph([]*Entry{old, successor, closed, closer, alphaLater, alphaEarlier})
 
-	rows, err := graph.IndexedFacts()
-	if err != nil {
-		t.Fatal(err)
-	}
+	rows := graph.IndexedFacts()
 	got := make([]string, len(rows))
 	for i, row := range rows {
 		got[i] = row.ID
@@ -211,10 +235,7 @@ func TestIndexedFactsLifecycleOrderingAndNoInheritance(t *testing.T) {
 
 	unindexedSuccessor := &Entry{ID: "20260719-100600-s-tac-off", Type: TypeSignal, Layer: LayerTactical, Kind: KindFact, Supersedes: []string{successor.ID}}
 	graph = NewGraph(append(graph.Entries, unindexedSuccessor))
-	rows, err = graph.IndexedFacts()
-	if err != nil {
-		t.Fatal(err)
-	}
+	rows = graph.IndexedFacts()
 	for _, row := range rows {
 		if row.ID == successor.ID || row.ID == unindexedSuccessor.ID {
 			t.Fatalf("index metadata inherited across supersession: %+v", rows)
@@ -228,10 +249,7 @@ func TestIndexedFactsOrderingAndValueIsolation(t *testing.T) {
 	finalSigma := indexedFact(t, "20260719-101002-s-tac-fin", "ς", "cli/view")
 	graph := NewGraph([]*Entry{finalSigma, sigma, agent})
 
-	rows, err := graph.IndexedFacts()
-	if err != nil {
-		t.Fatal(err)
-	}
+	rows := graph.IndexedFacts()
 	got := []string{rows[0].ID, rows[1].ID, rows[2].ID}
 	want := []string{agent.ID, sigma.ID, finalSigma.ID}
 	if !reflect.DeepEqual(got, want) {
@@ -243,16 +261,57 @@ func TestIndexedFactsOrderingAndValueIsolation(t *testing.T) {
 	}
 }
 
-func TestIndexedFactsFailsOnActiveMalformedEnrollment(t *testing.T) {
+// TestMalformedActiveEnrollmentExcludedWithParity pins the single-rule
+// contract: an active entry with a present-but-invalid index (here, index on a
+// non-fact kind) is not a member of the indexed population on either surface —
+// FilterIndexed nor IndexedFacts — yet it still loads carrying an index
+// warning rather than failing the read.
+func TestMalformedActiveEnrollmentExcludedWithParity(t *testing.T) {
 	topic, _ := ParseTopicPath("cli/view")
 	malformed := &Entry{
 		ID: "20260719-102000-s-tac-bad", Type: TypeSignal, Layer: LayerTactical, Kind: KindInsight,
 		Topics: []TopicPath{topic}, Index: &FactIndex{Title: "Invalid enrollment", Topic: topic},
 	}
-	graph := NewGraph([]*Entry{malformed})
-	_, err := graph.IndexedFacts()
-	if err == nil || !strings.Contains(err.Error(), malformed.ID) || !strings.Contains(err.Error(), "only valid on kind: fact") {
-		t.Fatalf("IndexedFacts error = %v", err)
+	valid := indexedFact(t, "20260719-102001-s-tac-ok", "Valid", "cli/view")
+	graph := NewGraph([]*Entry{malformed, valid})
+
+	if got := FilterIndexed(graph.Entries); len(got) != 1 || got[0].ID != valid.ID {
+		t.Fatalf("FilterIndexed = %+v, want only %s", got, valid.ID)
+	}
+	rows := graph.IndexedFacts()
+	if len(rows) != 1 || rows[0].ID != valid.ID {
+		t.Fatalf("IndexedFacts = %+v, want only %s", rows, valid.ID)
+	}
+
+	var warned bool
+	for _, warning := range graph.ByID[malformed.ID].Warnings {
+		if warning.Field == "index" {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatalf("malformed enrollment did not load with an index warning: %+v", graph.ByID[malformed.ID].Warnings)
+	}
+}
+
+// TestMalformedEnrollmentOnRetiredFactExcluded pins that a malformed index on a
+// superseded (retired) fact is silently excluded from both surfaces — the
+// invalid enrollment is dropped before lifecycle even enters the picture.
+func TestMalformedEnrollmentOnRetiredFactExcluded(t *testing.T) {
+	topic, _ := ParseTopicPath("cli/view")
+	other, _ := ParseTopicPath("engine/base-facts")
+	retired := &Entry{
+		ID: "20260719-102300-s-tac-old", Type: TypeSignal, Layer: LayerTactical, Kind: KindFact,
+		Topics: []TopicPath{other}, Index: &FactIndex{Title: "Unenrolled topic", Topic: topic},
+	}
+	successor := &Entry{ID: "20260719-102400-s-tac-new", Type: TypeSignal, Layer: LayerTactical, Kind: KindFact, Supersedes: []string{retired.ID}}
+	graph := NewGraph([]*Entry{retired, successor})
+
+	if got := FilterIndexed(graph.Entries); len(got) != 0 {
+		t.Fatalf("FilterIndexed = %+v, want empty", got)
+	}
+	if rows := graph.IndexedFacts(); len(rows) != 0 {
+		t.Fatalf("IndexedFacts = %+v, want empty", rows)
 	}
 }
 
@@ -277,10 +336,7 @@ func TestIndexedFactsUsesDiskOverrideAndExcludesDependencies(t *testing.T) {
 	if member, err := local.MemberGraph("example.com/team/remote"); err != nil || member == nil {
 		t.Fatalf("loading dependency: member=%v err=%v", member, err)
 	}
-	rows, err := local.IndexedFacts()
-	if err != nil {
-		t.Fatal(err)
-	}
+	rows := local.IndexedFacts()
 	if len(rows) != 1 || rows[0].ID != retained.ID {
 		t.Fatalf("IndexedFacts = %+v, want retained embedded fact only", rows)
 	}

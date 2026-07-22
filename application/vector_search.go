@@ -364,8 +364,8 @@ func (r graphStoreAttachmentReader) ReadAttachment(ctx context.Context, entry *m
 }
 
 func findTextForHybrid(ctx context.Context, graph *model.Graph, request query.SearchQuery) (*query.SearchResult, error) {
-	return finders.NewSearchFinder(finders.SearchFinderOptions{}).Search(ctx, query.SearchQuery{
-		Graph: graph, Terms: request.Terms, Filter: request.Filter, IncludeSuperseded: request.IncludeSuperseded,
+	return finders.NewSearchFinder(finders.SearchFinderOptions{Graph: graph}).Search(ctx, query.SearchQuery{
+		Terms: request.Terms, Filter: request.Filter, IncludeSuperseded: request.IncludeSuperseded,
 		Limit: request.Limit, MaxCitationsPerEntry: request.MaxCitationsPerEntry,
 	})
 }

@@ -185,6 +185,57 @@ See [design](./06-115516-s-stg-beh/design.md) for details.`)
 	}
 }
 
+// TestLoadGraphRecordsParseFailuresAndKeepsReadableEntries pins partial-read
+// resilience: a malformed entry does not abort the walk — every parseable
+// entry still loads, and the failure is recorded on the graph as a load issue
+// rather than swallowed or fatal.
+func TestLoadGraphRecordsParseFailuresAndKeepsReadableEntries(t *testing.T) {
+	dir := t.TempDir()
+
+	writeGraphEntry(t, dir, "20260406-115516-s-stg-beh", `---
+type: signal
+layer: strategic
+---
+
+Readable signal.`)
+
+	// Unterminated quoted scalar — a YAML syntax error, so ParseEntry fails.
+	writeGraphEntry(t, dir, "20260406-115600-s-stg-bad", `---
+type: signal
+layer: strategic
+refs:
+    - "unterminated
+---
+
+Broken frontmatter.`)
+
+	f := New(Options{})
+	g, err := f.LoadGraph(dir)
+	if err != nil {
+		t.Fatalf("LoadGraph aborted on a malformed entry: %v", err)
+	}
+
+	var readable bool
+	for _, e := range projectEntries(g) {
+		switch e.ID {
+		case "20260406-115516-s-stg-beh":
+			readable = true
+		case "20260406-115600-s-stg-bad":
+			t.Fatalf("malformed entry was admitted to the graph")
+		}
+	}
+	if !readable {
+		t.Fatal("readable entry missing after a sibling failed to parse")
+	}
+
+	if len(g.LoadIssues) != 1 {
+		t.Fatalf("LoadIssues = %+v, want exactly one", g.LoadIssues)
+	}
+	if got := g.LoadIssues[0]; got.Ref != "20260406-115600-s-stg-bad" || got.Message == "" {
+		t.Fatalf("LoadIssue = %+v, want the malformed entry ID and a non-empty message", got)
+	}
+}
+
 // writeGraphEntry writes a graph entry file in the hierarchical YYYY/MM/ layout.
 // The id is the full entry ID (e.g. "20260406-115516-s-stg-beh").
 func writeGraphEntry(t *testing.T, dir, id, content string) {

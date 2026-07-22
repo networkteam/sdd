@@ -169,7 +169,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		finder := finders.New(finders.Options{PreflightRunner: runtimeLLMRunner{executor: runtime.options.LLM, purpose: "preflight"}})
 		preflightCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
-		preflight, err := finder.Preflight(preflightCtx, query.PreflightQuery{Entry: entry, Graph: snapshot.graph})
+		preflight, err := finder.Preflight(preflightCtx, snapshot.graph, query.PreflightQuery{Entry: entry})
 		if err != nil {
 			return result, fmt.Errorf("pre-flight: %w", err)
 		}

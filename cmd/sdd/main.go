@@ -468,8 +468,7 @@ func showCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			result, err := f.Show(query.ShowQuery{
-				Graph:     g,
+			result, err := f.OnGraph(g).Show(query.ShowQuery{
 				IDs:       ids,
 				UpDepth:   int(cmd.Int("up")),
 				DownDepth: int(cmd.Int("down")),
@@ -918,7 +917,7 @@ func lintCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			result, err := f.Lint(query.LintQuery{Graph: g})
+			result, err := f.OnGraph(g).Lint(query.LintQuery{})
 			if err != nil {
 				return err
 			}

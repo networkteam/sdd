@@ -81,6 +81,65 @@ func (r *multiAccessResolver) ResolveDependency(context.Context, sdd.Principal, 
 	return r.dependency, nil
 }
 
+// TestApplicationLoadsDependencyPartiallyWithUnreadableEntry is the dependency
+// graceful-degradation proof: a connected repo whose graph carries one
+// undecodable document no longer collapses the whole dependency to
+// "unavailable" (application.go snapshotWithDependenciesFrom). BuildSnapshot
+// loads the parseable entries and records the failure as a load issue, so a
+// cross-repo Show of a valid foreign entry still resolves.
+func TestApplicationLoadsDependencyPartiallyWithUnreadableEntry(t *testing.T) {
+	baseSnapshot, err := sdd.BuildSnapshot(t.Context(), sdd.SnapshotData{Project: "base", Revision: "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignSnapshot, err := sdd.BuildSnapshot(t.Context(), sdd.SnapshotData{
+		Project: "example.org/dep", Revision: "r1",
+		Entries: []sdd.EntryDocument{{
+			LogicalPath: "2026/07/13-040000-s-tac-dep.md",
+			Frontmatter: map[string]any{"type": "signal", "kind": "gap", "layer": "tactical", "summary": "Foreign dependency fixture."},
+			Body:        "The authorized dependency body is visible through the base application.",
+		}},
+		// A file the store could not decode — carried as data, not an abort.
+		Unreadable: []sdd.DocumentIssue{{LogicalPath: "2026/07/13-050000-s-tac-bad.md", Message: "yaml: unterminated flow sequence"}},
+	})
+	if err != nil {
+		t.Fatalf("BuildSnapshot must not abort on an unreadable document: %v", err)
+	}
+	if health := foreignSnapshot.Health(); health.LoadErrors != 1 {
+		t.Fatalf("dependency snapshot Health should report 1 load error, got %+v", health)
+	}
+
+	llm := sdd.LLMExecutorFuncs{
+		CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
+		ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
+			return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
+		},
+	}
+	dependency, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		Project: sdd.ProjectRef{ID: "example.org/dep"}, Graph: staticGraphStore{snapshot: foreignSnapshot},
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []string{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := sdd.NewApplication(&multiAccessResolver{base: base, dependency: dependency})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	show, err := application.Show(t.Context(), identity, "base", sdd.ShowRequest{IDs: []string{"example.org/dep:20260713-040000-s-tac-dep"}})
+	if err != nil || !strings.Contains(show.Entries, "authorized dependency body") {
+		t.Fatalf("cross-project Show over a partially-loaded dependency = %q, %v", show.Entries, err)
+	}
+}
+
 func TestApplicationResolvesAuthorizedDependenciesWithoutLeakingDenials(t *testing.T) {
 	baseSnapshot, err := sdd.BuildSnapshot(t.Context(), sdd.SnapshotData{Project: "base", Revision: "r1"})
 	if err != nil {

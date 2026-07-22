@@ -19,7 +19,7 @@ func TestView_AsCounts(t *testing.T) {
 
 	layout := mustParseLayout(t, "as-counts")
 	f := New(Options{})
-	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		t.Fatalf("View: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestView_AsCounts_Empty(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{a})
 
 	layout := mustParseLayout(t, "as-counts")
-	result, err := New(Options{}).View(query.ViewQuery{Graph: g, Layout: layout})
+	result, err := New(Options{}).OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		t.Fatalf("View: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestView_AsCounts_RejectsRankAndN(t *testing.T) {
 	f := New(Options{})
 
 	for _, layout := range []string{"as-counts:rank(heat)", "as-counts:n(3)", "as-counts:group(by(kind))"} {
-		_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, layout)})
+		_, err := f.OnGraph(g).View(query.ViewQuery{Layout: mustParseLayout(t, layout)})
 		if err == nil {
 			t.Errorf("%q: expected mutual-exclusion error, got nil", layout)
 		}
@@ -95,7 +95,7 @@ func TestView_Untagged(t *testing.T) {
 	// this test asserts the untagged filter respects annotation *membership*
 	// (the annotation's own self-tagging is AC3, exercised separately).
 	layout := mustParseLayout(t, "kind(directive):untagged:as-list")
-	result, err := New(Options{}).View(query.ViewQuery{Graph: g, Layout: layout})
+	result, err := New(Options{}).OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		t.Fatalf("View: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestView_IDFilter(t *testing.T) {
 
 	// Quoted full ID + bare short ID, mixed. Order follows the entry set.
 	layout := mustParseLayout(t, `id("20260101-100000-d-tac-aaa",d-tac-ccc):as-list`)
-	result, err := New(Options{}).View(query.ViewQuery{Graph: g, Layout: layout})
+	result, err := New(Options{}).OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		t.Fatalf("View: %v", err)
 	}

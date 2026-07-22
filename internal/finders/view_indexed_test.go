@@ -30,7 +30,7 @@ func TestViewIndexedIsStructuralAndComposes(t *testing.T) {
 	graph := model.NewGraph([]*model.Entry{old, closer, first, second, other, unindexed})
 	finder := New(Options{})
 
-	result, err := finder.View(query.ViewQuery{Graph: graph, Layout: mustParseLayout(t, "indexed:as-list")})
+	result, err := finder.OnGraph(graph).View(query.ViewQuery{Layout: mustParseLayout(t, "indexed:as-list")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestViewIndexedIsStructuralAndComposes(t *testing.T) {
 		t.Fatalf("indexed population = %v, want %v", got, want)
 	}
 
-	result, err = finder.View(query.ViewQuery{Graph: graph, Layout: mustParseLayout(t, `active:indexed:topic("cli/view"):rank(by(date)):n(1):brief:as-list`)})
+	result, err = finder.OnGraph(graph).View(query.ViewQuery{Layout: mustParseLayout(t, `active:indexed:topic("cli/view"):rank(by(date)):n(1):brief:as-list`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestViewIndexedIsStructuralAndComposes(t *testing.T) {
 	}
 
 	for _, layout := range []string{"indexed:group(by(layer)):as-grouped", "active:indexed:as-counts"} {
-		if _, err := finder.View(query.ViewQuery{Graph: graph, Layout: mustParseLayout(t, layout)}); err != nil {
+		if _, err := finder.OnGraph(graph).View(query.ViewQuery{Layout: mustParseLayout(t, layout)}); err != nil {
 			t.Errorf("%s: %v", layout, err)
 		}
 	}
@@ -60,14 +60,11 @@ func TestActiveIndexedMatchesDerivedFactIndex(t *testing.T) {
 	successor := entry("20260101-120000-s-tac-new", withKind(model.KindFact), withSupersedes(retired.ID))
 	graph := model.NewGraph([]*model.Entry{active, second, retired, successor})
 
-	result, err := New(Options{}).View(query.ViewQuery{Graph: graph, Layout: mustParseLayout(t, "active:indexed:as-list")})
+	result, err := New(Options{}).OnGraph(graph).View(query.ViewQuery{Layout: mustParseLayout(t, "active:indexed:as-list")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := graph.IndexedFacts()
-	if err != nil {
-		t.Fatal(err)
-	}
+	rows := graph.IndexedFacts()
 	want := make([]string, len(rows))
 	for i, row := range rows {
 		want[i] = row.ID
@@ -81,7 +78,7 @@ func TestActiveIndexedMatchesDerivedFactIndex(t *testing.T) {
 }
 
 func TestViewIndexedRejectsArguments(t *testing.T) {
-	_, err := New(Options{}).View(query.ViewQuery{Graph: model.NewGraph(nil), Layout: mustParseLayout(t, "indexed(topic):as-list")})
+	_, err := New(Options{}).OnGraph(model.NewGraph(nil)).View(query.ViewQuery{Layout: mustParseLayout(t, "indexed(topic):as-list")})
 	if err == nil || !strings.Contains(err.Error(), "indexed takes no arguments") {
 		t.Fatalf("indexed argument error = %v", err)
 	}

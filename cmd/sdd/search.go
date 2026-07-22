@@ -490,7 +490,6 @@ func searchCmd() *cli.Command {
 				maxCitations = int(cmd.Int("max-citations"))
 			}
 			sq := query.SearchQuery{
-				Graph:                g,
 				Terms:                terms,
 				Phrase:               phrase,
 				Filter:               model.GraphFilter{Type: typ, Layer: layer, Kind: kind},
@@ -553,6 +552,7 @@ func searchCmd() *cli.Command {
 					}
 				}
 				finder := finders.NewSearchFinder(finders.SearchFinderOptions{
+					Graph:      g,
 					GraphDir:   graphDir,
 					Embedder:   emb,
 					IndexStore: idxStore,

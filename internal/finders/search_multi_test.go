@@ -66,9 +66,8 @@ func TestMultiSearchTextAcrossRepos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	local := NewSearchFinder(SearchFinderOptions{GraphDir: localDir, Repos: reg})
+	local := NewSearchFinder(SearchFinderOptions{Graph: g, GraphDir: localDir, Repos: reg})
 	q := query.SearchQuery{
-		Graph:    g,
 		Terms:    []string{"telemetry"},
 		AllRepos: true,
 	}

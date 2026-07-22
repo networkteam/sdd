@@ -26,18 +26,21 @@ import (
 // Pure read: no side effects. The lazy-fill that precedes a query is
 // the IndexHandler's job; this finder consumes the index as-is.
 type SearchFinder struct {
+	graph      *model.Graph // the graph filtered and resolved against
 	graphDir   string
 	embedder   llm.Embedder    // nil disables vector and hybrid modes
 	indexStore *index.Index    // nil disables vector and hybrid modes
 	repos      *repos.Registry // nil disables cross-repo search
 }
 
-// SearchFinderOptions configures NewSearchFinder. GraphDir is required
-// (used by text mode to resolve attachment paths). Embedder + IndexStore
-// are required for vector and hybrid modes; their absence makes those
-// modes return an error. Repos is required for cross-repo search
-// (MultiSearch).
+// SearchFinderOptions configures NewSearchFinder. Graph is the graph the
+// query filters and resolves against — the SearchFinder holds it so the
+// SearchQuery stays pure intent. GraphDir is required (used by text mode to
+// resolve attachment paths). Embedder + IndexStore are required for vector and
+// hybrid modes; their absence makes those modes return an error. Repos is
+// required for cross-repo search (MultiSearch).
 type SearchFinderOptions struct {
+	Graph      *model.Graph
 	GraphDir   string
 	Embedder   llm.Embedder
 	IndexStore *index.Index
@@ -47,6 +50,7 @@ type SearchFinderOptions struct {
 // NewSearchFinder constructs a SearchFinder.
 func NewSearchFinder(opts SearchFinderOptions) *SearchFinder {
 	return &SearchFinder{
+		graph:      opts.Graph,
 		graphDir:   opts.GraphDir,
 		embedder:   opts.Embedder,
 		indexStore: opts.IndexStore,
@@ -64,8 +68,8 @@ func (f *SearchFinder) VectorAvailable() bool {
 
 // Search dispatches the query to the appropriate mode.
 func (f *SearchFinder) Search(ctx context.Context, q query.SearchQuery) (*query.SearchResult, error) {
-	if q.Graph == nil {
-		return nil, errors.New("SearchQuery.Graph is required")
+	if f.graph == nil {
+		return nil, errors.New("SearchFinder graph is required")
 	}
 	switch q.Mode() {
 	case query.SearchModeText:
@@ -152,7 +156,7 @@ func (f *SearchFinder) textSearch(q query.SearchQuery) (*query.SearchResult, err
 	}
 	enriched := make([]scoredWithStatus, len(hits))
 	for i, h := range hits {
-		mult := statusMultiplier(q.Graph.DerivedStatus(h.entry).Kind)
+		mult := statusMultiplier(f.graph.DerivedStatus(h.entry).Kind)
 		enriched[i] = scoredWithStatus{s: h, adjusted: float32(h.matchCount) * mult}
 	}
 	sort.Slice(enriched, func(i, j int) bool {
@@ -301,7 +305,7 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 	for entryID, hits := range perEntry {
 		sort.Slice(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
 		topChunkScore := hits[0].score
-		statusMult := statusMultiplier(q.Graph.DerivedStatus(candidateSet[entryID]).Kind)
+		statusMult := statusMultiplier(f.graph.DerivedStatus(candidateSet[entryID]).Kind)
 		entryScore := topChunkScore * statusMult
 
 		citations := selectCitations(hits, topChunkScore, statusMult, q.EffectiveMaxCitations())
@@ -311,7 +315,19 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 			Citations: citations,
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Score > out[j].Score })
+	// Total-order sort: score desc, then full entry ID asc as the
+	// tie-break. The per-entry rollup above is built by iterating a map
+	// (randomized order), and equal scores are routine here — the fake-
+	// embedder e2e corpus ties fruit-free entries at cosine 1.0, and real
+	// corpora tie whenever two entries share a top chunk score — so a bare
+	// score sort would rank tied entries nondeterministically. Unique IDs
+	// make (score, ID) a total order.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].Entry.ID < out[j].Entry.ID
+	})
 	if len(out) > limit {
 		out = out[:limit]
 	}
@@ -322,13 +338,13 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 // Superseded entries are excluded by default — they pollute clusters with
 // historical near-duplicates per the design.md rationale.
 func (f *SearchFinder) candidates(q query.SearchQuery) []*model.Entry {
-	filtered := q.Graph.Filter(q.Filter)
+	filtered := f.graph.Filter(q.Filter)
 	if q.IncludeSuperseded {
 		return filtered
 	}
 	out := make([]*model.Entry, 0, len(filtered))
 	for _, e := range filtered {
-		if q.Graph.DerivedStatus(e).Kind == model.StatusSupersededBy {
+		if f.graph.DerivedStatus(e).Kind == model.StatusSupersededBy {
 			continue
 		}
 		out = append(out, e)
@@ -728,8 +744,17 @@ func rrfFuse(textRes, vecRes *query.SearchResult, limit int) *query.SearchResult
 			Citations: m.citations,
 		})
 	}
+	// Total-order sort: fused score desc, then full entry ID asc. RRF
+	// scores tie exactly whenever entries occupy the same rank slots in
+	// the two arms — e.g. a text-only rank-1 entry (1/(k+1)) and a
+	// vector-only rank-1 entry (also 1/(k+1)) collide. With the merge map
+	// iterated in randomized order, a bare score sort would flip those
+	// ties per run. Unique IDs make (score, ID) a total order.
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].Score > out[j].Score
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		return out[i].Entry.ID < out[j].Entry.ID
 	})
 	if len(out) > limit {
 		out = out[:limit]

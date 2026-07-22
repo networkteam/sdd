@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd/internal/engine"
@@ -80,7 +79,9 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	workflow.graphs = graphs
 
 	store := workflowTargetStore(t, map[string]any{"captureBranch": "work"})
-	store.WriteEngine("entryId", entryID)
+	if err := store.WriteEngine("entryId", entryID); err != nil {
+		t.Fatal(err)
+	}
 	graph, err := graphs.CurrentFor(store)
 	if err != nil {
 		t.Fatal(err)
@@ -157,17 +158,30 @@ func TestFactIndexQueryReturnsModelRowsWithoutDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, ok := value.([]model.FactIndexRow)
+	rows, ok := value.([]FactIndexRow)
 	if !ok || len(rows) != 1 || rows[0].ID != "20260719-120000-s-tac-loc" {
 		t.Fatalf("factIndex rows = %#v", value)
 	}
+	// The query result crosses the application boundary as plain, serializable
+	// strings \u2014 Topic in its canonical slash-joined form, never a model type.
+	if rows[0].Topic != "cli/view" {
+		t.Fatalf("factIndex topic = %q, want canonical string form", rows[0].Topic)
+	}
+
+	// A malformed enrollment (block-injecting title) is not rejected at the
+	// read boundary \u2014 it loads with a warning and is quietly omitted, so the
+	// serve still succeeds and the injected content never reaches the result.
 	malicious := model.NewGraph([]*model.Entry{{
 		ID: "20260719-120200-s-tac-bad", Type: model.TypeSignal, Layer: model.LayerTactical,
 		Kind: model.KindFact, Topics: []model.TopicPath{topic},
 		Index: &model.FactIndex{Title: "Cue\u2028## Injected block", Topic: topic},
 	}})
-	if _, err := factIndex.Fn(&engine.Context{Graph: malicious}, nil); err == nil || !strings.Contains(err.Error(), "control or line-separator") {
-		t.Fatalf("factIndex accepted a block-injecting title: %v", err)
+	value, err = factIndex.Fn(&engine.Context{Graph: malicious}, nil)
+	if err != nil {
+		t.Fatalf("factIndex on malformed enrollment errored instead of omitting: %v", err)
+	}
+	if rows, ok := value.([]FactIndexRow); !ok || len(rows) != 0 {
+		t.Fatalf("factIndex included a malformed enrollment: %#v", value)
 	}
 }
 

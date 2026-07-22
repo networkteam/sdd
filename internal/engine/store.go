@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 )
@@ -50,11 +49,13 @@ func NewStore(spec *Spec) *Store {
 	}
 }
 
-// Clone creates an isolated store for candidate mutation.
+// Clone creates an isolated store for candidate mutation. Every stored value
+// is a normalized JSON document, so a container-recursion copy fully isolates
+// the candidate — a rejected batch leaves the source untouched.
 func (s *Store) Clone() *Store {
 	values := make(map[string]storeValue, len(s.values))
 	for name, value := range s.values {
-		value.Value = cloneStoreValue(value.Value)
+		value.Value = copyStoreValue(value.Value)
 		values[name] = value
 	}
 	return &Store{spec: s.spec, values: values}
@@ -73,7 +74,10 @@ func (s *Store) transact(apply func(*Store) error) error {
 }
 
 func (s *Store) commit(candidate *Store) {
-	s.values = candidate.Clone().values
+	// The candidate is already an isolated copy (Clone at transaction start,
+	// fresh normalized values per write) and is discarded after adoption, so
+	// no further copy is needed.
+	s.values = candidate.values
 }
 
 // SetStart applies the start-time input map, the shared seeding primitive
@@ -137,7 +141,11 @@ func (s *Store) setParams(params map[string]any) error {
 		if err != nil {
 			return fmt.Errorf("param %q: %w", name, err)
 		}
-		s.values[name] = storeValue{Value: v, Provenance: ProvenanceParam}
+		nv, err := normalizeStoreValue(v)
+		if err != nil {
+			return fmt.Errorf("param %q: %w", name, err)
+		}
+		s.values[name] = storeValue{Value: nv, Provenance: ProvenanceParam}
 	}
 	for name, decl := range s.spec.Params {
 		if decl.Optional {
@@ -184,7 +192,11 @@ func (s *Store) writeState(fields map[string]any, validate func(*Store) error) (
 			if err != nil {
 				return fmt.Errorf("field %q: %w", name, err)
 			}
-			candidate.values[name] = storeValue{Value: v, Provenance: ProvenanceState}
+			nv, err := normalizeStoreValue(v)
+			if err != nil {
+				return fmt.Errorf("field %q: %w", name, err)
+			}
+			candidate.values[name] = storeValue{Value: nv, Provenance: ProvenanceState}
 		}
 		if validate != nil {
 			return validate(candidate)
@@ -199,12 +211,19 @@ func (s *Store) writeState(fields map[string]any, validate func(*Store) error) (
 
 // WriteEngine writes an engine-produced value (an op result or chooser-call
 // effect) per the producing function's Go contract. Never reachable from a
-// report.
-func (s *Store) WriteEngine(name string, v any) {
-	s.values[name] = storeValue{Value: cloneStoreValue(v), Provenance: ProvenanceEngine}
-	if s.engineJournal != nil {
-		s.engineJournal[name] = cloneStoreValue(v)
+// report. The value is normalized to its JSON document form so pre-restart
+// reads match the replayed form; a value that cannot marshal is a loud
+// write-time error, leaving the store unchanged.
+func (s *Store) WriteEngine(name string, v any) error {
+	nv, err := normalizeStoreValue(v)
+	if err != nil {
+		return fmt.Errorf("engine write %q: %w", name, err)
 	}
+	s.values[name] = storeValue{Value: nv, Provenance: ProvenanceEngine}
+	if s.engineJournal != nil {
+		s.engineJournal[name] = copyStoreValue(nv)
+	}
+	return nil
 }
 
 // beginJournal starts collecting engine writes for the next command run.
@@ -225,7 +244,7 @@ func (s *Store) Get(name string) (any, bool) {
 	if !ok {
 		return nil, false
 	}
-	return cloneStoreValue(sv.Value), true
+	return copyStoreValue(sv.Value), true
 }
 
 // Has reports whether the field is present and non-empty. Empty strings,
@@ -253,7 +272,7 @@ func (s *Store) Has(name string) bool {
 func (s *Store) TemplateContext() map[string]any {
 	ctx := make(map[string]any, len(s.values))
 	for name, sv := range s.values {
-		ctx[name] = cloneStoreValue(sv.Value)
+		ctx[name] = copyStoreValue(sv.Value)
 	}
 	return ctx
 }
@@ -303,7 +322,7 @@ func (s *Store) Collected() map[string]any {
 		if !s.Has(name) {
 			continue
 		}
-		out[name] = cloneStoreValue(sv.Value)
+		out[name] = copyStoreValue(sv.Value)
 	}
 	return out
 }
@@ -312,7 +331,7 @@ func (s *Store) Collected() map[string]any {
 func (s *Store) Export() map[string]ExportedValue {
 	out := make(map[string]ExportedValue, len(s.values))
 	for name, sv := range s.values {
-		sv.Value = cloneStoreValue(sv.Value)
+		sv.Value = copyStoreValue(sv.Value)
 		out[name] = ExportedValue(sv)
 	}
 	return out
@@ -339,7 +358,11 @@ func (s *Store) importValue(name string, ev ExportedValue) error {
 		if err != nil {
 			return fmt.Errorf("replayed param %q: %w", name, err)
 		}
-		s.values[name] = storeValue{Value: v, Provenance: ProvenanceParam}
+		nv, err := normalizeStoreValue(v)
+		if err != nil {
+			return fmt.Errorf("replayed param %q: %w", name, err)
+		}
+		s.values[name] = storeValue{Value: nv, Provenance: ProvenanceParam}
 	case ProvenanceState:
 		decl, ok := s.spec.State[name]
 		if !ok {
@@ -349,166 +372,66 @@ func (s *Store) importValue(name string, ev ExportedValue) error {
 		if err != nil {
 			return fmt.Errorf("replayed state field %q: %w", name, err)
 		}
-		s.values[name] = storeValue{Value: v, Provenance: ProvenanceState}
+		nv, err := normalizeStoreValue(v)
+		if err != nil {
+			return fmt.Errorf("replayed state field %q: %w", name, err)
+		}
+		s.values[name] = storeValue{Value: nv, Provenance: ProvenanceState}
 	case ProvenanceEngine:
-		s.values[name] = storeValue{Value: cloneStoreValue(ev.Value), Provenance: ProvenanceEngine}
+		nv, err := normalizeStoreValue(ev.Value)
+		if err != nil {
+			return fmt.Errorf("replayed engine field %q: %w", name, err)
+		}
+		s.values[name] = storeValue{Value: nv, Provenance: ProvenanceEngine}
 	default:
 		return fmt.Errorf("replayed field %q has unknown provenance %q", name, ev.Provenance)
 	}
 	return nil
 }
 
-// StoreValueCloner lets domain values preserve their type-specific ownership.
-type StoreValueCloner interface {
-	CloneStoreValue() any
+// normalizeStoreValue reduces a value to its JSON document form — the store's
+// contract is that every value is a JSON document. Marshalling then decoding
+// into an untyped `any` yields exactly the persisted shape (map[string]any,
+// []any, string, float64, bool, nil), so a value read before a restart matches
+// the same value replayed from the log, and typed inputs (engine.Ref,
+// engine.FactIndex, time.Time) collapse to that shape at the write boundary. A
+// value that cannot marshal (a channel, a func) is a loud write-time error, not
+// a panic and not a silent skip.
+func normalizeStoreValue(value any) (any, error) {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("store value is not JSON-persistable: %w", err)
+	}
+	var out any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, fmt.Errorf("store value did not round-trip through JSON: %w", err)
+	}
+	return out, nil
 }
 
-// Store values cross API boundaries by value so transactions own their state.
-func cloneStoreValue(value any) any {
-	if value == nil {
-		return nil
-	}
-	return cloneStoreReflect(reflect.ValueOf(value), map[cloneVisit]bool{}).Interface()
-}
-
-type cloneVisit struct {
-	typeOf  reflect.Type
-	pointer uintptr
-}
-
-func cloneStoreReflect(value reflect.Value, active map[cloneVisit]bool) reflect.Value {
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.UnsafePointer:
-		panic(fmt.Sprintf("engine store value kind %s is not JSON-persistable", value.Kind()))
-	}
-	if value.CanInterface() {
-		dynamic := reflect.ValueOf(value.Interface())
-		if dynamic.IsValid() && !isNilValue(dynamic) {
-			cloner, ok := dynamic.Interface().(StoreValueCloner)
-			if ok {
-				cloned := reflect.ValueOf(cloner.CloneStoreValue())
-				if !cloned.IsValid() || cloned.Type() != dynamic.Type() || !cloned.Type().AssignableTo(value.Type()) {
-					panic(fmt.Sprintf("StoreValueCloner for %s must preserve its concrete type", dynamic.Type()))
-				}
-				return cloned
-			}
-		}
-	}
-	if visit, ok := cloneReferenceVisit(value); ok {
-		if active[visit] {
-			panic("engine store value contains a reference cycle; values must be JSON-persistable")
-		}
-		active[visit] = true
-		defer delete(active, visit)
-	}
-	switch value.Kind() {
-	case reflect.Interface:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		cloned := cloneStoreReflect(value.Elem(), active)
-		out := reflect.New(value.Type()).Elem()
-		out.Set(cloned)
-		return out
-	case reflect.Pointer:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		out := reflect.New(value.Type().Elem())
-		out.Elem().Set(cloneStoreReflect(value.Elem(), active))
-		return out
-	case reflect.Map:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		out := reflect.MakeMapWithSize(value.Type(), value.Len())
-		iter := value.MapRange()
-		for iter.Next() {
-			out.SetMapIndex(cloneStoreReflect(iter.Key(), active), cloneStoreReflect(iter.Value(), active))
+// copyStoreValue returns an isolated copy of a normalized store value so a
+// caller cannot mutate store internals through a returned map or slice. Values
+// are guaranteed JSON shapes by normalizeStoreValue, so a container-recursion
+// walk suffices — scalars (string, float64, bool, nil) are immutable and pass
+// through, and no marshal step is needed on the read path (marshal failures are
+// already surfaced at write time).
+func copyStoreValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, item := range v {
+			out[k] = copyStoreValue(item)
 		}
 		return out
-	case reflect.Slice:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		out := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
-		for i := range value.Len() {
-			out.Index(i).Set(cloneStoreReflect(value.Index(i), active))
-		}
-		return out
-	case reflect.Array:
-		out := reflect.New(value.Type()).Elem()
-		for i := range value.Len() {
-			out.Index(i).Set(cloneStoreReflect(value.Index(i), active))
-		}
-		return out
-	case reflect.Struct:
-		out := reflect.New(value.Type()).Elem()
-		out.Set(value)
-		for i := range value.NumField() {
-			field := value.Type().Field(i)
-			if field.PkgPath != "" {
-				if carriesMutableAlias(field.Type, map[reflect.Type]bool{}) {
-					panic(fmt.Sprintf("engine store value %s has unexported mutable field %s; implement StoreValueCloner", value.Type(), field.Name))
-				}
-				continue
-			}
-			out.Field(i).Set(cloneStoreReflect(value.Field(i), active))
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = copyStoreValue(item)
 		}
 		return out
 	default:
 		return value
 	}
-}
-
-func isNilValue(value reflect.Value) bool {
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
-}
-
-func cloneReferenceVisit(value reflect.Value) (cloneVisit, bool) {
-	if isNilValue(value) {
-		return cloneVisit{}, false
-	}
-	var pointer uintptr
-	switch value.Kind() {
-	case reflect.Map:
-		pointer = uintptr(value.UnsafePointer())
-	case reflect.Pointer:
-		pointer = value.Pointer()
-	case reflect.Slice:
-		if value.Len() == 0 {
-			return cloneVisit{}, false
-		}
-		pointer = value.Pointer()
-	default:
-		return cloneVisit{}, false
-	}
-	return cloneVisit{typeOf: value.Type(), pointer: pointer}, true
-}
-
-func carriesMutableAlias(valueType reflect.Type, seen map[reflect.Type]bool) bool {
-	if seen[valueType] {
-		return false
-	}
-	seen[valueType] = true
-	switch valueType.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface, reflect.UnsafePointer:
-		return true
-	case reflect.Array:
-		return carriesMutableAlias(valueType.Elem(), seen)
-	case reflect.Struct:
-		for i := range valueType.NumField() {
-			if carriesMutableAlias(valueType.Field(i).Type, seen) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func joinNames(names []string) string {

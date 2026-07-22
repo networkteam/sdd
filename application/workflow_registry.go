@@ -57,7 +57,12 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		Doc:       engine.FuncDoc{Name: "factIndex", Doc: "Active indexed facts from the current project graph, ordered for session discovery."},
 		ServeSafe: true,
 		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
-			return ctx.Graph.IndexedFacts()
+			rows := ctx.Graph.IndexedFacts()
+			result := make([]FactIndexRow, len(rows))
+			for i, row := range rows {
+				result[i] = FactIndexRow{ID: row.ID, Title: row.Title, Topic: row.Topic.String()}
+			}
+			return result, nil
 		},
 	}); err != nil {
 		return err
@@ -182,8 +187,7 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 				return err
 			}
 			w.binding = result.Binding
-			ctx.Store.WriteEngine("wipMarker", marker)
-			return nil
+			return ctx.Store.WriteEngine("wipMarker", marker)
 		},
 	}); err != nil {
 		return err
@@ -201,8 +205,7 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 				return err
 			}
 			w.binding = result.Binding
-			ctx.Store.WriteEngine("wipMarker", nil)
-			return nil
+			return ctx.Store.WriteEngine("wipMarker", nil)
 		},
 	}); err != nil {
 		return err
@@ -250,24 +253,19 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	}
 	draft.Confidence, _ = workflowStoreString(ctx.Store, "confidence")
 	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
-	if value, ok := ctx.Store.Get("index"); ok {
-		index, valid := value.(engine.FactIndex)
-		if !valid {
-			return fmt.Errorf("newEntry: index has invalid stored type")
-		}
-		draft.Index = &FactIndex{Title: index.Title, Topic: index.Topic}
+	if index, ok := workflowStoreDocument(ctx.Store, "index"); ok {
+		title, _ := index["title"].(string)
+		topic, _ := index["topic"].(string)
+		draft.Index = &FactIndex{Title: title, Topic: topic}
 	}
 	if override, ok := ctx.Store.Get("preflightOverride"); ok {
 		draft.SkipPreflight, _ = override.(bool)
 	}
-	if value, ok := ctx.Store.Get("refs"); ok {
-		if refs, ok := value.([]any); ok {
-			for _, item := range refs {
-				if ref, ok := item.(engine.Ref); ok {
-					draft.Refs = append(draft.Refs, EntryRef{ID: ref.ID, Kind: ref.Kind, Desc: ref.Desc})
-				}
-			}
-		}
+	for _, ref := range workflowStoreDocuments(ctx.Store, "refs") {
+		id, _ := ref["id"].(string)
+		kind, _ := ref["kind"].(string)
+		desc, _ := ref["desc"].(string)
+		draft.Refs = append(draft.Refs, EntryRef{ID: id, Kind: kind, Desc: desc})
 	}
 	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
 	if err == nil {
@@ -277,7 +275,9 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	for _, finding := range result.Findings {
 		findings = append(findings, query.Finding{Severity: query.Severity(finding.Severity), Category: finding.Category, Observation: finding.Observation})
 	}
-	ctx.Store.WriteEngine("findings", findings)
+	if writeErr := ctx.Store.WriteEngine("findings", findings); writeErr != nil {
+		return fmt.Errorf("newEntry: %w", writeErr)
+	}
 	if err != nil {
 		return fmt.Errorf("newEntry: %w", err)
 	}
@@ -286,7 +286,9 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 			return nil
 		}
 	}
-	ctx.Store.WriteEngine("entryId", result.EntryID)
+	if err := ctx.Store.WriteEngine("entryId", result.EntryID); err != nil {
+		return fmt.Errorf("newEntry: %w", err)
+	}
 	w.session.LogRead("newEntry", []string{result.EntryID}, nil)
 	return nil
 }
@@ -306,6 +308,38 @@ func workflowStoreString(store *engine.Store, name string) (string, bool) {
 	}
 	result, ok := value.(string)
 	return result, ok && result != ""
+}
+
+// workflowStoreDocument reads a single object-shaped store value. Store values
+// are normalized JSON documents, so a ref or fact-index comes back as a
+// map[string]any keyed by its JSON field names, not as a typed struct.
+func workflowStoreDocument(store *engine.Store, name string) (map[string]any, bool) {
+	value, ok := store.Get(name)
+	if !ok {
+		return nil, false
+	}
+	doc, ok := value.(map[string]any)
+	return doc, ok
+}
+
+// workflowStoreDocuments reads a list of object-shaped store values (e.g. refs),
+// skipping any element that is not a JSON object.
+func workflowStoreDocuments(store *engine.Store, name string) []map[string]any {
+	value, ok := store.Get(name)
+	if !ok {
+		return nil
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	docs := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if doc, ok := item.(map[string]any); ok {
+			docs = append(docs, doc)
+		}
+	}
+	return docs
 }
 
 func workflowStoreStrings(store *engine.Store, name string) []string {
@@ -377,6 +411,16 @@ func WorkflowRegistryDocs(class string) ([]RegistryFunction, error) {
 		})
 	}
 	return result, nil
+}
+
+// FactIndexRow is the application-boundary shape of an indexed fact: plain,
+// serializable strings only. Topic carries the canonical slash-joined form
+// (e.g. "cli/view"). ID and Title match the template keys the user-dialogue
+// procedure renders from the factIndex inject result.
+type FactIndexRow struct {
+	ID    string
+	Title string
+	Topic string
 }
 
 type RegistryFunction struct {

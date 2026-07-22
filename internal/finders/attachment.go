@@ -13,11 +13,11 @@ import (
 // ReadAttachment reads one page of an entry's attachment through the shared
 // accessor: the entry's frontmatter-listed attachments are the only readable
 // set, so callers never touch the on-disk layout (d-tac-d21). Pure read.
-func (f *Finder) ReadAttachment(q query.ReadAttachmentQuery) (*query.ReadAttachmentResult, error) {
-	if q.Graph == nil {
+func (gf *GraphFinder) ReadAttachment(q query.ReadAttachmentQuery) (*query.ReadAttachmentResult, error) {
+	if gf.graph == nil {
 		return nil, fmt.Errorf("read attachment: graph is required")
 	}
-	entry, ok := q.Graph.ByID[q.EntryID]
+	entry, ok := gf.graph.ByID[q.EntryID]
 	if !ok {
 		return nil, fmt.Errorf("entry %s not found", q.EntryID)
 	}
@@ -46,7 +46,7 @@ func (f *Finder) ReadAttachment(q query.ReadAttachmentQuery) (*query.ReadAttachm
 		return nil, fmt.Errorf("entry %s has no attachment %q (available: %v)", q.EntryID, name, available)
 	}
 
-	absPath, err := filepath.Abs(filepath.Join(q.GraphDir, filepath.FromSlash(rel)))
+	absPath, err := filepath.Abs(filepath.Join(gf.graph.GraphDir(), filepath.FromSlash(rel)))
 	if err != nil {
 		return nil, fmt.Errorf("resolving attachment path %s: %w", name, err)
 	}

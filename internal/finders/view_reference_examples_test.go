@@ -21,7 +21,7 @@ func TestViewReferenceExamplesExecute(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = New(Options{}).View(query.ViewQuery{Graph: graph, Layout: layout, WIPMarkers: []*model.WIPMarker{}})
+			_, err = New(Options{}).OnGraph(graph).WithWIP([]*model.WIPMarker{}).View(query.ViewQuery{Layout: layout})
 			if err != nil {
 				t.Fatal(err)
 			}

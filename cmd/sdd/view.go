@@ -8,7 +8,6 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
-	"github.com/networkteam/sdd/internal/repos"
 	"github.com/networkteam/sdd/internal/viewlayout"
 	"github.com/urfave/cli/v3"
 )
@@ -83,7 +82,7 @@ func viewCmd() *cli.Command {
 				return err
 			}
 
-			result, err := f.View(query.ViewQuery{Graph: g, Layout: layout, GraphDir: dir})
+			result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 			if err != nil {
 				return err
 			}
@@ -101,15 +100,10 @@ func viewCmd() *cli.Command {
 					fmt.Fprintf(os.Stdout, "\n── repo: %s (unavailable) ──\n", repoID)
 					continue
 				}
-				cacheDir, err := reg.CacheDir(repoID)
-				if err != nil {
-					return err
-				}
-				memberDir, err := repos.GraphDir(cacheDir)
-				if err != nil {
-					return err
-				}
-				mresult, err := f.View(query.ViewQuery{Graph: member, Layout: layout, GraphDir: memberDir})
+				// The member graph records its own directory (loaded via
+				// LoadGraph), so the finder resolves that repo's WIP markers
+				// lazily when the layout needs them.
+				mresult, err := f.OnGraph(member).View(query.ViewQuery{Layout: layout})
 				if err != nil {
 					return err
 				}

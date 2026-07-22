@@ -2,18 +2,13 @@ package query
 
 import "github.com/networkteam/sdd/internal/model"
 
-// ViewQuery captures intent to execute a layout pipeline against the graph.
-// The Layout AST is produced upstream by ParseLayout — the finder consumes
-// the parsed shape rather than the raw `--layout` string.
-//
-// WIPMarkers lets storage-neutral callers provide the current markers.
-// GraphDir remains the filesystem fallback for legacy callers. Both can be
-// empty when the layout does not use source(wip).
+// ViewQuery captures intent to execute a layout pipeline. Pure intent: the
+// Layout AST is produced upstream by ParseLayout — the finder consumes the
+// parsed shape rather than the raw `--layout` string. The graph and any WIP
+// markers the pipeline needs are held by the GraphFinder that runs the query,
+// not carried here.
 type ViewQuery struct {
-	Graph      *model.Graph
-	Layout     model.Layout
-	GraphDir   string
-	WIPMarkers []*model.WIPMarker
+	Layout model.Layout
 }
 
 // ViewResult is the structured output of a ViewQuery: one SectionResult

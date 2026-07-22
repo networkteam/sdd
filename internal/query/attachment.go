@@ -1,15 +1,11 @@
 package query
 
-import "github.com/networkteam/sdd/internal/model"
-
 // ReadAttachmentQuery captures intent to read an entry's attachment content
 // through the CLI-owned accessor, so agents never derive storage paths
 // themselves (20260606-004059-d-tac-d21). Content is paged for remote
 // consumers: Offset is a byte position into the file, MaxBytes caps the
 // returned slice.
 type ReadAttachmentQuery struct {
-	Graph    *model.Graph
-	GraphDir string
 	// EntryID is the full ID of the entry whose attachment is read.
 	EntryID string
 	// Name selects the attachment by filename. Optional when the entry has

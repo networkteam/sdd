@@ -36,7 +36,7 @@ func (f *fakeReader) LoadWIPMarkers(_ string) ([]*model.WIPMarker, error) {
 	return nil, nil
 }
 
-func (f *fakeReader) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
+func (f *fakeReader) Preflight(ctx context.Context, g *model.Graph, q query.PreflightQuery) (*query.PreflightResult, error) {
 	return f.preflightResult, f.preflightErr
 }
 

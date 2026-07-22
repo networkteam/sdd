@@ -15,12 +15,12 @@ import (
 // renderShow exercises the finder + presenter together.
 func renderShow(t *testing.T, g *model.Graph, ids []string, opts ...showOpt) string {
 	t.Helper()
-	cfg := showConfig{q: query.ShowQuery{Graph: g, IDs: ids, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth}}
+	cfg := showConfig{q: query.ShowQuery{IDs: ids, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth}}
 	for _, o := range opts {
 		o(&cfg)
 	}
 	f := finders.New(finders.Options{})
-	result, err := f.Show(cfg.q)
+	result, err := f.OnGraph(g).Show(cfg.q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestRenderShow_EntryNotFound(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{})
 
 	f := finders.New(finders.Options{})
-	_, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{"20260410-100000-s-stg-xxx"}})
+	_, err := f.OnGraph(g).Show(query.ShowQuery{IDs: []string{"20260410-100000-s-stg-xxx"}})
 	if err == nil {
 		t.Fatal("expected error for missing entry")
 	}
@@ -324,7 +324,7 @@ func TestRenderShowStyled_ColorDisabled(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{root, primary})
 
 	f := finders.New(finders.Options{})
-	result, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{primary.ID}, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth})
+	result, err := f.OnGraph(g).Show(query.ShowQuery{IDs: []string{primary.ID}, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth})
 	if err != nil {
 		t.Fatal(err)
 	}

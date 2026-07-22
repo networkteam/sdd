@@ -15,9 +15,8 @@ func TestShow_ShortIDResolves(t *testing.T) {
 	})
 	f := New(Options{})
 
-	result, err := f.Show(query.ShowQuery{
-		Graph: g,
-		IDs:   []string{"d-tac-bbb"},
+	result, err := f.OnGraph(g).Show(query.ShowQuery{
+		IDs: []string{"d-tac-bbb"},
 	})
 	if err != nil {
 		t.Fatalf("Show: %v", err)
@@ -37,9 +36,8 @@ func TestShow_AmbiguousShortIDErrors(t *testing.T) {
 	})
 	f := New(Options{})
 
-	_, err := f.Show(query.ShowQuery{
-		Graph: g,
-		IDs:   []string{"s-stg-xyz"},
+	_, err := f.OnGraph(g).Show(query.ShowQuery{
+		IDs: []string{"s-stg-xyz"},
 	})
 	if err == nil {
 		t.Fatal("Show: want error for ambiguous short ID")
@@ -55,9 +53,8 @@ func TestShow_NotFoundShortIDPassesThroughError(t *testing.T) {
 	})
 	f := New(Options{})
 
-	_, err := f.Show(query.ShowQuery{
-		Graph: g,
-		IDs:   []string{"s-stg-zzz"},
+	_, err := f.OnGraph(g).Show(query.ShowQuery{
+		IDs: []string{"s-stg-zzz"},
 	})
 	if err == nil {
 		t.Fatal("Show: want error for unresolved short ID")

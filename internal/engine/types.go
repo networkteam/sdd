@@ -262,13 +262,13 @@ func validateBaseValue(base BaseType, v any) (any, error) {
 					return nil, fmt.Errorf("finding %d: expected object", i)
 				}
 				f := query.Finding{}
-				if s, ok := m["severity"].(string); ok {
+				if s, ok := findingField(m, "severity"); ok {
 					f.Severity = query.Severity(s)
 				}
-				if s, ok := m["category"].(string); ok {
+				if s, ok := findingField(m, "category"); ok {
 					f.Category = s
 				}
-				if s, ok := m["observation"].(string); ok {
+				if s, ok := findingField(m, "observation"); ok {
 					f.Observation = s
 				}
 				findings = append(findings, f)
@@ -295,6 +295,21 @@ type Ref struct {
 type FactIndex struct {
 	Title string `json:"title"`
 	Topic string `json:"topic"`
+}
+
+// findingField reads a finding field by its document key, tolerating both the
+// JSON-tag casing and the exported Go field name. query.Finding carries no JSON
+// tags, so the store's normalized document form uses the capitalized field
+// names; a report or a future tagged form would use the lowercase key.
+func findingField(m map[string]any, key string) (string, bool) {
+	if s, ok := m[key].(string); ok {
+		return s, true
+	}
+	exported := strings.ToUpper(key[:1]) + key[1:]
+	if s, ok := m[exported].(string); ok {
+		return s, true
+	}
+	return "", false
 }
 
 func refFromMap(m map[string]any) (Ref, error) {

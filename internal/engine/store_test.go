@@ -1,33 +1,11 @@
 package engine
 
 import (
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
-	"unsafe"
-
-	"github.com/networkteam/sdd/internal/query"
+	"time"
 )
-
-type compositeStoreValue struct {
-	Items    []any
-	Metadata map[string]any
-	Findings []query.Finding
-	Nested   *struct{ Labels []string }
-}
-
-type ownedStoreValue struct{ items []string }
-
-type unsafeOwnedStoreValue struct{ items []string }
-
-type badCloneStoreValue struct{}
-
-func (v *ownedStoreValue) CloneStoreValue() any {
-	return &ownedStoreValue{items: append([]string(nil), v.items...)}
-}
-
-func (*badCloneStoreValue) CloneStoreValue() any { return &ownedStoreValue{} }
 
 func TestWriteStateClearsOnlyOptionalFields(t *testing.T) {
 	env := newFixtureEnv(t)
@@ -165,133 +143,102 @@ func TestStartInputsAndParamsRejectBatchesWithoutMutation(t *testing.T) {
 	})
 }
 
-func TestStoreOwnsCompositeValuesAcrossAPIBoundaries(t *testing.T) {
-	store := NewStore(&Spec{})
-	input := &compositeStoreValue{
-		Items:    []any{"original", map[string]any{"key": "value"}},
-		Metadata: map[string]any{"nested": []any{"kept"}},
-		Findings: []query.Finding{{Observation: "unchanged"}},
-		Nested:   &struct{ Labels []string }{Labels: []string{"stable"}},
+// TestStoreNormalizesTimeValuesWithoutPanic guards the store's JSON-document
+// contract: a time.Time (bare or nested in containers) normalizes to its
+// RFC3339 string on write, and the read/clone/commit paths never panic on it.
+func TestStoreNormalizesTimeValuesWithoutPanic(t *testing.T) {
+	spec := &Spec{State: map[string]VarDecl{"note": {Type: VarType{Base: TypeText}}}}
+	store := NewStore(spec)
+	stamp := time.Date(2026, 7, 22, 10, 30, 0, 0, time.UTC)
+	if err := store.WriteEngine("stamp", stamp); err != nil {
+		t.Fatal(err)
 	}
-	store.beginJournal()
-	store.WriteEngine("composite", input)
-	input.Items[0] = "caller mutation"
-	input.Metadata["nested"].([]any)[0] = "caller mutation"
-	input.Findings[0].Observation = "caller mutation"
-	input.Nested.Labels[0] = "caller mutation"
-	journal := store.drainJournal()
-	if journal["composite"].(*compositeStoreValue).Items[0] != "original" {
-		t.Fatalf("caller mutation reached journal: %#v", journal)
+	if err := store.WriteEngine("wrapped", map[string]any{"at": stamp, "list": []any{stamp}}); err != nil {
+		t.Fatal(err)
 	}
-	journal["composite"].(*compositeStoreValue).Items[0] = "journal mutation"
 
-	got, _ := store.Get("composite")
-	composite, ok := got.(*compositeStoreValue)
+	got, ok := store.Get("stamp")
 	if !ok {
-		t.Fatalf("stored type = %T", got)
+		t.Fatal("stamp missing")
 	}
-	if composite.Items[0] != "original" || composite.Metadata["nested"].([]any)[0] != "kept" ||
-		composite.Findings[0].Observation != "unchanged" || composite.Nested.Labels[0] != "stable" {
-		t.Fatalf("caller mutation reached store: %#v", composite)
+	if s, isStr := got.(string); !isStr || !strings.HasPrefix(s, "2026-07-22T10:30:00") {
+		t.Fatalf("stamp normalized to %#v, want RFC3339 string", got)
+	}
+	wrapped, _ := store.Get("wrapped")
+	if _, isStr := wrapped.(map[string]any)["at"].(string); !isStr {
+		t.Fatalf("nested time normalized to %#v", wrapped)
 	}
 
-	composite.Items[1].(map[string]any)["key"] = "get mutation"
-	context := store.TemplateContext()
-	context["composite"].(*compositeStoreValue).Nested.Labels[0] = "context mutation"
-	exported := store.Export()
-	exported["composite"].Value.(*compositeStoreValue).Findings[0].Observation = "export mutation"
-	again, _ := store.Get("composite")
-	if !reflect.DeepEqual(again, &compositeStoreValue{
-		Items:    []any{"original", map[string]any{"key": "value"}},
-		Metadata: map[string]any{"nested": []any{"kept"}},
-		Findings: []query.Finding{{Observation: "unchanged"}},
-		Nested:   &struct{ Labels []string }{Labels: []string{"stable"}},
-	}) {
-		t.Fatalf("egress mutation reached store: %#v", again)
+	// Export and a transactional write (which clones then commits with the
+	// time-derived value present) must not panic.
+	_ = store.Export()
+	if _, err := store.WriteState(map[string]any{"note": "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := store.Get("stamp"); again != got {
+		t.Fatalf("stamp changed across commit: %#v", again)
 	}
 }
 
-func TestStoreUsesDomainValueClone(t *testing.T) {
-	store := NewStore(&Spec{})
-	input := &ownedStoreValue{items: []string{"original"}}
-	store.WriteEngine("owned", []any{map[string]any{"value": input}})
-	input.items[0] = "caller mutation"
-	got, _ := store.Get("owned")
-	owned, ok := got.([]any)[0].(map[string]any)["value"].(*ownedStoreValue)
-	if !ok || !reflect.DeepEqual(owned.items, []string{"original"}) {
-		t.Fatalf("domain clone = %#v (%T)", got, got)
+// TestStoreRejectsNonMarshalableEngineValue confirms a value that cannot become
+// a JSON document is a loud write-time error that leaves the store untouched —
+// never a panic and never a silent skip.
+func TestStoreRejectsNonMarshalableEngineValue(t *testing.T) {
+	cases := map[string]any{
+		"channel":     make(chan int),
+		"func":        func() {},
+		"nested func": map[string]any{"fn": func() {}},
 	}
-}
-
-func TestStorePreservesTypedNilDomainValues(t *testing.T) {
-	store := NewStore(&Spec{})
-	var input *ownedStoreValue
-	store.WriteEngine("owned", []any{input})
-	got, _ := store.Get("owned")
-	owned, ok := got.([]any)[0].(*ownedStoreValue)
-	if !ok || owned != nil {
-		t.Fatalf("typed nil = %#v (%T)", got, got)
-	}
-}
-
-func TestStoreRejectsDomainCloneTypeChanges(t *testing.T) {
-	store := NewStore(&Spec{})
-	defer func() {
-		got := recover()
-		if got == nil || !strings.Contains(fmt.Sprint(got), "preserve its concrete type") {
-			t.Fatalf("panic = %v", got)
-		}
-	}()
-	store.WriteEngine("bad", []any{&badCloneStoreValue{}})
-}
-
-func TestStoreRejectsUnexportedMutableFieldsWithoutDomainClone(t *testing.T) {
-	store := NewStore(&Spec{})
-	defer func() {
-		got := recover()
-		if got == nil || !strings.Contains(fmt.Sprint(got), "unexported mutable field items; implement StoreValueCloner") {
-			t.Fatalf("panic = %v", got)
-		}
-	}()
-	store.WriteEngine("unsafe", unsafeOwnedStoreValue{items: []string{"aliased"}})
-}
-
-func TestStoreRejectsReferenceCycles(t *testing.T) {
-	store := NewStore(&Spec{})
-	cyclic := map[string]any{}
-	cyclic["self"] = cyclic
-	defer func() {
-		got := recover()
-		if got == nil || !strings.Contains(fmt.Sprint(got), "reference cycle") {
-			t.Fatalf("panic = %v", got)
-		}
-	}()
-	store.WriteEngine("cyclic", cyclic)
-}
-
-func TestStoreRejectsUnsupportedReferenceValues(t *testing.T) {
-	values := map[string]any{
-		"channel":        make(chan int),
-		"function":       func() {},
-		"unsafe pointer": unsafe.Pointer(new(int)),
-	}
-	for name, value := range values {
+	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
 			store := NewStore(&Spec{})
-			defer func() {
-				got := recover()
-				if got == nil || !strings.Contains(fmt.Sprint(got), "not JSON-persistable") {
-					t.Fatalf("panic = %v", got)
-				}
-			}()
-			store.WriteEngine("unsupported", value)
+			if err := store.WriteEngine("kept", "safe"); err != nil {
+				t.Fatal(err)
+			}
+			before := store.Export()
+			err := store.WriteEngine("bad", value)
+			if err == nil || !strings.Contains(err.Error(), "JSON") {
+				t.Fatalf("WriteEngine error = %v, want a JSON-persistable error", err)
+			}
+			if !reflect.DeepEqual(store.Export(), before) {
+				t.Fatalf("rejected value changed store: %#v", store.Export())
+			}
 		})
+	}
+}
+
+// TestStoreGetAndWriteStateIsolateContainers confirms the store never shares a
+// mutable container with a caller: mutating the map passed to WriteState after
+// the call, and mutating a map returned by Get, both leave the store unchanged.
+func TestStoreGetAndWriteStateIsolateContainers(t *testing.T) {
+	spec := &Spec{State: map[string]VarDecl{"index": {Type: VarType{Base: TypeFactIndex}}}}
+	store := NewStore(spec)
+	input := map[string]any{"title": "View grammar", "topic": "cli/ux"}
+	if _, err := store.WriteState(map[string]any{"index": input}); err != nil {
+		t.Fatal(err)
+	}
+	input["title"] = "caller mutation"
+
+	first, ok := store.Get("index")
+	if !ok {
+		t.Fatal("index missing")
+	}
+	if first.(map[string]any)["title"] != "View grammar" {
+		t.Fatalf("write input aliased store: %#v", first)
+	}
+	first.(map[string]any)["title"] = "get mutation"
+
+	second, _ := store.Get("index")
+	if second.(map[string]any)["title"] != "View grammar" {
+		t.Fatalf("get result aliased store: %#v", second)
 	}
 }
 
 func TestStoreCloneIsolatesCandidateValues(t *testing.T) {
 	store := NewStore(&Spec{})
-	store.WriteEngine("items", []any{map[string]any{"value": "original"}})
+	if err := store.WriteEngine("items", []any{map[string]any{"value": "original"}}); err != nil {
+		t.Fatal(err)
+	}
 	candidate := store.Clone()
 	candidate.values["items"].Value.([]any)[0].(map[string]any)["value"] = "candidate mutation"
 	got, _ := store.Get("items")

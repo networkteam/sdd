@@ -12,10 +12,14 @@ import (
 // the caller decides what to do about a non-zero issue count (typically
 // returning a non-zero exit code from the CLI).
 func RenderLint(w io.Writer, result *query.LintResult, g *model.Graph) {
-	if len(result.Entries) == 0 {
+	if result.TotalIssues == 0 {
 		fmt.Fprintln(w, "No issues found.")
-	} else {
-		fmt.Fprintf(w, "%d issue(s) in %d entry/entries:\n\n", result.TotalIssues, len(result.Entries))
+		renderIndexLint(w, result)
+		return
+	}
+	if len(result.Entries) > 0 {
+		entryIssues := result.TotalIssues - len(result.LoadErrors)
+		fmt.Fprintf(w, "%d issue(s) in %d entry/entries:\n\n", entryIssues, len(result.Entries))
 		for _, e := range result.Entries {
 			desc := e.Summary
 			if desc == "" {
@@ -33,7 +37,21 @@ func RenderLint(w io.Writer, result *query.LintResult, g *model.Graph) {
 			fmt.Fprintln(w)
 		}
 	}
+	renderLoadErrors(w, result)
 	renderIndexLint(w, result)
+}
+
+// renderLoadErrors surfaces entries the loader could not parse. They are
+// excluded from the in-memory graph, so they carry no per-entry warnings —
+// this section is the only place they appear.
+func renderLoadErrors(w io.Writer, result *query.LintResult) {
+	if len(result.LoadErrors) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "%d unreadable entry/entries (parse failed, excluded from the graph):\n\n", len(result.LoadErrors))
+	for _, le := range result.LoadErrors {
+		fmt.Fprintf(w, "  %s\n    ⚠ %s\n\n", le.Ref, le.Message)
+	}
 }
 
 // renderIndexLint surfaces the search index's drift count under the

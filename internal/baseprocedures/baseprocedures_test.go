@@ -124,8 +124,8 @@ func TestCaptureCarriesFactIndexThroughPlaybackAndWrite(t *testing.T) {
 	}
 	for _, want := range []string{
 		"{{if .index}}- index:",
-		"title: {{.index.Title}}",
-		"topic: {{.index.Topic}}",
+		"title: {{.index.title}}",
+		"topic: {{.index.topic}}",
 		"optionally enrolls a `fact` in the retrieval index",
 	} {
 		if !strings.Contains(capture, want) {

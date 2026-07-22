@@ -276,7 +276,9 @@ func (s *Session) reopenStalePlayback(inst *Instance, failing []FailedPredicate)
 	if conf.Snapshot == inst.Store.StateSnapshot() {
 		return false, nil // confirmation is current; the gate is held by something else
 	}
-	inst.Store.WriteEngine(fieldPlaybackConfirmation, nil)
+	if err := inst.Store.WriteEngine(fieldPlaybackConfirmation, nil); err != nil {
+		return false, err
+	}
 	s.appendEvent(inst.ID, EventOpResult, map[string]any{
 		"step": inst.Step,
 		"fn":   "reopenPlayback",

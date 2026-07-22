@@ -2,10 +2,9 @@ package query
 
 import "github.com/networkteam/sdd/internal/model"
 
-// LintQuery captures intent to surface graph integrity issues.
-type LintQuery struct {
-	Graph *model.Graph
-}
+// LintQuery captures intent to surface graph integrity issues. Pure intent —
+// the graph is held by the GraphFinder that runs the query.
+type LintQuery struct{}
 
 // IndexLintQuery captures intent to surface search-index health: the
 // resolved embedding config (flag/config merging is the shell's job) and
@@ -26,6 +25,12 @@ type IndexLintQuery struct {
 type LintResult struct {
 	Entries     []*model.Entry
 	TotalIssues int
+
+	// LoadErrors lists entries the graph loader could not parse. They are
+	// counted in TotalIssues (so the exit code reflects them) and rendered in
+	// their own section — an unreadable entry is a graph-integrity problem
+	// even though it carries no in-graph warnings.
+	LoadErrors []model.LoadIssue
 
 	// IndexConfigured is true when an embedding provider is configured.
 	// When false, the rest of the index-side fields are zero values and

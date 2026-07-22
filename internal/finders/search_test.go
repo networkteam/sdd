@@ -141,10 +141,9 @@ func loadSearchIndex(t *testing.T, g *model.Graph) *index.Index {
 func TestSearchFinder_TextModeMultiTermAND(t *testing.T) {
 	t.Parallel()
 	g := buildSearchGraph(t)
-	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+	f := NewSearchFinder(SearchFinderOptions{Graph: g, GraphDir: t.TempDir()})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph:                g,
 		Terms:                []string{"apple", "harvest"},
 		MaxCitationsPerEntry: query.DefaultMaxCitationsPerEntry,
 	})
@@ -173,10 +172,9 @@ func TestSearchFinder_TextModeMultiTermAND(t *testing.T) {
 func TestSearchFinder_ZeroMaxCitations(t *testing.T) {
 	t.Parallel()
 	g := buildSearchGraph(t)
-	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+	f := NewSearchFinder(SearchFinderOptions{Graph: g, GraphDir: t.TempDir()})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph:                g,
 		Terms:                []string{"apple", "harvest"},
 		MaxCitationsPerEntry: 0, // literal zero — suppress citations
 	})
@@ -194,11 +192,10 @@ func TestSearchFinder_ZeroMaxCitations(t *testing.T) {
 func TestSearchFinder_TextModeRegexAlternation(t *testing.T) {
 	t.Parallel()
 	g := buildSearchGraph(t)
-	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+	f := NewSearchFinder(SearchFinderOptions{Graph: g, GraphDir: t.TempDir()})
 
 	// OR semantics achieved via regex alternation in a single term.
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph: g,
 		Terms: []string{"(apple|orange)"},
 	})
 	if err != nil {
@@ -218,10 +215,9 @@ func TestSearchFinder_TextModeRegexAlternation(t *testing.T) {
 func TestSearchFinder_TextModeExcludesSupersededByDefault(t *testing.T) {
 	t.Parallel()
 	g := buildSearchGraph(t)
-	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+	f := NewSearchFinder(SearchFinderOptions{Graph: g, GraphDir: t.TempDir()})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph: g,
 		Terms: []string{"apple"},
 	})
 	if err != nil {
@@ -235,7 +231,6 @@ func TestSearchFinder_TextModeExcludesSupersededByDefault(t *testing.T) {
 
 	// IncludeSuperseded flips the gate.
 	res, err = f.Search(context.Background(), query.SearchQuery{
-		Graph:             g,
 		Terms:             []string{"apple"},
 		IncludeSuperseded: true,
 	})
@@ -256,10 +251,9 @@ func TestSearchFinder_TextModeExcludesSupersededByDefault(t *testing.T) {
 func TestSearchFinder_TextModeFilterByType(t *testing.T) {
 	t.Parallel()
 	g := buildSearchGraph(t)
-	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+	f := NewSearchFinder(SearchFinderOptions{Graph: g, GraphDir: t.TempDir()})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph:  g,
 		Terms:  []string{"apple"},
 		Filter: model.GraphFilter{Type: model.TypeDecision},
 	})
@@ -283,13 +277,13 @@ func TestSearchFinder_VectorMode(t *testing.T) {
 	idx := loadSearchIndex(t, g)
 	emb := &fakeEmbedder{}
 	f := NewSearchFinder(SearchFinderOptions{
+		Graph:      g,
 		GraphDir:   t.TempDir(),
 		Embedder:   emb,
 		IndexStore: idx,
 	})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph:                g,
 		Phrase:               "Need information about apples",
 		MaxCitationsPerEntry: query.DefaultMaxCitationsPerEntry,
 	})
@@ -315,10 +309,9 @@ func TestSearchFinder_VectorMode(t *testing.T) {
 func TestSearchFinder_VectorModeWithoutEmbedderErrors(t *testing.T) {
 	t.Parallel()
 	g := buildSearchGraph(t)
-	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+	f := NewSearchFinder(SearchFinderOptions{Graph: g, GraphDir: t.TempDir()})
 
 	_, err := f.Search(context.Background(), query.SearchQuery{
-		Graph:  g,
 		Phrase: "anything",
 	})
 	if err == nil {
@@ -335,13 +328,13 @@ func TestSearchFinder_HybridMode(t *testing.T) {
 	idx := loadSearchIndex(t, g)
 	emb := &fakeEmbedder{}
 	f := NewSearchFinder(SearchFinderOptions{
+		Graph:      g,
 		GraphDir:   t.TempDir(),
 		Embedder:   emb,
 		IndexStore: idx,
 	})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph:  g,
 		Terms:  []string{"apple"},
 		Phrase: "apples",
 	})
@@ -454,10 +447,9 @@ func TestSearchFinder_OpenOutranksClosedAtSimilarSimilarity(t *testing.T) {
 	)
 
 	g := model.NewGraph([]*model.Entry{open, closed, closer})
-	f := NewSearchFinder(SearchFinderOptions{GraphDir: t.TempDir()})
+	f := NewSearchFinder(SearchFinderOptions{Graph: g, GraphDir: t.TempDir()})
 
 	res, err := f.Search(context.Background(), query.SearchQuery{
-		Graph: g,
 		Terms: []string{"ordering"},
 	})
 	if err != nil {

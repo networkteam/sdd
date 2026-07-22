@@ -24,13 +24,11 @@ const DefaultSearchLimit = 10
 // for terser ("--max-citations 1") or wider scans.
 const DefaultMaxCitationsPerEntry = 3
 
-// SearchQuery carries the parsed input for the sdd search command. The
-// finder derives the mode from which fields are populated.
+// SearchQuery carries the parsed input for the sdd search command. Pure
+// intent: the graph it filters and resolves against is held by the
+// SearchFinder that runs it, not carried here. The finder derives the mode
+// from which fields are populated.
 type SearchQuery struct {
-	// Graph is the loaded graph used for filtering and entry resolution.
-	// Required.
-	Graph *model.Graph
-
 	// Terms are the --term values: regex strings combined with AND. Each
 	// must match somewhere in the entry's searchable text. Empty disables
 	// text mode.

@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -63,10 +64,8 @@ func (i *FactIndex) ValidateForEntry(kind Kind, topics []TopicPath) error {
 	if kind != KindFact {
 		return fmt.Errorf("index is only valid on kind: fact")
 	}
-	for _, topic := range topics {
-		if i.Topic.Equal(topic) {
-			return nil
-		}
+	if slices.ContainsFunc(topics, i.Topic.Equal) {
+		return nil
 	}
 	return fmt.Errorf("index.topic %q must also appear in topics", i.Topic.String())
 }
@@ -114,29 +113,36 @@ type FactIndexRow struct {
 	Topic TopicPath
 }
 
-// FilterIndexed selects entries by index metadata alone.
+// IsIndexed reports whether the entry carries a valid fact-index enrollment.
+// Enrollment is the single membership rule for the indexed population: the
+// index block must be present and pass ValidateForEntry for the entry's kind
+// and topics. A malformed index loads with a warning (see validateFactIndex)
+// but is never a member here, so every surface that consumes the population
+// agrees on who is in it.
+func (e *Entry) IsIndexed() bool {
+	return e.Index != nil && e.Index.ValidateForEntry(e.Kind, e.Topics) == nil
+}
+
+// FilterIndexed selects entries whose enrollment is valid, ignoring lifecycle.
 func FilterIndexed(entries []*Entry) []*Entry {
 	result := make([]*Entry, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Index != nil {
+		if entry.IsIndexed() {
 			result = append(result, entry)
 		}
 	}
 	return result
 }
 
-func (g *Graph) IndexedFacts() ([]FactIndexRow, error) {
+func (g *Graph) IndexedFacts() []FactIndexRow {
 	var rows []FactIndexRow
 	for _, entry := range g.Entries {
-		if entry.Index == nil {
+		if !entry.IsIndexed() {
 			continue
 		}
 		status := g.DerivedStatus(entry).Kind
 		if status != StatusOpen && status != StatusActive {
 			continue
-		}
-		if err := entry.Index.ValidateForEntry(entry.Kind, entry.Topics); err != nil {
-			return nil, fmt.Errorf("entry %s index: %w", entry.ID, err)
 		}
 		rows = append(rows, FactIndexRow{
 			ID: entry.ID, Title: entry.Index.Title,
@@ -152,5 +158,5 @@ func (g *Graph) IndexedFacts() ([]FactIndexRow, error) {
 		}
 		return rows[a].ID < rows[b].ID
 	})
-	return rows, nil
+	return rows
 }
