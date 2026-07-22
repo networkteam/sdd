@@ -242,6 +242,130 @@ func TestMechanical_ParticipantCoverage_AliasDoesNotMatch(t *testing.T) {
 	}
 }
 
+func TestMechanical_FocusActorCoverage_ValidActorsPass(t *testing.T) {
+	actor := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{actor})
+
+	proposed := &model.Entry{
+		Type:        model.TypeDecision,
+		Kind:        model.KindFocus,
+		Layer:       model.LayerTactical,
+		Content:     "focus body",
+		FocusActors: []string{"Christopher"},
+		Involvement: []model.Involvement{
+			{Target: actor.ID, Actors: []string{"Christopher"}},
+		},
+	}
+
+	got := mechanicalPreflight(proposed, graph, nil)
+	for _, f := range got {
+		if f.Category == "focus-actor-drift" {
+			t.Errorf("valid focus actors should not draw a finding, got %+v", f)
+		}
+	}
+}
+
+func TestMechanical_FocusActorCoverage_UnknownFocusActorBlocks(t *testing.T) {
+	actor := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{actor})
+
+	proposed := &model.Entry{
+		Type:        model.TypeDecision,
+		Kind:        model.KindFocus,
+		Layer:       model.LayerTactical,
+		Content:     "focus body",
+		FocusActors: []string{"Claude"},
+	}
+
+	got := mechanicalPreflight(proposed, graph, nil)
+	found := false
+	for _, f := range got {
+		if f.Category == "focus-actor-drift" && f.Severity == query.SeverityHigh {
+			found = true
+			if !strings.Contains(f.Observation, "actors[0]") || !strings.Contains(f.Observation, "Claude") {
+				t.Errorf("finding should name actors[0] and the drifting name, got %q", f.Observation)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected focus-actor-drift finding for unknown focus-level actor, got %+v", got)
+	}
+}
+
+func TestMechanical_FocusActorCoverage_UnknownInvolvementActorBlocks(t *testing.T) {
+	actor := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{actor})
+
+	proposed := &model.Entry{
+		Type:        model.TypeDecision,
+		Kind:        model.KindFocus,
+		Layer:       model.LayerTactical,
+		Content:     "focus body",
+		FocusActors: []string{"Christopher"},
+		Involvement: []model.Involvement{
+			{Target: actor.ID, Actors: []string{"Christopher"}},
+			{Target: actor.ID, Actors: []string{"Christopher", "Claude"}},
+		},
+	}
+
+	got := mechanicalPreflight(proposed, graph, nil)
+	found := false
+	for _, f := range got {
+		if f.Category == "focus-actor-drift" && f.Severity == query.SeverityHigh {
+			found = true
+			if !strings.Contains(f.Observation, "involvement[1].actors[1]") || !strings.Contains(f.Observation, "Claude") {
+				t.Errorf("finding should name involvement[1].actors[1] and the drifting name, got %q", f.Observation)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected focus-actor-drift finding for unknown involvement actor, got %+v", got)
+	}
+}
+
+func TestMechanical_FocusActorCoverage_GraceModeWhenNoActors(t *testing.T) {
+	// No active actor signals — grace mode skips the check entirely.
+	graph := model.NewGraph(nil)
+
+	proposed := &model.Entry{
+		Type:        model.TypeDecision,
+		Kind:        model.KindFocus,
+		Layer:       model.LayerTactical,
+		Content:     "focus body",
+		FocusActors: []string{"Christopher"},
+		Involvement: []model.Involvement{
+			{Target: "20260410-120000-s-cpt-tgt", Actors: []string{"Claude"}},
+		},
+	}
+
+	for _, f := range mechanicalPreflight(proposed, graph, nil) {
+		if f.Category == "focus-actor-drift" {
+			t.Errorf("grace mode should skip focus actor check, got %+v", f)
+		}
+	}
+}
+
+func TestMechanical_FocusActorCoverage_NonFocusUnaffected(t *testing.T) {
+	// A non-focus entry carrying FocusActors/Involvement (defensively) must
+	// not draw the focus check — it is gated on kind: focus.
+	actor := actorEntry("Christopher", nil)
+	graph := model.NewGraph([]*model.Entry{actor})
+
+	proposed := &model.Entry{
+		Type:        model.TypeDecision,
+		Kind:        model.KindDirective,
+		Layer:       model.LayerTactical,
+		Content:     "directive body",
+		FocusActors: []string{"Claude"},
+	}
+
+	for _, f := range mechanicalPreflight(proposed, graph, nil) {
+		if f.Category == "focus-actor-drift" {
+			t.Errorf("non-focus entry must not draw focus-actor-drift, got %+v", f)
+		}
+	}
+}
+
 func TestMechanical_ActorWriteOnce_NewChainAllowed(t *testing.T) {
 	// First actor for canonical "Christopher" — nothing existing to collide.
 	graph := model.NewGraph(nil)

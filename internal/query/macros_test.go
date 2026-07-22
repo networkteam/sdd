@@ -373,6 +373,91 @@ func TestExpandMacros_ParticipantsAndWipNoArgs(t *testing.T) {
 
 // --- helpers ---
 
+func TestExpandMacros_ReadinessExpandsToFourLanes(t *testing.T) {
+	// `readiness` is a layout macro: one lone name expands into the four capped
+	// bootstrap lanes, and the per-section pass finishes the participants and
+	// aspirations section macros they carry.
+	layout := mustParseLayoutHelper(t, "readiness")
+	got, err := ExpandMacros(layout)
+	if err != nil {
+		t.Fatalf("ExpandMacros: %v", err)
+	}
+	if len(got.Sections) != 4 {
+		t.Fatalf("readiness sections: got %d, want 4", len(got.Sections))
+	}
+
+	// Lane 1: participants:brief composes — the participants macro's
+	// as-participants-block render survives and brief is appended.
+	lane1 := functionNames(got.Sections[0])
+	if !containsName(lane1, "as-participants-block") {
+		t.Errorf("lane 1 should render as-participants-block, got %v", lane1)
+	}
+	if !containsName(lane1, "brief") {
+		t.Errorf("lane 1 should carry brief (participants:brief composes), got %v", lane1)
+	}
+
+	// Lane 2: aspirations macro expanded (active + kind(aspiration)) then capped.
+	if !sectionHasKind(got.Sections[1], "aspiration") {
+		t.Errorf("lane 2 should filter kind(aspiration), got %v", functionNames(got.Sections[1]))
+	}
+
+	// Lanes 3 and 4: the guiding directives split by layer — the layer()/intent()
+	// split composes, one strategic lane and one conceptual lane.
+	if !sectionHasKind(got.Sections[2], "directive") || !sectionHasLayer(got.Sections[2], "strategic") || !sectionHasIntent(got.Sections[2], "guiding") {
+		t.Errorf("lane 3 should be kind(directive)+intent(guiding)+layer(strategic), got %v", functionNames(got.Sections[2]))
+	}
+	if !sectionHasLayer(got.Sections[3], "conceptual") || !sectionHasIntent(got.Sections[3], "guiding") {
+		t.Errorf("lane 4 should be layer(conceptual)+intent(guiding), got %v", functionNames(got.Sections[3]))
+	}
+}
+
+func TestMacroNames_ReadinessIsALayoutMacroNotSectionMacro(t *testing.T) {
+	// readiness is not valid at section start, so it must stay out of the
+	// section-start macro list (the one view.go renders in its hint) and live in
+	// the layout-macro list instead.
+	if containsName(MacroNames(), "readiness") {
+		t.Errorf("MacroNames (section-start) must not include readiness, got %v", MacroNames())
+	}
+	if !containsName(LayoutMacroNames(), "readiness") {
+		t.Fatalf("LayoutMacroNames must include readiness, got %v", LayoutMacroNames())
+	}
+}
+
+func containsName(names []string, want string) bool {
+	for _, n := range names {
+		if n == want {
+			return true
+		}
+	}
+	return false
+}
+
+func sectionHasKind(s model.Section, kind string) bool {
+	return sectionHasFuncArg(s, "kind", kind)
+}
+
+func sectionHasLayer(s model.Section, layer string) bool {
+	return sectionHasFuncArg(s, "layer", layer)
+}
+
+func sectionHasIntent(s model.Section, intent string) bool {
+	return sectionHasFuncArg(s, "intent", intent)
+}
+
+func sectionHasFuncArg(s model.Section, fn, arg string) bool {
+	for _, f := range s.Functions {
+		if f.Name != fn {
+			continue
+		}
+		for _, a := range f.Args {
+			if a.String == arg {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func mustParseLayoutHelper(t *testing.T, s string) model.Layout {
 	t.Helper()
 	l, err := ParseLayout(s)

@@ -54,6 +54,13 @@ type VarDecl struct {
 	Type     VarType
 	Optional bool
 	Desc     string
+	// Default is an optional start-time value applied to a state field the
+	// caller leaves unset — the one place the spec carries a literal, and only
+	// a declaration attribute, not an expression in the step language. It lets
+	// a procedure carry a constant it seeds into every child it dispatches
+	// (bootstrap's recognitionMode flag). Validated against Type at load; nil
+	// means no default. Applied at store start on state only.
+	Default any
 }
 
 // ChooserKind classifies who advances a step: the engine (gate,
@@ -158,6 +165,7 @@ type varDeclYAML struct {
 	Type     string `yaml:"type"`
 	Optional bool   `yaml:"optional"`
 	Desc     string `yaml:"desc"`
+	Default  any    `yaml:"default"`
 }
 
 type injectYAML struct {
@@ -282,6 +290,13 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 	}
 
 	for name, d := range paramsYAML {
+		// default applies only to state (applyStateDefaults iterates State); a
+		// default on a param would validate but never be applied — reject it
+		// loudly rather than let it look effective.
+		if d.Default != nil {
+			addProblem("params.%s: default is not supported on params — params are supplied at start", name)
+			continue
+		}
 		decl, err := parseVarDecl(name, d)
 		if err != nil {
 			addProblem("params.%s: %v", name, err)
@@ -388,7 +403,15 @@ func parseVarDecl(name string, d varDeclYAML) (VarDecl, error) {
 	if err != nil {
 		return VarDecl{}, err
 	}
-	return VarDecl{Type: t, Optional: d.Optional, Desc: d.Desc}, nil
+	decl := VarDecl{Type: t, Optional: d.Optional, Desc: d.Desc}
+	if d.Default != nil {
+		dv, err := t.ValidateValue(d.Default)
+		if err != nil {
+			return VarDecl{}, fmt.Errorf("default: %w", err)
+		}
+		decl.Default = dv
+	}
+	return decl, nil
 }
 
 func parseStep(sy stepYAML, index int) (*Step, []string) {

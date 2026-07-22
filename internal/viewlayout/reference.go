@@ -17,6 +17,9 @@ type Vocabulary struct {
 	Algorithms []string
 	Decays     []string
 	Macros     []string
+	// LayoutMacros are macros used alone as a whole layout (they expand into
+	// several sections), not at section start.
+	LayoutMacros []string
 }
 
 type item struct {
@@ -89,6 +92,7 @@ var macroReference = map[string]string{
 	"contracts":    "contracts — active contracts",
 	"participants": "participants — active actors with bound roles",
 	"wip":          "wip — active WIP markers",
+	"readiness":    "readiness — capped bootstrap grounding: participants, aspirations, strategic and conceptual guiding",
 }
 
 var categoryOrder = []string{"Sources", "Filters", "Rank", "Page", "Aggregate", "Transform", "Output", "Other primitives"}
@@ -126,7 +130,7 @@ func ReferenceBody(v Vocabulary) string {
 		}
 		ref, ok := functionReference[name]
 		if !ok {
-			ref = item{category: "Other primitives", syntax: name, description: "See executor validation for accepted arguments."}
+			ref = item{category: "Other primitives"}
 		}
 		byCategory[ref.category] = append(byCategory[ref.category], name)
 	}
@@ -149,9 +153,10 @@ func ReferenceBody(v Vocabulary) string {
 		}
 		fmt.Fprintf(&b, "\n  %s:\n", category)
 		for _, name := range names {
-			ref := functionReference[name]
-			if ref.syntax == "" {
-				ref.syntax = name
+			ref, ok := functionReference[name]
+			if !ok {
+				fmt.Fprintf(&b, "    %-30s %s\n", name, missingMetadataError(name, "functionReference"))
+				continue
 			}
 			fmt.Fprintf(&b, "    %-30s %s\n", ref.syntax, ref.description)
 		}
@@ -186,14 +191,33 @@ func ReferenceBody(v Vocabulary) string {
 
 	b.WriteString("\n  Macros (recognized at section start; later modifiers override defaults):\n")
 	for _, name := range v.Macros {
-		description := macroReference[name]
-		if description == "" {
-			description = name + " — query-defined macro"
+		description, ok := macroReference[name]
+		if !ok {
+			description = missingMetadataError(name, "macroReference")
 		}
 		fmt.Fprintf(&b, "    %s\n", description)
 	}
 
+	if len(v.LayoutMacros) > 0 {
+		b.WriteString("\n  Layout macros (used alone as the whole layout, not at section start):\n")
+		for _, name := range v.LayoutMacros {
+			description, ok := macroReference[name]
+			if !ok {
+				description = missingMetadataError(name, "macroReference")
+			}
+			fmt.Fprintf(&b, "    %s\n", description)
+		}
+	}
+
 	return b.String()
+}
+
+// missingMetadataError is the loud placeholder rendered when a live vocabulary
+// name has no descriptive entry in its metadata map. It renders into
+// `sdd view --help` and the auto-rendered view-grammar base fact, so a missing
+// registration is immediately visible instead of silently blank.
+func missingMetadataError(name, mapName string) string {
+	return fmt.Sprintf("ERROR: missing reference metadata for %q — register it in %s", name, mapName)
 }
 
 // MissingReferenceNames returns live vocabulary names that lack descriptive
@@ -223,6 +247,11 @@ func MissingReferenceNames(v Vocabulary) []string {
 		}
 	}
 	for _, name := range v.Macros {
+		if _, ok := macroReference[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	for _, name := range v.LayoutMacros {
 		if _, ok := macroReference[name]; !ok {
 			missing = append(missing, name)
 		}

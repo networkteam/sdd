@@ -20,6 +20,22 @@ import (
 // parsing so each can be tested in isolation. The CLI calls ParseLayout
 // then ExpandMacros; tests can target either step.
 func ExpandMacros(layout model.Layout) (model.Layout, error) {
+	// A lone layout macro expands into several sections first; the per-section
+	// pass below then finishes any section macros they introduce (participants,
+	// aspirations). A layout macro only triggers when it is the whole layout —
+	// one section, one function — so a stray `readiness` mid-layout falls
+	// through to the section pass and the executor's unknown-function error.
+	if len(layout.Sections) == 1 && len(layout.Sections[0].Functions) == 1 {
+		first := layout.Sections[0].Functions[0]
+		if expand, ok := layoutMacros[first.Name]; ok {
+			expanded, err := expand(first.Args)
+			if err != nil {
+				return model.Layout{}, fmt.Errorf("%s: %w", first.Name, err)
+			}
+			layout = expanded
+		}
+	}
+
 	out := model.Layout{Sections: make([]model.Section, 0, len(layout.Sections))}
 	for i, section := range layout.Sections {
 		expanded, err := expandSection(section)
@@ -31,12 +47,24 @@ func ExpandMacros(layout model.Layout) (model.Layout, error) {
 	return out, nil
 }
 
-// MacroNames returns the registered macro names sorted for deterministic
+// MacroNames returns the section-start macro names sorted for deterministic
 // help-text rendering. Exposed so the CLI's view help doesn't need to
-// import the registry directly.
+// import the registry directly. Layout macros are excluded — they are not
+// valid at section start; see LayoutMacroNames.
 func MacroNames() []string {
 	names := make([]string, 0, len(macros))
 	for n := range macros {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// LayoutMacroNames returns the layout macro names sorted — macros used alone
+// as a whole layout rather than at section start.
+func LayoutMacroNames() []string {
+	names := make([]string, 0, len(layoutMacros))
+	for n := range layoutMacros {
 		names = append(names, n)
 	}
 	sort.Strings(names)
@@ -77,6 +105,26 @@ var macros = map[string]func(args []model.FunctionArg) ([]model.Function, error)
 	"contracts":    expandContracts,
 	"participants": expandParticipants,
 	"wip":          expandWIP,
+}
+
+// layoutMacros expand a lone macro name into a whole multi-section layout,
+// which a single-section macro cannot produce.
+var layoutMacros = map[string]func(args []model.FunctionArg) (model.Layout, error){
+	"readiness": expandReadinessLayout,
+}
+
+// readinessLayout is the four capped bootstrap grounding lanes: participants,
+// aspirations, strategic guiding, conceptual guiding.
+const readinessLayout = `participants:brief,` +
+	`aspirations:active:rank(heat(exp-14d)):n(6):name("Aspirations"):brief:as-list,` +
+	`kind(directive):intent(guiding):layer(strategic):active:rank(heat(exp-14d)):n(6):name("Direction — strategic guiding"):brief:as-list,` +
+	`kind(directive):intent(guiding):layer(conceptual):active:rank(heat(exp-14d)):n(6):name("Shape — conceptual guiding"):brief:as-list`
+
+func expandReadinessLayout(args []model.FunctionArg) (model.Layout, error) {
+	if len(args) > 0 {
+		return model.Layout{}, fmt.Errorf("takes no arguments")
+	}
+	return ParseLayout(readinessLayout)
 }
 
 // expandTop expands `top(N)` with a baked `name-prefix("Top")` so the

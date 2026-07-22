@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -77,6 +78,12 @@ func TestValidateValue(t *testing.T) {
 		{name: "list ok", typ: "list<label>", value: []any{"cli/ux", "type-system"}},
 		{name: "list element invalid", typ: "list<label>", value: []any{"ok", ""}, wantErr: "item 1"},
 		{name: "list not list", typ: "list<label>", value: "cli/ux", wantErr: "expected a list"},
+		{name: "involvement ok", typ: "involvement", value: map[string]any{"target": goodID}},
+		{name: "involvement bad target", typ: "involvement", value: map[string]any{"target": "nope"}, wantErr: "not a full entry ID"},
+		{name: "involvement bad when", typ: "involvement", value: map[string]any{"target": goodID, "when": map[string]any{"from": "Jan"}}, wantErr: "when.from"},
+		{name: "involvement empty actor", typ: "involvement", value: map[string]any{"target": goodID, "actors": []any{""}}, wantErr: "actors[0]"},
+		{name: "involvement-when ok", typ: "involvement-when", value: map[string]any{"to": "2026-02-01"}},
+		{name: "involvement-when empty", typ: "involvement-when", value: map[string]any{}, wantErr: "at least one"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,6 +100,47 @@ func TestValidateValue(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("ValidateValue: %v", err)
+			}
+		})
+	}
+}
+
+// TestInvolvementActorsSetSurvivesJSONRoundTrip locks the session-log replay
+// contract: an involvement marshals to JSON and re-validates through the map
+// form (how the store restores replayed state) without losing the model's
+// unset-vs-explicit-empty actors distinction.
+func TestInvolvementActorsSetSurvivesJSONRoundTrip(t *testing.T) {
+	const target = "20260702-120000-d-tac-abc"
+	cases := []struct {
+		name          string
+		in            Involvement
+		wantActorsSet bool
+	}{
+		{name: "unset actors", in: Involvement{Target: target}, wantActorsSet: false},
+		{name: "explicit empty actors", in: Involvement{Target: target, ActorsSet: true, Actors: []string{}}, wantActorsSet: true},
+		{name: "named actors", in: Involvement{Target: target, ActorsSet: true, Actors: []string{"Christopher"}}, wantActorsSet: true},
+	}
+	vt, _ := ParseVarType("involvement")
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(tt.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var asMap map[string]any
+			if err := json.Unmarshal(raw, &asMap); err != nil {
+				t.Fatal(err)
+			}
+			got, err := vt.ValidateValue(asMap)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inv := got.(Involvement)
+			if inv.ActorsSet != tt.wantActorsSet {
+				t.Fatalf("ActorsSet = %v after round trip, want %v (json: %s)", inv.ActorsSet, tt.wantActorsSet, raw)
+			}
+			if len(inv.Actors) != len(tt.in.Actors) {
+				t.Errorf("actors = %v, want %v", inv.Actors, tt.in.Actors)
 			}
 		})
 	}

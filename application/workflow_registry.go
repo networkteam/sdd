@@ -1,11 +1,13 @@
 package application
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/networkteam/sdd/internal/engine"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
 
@@ -130,7 +132,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 	if err := registry.RegisterCommand(engine.Command{
 		Doc: engine.FuncDoc{
 			Name: "newEntry", Doc: "Creates the entry from the capture state fields (pre-flight inside; staged attachments materialized from handles; a recorded override skips pre-flight, durably logged).",
-			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "preflightOverride"}, Writes: []string{"entryId", "findings"},
+			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "canonical", "aliases", "roleActor", "involvement", "focusActors", "focusWhen", "preflightOverride"}, Writes: []string{"entryId", "findings"},
 		},
 		MutatesGraph: true,
 		Fn:           w.runWorkflowNewEntry,
@@ -241,6 +243,29 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	}
 	draft.Confidence, _ = workflowStoreString(ctx.Store, "confidence")
 	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
+	draft.Canonical, _ = workflowStoreString(ctx.Store, "canonical")
+	draft.Actor, _ = workflowStoreString(ctx.Store, "roleActor")
+	draft.Aliases = workflowStoreStrings(ctx.Store, "aliases")
+	draft.FocusActors = workflowStoreStrings(ctx.Store, "focusActors")
+	if v, ok := ctx.Store.Get("focusWhen"); ok {
+		if w, ok := v.(*engine.When); ok {
+			draft.FocusWhen = modelFocusWhen(w)
+		}
+	}
+	if v, ok := ctx.Store.Get("involvement"); ok {
+		if items, ok := v.([]any); ok {
+			for _, item := range items {
+				if inv, ok := item.(engine.Involvement); ok {
+					draft.Involvement = append(draft.Involvement, model.Involvement{
+						Target:    inv.Target,
+						Actors:    append([]string(nil), inv.Actors...),
+						ActorsSet: inv.ActorsSet,
+						When:      modelFocusWhen(inv.When),
+					})
+				}
+			}
+		}
+	}
 	if override, ok := ctx.Store.Get("preflightOverride"); ok {
 		draft.SkipPreflight, _ = override.(bool)
 	}
@@ -254,6 +279,27 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		}
 	}
 	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
+	// A structural validation failure re-serves as high findings instead of
+	// wedging the instance: the write step's `otherwise` routes to
+	// reviseOrOverride, whose revise returns to assemble to fix the named rule
+	// and field. No write happened, so the binding is left untouched.
+	var validationErr *ValidationError
+	if errors.As(err, &validationErr) {
+		findings := make([]query.Finding, 0, len(validationErr.Warnings))
+		for _, warning := range validationErr.Warnings {
+			observation := warning.Message
+			if warning.Field != "" {
+				observation = fmt.Sprintf("%s (field: %s)", warning.Message, warning.Field)
+			}
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "validation",
+				Observation: observation,
+			})
+		}
+		ctx.Store.WriteEngine("findings", findings)
+		return nil
+	}
 	if err == nil {
 		w.binding = result.Binding
 	}
@@ -281,6 +327,13 @@ func (w *WorkflowSession) mutationTarget(store *engine.Store, branchField string
 		return MutationTarget{}
 	}
 	return MutationTarget{Project: w.project, Branch: branch}
+}
+
+func modelFocusWhen(w *engine.When) *model.FocusWhen {
+	if w == nil {
+		return nil
+	}
+	return &model.FocusWhen{From: w.From, To: w.To}
 }
 
 func workflowStoreString(store *engine.Store, name string) (string, bool) {
