@@ -1165,40 +1165,26 @@ func promptLanguage(defaultValue string) (string, error) {
 // `project` so the keystroke-free path installs into the repo-local tree. The
 // caller owns the non-interactive branch — this unconditionally opens a TTY.
 func promptScope() (model.Scope, error) {
-	scopes := []model.Scope{model.ScopeProject, model.ScopeUser}
-	idx, err := tui.RunSelect(tui.SelectPrompt{
+	return tui.RunSelect(tui.SelectPrompt[model.Scope]{
 		Header: "Where should skills be installed? (↑/↓ to navigate, enter to confirm)",
-		Options: []tui.SelectOption{
-			{Label: "project", Hint: ".claude/skills/ in this repo (recommended for shared SDD-instrumented repos)"},
-			{Label: "user", Hint: "~/.claude/skills/ shared across all projects on this machine"},
+		Options: []tui.SelectOption[model.Scope]{
+			{Label: "project", Hint: ".claude/skills/ in this repo (recommended for shared SDD-instrumented repos)", Value: model.ScopeProject},
+			{Label: "user", Hint: "~/.claude/skills/ shared across all projects on this machine", Value: model.ScopeUser},
 		},
 	})
-	if err != nil {
-		return "", err
-	}
-	return scopes[idx], nil
 }
 
 // promptAgents runs the supported-agents multi-select shown on fresh init.
 // Claude starts selected so the keystroke-light path matches the pre-multi-agent
 // default. The caller owns the non-interactive branch.
 func promptAgents() ([]model.AgentTarget, error) {
-	targets := []model.AgentTarget{model.AgentClaude, model.AgentCodex}
-	sel, err := tui.RunMultiSelect(tui.MultiSelectPrompt{
+	return tui.RunMultiSelect(tui.MultiSelectPrompt[model.AgentTarget]{
 		Header: "Which agents should sdd render skills for? (↑/↓ navigate, space toggle, enter confirm)",
-		Options: []tui.MultiSelectOption{
-			{Label: "claude", Hint: ".claude/skills/ — Claude Code", Selected: true},
-			{Label: "codex", Hint: ".agents/skills/ — Codex (Agent Skills standard)"},
+		Options: []tui.MultiSelectOption[model.AgentTarget]{
+			{Label: "claude", Hint: ".claude/skills/ — Claude Code", Value: model.AgentClaude, Selected: true},
+			{Label: "codex", Hint: ".agents/skills/ — Codex (Agent Skills standard)", Value: model.AgentCodex},
 		},
 	})
-	if err != nil {
-		return nil, err
-	}
-	chosen := make([]model.AgentTarget, 0, len(sel))
-	for _, i := range sel {
-		chosen = append(chosen, targets[i])
-	}
-	return chosen, nil
 }
 
 // warnIfParticipantMissing emits a one-line stderr nudge when no local

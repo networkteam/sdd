@@ -1,11 +1,10 @@
-// Package tui drives the transient interactive terminal view for long-running
-// sdd commands. It imports bubble tea and depends on the bubble-tea-free core
-// in internal/cliout; only cmd/sdd imports this package. Interactive is the
-// reusable entry point: it constructs a cliout.Coordinator, hands it a starter
-// that runs the bubble tea program, and lets the coordinator own the lifecycle
-// (dormant → armed → live → done) so instant work never starts a program —
-// realizing the per-command terminal experience the architecture directive
-// (d-cpt-mvb) defers.
+// Package tui is sdd's bubble tea layer: the transient coordinator display for
+// long-running commands (Interactive, which lets a cliout.Coordinator own the
+// dormant → armed → live → done lifecycle so instant work never starts a
+// program) and the reusable init input prompts (text, select, multi-select,
+// confirm). Both surfaces route through the one shared program runner
+// (runner.go). It depends on the bubble-tea-free core in internal/cliout; only
+// cmd/sdd imports this package.
 package tui
 
 import (

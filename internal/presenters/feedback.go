@@ -15,7 +15,7 @@ import (
 // be empty.
 //
 // This is the styled-feedback surface the terminal-experience directive
-// (d-cpt-mvb) calls for, sharing the palette established by d-cpt-n0f so the
+// (d-cpt-mvb) calls for, sharing the palette established by d-cpt-vye so the
 // summary reads as one piece with sdd show and sdd stats.
 func RenderResultLine(dst io.Writer, headline, detail string) {
 	w := colorprofile.NewWriter(dst, os.Environ())

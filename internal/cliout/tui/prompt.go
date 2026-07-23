@@ -140,34 +140,36 @@ func RunConfirm(cfg ConfirmPrompt) (bool, error) {
 	return fm.(confirmPromptModel).result(), nil
 }
 
-// SelectOption is one row of a single- or multi-select prompt.
-type SelectOption struct {
+// SelectOption is one row of a single- or multi-select prompt. Value is the
+// domain value the option stands for, returned when the option is chosen.
+type SelectOption[T any] struct {
 	Label string
 	Hint  string
+	Value T
 }
 
 // SelectPrompt configures a cursor-navigated single-select. Header is printed
 // on its own line above the options; Cursor is the initial selection.
-type SelectPrompt struct {
+type SelectPrompt[T any] struct {
 	Header  string
-	Options []SelectOption
+	Options []SelectOption[T]
 	Cursor  int
 }
 
-type selectModel struct {
+type selectModel[T any] struct {
 	header  string
-	options []SelectOption
+	options []SelectOption[T]
 	cursor  int
 	done    bool
 }
 
-func newSelectModel(cfg SelectPrompt) selectModel {
-	return selectModel{header: cfg.Header, options: cfg.Options, cursor: cfg.Cursor}
+func newSelectModel[T any](cfg SelectPrompt[T]) selectModel[T] {
+	return selectModel[T]{header: cfg.Header, options: cfg.Options, cursor: cfg.Cursor}
 }
 
-func (m selectModel) Init() tea.Cmd { return nil }
+func (m selectModel[T]) Init() tea.Cmd { return nil }
 
-func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m selectModel[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "enter":
@@ -188,7 +190,7 @@ func (m selectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m selectModel) View() tea.View {
+func (m selectModel[T]) View() tea.View {
 	var b strings.Builder
 	b.WriteString(m.header + "\n")
 	for i, opt := range m.options {
@@ -201,51 +203,53 @@ func (m selectModel) View() tea.View {
 	return tea.NewView(b.String())
 }
 
-// RunSelect runs the single-select prompt on a TTY, returning the chosen option
-// index or ErrPromptCancelled if the user aborts.
-func RunSelect(cfg SelectPrompt) (int, error) {
+// RunSelect runs the single-select prompt on a TTY, returning the chosen
+// option's value or ErrPromptCancelled if the user aborts.
+func RunSelect[T any](cfg SelectPrompt[T]) (T, error) {
+	var zero T
 	fm, err := runProgram(newSelectModel(cfg), promptSurface)
 	if err != nil {
-		return 0, err
+		return zero, err
 	}
-	final := fm.(selectModel)
+	final := fm.(selectModel[T])
 	if !final.done {
-		return 0, ErrPromptCancelled
+		return zero, ErrPromptCancelled
 	}
-	return final.cursor, nil
+	return final.options[final.cursor].Value, nil
 }
 
-// MultiSelectOption is one row of a multi-select prompt, with its initial
-// checked state.
-type MultiSelectOption struct {
+// MultiSelectOption is one row of a multi-select prompt, carrying the domain
+// value it stands for and its initial checked state.
+type MultiSelectOption[T any] struct {
 	Label    string
 	Hint     string
+	Value    T
 	Selected bool
 }
 
 // MultiSelectPrompt configures a cursor-navigated multi-select toggled with
 // space; enter confirms only once at least one option is selected.
-type MultiSelectPrompt struct {
+type MultiSelectPrompt[T any] struct {
 	Header  string
-	Options []MultiSelectOption
+	Options []MultiSelectOption[T]
 }
 
-type multiSelectModel struct {
+type multiSelectModel[T any] struct {
 	header  string
-	options []MultiSelectOption
+	options []MultiSelectOption[T]
 	cursor  int
 	done    bool
 }
 
-func newMultiSelectModel(cfg MultiSelectPrompt) multiSelectModel {
-	opts := make([]MultiSelectOption, len(cfg.Options))
+func newMultiSelectModel[T any](cfg MultiSelectPrompt[T]) multiSelectModel[T] {
+	opts := make([]MultiSelectOption[T], len(cfg.Options))
 	copy(opts, cfg.Options)
-	return multiSelectModel{header: cfg.Header, options: opts}
+	return multiSelectModel[T]{header: cfg.Header, options: opts}
 }
 
-func (m multiSelectModel) Init() tea.Cmd { return nil }
+func (m multiSelectModel[T]) Init() tea.Cmd { return nil }
 
-func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m multiSelectModel[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "enter":
@@ -273,7 +277,7 @@ func (m multiSelectModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m multiSelectModel) View() tea.View {
+func (m multiSelectModel[T]) View() tea.View {
 	var b strings.Builder
 	b.WriteString(m.header + "\n")
 	for i, opt := range m.options {
@@ -290,22 +294,27 @@ func (m multiSelectModel) View() tea.View {
 	return tea.NewView(b.String())
 }
 
-// RunMultiSelect runs the multi-select prompt on a TTY, returning the indices
-// of the selected options in option order, or ErrPromptCancelled if aborted.
-func RunMultiSelect(cfg MultiSelectPrompt) ([]int, error) {
+// selectedValues collects the values of the checked options in option order.
+func (m multiSelectModel[T]) selectedValues() []T {
+	var chosen []T
+	for _, o := range m.options {
+		if o.Selected {
+			chosen = append(chosen, o.Value)
+		}
+	}
+	return chosen
+}
+
+// RunMultiSelect runs the multi-select prompt on a TTY, returning the selected
+// options' values in option order, or ErrPromptCancelled if aborted.
+func RunMultiSelect[T any](cfg MultiSelectPrompt[T]) ([]T, error) {
 	fm, err := runProgram(newMultiSelectModel(cfg), promptSurface)
 	if err != nil {
 		return nil, err
 	}
-	final := fm.(multiSelectModel)
+	final := fm.(multiSelectModel[T])
 	if !final.done {
 		return nil, ErrPromptCancelled
 	}
-	var chosen []int
-	for i, o := range final.options {
-		if o.Selected {
-			chosen = append(chosen, i)
-		}
-	}
-	return chosen, nil
+	return final.selectedValues(), nil
 }

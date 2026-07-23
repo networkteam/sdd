@@ -13,8 +13,10 @@ package styles
 import "charm.land/lipgloss/v2"
 
 var (
-	Heading   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // section headings, operation labels (bright white)
-	Identity  = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))            // identity values: type, layer
+	Heading  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // section headings, operation labels (bright white)
+	Identity = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))            // identity values: type, layer
+	// Qualifier deliberately shares Heading's bold-white treatment (two most-
+	// prominent concepts, one weight) — keep them identical if either changes.
 	Qualifier = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // kind + status words — most prominent
 	ID        = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))           // rendered entry ids outside the body (gold)
 	Key       = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))             // YAML keys, attr keys, column labels (cyan)

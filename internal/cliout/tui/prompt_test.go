@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -83,9 +84,9 @@ func TestConfirm_View(t *testing.T) {
 }
 
 func TestSelect_NavigateAndConfirm(t *testing.T) {
-	cfg := SelectPrompt{
+	cfg := SelectPrompt[string]{
 		Header:  "Where?",
-		Options: []SelectOption{{Label: "project", Hint: "a"}, {Label: "user", Hint: "b"}},
+		Options: []SelectOption[string]{{Label: "project", Hint: "a", Value: "p"}, {Label: "user", Hint: "b", Value: "u"}},
 	}
 	m := newSelectModel(cfg)
 	if m.cursor != 0 {
@@ -93,31 +94,34 @@ func TestSelect_NavigateAndConfirm(t *testing.T) {
 	}
 	// Down moves to user; up past top clamps; enter confirms.
 	nm, _ := m.Update(key('j'))
-	m = nm.(selectModel)
+	m = nm.(selectModel[string])
 	if m.cursor != 1 {
 		t.Errorf("j should move cursor to 1, got %d", m.cursor)
 	}
 	nm, _ = m.Update(key(tea.KeyUp))
-	m = nm.(selectModel)
+	m = nm.(selectModel[string])
 	if m.cursor != 0 {
 		t.Errorf("up should move back to 0, got %d", m.cursor)
 	}
 	nm, _ = m.Update(key(tea.KeyUp))
-	m = nm.(selectModel)
+	m = nm.(selectModel[string])
 	if m.cursor != 0 {
 		t.Errorf("up at top should clamp at 0, got %d", m.cursor)
 	}
 	nm, cmd := m.Update(key(tea.KeyEnter))
-	m = nm.(selectModel)
+	m = nm.(selectModel[string])
 	if !m.done || cmd == nil {
 		t.Error("enter should confirm and quit")
+	}
+	if got := m.options[m.cursor].Value; got != "p" {
+		t.Errorf("confirmed value = %q, want p", got)
 	}
 }
 
 func TestSelect_View(t *testing.T) {
-	m := newSelectModel(SelectPrompt{
+	m := newSelectModel(SelectPrompt[string]{
 		Header:  "Where should skills be installed?",
-		Options: []SelectOption{{Label: "project", Hint: "repo"}, {Label: "user", Hint: "home"}},
+		Options: []SelectOption[string]{{Label: "project", Hint: "repo"}, {Label: "user", Hint: "home"}},
 	})
 	got := m.View().Content
 	want := "Where should skills be installed?\n› project — repo\n  user — home\n"
@@ -127,47 +131,48 @@ func TestSelect_View(t *testing.T) {
 }
 
 func TestMultiSelect_ToggleAndConfirm(t *testing.T) {
-	cfg := MultiSelectPrompt{
+	cfg := MultiSelectPrompt[string]{
 		Header: "Which agents?",
-		Options: []MultiSelectOption{
-			{Label: "claude", Hint: "cc", Selected: true},
-			{Label: "codex", Hint: "cx"},
+		Options: []MultiSelectOption[string]{
+			{Label: "claude", Hint: "cc", Value: "claude", Selected: true},
+			{Label: "codex", Hint: "cx", Value: "codex"},
 		},
 	}
 	m := newMultiSelectModel(cfg)
 	nm, _ := m.Update(key('j')) // move to codex
-	m = nm.(multiSelectModel)
+	m = nm.(multiSelectModel[string])
 	nm, _ = m.Update(key(tea.KeySpace)) // toggle codex on
-	m = nm.(multiSelectModel)
+	m = nm.(multiSelectModel[string])
 	nm, cmd := m.Update(key(tea.KeyEnter))
-	m = nm.(multiSelectModel)
+	m = nm.(multiSelectModel[string])
 	if !m.done || cmd == nil {
 		t.Fatal("enter with a selection should confirm and quit")
 	}
-	if !m.options[0].Selected || !m.options[1].Selected {
-		t.Errorf("both options should be selected; got %+v", m.options)
+	// Values come back in option order regardless of toggle order.
+	if got := m.selectedValues(); !slices.Equal(got, []string{"claude", "codex"}) {
+		t.Errorf("selected values = %v, want [claude codex]", got)
 	}
 }
 
 func TestMultiSelect_RequiresSelection(t *testing.T) {
-	cfg := MultiSelectPrompt{
+	cfg := MultiSelectPrompt[string]{
 		Header:  "Which agents?",
-		Options: []MultiSelectOption{{Label: "claude", Selected: true}, {Label: "codex"}},
+		Options: []MultiSelectOption[string]{{Label: "claude", Value: "claude", Selected: true}, {Label: "codex", Value: "codex"}},
 	}
 	m := newMultiSelectModel(cfg)
 	nm, _ := m.Update(key(tea.KeySpace)) // deselect the only selected option
-	m = nm.(multiSelectModel)
+	m = nm.(multiSelectModel[string])
 	nm, _ = m.Update(key(tea.KeyEnter)) // enter with nothing selected
-	m = nm.(multiSelectModel)
+	m = nm.(multiSelectModel[string])
 	if m.done {
 		t.Error("enter with no selection must not confirm")
 	}
 }
 
 func TestMultiSelect_View(t *testing.T) {
-	m := newMultiSelectModel(MultiSelectPrompt{
+	m := newMultiSelectModel(MultiSelectPrompt[string]{
 		Header: "Which agents?",
-		Options: []MultiSelectOption{
+		Options: []MultiSelectOption[string]{
 			{Label: "claude", Hint: "cc", Selected: true},
 			{Label: "codex", Hint: "cx"},
 		},
@@ -182,8 +187,8 @@ func TestMultiSelect_View(t *testing.T) {
 // newMultiSelectModel must copy the caller's options so a returned model never
 // mutates the prompt config's slice.
 func TestMultiSelect_CopiesOptions(t *testing.T) {
-	opts := []MultiSelectOption{{Label: "claude", Selected: true}, {Label: "codex"}}
-	cfg := MultiSelectPrompt{Header: "x", Options: opts}
+	opts := []MultiSelectOption[string]{{Label: "claude", Selected: true}, {Label: "codex"}}
+	cfg := MultiSelectPrompt[string]{Header: "x", Options: opts}
 	m := newMultiSelectModel(cfg)
 	m.options[1].Selected = true
 	if opts[1].Selected {
