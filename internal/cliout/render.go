@@ -8,24 +8,24 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/styles"
 )
 
 // PhaseLabel is the footer text for a phase. Rendering lives here, not on the
 // domain type, so internal/model stays dependency-free display vocabulary.
 func PhaseLabel(p model.Phase) string { return string(p) }
 
-// Log-level + progress-chrome styles; distinct surface from the presenters palette (d-cpt-n0f).
+// Footer chrome + log-level styles, drawn from the shared palette so the
+// coordinator's output reads consistently with the presenters surface.
 var (
-	StyleLabel = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // operation label (bright white)
-	StyleBody  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))           // message text (body grey)
-	styleKey   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))             // attr keys (cyan)
-	styleFaint = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // attr values, counts (faint)
+	StyleLabel = styles.Heading // operation label
+	StyleBody  = styles.Body    // message text
 
 	levelStyles = map[slog.Level]lipgloss.Style{
-		slog.LevelDebug: lipgloss.NewStyle().Foreground(lipgloss.Color("240")),          // faint
-		slog.LevelInfo:  lipgloss.NewStyle().Foreground(lipgloss.Color("6")),            // cyan
-		slog.LevelWarn:  lipgloss.NewStyle().Foreground(lipgloss.Color("220")),          // gold
-		slog.LevelError: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9")), // red, bold
+		slog.LevelDebug: styles.Faint,
+		slog.LevelInfo:  styles.Info,
+		slog.LevelWarn:  styles.Warn,
+		slog.LevelError: styles.Error,
 	}
 )
 
@@ -48,8 +48,8 @@ func RenderEntry(e LogEntry) string {
 	b.WriteString(StyleBody.Render(e.Message))
 	for _, a := range e.Attrs {
 		b.WriteByte(' ')
-		b.WriteString(styleKey.Render(a.Key + "="))
-		b.WriteString(styleFaint.Render(a.Value.String()))
+		b.WriteString(styles.Key.Render(a.Key + "="))
+		b.WriteString(styles.Faint.Render(a.Value.String()))
 	}
 	return b.String()
 }
@@ -63,9 +63,9 @@ func RenderCount(p Progress) string {
 		if unit != "" {
 			unit = " " + unit
 		}
-		return styleFaint.Render(fmt.Sprintf("%d/%d%s", p.Done, p.Total, unit))
+		return styles.Faint.Render(fmt.Sprintf("%d/%d%s", p.Done, p.Total, unit))
 	case p.Done > 0:
-		return styleFaint.Render(fmt.Sprintf("%d", p.Done))
+		return styles.Faint.Render(fmt.Sprintf("%d", p.Done))
 	default:
 		return ""
 	}
