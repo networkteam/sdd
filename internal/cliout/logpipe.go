@@ -45,20 +45,24 @@ type LogEntry struct {
 // Neither end references a bubble tea program, so there is no construction
 // cycle between the pipe and the model that consumes it.
 func NewLogPipe(capture slog.Leveler) (slog.Handler, *LogConsumer) {
-	ch := make(chan LogEntry, logChanCap)
-	done := make(chan struct{})
-	h := &pipeHandler{level: capture, ch: ch}
-	c := &LogConsumer{ch: ch, done: done}
-	return h, c
+	c := NewLogConsumer(logChanCap)
+	return newPipeHandler(capture, c.Offer), c
 }
 
-// pipeHandler is a slog.Handler that snapshots each record and sends it
-// non-blocking onto the display channel. WithAttrs/WithGroup state is
-// accumulated so the codebase's `…FromContext(ctx).With("command", …)`
-// pattern is honored rather than silently dropped.
+// newPipeHandler builds the slog front that snapshots each admitted record into
+// a LogEntry and hands it to sink. The coordinator uses this to route records
+// into its lifecycle; NewLogPipe uses it to feed a LogConsumer directly.
+func newPipeHandler(capture slog.Leveler, sink func(LogEntry)) *pipeHandler {
+	return &pipeHandler{level: capture, sink: sink}
+}
+
+// pipeHandler is a slog.Handler that snapshots each record and hands it to a
+// sink. WithAttrs/WithGroup state is accumulated so the codebase's
+// `…FromContext(ctx).With("command", …)` pattern is honored rather than
+// silently dropped.
 type pipeHandler struct {
 	level       slog.Leveler
-	ch          chan<- LogEntry
+	sink        func(LogEntry)
 	groupPrefix string
 	attrs       []slog.Attr // already group-prefixed at WithAttrs time
 }
@@ -77,14 +81,7 @@ func (h *pipeHandler) Handle(_ context.Context, r slog.Record) error {
 		return true
 	})
 
-	e := LogEntry{Time: r.Time, Level: r.Level, Message: r.Message, Attrs: attrs}
-
-	// Non-blocking: a full channel drops the entry rather than stalling the
-	// work goroutine. Bounds time coupling between producer and display.
-	select {
-	case h.ch <- e:
-	default:
-	}
+	h.sink(LogEntry{Time: r.Time, Level: r.Level, Message: r.Message, Attrs: attrs})
 	return nil
 }
 
@@ -113,7 +110,7 @@ func (h *pipeHandler) clone() *pipeHandler {
 	copy(attrs, h.attrs)
 	return &pipeHandler{
 		level:       h.level,
-		ch:          h.ch,
+		sink:        h.sink,
 		groupPrefix: h.groupPrefix,
 		attrs:       attrs,
 	}
@@ -135,6 +132,21 @@ type LogConsumer struct {
 	ch        chan LogEntry
 	done      chan struct{}
 	closeOnce sync.Once
+}
+
+// NewLogConsumer builds a consumer over a channel of the given capacity. The
+// coordinator uses this to hand live lines to a running program; Offer feeds it.
+func NewLogConsumer(capacity int) *LogConsumer {
+	return &LogConsumer{ch: make(chan LogEntry, capacity), done: make(chan struct{})}
+}
+
+// Offer sends an entry non-blocking: a full channel drops it rather than
+// stalling the producer, bounding time coupling between producer and display.
+func (c *LogConsumer) Offer(e LogEntry) {
+	select {
+	case c.ch <- e:
+	default:
+	}
 }
 
 // Recv returns the next entry, or ok=false once work has finished and the

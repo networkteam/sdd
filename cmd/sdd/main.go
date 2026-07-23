@@ -16,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/cliout"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/git"
@@ -310,9 +311,10 @@ func main() {
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		// Ctrl-C during a long operation (e.g. an embed) cancels the work
 		// context. That is user intent, not a failure — report it calmly and
-		// exit with the conventional SIGINT code (130) rather than dumping a
-		// raw "context canceled" error at the generic error exit.
-		if errors.Is(err, context.Canceled) {
+		// exit with the conventional SIGINT code (130). The coordinator raises
+		// ErrUserCancelled for its interrupt path; a bare context.Canceled
+		// covers cancellations outside a coordinator.
+		if errors.Is(err, cliout.ErrUserCancelled) || errors.Is(err, context.Canceled) {
 			fmt.Fprintln(os.Stderr, "cancelled.")
 			os.Exit(130)
 		}

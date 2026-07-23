@@ -1,4 +1,4 @@
-package tui
+package cliout
 
 import (
 	"fmt"
@@ -6,18 +6,16 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-
-	"github.com/networkteam/sdd/internal/cliout"
 )
 
-// Styles for the transient view. They follow the CLI color-scheme philosophy
-// (d-cpt-n0f) — one color per concept, prominence by weight — but cover a
-// different surface (log levels, progress chrome) than the entry-rendering
-// palette in internal/presenters, so they live here rather than being shared.
-// Colors emit only on the colorprofile-capable TTY the view runs on.
+// Styles for the terminal experience. They follow the CLI color-scheme
+// philosophy (d-cpt-n0f) — one color per concept, prominence by weight — but
+// cover a different surface (log levels, progress chrome) than the
+// entry-rendering palette in internal/presenters, so they live here rather
+// than being shared. Colors emit only on a colorprofile-capable TTY.
 var (
-	styleLabel = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // operation label (bright white)
-	styleBody  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))           // message text (body grey)
+	StyleLabel = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // operation label (bright white)
+	StyleBody  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))           // message text (body grey)
 	styleKey   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))             // attr keys (cyan)
 	styleFaint = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // attr values, counts (faint)
 
@@ -33,19 +31,19 @@ var (
 func levelBadge(l slog.Level) string {
 	st, ok := levelStyles[l]
 	if !ok {
-		st = styleBody
+		st = StyleBody
 	}
 	return st.Render(fmt.Sprintf("%-5s", l.String()))
 }
 
-// renderEntry formats one log entry as a styled line: level badge, message,
-// then space-separated key=value attributes. Structured to the end — attrs
-// are styled here, not flattened upstream.
-func renderEntry(e cliout.LogEntry) string {
+// RenderEntry formats one log entry as a styled line: level badge, message,
+// then space-separated key=value attributes. It is the single line renderer for
+// both the plain stderr path (dormant/armed) and the live tea.Printf path.
+func RenderEntry(e LogEntry) string {
 	var b strings.Builder
 	b.WriteString(levelBadge(e.Level))
 	b.WriteByte(' ')
-	b.WriteString(styleBody.Render(e.Message))
+	b.WriteString(StyleBody.Render(e.Message))
 	for _, a := range e.Attrs {
 		b.WriteByte(' ')
 		b.WriteString(styleKey.Render(a.Key + "="))
@@ -54,9 +52,9 @@ func renderEntry(e cliout.LogEntry) string {
 	return b.String()
 }
 
-// renderCount formats the absolute progress count beside the spinner, e.g.
+// RenderCount formats the absolute progress count beside the spinner, e.g.
 // "42/120 entries". Empty when no total is known and nothing has completed.
-func renderCount(p cliout.Progress) string {
+func RenderCount(p Progress) string {
 	switch {
 	case p.Total > 0:
 		unit := p.Unit

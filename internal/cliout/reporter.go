@@ -42,6 +42,8 @@ type Reporter struct {
 	ch        chan Progress
 	closeCh   chan struct{}
 	closeOnce sync.Once
+
+	onPublish func() // fired after each publish; the coordinator arms on it
 }
 
 // NewReporter builds a reporter with an empty mailbox.
@@ -87,12 +89,25 @@ func (r *Reporter) Add(n int) {
 	r.publish()
 }
 
+// Notify registers a hook fired after each publish — the coordinator uses it to
+// arm on the first progress event even before any display-eligible log.
+func (r *Reporter) Notify(fn func()) {
+	r.mu.Lock()
+	r.onPublish = fn
+	r.mu.Unlock()
+}
+
 // publish drops any stale pending snapshot and posts the current one, so the
 // mailbox always holds the latest state (latest-wins) rather than a backlog.
 func (r *Reporter) publish() {
 	r.mu.Lock()
 	snap := Progress{Done: r.done, Total: r.total, Unit: r.unit, Note: r.note}
+	notify := r.onPublish
 	r.mu.Unlock()
+
+	if notify != nil {
+		notify()
+	}
 
 	select {
 	case r.ch <- snap:

@@ -219,23 +219,7 @@ func indexCmd() *cli.Command {
 				Reader:   reader,
 			})
 
-			// Pre-pass: does the local index need work? This decides whether to
-			// show a transient view for a local-only build — a fully warm index
-			// does no work, so skip the program and its flash. Cross-repo always
-			// shows the view: member work is only known after caches are fresh.
-			g, err := reader.CurrentGraph(graphDir)
-			if err != nil {
-				return err
-			}
-			manifest, err := index.LoadManifest(idxDir)
-			if err != nil {
-				return err
-			}
 			force := cmd.Bool("force")
-			localPending := manifest.PendingCount(entryIDs(g), emb.Fingerprint())
-			if force {
-				localPending = len(g.Entries) // force re-embeds everything
-			}
 
 			start := time.Now()
 			reporter := cliout.NewReporter()
@@ -304,8 +288,10 @@ func indexCmd() *cli.Command {
 			}
 
 			// Indexing logs persist (the per-entry indexed lines scroll above
-			// the footer); on a TTY with work to do, run under the inline view.
-			if cliout.IsInteractive(os.Stderr) && (localPending > 0 || crossRepo) {
+			// the footer). On a TTY the coordinator owns whether a program
+			// runs: a warm index does no work and stays dormant/silent; a real
+			// build arms and shows the inline view.
+			if cliout.IsInteractive(os.Stderr) {
 				_, err = clitui.Interactive(ctx, transientViewPolicy(),
 					clitui.View{Label: "indexing", Progress: reporter, StreamLogs: true}, work)
 			} else {
@@ -411,11 +397,9 @@ func searchCmd() *cli.Command {
 			}
 
 			var (
-				emb      llm.Embedder
-				idxDir   string
-				ih       *handlers.IndexHandler
-				willFill bool
-				pending  int
+				emb    llm.Embedder
+				idxDir string
+				ih     *handlers.IndexHandler
 			)
 			needsVector := phrase != ""
 			if needsVector {
@@ -444,15 +428,6 @@ func searchCmd() *cli.Command {
 					Embedder: emb,
 					Reader:   reader,
 				})
-				// Will lazy-fill actually embed anything? A warm index does no
-				// work, so the transient view is skipped and the result path
-				// stays quiet for agents.
-				manifest, err := index.LoadManifest(idxDir)
-				if err != nil {
-					return err
-				}
-				pending = manifest.PendingCount(entryIDs(g), emb.Fingerprint())
-				willFill = pending > 0
 			}
 
 			reg, mgr, err := defaultRepos()
@@ -501,14 +476,15 @@ func searchCmd() *cli.Command {
 				AllRepos:             allRepos,
 			}
 
-			// Lazy-fill (when vector search needs a warm index) then query.
-			// On a TTY with fill work pending — local, or the connected-repo
-			// member builds that were the silent 35-minute hang — the inline
-			// footer shows determinate progress and clears before results
-			// render. Indexing is transient for search, so its per-entry log
-			// lines are not streamed. Off-TTY (and for agents) the plain path
-			// stays quiet at the Warn floor.
-			showView := cliout.IsInteractive(os.Stderr) && (willFill || crossRepo)
+			// Lazy-fill (when vector search needs a warm index) then query. On a
+			// TTY the coordinator owns whether a footer appears: a warm index
+			// does no work and stays dormant/silent, while a real fill — local,
+			// or the connected-repo member builds that were the silent
+			// 35-minute hang — arms the determinate footer that clears before
+			// results render. Indexing is transient for search, so its per-entry
+			// log lines are not streamed. Off-TTY (and for agents) the plain
+			// path stays quiet at the Warn floor.
+			showView := cliout.IsInteractive(os.Stderr)
 			var reporter *cliout.Reporter
 			var addPlanned func(int)
 			var setNote func([]string, int)
@@ -610,16 +586,6 @@ func searchCmd() *cli.Command {
 			return nil
 		},
 	}
-}
-
-// entryIDs collects the IDs of every entry in the graph — the universe the
-// index reconciles against when counting pending work.
-func entryIDs(g *model.Graph) []string {
-	ids := make([]string, len(g.Entries))
-	for i, e := range g.Entries {
-		ids[i] = e.ID
-	}
-	return ids
 }
 
 // transientViewPolicy is the durable-vs-ephemeral policy shared by the

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
@@ -11,21 +12,28 @@ import (
 )
 
 // Messages driving the model. logMsg/progressMsg carry pipe data; the *DoneMsg
-// variants signal their stream finished (Recv returned ok=false).
+// variants signal their stream finished (Recv returned ok=false). firstPaintMsg
+// fires a few frames after the first WindowSizeMsg — the gate that lets held
+// lines flush only once the renderer has certainly flushed a frame.
 type (
 	logMsg          cliout.LogEntry
 	logDoneMsg      struct{}
 	progressMsg     cliout.Progress
 	progressDoneMsg struct{}
+	firstPaintMsg   struct{}
 )
 
 // model is the inline transient view: a single footer line (spinner, optional
 // determinate bar, count) rendered in normal terminal flow — no alt-screen.
-// When streamLogs is set, display-eligible log entries are emitted as durable
-// lines above the footer via tea.Printf, so they scroll into terminal history
-// like ordinary output; the footer redraws around them and is cleared on quit.
-// Every entry is still fed to the recorder for the durable re-emit. The model
-// quits when the log stream finishes.
+// Display-eligible log lines arrive already filtered by the coordinator and are
+// emitted as durable lines above the footer via tea.Printf, scrolling into
+// terminal history; the footer redraws around them and is cleared on quit.
+//
+// Durable lines are held until a first-paint gate (first WindowSizeMsg plus a
+// short tick): a WindowSizeMsg does not imply a renderer flush, and printing
+// before the first flush emits a full-height cursor-down against a cellbuf still
+// sized to the whole terminal. Holding until the gate keeps that escape out of
+// the output. The model quits when the log stream finishes.
 type model struct {
 	label string
 
@@ -34,31 +42,35 @@ type model struct {
 	hasProg  bool
 	reporter *cliout.Reporter
 
-	logs       *cliout.LogConsumer
-	policy     cliout.Policy
-	rec        *cliout.Recorder
-	streamLogs bool
+	logs *cliout.LogConsumer
 
 	lastProg cliout.Progress
 	width    int
 
 	interrupt func()
 	done      bool
+
+	held      []cliout.LogEntry // durable lines awaiting the first-paint gate
+	painted   bool              // gate open: lines pass straight through
+	gateArmed bool              // first-paint tick scheduled
 }
 
 // defaultBarWidth is used until the first WindowSizeMsg arrives so the bar
 // renders sensibly even before the terminal size is known.
 const defaultBarWidth = 28
 
-func newModel(view View, logs *cliout.LogConsumer, policy cliout.Policy, rec *cliout.Recorder, interrupt func()) model {
+// firstPaintDelay is ~3 frame intervals at the default 60fps — long enough that
+// the renderer has flushed its first frame (and resized its cellbuf to the
+// footer height) before any held line is printed above it.
+const firstPaintDelay = 50 * time.Millisecond
+
+func newModel(view View, logs *cliout.LogConsumer, backlog []cliout.LogEntry, interrupt func()) model {
 	m := model{
-		label:      view.Label,
-		spinner:    spinner.New(spinner.WithSpinner(spinner.Dot)),
-		logs:       logs,
-		policy:     policy,
-		rec:        rec,
-		streamLogs: view.StreamLogs,
-		interrupt:  interrupt,
+		label:     view.Label,
+		spinner:   spinner.New(spinner.WithSpinner(spinner.Dot)),
+		logs:      logs,
+		interrupt: interrupt,
+		held:      backlog,
 	}
 	if view.Progress != nil {
 		m.hasProg = true
@@ -103,7 +115,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.hasProg {
 			m.progress.SetWidth(barWidth(m.width))
 		}
+		if !m.gateArmed {
+			m.gateArmed = true
+			return m, tea.Tick(firstPaintDelay, func(time.Time) tea.Msg { return firstPaintMsg{} })
+		}
 		return m, nil
+
+	case firstPaintMsg:
+		m.painted = true
+		cmd := m.flushHeld()
+		return m, cmd
 
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
@@ -116,16 +137,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logMsg:
 		e := cliout.LogEntry(msg)
-		m.rec.Observe(e)
-		if m.streamLogs && m.policy.ShowInDisplay(e.Level) {
-			// Durable: print above the footer; it persists in scrollback.
-			return m, tea.Batch(tea.Printf("%s", renderEntry(e)), recvLog(m.logs))
+		if !m.painted {
+			m.held = append(m.held, e)
+			return m, recvLog(m.logs)
 		}
-		return m, recvLog(m.logs)
+		return m, tea.Batch(tea.Printf("%s", cliout.RenderEntry(e)), recvLog(m.logs))
 
 	case logDoneMsg:
 		m.done = true
-		return m, tea.Quit
+		// Flush anything still held so a fast finish loses nothing.
+		return m, tea.Sequence(m.flushHeld(), tea.Quit)
 
 	case progressMsg:
 		m.lastProg = cliout.Progress(msg)
@@ -154,6 +175,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// flushHeld prints the held durable lines in arrival order and clears the
+// buffer. Returns nil when nothing is held. Modifies the receiver in place, so
+// call it on the returned model value.
+func (m *model) flushHeld() tea.Cmd {
+	if len(m.held) == 0 {
+		return nil
+	}
+	cmds := make([]tea.Cmd, len(m.held))
+	for i, e := range m.held {
+		cmds[i] = tea.Printf("%s", cliout.RenderEntry(e))
+	}
+	m.held = nil
+	return tea.Sequence(cmds...)
+}
+
 // View renders the inline footer only — one line: spinner, label, (when a
 // reporter is wired) a determinate bar with an absolute count, and an optional
 // note naming the work in flight. No alt-screen, so bubble tea clears just this
@@ -162,18 +198,18 @@ func (m model) View() tea.View {
 	var b strings.Builder
 	b.WriteString(m.spinner.View())
 	b.WriteByte(' ')
-	b.WriteString(styleLabel.Render(m.label))
+	b.WriteString(cliout.StyleLabel.Render(m.label))
 	if m.hasProg {
 		b.WriteString("  ")
 		b.WriteString(m.progress.View())
-		if c := renderCount(m.lastProg); c != "" {
+		if c := cliout.RenderCount(m.lastProg); c != "" {
 			b.WriteString("  ")
 			b.WriteString(c)
 		}
 	}
 	if n := m.lastProg.Note; n != "" {
 		b.WriteString("  ")
-		b.WriteString(styleBody.Render(n))
+		b.WriteString(cliout.StyleBody.Render(n))
 	}
 	return tea.NewView(b.String())
 }
