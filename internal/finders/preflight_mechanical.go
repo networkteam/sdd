@@ -17,6 +17,10 @@ import (
 //   - participant-coverage (AC 6): every name in Participants must match
 //     the canonical of an active actor signal. Self-transitioning grace —
 //     skipped when the graph has zero active actor signals.
+//   - focus-actor-drift: on a kind: focus decision, every focus-level actor
+//     and every per-involvement actor override must match an active actor
+//     canonical — participant coverage applied to the focus actor fields,
+//     sharing the same canonical set and grace mode.
 //   - actor-canonical-reused (AC 5): for a new kind: actor signal, the
 //     canonical must not appear in any actor-identity chain other than
 //     the chain the new entry extends.
@@ -60,6 +64,7 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph, declaredDeps []
 	var findings []query.Finding
 
 	findings = append(findings, participantCoverageFindings(entry, graph)...)
+	findings = append(findings, focusActorCoverageFindings(entry, graph)...)
 	findings = append(findings, refKindFindings(entry)...)
 	findings = append(findings, refKindApplicabilityFindings(entry, graph)...)
 	findings = append(findings, supersedeForkFindings(entry, graph)...)
@@ -297,15 +302,9 @@ func capturableRefKindList() string {
 // actor signal. Grace mode (no active actors yet) skips the check so
 // fresh graphs aren't blocked before the first actor is captured.
 func participantCoverageFindings(entry *model.Entry, graph *model.Graph) []query.Finding {
-	active := graph.ActiveActorHeads()
-	if len(active) == 0 {
+	canonicals, active := activeActorCanonicals(graph)
+	if !active {
 		return nil // grace mode
-	}
-	canonicals := make(map[string]struct{}, len(active))
-	for _, a := range active {
-		if a.Canonical != "" {
-			canonicals[a.Canonical] = struct{}{}
-		}
 	}
 	var findings []query.Finding
 	for _, p := range entry.Participants {
@@ -320,6 +319,67 @@ func participantCoverageFindings(entry *model.Entry, graph *model.Graph) []query
 			Category:    "participant-drift",
 			Observation: fmt.Sprintf("participant %q does not match any active actor canonical", p),
 		})
+	}
+	return findings
+}
+
+// activeActorCanonicals returns the canonical set of every active actor head.
+// The bool is false in grace mode (no active actor signals yet) so coverage
+// checks skip a fresh graph rather than blocking before the first actor lands.
+func activeActorCanonicals(graph *model.Graph) (map[string]struct{}, bool) {
+	active := graph.ActiveActorHeads()
+	if len(active) == 0 {
+		return nil, false
+	}
+	canonicals := make(map[string]struct{}, len(active))
+	for _, a := range active {
+		if a.Canonical != "" {
+			canonicals[a.Canonical] = struct{}{}
+		}
+	}
+	return canonicals, true
+}
+
+// focusActorCoverageFindings applies participant coverage to the actor fields
+// of a kind: focus decision: every focus-level actor and every per-involvement
+// actor override must match an active actor canonical. Shares the canonical set
+// and grace mode with participantCoverageFindings; non-focus entries pass.
+func focusActorCoverageFindings(entry *model.Entry, graph *model.Graph) []query.Finding {
+	if !entry.IsFocus() {
+		return nil
+	}
+	canonicals, active := activeActorCanonicals(graph)
+	if !active {
+		return nil // grace mode
+	}
+	var findings []query.Finding
+	for i, name := range entry.FocusActors {
+		if name == "" {
+			continue
+		}
+		if _, ok := canonicals[name]; ok {
+			continue
+		}
+		findings = append(findings, query.Finding{
+			Severity:    query.SeverityHigh,
+			Category:    "focus-actor-drift",
+			Observation: fmt.Sprintf("actors[%d] %q does not match any active actor canonical", i, name),
+		})
+	}
+	for i, inv := range entry.Involvement {
+		for j, name := range inv.Actors {
+			if name == "" {
+				continue
+			}
+			if _, ok := canonicals[name]; ok {
+				continue
+			}
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "focus-actor-drift",
+				Observation: fmt.Sprintf("involvement[%d].actors[%d] %q does not match any active actor canonical", i, j, name),
+			})
+		}
 	}
 	return findings
 }

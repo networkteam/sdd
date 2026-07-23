@@ -312,11 +312,13 @@ func TestCapture_StallNamesExactlyWhatIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Partial report: no widenReport, no topics — the step stays and names
-	// exactly what's missing.
+	// Partial report: no widenReport, no confidence — both required collects,
+	// so the step stays and names exactly what's missing. (refs/topics are
+	// optional collects gate-enforced per kind, so they surface as gate
+	// predicates once the required collects are complete — see below.)
 	draft := fullDraft()
 	delete(draft, "widenReport")
-	delete(draft, "topics")
+	delete(draft, "confidence")
 	sv, err = env.session.Report(sv.Instance, draft)
 	if err != nil {
 		t.Fatal(err)
@@ -324,11 +326,45 @@ func TestCapture_StallNamesExactlyWhatIsMissing(t *testing.T) {
 	if sv.Step != "assemble" {
 		t.Fatalf("step = %s, want assemble (stalled)", sv.Step)
 	}
-	if got := strings.Join(sv.Missing, ","); got != "topics,widenReport" {
-		t.Fatalf("missing = %q, want topics,widenReport", got)
+	if got := strings.Join(sv.Missing, ","); got != "confidence,widenReport" {
+		t.Fatalf("missing = %q, want confidence,widenReport", got)
 	}
-	if !strings.Contains(sv.Instructions, "missing: topics, widenReport") {
+	if !strings.Contains(sv.Instructions, "missing: confidence, widenReport") {
 		t.Errorf("stall instructions should name missing fields, got %q", sv.Instructions)
+	}
+}
+
+// TestCapture_OrdinaryKindGateEnforcesRefsAndTopics confirms refs/topics stay
+// mandatory for ordinary kinds through the gate (not the collect list): once
+// every required collect is present, a draft still missing topics holds on the
+// hasTopics predicate — the enforcement moved from collect-nudge to gate, so
+// identity kinds can skip refs/topics while ordinary kinds cannot.
+func TestCapture_OrdinaryKindGateEnforcesRefsAndTopics(t *testing.T) {
+	env := newFixtureEnv(t)
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := fullDraft()
+	delete(draft, "topics")
+	sv, err = env.session.Report(sv.Instance, draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "assemble" {
+		t.Fatalf("ordinary draft without topics must hold assemble, got %q", sv.Step)
+	}
+	if len(sv.Missing) != 0 {
+		t.Fatalf("required collects are complete, so nothing should be Missing, got %v", sv.Missing)
+	}
+	found := false
+	for _, f := range sv.Failing {
+		if f.Name == "hasTopics" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("failing = %+v, want hasTopics (gate-enforced for ordinary kinds)", sv.Failing)
 	}
 }
 

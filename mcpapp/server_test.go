@@ -1151,13 +1151,16 @@ func TestRejectedWriteKeepsConnectionUsable(t *testing.T) {
 		t.Fatalf("assemble should cascade to playback, got %q (missing %v)", serve.Step, serve.Missing)
 	}
 
-	// Confirm drives the write op; CreateEntry rejects the dangling ref — the
-	// legitimate write-gate rejection that exposed the binding wipe.
-	msg := callExpectError(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
+	// A dangling-ref rejection re-serves in-band as findings at the reviseOrOverride
+	// user chooser rather than erroring; no write happened, so the binding stays intact.
+	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "capture it",
-	}})
-	if !strings.Contains(msg, "dangling ref") {
-		t.Fatalf("the write should fail with the dangling-ref validation error, got %q", msg)
+	}}, &serve)
+	// This fixture's only path to reviseOrOverride is the dangling-ref rejection
+	// (assemble omits the ref predicates, no canned findings exist), so landing here
+	// is itself the assertion that the rejection re-served instead of erroring.
+	if serve.Step != "reviseOrOverride" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
+		t.Fatalf("the dangling-ref rejection should re-serve at the reviseOrOverride user chooser, got %q", serve.Step)
 	}
 
 	// The connection must stay usable. A free read appends to the session read

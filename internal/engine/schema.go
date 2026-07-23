@@ -6,6 +6,10 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
+// entryIDSchemaPattern is the JSON-Schema pattern for a full entry ID, shared
+// by every string property that carries one (entry-id, ref.id, involvement.target).
+const entryIDSchemaPattern = `^\d{8}-\d{6}-[sd]-(stg|cpt|tac|ops|prc)-[a-z0-9]+$`
+
 // ReportSchemaForStep generates the JSON Schema for a step's report from the
 // spec's variable declarations: the step's collect fields are the named,
 // described properties (required unless marked optional), and every other
@@ -144,7 +148,7 @@ func schemaForType(t VarType, desc string) map[string]any {
 	case TypeEntryID:
 		schema = map[string]any{
 			"type":    "string",
-			"pattern": `^\d{8}-\d{6}-[sd]-(stg|cpt|tac|ops|prc)-[a-z0-9]+$`,
+			"pattern": entryIDSchemaPattern,
 		}
 	case TypeRef:
 		kinds := model.RefKindValues()
@@ -157,7 +161,7 @@ func schemaForType(t VarType, desc string) map[string]any {
 			"properties": map[string]any{
 				"id": map[string]any{
 					"type":    "string",
-					"pattern": `^\d{8}-\d{6}-[sd]-(stg|cpt|tac|ops|prc)-[a-z0-9]+$`,
+					"pattern": entryIDSchemaPattern,
 				},
 				"kind": map[string]any{"type": "string", "enum": enum},
 				"desc": map[string]any{"type": "string"},
@@ -165,6 +169,22 @@ func schemaForType(t VarType, desc string) map[string]any {
 			"required":             []string{"id", "kind"},
 			"additionalProperties": false,
 		}
+	case TypeInvolvement:
+		schema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"target": map[string]any{
+					"type":    "string",
+					"pattern": entryIDSchemaPattern,
+				},
+				"actors": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"when":   involvementWhenSchema(),
+			},
+			"required":             []string{"target"},
+			"additionalProperties": false,
+		}
+	case TypeInvolvementWhen:
+		schema = involvementWhenSchema()
 	case TypeEntryKind:
 		schema = map[string]any{"type": "string", "enum": []any{
 			"gap", "fact", "question", "insight", "done", "actor", "annotation",
@@ -209,4 +229,20 @@ func schemaForType(t VarType, desc string) map[string]any {
 		schema["description"] = desc
 	}
 	return schema
+}
+
+// involvementWhenSchema is the {from, to} ISO-date object shared by the
+// involvement type's nested when and the standalone involvement-when type.
+// minProperties matches FocusWhen.Validate, which rejects an empty range — an
+// empty when must be omitted, not spelled as {}.
+func involvementWhenSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"from": map[string]any{"type": "string", "pattern": `^\d{4}-\d{2}-\d{2}$`},
+			"to":   map[string]any{"type": "string", "pattern": `^\d{4}-\d{2}-\d{2}$`},
+		},
+		"minProperties":        1,
+		"additionalProperties": false,
+	}
 }

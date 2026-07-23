@@ -11,6 +11,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -37,6 +38,8 @@ const (
 	TypeAttachmentHandle  BaseType = "attachment-handle"
 	TypeFactIndex         BaseType = "fact-index"
 	TypePreflightFindings BaseType = "preflight-findings"
+	TypeInvolvement       BaseType = "involvement"
+	TypeInvolvementWhen   BaseType = "involvement-when"
 )
 
 var baseTypes = map[BaseType]bool{
@@ -53,6 +56,8 @@ var baseTypes = map[BaseType]bool{
 	TypeAttachmentHandle:  true,
 	TypeFactIndex:         true,
 	TypePreflightFindings: true,
+	TypeInvolvement:       true,
+	TypeInvolvementWhen:   true,
 }
 
 // VarType is a declared variable type: a base domain type, optionally
@@ -156,6 +161,19 @@ func validateBaseValue(base BaseType, v any) (any, error) {
 			return nil, err
 		}
 		return ref, nil
+
+	case TypeInvolvement:
+		switch iv := v.(type) {
+		case Involvement:
+			return iv, nil
+		case map[string]any:
+			return involvementFromMap(iv)
+		default:
+			return nil, fmt.Errorf("expected involvement object {target, actors?, when?}")
+		}
+
+	case TypeInvolvementWhen:
+		return whenFromValue(v)
 
 	case TypeLabel:
 		s, ok := v.(string)
@@ -329,4 +347,116 @@ func refFromMap(m map[string]any) (Ref, error) {
 		return Ref{}, fmt.Errorf("ref kind %q is not in the closed ref-kind set", kind)
 	}
 	return Ref{ID: id, Kind: kind, Desc: desc}, nil
+}
+
+// When is the engine-side value of an involvement-when: a temporal range that
+// becomes a model.FocusWhen at the write gate. At least one end is set.
+type When struct {
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+}
+
+func (w When) String() string {
+	switch {
+	case w.From != "" && w.To != "":
+		return w.From + "→" + w.To
+	case w.From != "":
+		return w.From + "→"
+	default:
+		return "→" + w.To
+	}
+}
+
+// Involvement is the engine-side value of an involvement-typed variable: one
+// target a focus advances, with optional per-target actors and when, before it
+// becomes a model.Involvement at the write gate. ActorsSet keeps the model's
+// unset (inherit focus default) versus explicit-empty (pull-available)
+// distinction across the JSON round-trip through the session log.
+type Involvement struct {
+	Target    string
+	Actors    []string
+	ActorsSet bool
+	When      *When
+}
+
+func (i Involvement) String() string {
+	s := i.Target
+	if i.ActorsSet {
+		s += " [" + strings.Join(i.Actors, ", ") + "]"
+	}
+	if i.When != nil {
+		s += " (" + i.When.String() + ")"
+	}
+	return s
+}
+
+// MarshalJSON emits actors only when set, so the replay round-trip through
+// map[string]any reconstructs ActorsSet from the key's presence — omitempty
+// cannot tell an explicit empty list from an unset one.
+func (i Involvement) MarshalJSON() ([]byte, error) {
+	m := map[string]any{"target": i.Target}
+	if i.ActorsSet {
+		actors := i.Actors
+		if actors == nil {
+			actors = []string{}
+		}
+		m["actors"] = actors
+	}
+	if i.When != nil {
+		m["when"] = i.When
+	}
+	return json.Marshal(m)
+}
+
+func involvementFromMap(m map[string]any) (Involvement, error) {
+	target, _ := m["target"].(string)
+	if _, err := model.ParseID(target); err != nil {
+		return Involvement{}, fmt.Errorf("involvement target: not a full entry ID: %w", err)
+	}
+	inv := Involvement{Target: target}
+	if raw, ok := m["actors"]; ok {
+		inv.ActorsSet = true
+		items, ok := raw.([]any)
+		if !ok {
+			return Involvement{}, fmt.Errorf("involvement actors: expected a list of participant canonicals")
+		}
+		inv.Actors = make([]string, 0, len(items))
+		for i, item := range items {
+			s, ok := item.(string)
+			if !ok || strings.TrimSpace(s) == "" {
+				return Involvement{}, fmt.Errorf("involvement actors[%d]: expected a non-empty participant canonical", i)
+			}
+			inv.Actors = append(inv.Actors, s)
+		}
+	}
+	if raw, ok := m["when"]; ok {
+		w, err := whenFromValue(raw)
+		if err != nil {
+			return Involvement{}, fmt.Errorf("involvement when: %w", err)
+		}
+		inv.When = w
+	}
+	return inv, nil
+}
+
+func whenFromValue(v any) (*When, error) {
+	var from, to string
+	switch w := v.(type) {
+	case *When:
+		if w == nil {
+			return nil, fmt.Errorf("expected when object {from?, to?}")
+		}
+		from, to = w.From, w.To
+	case When:
+		from, to = w.From, w.To
+	case map[string]any:
+		from, _ = w["from"].(string)
+		to, _ = w["to"].(string)
+	default:
+		return nil, fmt.Errorf("expected when object {from?, to?}")
+	}
+	if err := (&model.FocusWhen{From: from, To: to}).Validate(); err != nil {
+		return nil, err
+	}
+	return &When{From: from, To: to}, nil
 }

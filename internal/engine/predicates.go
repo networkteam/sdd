@@ -36,13 +36,21 @@ type playbackConfirmation struct {
 // contract (hasKind reads entryKind — the capture spine collects the target
 // kind under that name, kind being the param that pre-selects it).
 var presenceFields = map[string]string{
-	"hasBody":         "body",
-	"hasRefs":         "refs",
-	"hasTopics":       "topics",
-	"hasConfidence":   "confidence",
-	"hasKind":         "entryKind",
-	"hasLayer":        "layer",
-	"hasWidenReport":  "widenReport",
+	"hasBody":        "body",
+	"hasRefs":        "refs",
+	"hasTopics":      "topics",
+	"hasConfidence":  "confidence",
+	"hasKind":        "entryKind",
+	"hasLayer":       "layer",
+	"hasWidenReport": "widenReport",
+	// Identity-kind capture fields (bootstrap's actor/role captures): canonical
+	// on an actor, the bound actor canonical on a role. Presence only —
+	// resolution is roleActorResolves' job, shape is aliasesWellFormed's.
+	"hasCanonical": "canonical",
+	"hasRoleActor": "roleActor",
+	// A focus's involvement triples: presence only — target resolution is
+	// involvementTargetsResolve's job.
+	"hasInvolvement":  "involvement",
 	"hasAnchor":       "anchor",
 	"hasTargets":      "targets",
 	"hasGoal":         "goal",
@@ -56,6 +64,10 @@ var presenceFields = map[string]string{
 	"hasDoneEntry":    "doneEntry",
 	"hasCandidates":   "candidates",
 	"hasSynthesis":    "synthesis",
+
+	// Bootstrap's brownfield gate: the host agent's repository read must land
+	// before the conversation opens on it.
+	"hasBrownfieldSynthesis": "brownfieldSynthesis",
 
 	// The evaluate lens gate: at least one lens judgment must land before the
 	// junction; evidence fields are instructed alongside, never gated.
@@ -162,6 +174,66 @@ func registerBuiltinPredicates(r *Registry) {
 		},
 		Fn:          participantsCanonical,
 		FailMessage: "a participant is not an active actor canonical — resolve aliases to canonicals before capture",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "roleActorResolves",
+			Doc:   "The roleActor canonical resolves to an actor-identity chain in the graph (the bound actor exists). Absent roleActor passes — presence is hasRoleActor's job.",
+			Reads: []string{"roleActor"},
+		},
+		Fn:          roleActorResolves,
+		FailMessage: "roleActor does not name an actor known to the graph — capture the actor first, then bind the role to its canonical",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "aliasesWellFormed",
+			Doc:   "Every alias is a non-empty, distinct name, none colliding with the canonical. Absent aliases pass — aliases are optional on an actor.",
+			Reads: []string{"aliases", "canonical"},
+		},
+		Fn:          aliasesWellFormed,
+		FailMessage: "an alias is empty, duplicated, or repeats the canonical — list each alternate name once",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "entryKindIsActor",
+			Doc:   "The drafted entryKind is actor. Discriminates the kind-conditional assemble gate's identity branch.",
+			Reads: []string{"entryKind"},
+		},
+		Fn:          entryKindIs("actor"),
+		FailMessage: "the drafted kind is not actor",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "entryKindIsRole",
+			Doc:   "The drafted entryKind is role. Discriminates the kind-conditional assemble gate's role branch.",
+			Reads: []string{"entryKind"},
+		},
+		Fn:          entryKindIs("role"),
+		FailMessage: "the drafted kind is not role",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "entryKindIsFocus",
+			Doc:   "The drafted entryKind is focus. Discriminates the kind-conditional assemble gate's focus branch.",
+			Reads: []string{"entryKind"},
+		},
+		Fn:          entryKindIs("focus"),
+		FailMessage: "the drafted kind is not focus",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "involvementTargetsResolve",
+			Doc:   "Every drafted involvement target resolves to an entry in the graph. Absent involvement passes — presence is hasInvolvement's job.",
+			Reads: []string{"involvement"},
+		},
+		Fn:          involvementTargetsResolve,
+		FailMessage: "an involvement target does not resolve to a known entry — capture or reference the target first",
 	})
 
 	mustRegisterPredicate(r, Predicate{
@@ -373,6 +445,78 @@ func participantsCanonical(ctx *Context) (bool, error) {
 	return true, nil
 }
 
+func roleActorResolves(ctx *Context) (bool, error) {
+	if ctx.Graph == nil {
+		return false, fmt.Errorf("roleActorResolves needs a graph")
+	}
+	v, ok := ctx.Store.Get("roleActor")
+	if !ok {
+		return true, nil
+	}
+	canonical, ok := v.(string)
+	if !ok || canonical == "" {
+		return true, nil
+	}
+	return ctx.Graph.ChainForCanonical(canonical) != nil, nil
+}
+
+func involvementTargetsResolve(ctx *Context) (bool, error) {
+	if ctx.Graph == nil {
+		return false, fmt.Errorf("involvementTargetsResolve needs a graph")
+	}
+	v, ok := ctx.Store.Get("involvement")
+	if !ok {
+		return true, nil
+	}
+	for _, inv := range asInvolvements(v) {
+		if _, ok := ctx.Graph.ByID[inv.Target]; !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func aliasesWellFormed(ctx *Context) (bool, error) {
+	v, ok := ctx.Store.Get("aliases")
+	if !ok {
+		return true, nil
+	}
+	aliases := asStrings(v)
+	if len(aliases) == 0 {
+		return true, nil
+	}
+	canonical, _ := ctx.Store.Get("canonical")
+	canonicalName, _ := canonical.(string)
+	seen := make(map[string]bool, len(aliases))
+	for _, a := range aliases {
+		if strings.TrimSpace(a) == "" {
+			return false, nil
+		}
+		if a == canonicalName {
+			return false, nil
+		}
+		if seen[a] {
+			return false, nil
+		}
+		seen[a] = true
+	}
+	return true, nil
+}
+
+// entryKindIs builds a predicate that holds when the drafted entryKind equals
+// kind — the kind discriminator the assemble gate's ordered transitions branch
+// on so identity kinds and ordinary kinds carry different requirements.
+func entryKindIs(kind string) func(*Context) (bool, error) {
+	return func(ctx *Context) (bool, error) {
+		v, ok := ctx.Store.Get("entryKind")
+		if !ok {
+			return false, nil
+		}
+		s, ok := v.(string)
+		return ok && s == kind, nil
+	}
+}
+
 func topicsKnown(ctx *Context) (bool, error) {
 	if ctx.Graph == nil {
 		return false, fmt.Errorf("topicsKnown needs a graph")
@@ -461,6 +605,27 @@ func asRefs(v any) []Ref {
 		}
 	}
 	return refs
+}
+
+// asInvolvements normalizes a list-of-involvement store value, accepting both
+// the validated engine value and the replay/JSON map form.
+func asInvolvements(v any) []Involvement {
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]Involvement, 0, len(items))
+	for _, item := range items {
+		switch iv := item.(type) {
+		case Involvement:
+			out = append(out, iv)
+		case map[string]any:
+			if inv, err := involvementFromMap(iv); err == nil {
+				out = append(out, inv)
+			}
+		}
+	}
+	return out
 }
 
 // asStrings normalizes a list-of-strings store value.

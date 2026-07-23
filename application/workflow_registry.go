@@ -1,11 +1,13 @@
 package application
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/networkteam/sdd/internal/engine"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
 
@@ -144,7 +146,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 	if err := registry.RegisterCommand(engine.Command{
 		Doc: engine.FuncDoc{
 			Name: "newEntry", Doc: "Creates the entry from the capture state fields (pre-flight inside; staged attachments materialized from handles; a recorded override skips pre-flight, durably logged).",
-			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "index", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "preflightOverride"}, Writes: []string{"entryId", "findings"},
+			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "index", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "canonical", "aliases", "roleActor", "involvement", "focusActors", "focusWhen", "preflightOverride"}, Writes: []string{"entryId", "findings"},
 		},
 		MutatesGraph: true,
 		Fn:           w.runWorkflowNewEntry,
@@ -258,6 +260,28 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		topic, _ := index["topic"].(string)
 		draft.Index = &FactIndex{Title: title, Topic: topic}
 	}
+	draft.Canonical, _ = workflowStoreString(ctx.Store, "canonical")
+	draft.Actor, _ = workflowStoreString(ctx.Store, "roleActor")
+	draft.Aliases = workflowStoreStrings(ctx.Store, "aliases")
+	draft.FocusActors = workflowStoreStrings(ctx.Store, "focusActors")
+	// Store values are normalized JSON documents, so focusWhen comes back as a
+	// map keyed by its JSON field names and involvement as a list of such maps —
+	// not as typed engine.When / engine.Involvement values.
+	if when, ok := workflowStoreDocument(ctx.Store, "focusWhen"); ok {
+		draft.FocusWhen = focusWhenFromDocument(when)
+	}
+	for _, inv := range workflowStoreDocuments(ctx.Store, "involvement") {
+		target, _ := inv["target"].(string)
+		involvement := model.Involvement{Target: target, When: focusWhenFromDocument(inv["when"])}
+		// "actors" is present in the normalized document only when it was set
+		// (engine.Involvement.MarshalJSON), so key presence reconstructs the
+		// unset-vs-explicit-empty distinction the model relies on.
+		if actors, ok := inv["actors"]; ok {
+			involvement.ActorsSet = true
+			involvement.Actors = documentStrings(actors)
+		}
+		draft.Involvement = append(draft.Involvement, involvement)
+	}
 	if override, ok := ctx.Store.Get("preflightOverride"); ok {
 		draft.SkipPreflight, _ = override.(bool)
 	}
@@ -268,6 +292,29 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		draft.Refs = append(draft.Refs, EntryRef{ID: id, Kind: kind, Desc: desc})
 	}
 	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
+	// A structural validation failure re-serves as high findings instead of
+	// wedging the instance: the write step's `otherwise` routes to
+	// reviseOrOverride, whose revise returns to assemble to fix the named rule
+	// and field. No write happened, so the binding is left untouched.
+	var validationErr *ValidationError
+	if errors.As(err, &validationErr) {
+		findings := make([]query.Finding, 0, len(validationErr.Warnings))
+		for _, warning := range validationErr.Warnings {
+			observation := warning.Message
+			if warning.Field != "" {
+				observation = fmt.Sprintf("%s (field: %s)", warning.Message, warning.Field)
+			}
+			findings = append(findings, query.Finding{
+				Severity:    query.SeverityHigh,
+				Category:    "validation",
+				Observation: observation,
+			})
+		}
+		if writeErr := ctx.Store.WriteEngine("findings", findings); writeErr != nil {
+			return fmt.Errorf("newEntry: %w", writeErr)
+		}
+		return nil
+	}
 	if err == nil {
 		w.binding = result.Binding
 	}
@@ -299,6 +346,38 @@ func (w *WorkflowSession) mutationTarget(store *engine.Store, branchField string
 		return MutationTarget{}
 	}
 	return MutationTarget{Project: w.project, Branch: branch}
+}
+
+// focusWhenFromDocument builds a model.FocusWhen from a normalized store value.
+// The value is a JSON document (map keyed by When's json field names) or absent;
+// a range with neither end set collapses to nil.
+func focusWhenFromDocument(v any) *model.FocusWhen {
+	doc, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	from, _ := doc["from"].(string)
+	to, _ := doc["to"].(string)
+	if from == "" && to == "" {
+		return nil
+	}
+	return &model.FocusWhen{From: from, To: to}
+}
+
+// documentStrings coerces a normalized list value ([]any of strings) to []string,
+// skipping any non-string element.
+func documentStrings(v any) []string {
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func workflowStoreString(store *engine.Store, name string) (string, bool) {

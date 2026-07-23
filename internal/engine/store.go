@@ -106,11 +106,43 @@ func (s *Store) SetStart(inputs map[string]any) error {
 			return err
 		}
 		if len(seed) > 0 {
-			_, err := candidate.writeState(seed, nil)
-			return err
+			if _, err := candidate.writeState(seed, nil); err != nil {
+				return err
+			}
 		}
-		return nil
+		return candidate.applyStateDefaults()
 	})
+}
+
+// applyStateDefaults writes each declared state field's Default for fields left
+// unset after params and seed. Deterministic from the spec, so live start and
+// replay (both routed through SetStart) agree without the value ever being
+// logged. A field with a default therefore won't receive a later parent seed —
+// the default counts as already-set — which is exactly right for a constant a
+// procedure carries and seeds outward rather than one it inherits.
+//
+// A default is only safe on a NEW procedure or a NEW field: adding one to an
+// existing field retroactively would apply it on replay of sessions that ran
+// before it existed, silently rewriting their recovered state.
+//
+// Runs on the transaction candidate: decl.Default is already validated at spec
+// load, so it only needs normalizing to the store's JSON-document form before
+// landing with state provenance.
+func (s *Store) applyStateDefaults() error {
+	for name, decl := range s.spec.State {
+		if decl.Default == nil {
+			continue
+		}
+		if _, ok := s.values[name]; ok {
+			continue
+		}
+		nv, err := normalizeStoreValue(decl.Default)
+		if err != nil {
+			return fmt.Errorf("state default %q: %w", name, err)
+		}
+		s.values[name] = storeValue{Value: nv, Provenance: ProvenanceState}
+	}
+	return nil
 }
 
 func (s *Store) isParam(name string) bool {

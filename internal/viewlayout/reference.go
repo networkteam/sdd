@@ -13,6 +13,9 @@ type Vocabulary struct {
 	Algorithms []string
 	Decays     []string
 	Macros     []string
+	// LayoutMacros are macros used alone as a whole layout (they expand into
+	// several sections), not at section start.
+	LayoutMacros []string
 }
 
 type referenceItem struct {
@@ -97,12 +100,13 @@ var macroReference = map[string]string{
 	"contracts":    "active contracts",
 	"participants": "active actors with bound roles",
 	"wip":          "active WIP markers",
+	"readiness":    "capped bootstrap grounding: participants, aspirations, strategic and conceptual guiding",
 }
 
 var macroSyntax = map[string]string{
 	"top": "top(N)", "topic": "topic(L)", "focus": "focus", "decisions": "decisions",
 	"signals": "signals", "insights": "insights", "done": "done", "aspirations": "aspirations",
-	"contracts": "contracts", "participants": "participants", "wip": "wip",
+	"contracts": "contracts", "participants": "participants", "wip": "wip", "readiness": "readiness",
 }
 
 var categoryOrder = []string{"Sources", "Filters", "Rank", "Page", "Aggregate", "Transform", "Output", "Other primitives"}
@@ -141,7 +145,7 @@ func buildReference(v Vocabulary) referenceModel {
 		}
 		item, ok := functionReference[name]
 		if !ok {
-			item = referenceItem{category: "Other primitives", syntax: name, description: "See executor validation for accepted arguments."}
+			item = referenceItem{category: "Other primitives", syntax: name, description: missingMetadataError(name, "functionReference")}
 		}
 		byCategory[item.category] = append(byCategory[item.category], item)
 	}
@@ -158,6 +162,11 @@ func buildReference(v Vocabulary) referenceModel {
 		referenceSection{title: "Decays", items: namedItems(v.Decays, decayReference, "Model-defined decay function.")},
 		referenceSection{title: "Macros (recognized at section start; later modifiers override defaults)", items: macroItems(v.Macros)},
 	)
+	if len(v.LayoutMacros) > 0 {
+		model.sections = append(model.sections,
+			referenceSection{title: "Layout macros (used alone as the whole layout, not at section start)", items: macroItems(v.LayoutMacros)},
+		)
+	}
 	return model
 }
 
@@ -168,9 +177,9 @@ func macroItems(names []string) []referenceItem {
 		if syntax == "" {
 			syntax = name
 		}
-		description := macroReference[name]
-		if description == "" {
-			description = "Query-defined macro."
+		description, ok := macroReference[name]
+		if !ok {
+			description = missingMetadataError(name, "macroReference")
 		}
 		items = append(items, referenceItem{syntax: syntax, description: description})
 	}
@@ -219,7 +228,7 @@ func referenceBody(model referenceModel) string {
 		}
 		fmt.Fprintf(&b, "\n  %s:\n", section.title)
 		for _, item := range section.items {
-			if strings.HasPrefix(section.title, "Macros ") {
+			if strings.HasPrefix(section.title, "Macros ") || strings.HasPrefix(section.title, "Layout macros") {
 				fmt.Fprintf(&b, "    %s — %s\n", item.syntax, item.description)
 			} else {
 				fmt.Fprintf(&b, "    %-30s %s\n", item.syntax, item.description)
@@ -256,11 +265,28 @@ func Markdown(v Vocabulary) string {
 	return b.String()
 }
 
+// ReferenceBody renders the host-neutral body (grammar plus pipeline
+// vocabulary) without the terminal Usage/Examples framing — the shared surface
+// behind both Reference and the view-grammar base fact.
+func ReferenceBody(v Vocabulary) string {
+	return referenceBody(buildReference(v))
+}
+
 func escapeTable(value string) string {
 	return strings.ReplaceAll(value, "|", `\|`)
 }
 
-// MissingReferenceNames reports live names without descriptive metadata.
+// missingMetadataError is the loud placeholder rendered when a live vocabulary
+// name has no descriptive entry in its metadata map. It renders into
+// `sdd view --help` and the auto-rendered view-grammar base fact, so a missing
+// registration is immediately visible instead of silently blank.
+func missingMetadataError(name, mapName string) string {
+	return fmt.Sprintf("ERROR: missing reference metadata for %q — register it in %s", name, mapName)
+}
+
+// MissingReferenceNames returns live vocabulary names that lack descriptive
+// metadata. Tests use it to keep the reference explanatory as well as
+// mechanically complete.
 func MissingReferenceNames(v Vocabulary) []string {
 	var missing []string
 	for _, name := range v.Functions {
@@ -285,6 +311,11 @@ func MissingReferenceNames(v Vocabulary) []string {
 		}
 	}
 	for _, name := range v.Macros {
+		if _, ok := macroReference[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	for _, name := range v.LayoutMacros {
 		if _, ok := macroReference[name]; !ok {
 			missing = append(missing, name)
 		}

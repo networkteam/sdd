@@ -182,6 +182,15 @@ steps:
 			wantErr: "field colect not found",
 		},
 		{
+			name: "default on a param is rejected",
+			machine: `params:
+    flag: {type: bool, default: true, desc: x}
+state:
+    note: {type: text, desc: x}
+` + minimalSteps,
+			wantErr: "params.flag: default is not supported on params",
+		},
+		{
 			name:    "no machine frontmatter",
 			machine: "",
 			wantErr: "no params/state/steps frontmatter",
