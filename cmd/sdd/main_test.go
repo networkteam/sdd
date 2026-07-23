@@ -4,52 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/networkteam/sdd/internal/model"
 )
-
-func pressAgentsKey(m agentsPromptModel, code rune) agentsPromptModel {
-	next, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: code}))
-	return next.(agentsPromptModel)
-}
-
-// TestAgentsPromptModel_ToggleAndConfirm walks the supported-agents multi-select
-// the way an operator would on first run: navigate to codex, toggle it on, and
-// confirm — yielding both targets.
-func TestAgentsPromptModel_ToggleAndConfirm(t *testing.T) {
-	m := newAgentsPromptModel() // claude pre-selected, cursor on claude
-	m = pressAgentsKey(m, 'j')  // move to codex
-	m = pressAgentsKey(m, ' ')  // toggle codex on
-	m = pressAgentsKey(m, tea.KeyEnter)
-	if !m.done {
-		t.Fatal("enter with a selection should confirm")
-	}
-	var chosen []model.AgentTarget
-	for _, o := range m.options {
-		if o.selected {
-			chosen = append(chosen, o.value)
-		}
-	}
-	if !slices.Equal(chosen, []model.AgentTarget{model.AgentClaude, model.AgentCodex}) {
-		t.Errorf("got %v, want [claude codex]", chosen)
-	}
-}
-
-// TestAgentsPromptModel_RequiresSelection verifies enter is ignored until at
-// least one agent is selected.
-func TestAgentsPromptModel_RequiresSelection(t *testing.T) {
-	m := newAgentsPromptModel()
-	m = pressAgentsKey(m, ' ')          // deselect claude (the only default)
-	m = pressAgentsKey(m, tea.KeyEnter) // try to confirm with nothing selected
-	if m.done {
-		t.Error("enter with no selection must not confirm")
-	}
-}
 
 func TestChooseLegacySessionMigrationRequiresExplicitNonInteractiveOptIn(t *testing.T) {
 	promptCalls := 0

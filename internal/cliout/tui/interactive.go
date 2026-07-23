@@ -18,6 +18,11 @@ import (
 	sddmodel "github.com/networkteam/sdd/internal/model"
 )
 
+// runReal runs the coordinator's program through the shared runner.
+func runReal(m tea.Model) (tea.Model, error) {
+	return runProgram(m, coordinatorSurface)
+}
+
 // View specs a phase-labeled footer for one operation: an initial phase label,
 // an optional progress reporter (phase + count snapshots), and an opt-in log
 // stream. The footer label tracks the reporter's current phase, so commands
@@ -43,15 +48,6 @@ type View struct {
 // model. Swappable in tests so the coordinator's starter contract is exercised
 // without a real terminal.
 type programRunner func(m tea.Model) (tea.Model, error)
-
-func runReal(m tea.Model) (tea.Model, error) {
-	// Output goes to stderr; stdout stays clean for the result. The view
-	// renders inline (no alt-screen), so bubble tea clears only its footer on
-	// quit while durable log lines remain in scrollback. WithoutSignalHandler:
-	// ctrl+c is handled in Update so it can cancel the work context rather than
-	// killing the process mid-teardown.
-	return tea.NewProgram(m, tea.WithOutput(os.Stderr), tea.WithoutSignalHandler()).Run()
-}
 
 // starter adapts a View into a cliout.DisplayStarter: it builds the model with
 // the coordinator's backlog and live consumer and runs the program.

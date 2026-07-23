@@ -12,11 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/cliout"
+	"github.com/networkteam/sdd/internal/cliout/tui"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/git"
@@ -1132,344 +1131,72 @@ func resolveSDDDir() (string, error) {
 	return meta.SDDDir(repoRoot), nil
 }
 
-// graphDirPromptModel is a bubbletea model for the graph directory prompt.
-type graphDirPromptModel struct {
-	textInput textinput.Model
-	done      bool
-}
-
-func newGraphDirPromptModel(defaultValue string) graphDirPromptModel {
-	ti := textinput.New()
-	ti.Placeholder = defaultValue
-	ti.Focus()
-	ti.SetWidth(60)
-	return graphDirPromptModel{textInput: ti}
-}
-
-func (m graphDirPromptModel) Init() tea.Cmd {
-	return textinput.Blink
-}
-
-func (m graphDirPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "enter":
-			m.done = true
-			return m, tea.Quit
-		case "ctrl+c", "esc":
-			return m, tea.Quit
-		}
-	}
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m graphDirPromptModel) View() tea.View {
-	return tea.NewView(fmt.Sprintf("Graph directory (relative to repo root) [%s]: %s",
-		m.textInput.Placeholder, m.textInput.View()))
-}
-
-// promptGraphDir runs an interactive prompt for the graph directory.
+// promptGraphDir runs an interactive prompt for the graph directory. Empty
+// input accepts the default; cancellation returns an error.
 func promptGraphDir(defaultValue string) (string, error) {
-	m := newGraphDirPromptModel(defaultValue)
-	p := tea.NewProgram(m)
-	result, err := p.Run()
-	if err != nil {
-		return "", err
-	}
-	final := result.(graphDirPromptModel)
-	if !final.done {
-		return "", fmt.Errorf("prompt cancelled")
-	}
-	value := strings.TrimSpace(final.textInput.Value())
-	if value == "" {
-		return defaultValue, nil
-	}
-	return value, nil
-}
-
-// participantPromptModel is a bubbletea model for the participant-name prompt.
-type participantPromptModel struct {
-	textInput textinput.Model
-	done      bool
-}
-
-func newParticipantPromptModel(defaultValue string) participantPromptModel {
-	ti := textinput.New()
-	ti.Placeholder = defaultValue
-	ti.Focus()
-	ti.SetWidth(60)
-	return participantPromptModel{textInput: ti}
-}
-
-func (m participantPromptModel) Init() tea.Cmd { return textinput.Blink }
-
-func (m participantPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "enter":
-			m.done = true
-			return m, tea.Quit
-		case "ctrl+c", "esc":
-			return m, tea.Quit
-		}
-	}
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m participantPromptModel) View() tea.View {
-	return tea.NewView(fmt.Sprintf("Participant name [%s]: %s",
-		m.textInput.Placeholder, m.textInput.View()))
+	return tui.RunTextPrompt(tui.TextPrompt{
+		Label:   "Graph directory (relative to repo root)",
+		Default: defaultValue,
+		Width:   60,
+	})
 }
 
 // promptParticipant runs an interactive prompt for the local participant name.
-// Empty input accepts the default. Cancellation returns an error.
+// Empty input accepts the default; cancellation returns an error.
 func promptParticipant(defaultValue string) (string, error) {
-	m := newParticipantPromptModel(defaultValue)
-	result, err := tea.NewProgram(m).Run()
-	if err != nil {
-		return "", err
-	}
-	final := result.(participantPromptModel)
-	if !final.done {
-		return "", fmt.Errorf("prompt cancelled")
-	}
-	value := strings.TrimSpace(final.textInput.Value())
-	if value == "" {
-		return defaultValue, nil
-	}
-	return value, nil
-}
-
-// languagePromptModel is a bubbletea model for the graph-language prompt.
-type languagePromptModel struct {
-	textInput textinput.Model
-	done      bool
-}
-
-func newLanguagePromptModel(defaultValue string) languagePromptModel {
-	ti := textinput.New()
-	ti.Placeholder = defaultValue
-	ti.Focus()
-	ti.SetWidth(20)
-	return languagePromptModel{textInput: ti}
-}
-
-func (m languagePromptModel) Init() tea.Cmd { return textinput.Blink }
-
-func (m languagePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "enter":
-			m.done = true
-			return m, tea.Quit
-		case "ctrl+c", "esc":
-			return m, tea.Quit
-		}
-	}
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m languagePromptModel) View() tea.View {
-	return tea.NewView(fmt.Sprintf("Graph language [%s]: %s",
-		m.textInput.Placeholder, m.textInput.View()))
+	return tui.RunTextPrompt(tui.TextPrompt{
+		Label:   "Participant name",
+		Default: defaultValue,
+		Width:   60,
+	})
 }
 
 // promptLanguage runs an interactive prompt for the graph authoring language.
-// Empty input accepts the default. Cancellation returns an error.
+// Empty input accepts the default; cancellation returns an error.
 func promptLanguage(defaultValue string) (string, error) {
-	m := newLanguagePromptModel(defaultValue)
-	result, err := tea.NewProgram(m).Run()
-	if err != nil {
-		return "", err
-	}
-	final := result.(languagePromptModel)
-	if !final.done {
-		return "", fmt.Errorf("prompt cancelled")
-	}
-	value := strings.TrimSpace(final.textInput.Value())
-	if value == "" {
-		return defaultValue, nil
-	}
-	return value, nil
+	return tui.RunTextPrompt(tui.TextPrompt{
+		Label:   "Graph language",
+		Default: defaultValue,
+		Width:   20,
+	})
 }
 
-// scopePromptModel is a bubbletea model for the skill-scope selector. Two
-// fixed options (project, user) navigated by ↑/↓ or j/k; Enter confirms.
-// Per d-tac-07q the cursor starts on `project` so the keystroke-free path
-// installs into the repo-local tree — friction-minimising for contributors
-// cloning an SDD-instrumented repo.
-type scopePromptModel struct {
-	options []scopeOption
-	cursor  int
-	done    bool
-}
-
-type scopeOption struct {
-	value model.Scope
-	label string
-	hint  string
-}
-
-func newScopePromptModel() scopePromptModel {
-	return scopePromptModel{
-		options: []scopeOption{
-			{value: model.ScopeProject, label: "project", hint: ".claude/skills/ in this repo (recommended for shared SDD-instrumented repos)"},
-			{value: model.ScopeUser, label: "user", hint: "~/.claude/skills/ shared across all projects on this machine"},
-		},
-		cursor: 0,
-	}
-}
-
-func (m scopePromptModel) Init() tea.Cmd { return nil }
-
-func (m scopePromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "enter":
-			m.done = true
-			return m, tea.Quit
-		case "ctrl+c", "esc":
-			return m, tea.Quit
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "down", "j":
-			if m.cursor < len(m.options)-1 {
-				m.cursor++
-			}
-		}
-	}
-	return m, nil
-}
-
-func (m scopePromptModel) View() tea.View {
-	var b strings.Builder
-	b.WriteString("Where should skills be installed? (↑/↓ to navigate, enter to confirm)\n")
-	for i, opt := range m.options {
-		marker := "  "
-		if i == m.cursor {
-			marker = "› "
-		}
-		fmt.Fprintf(&b, "%s%s — %s\n", marker, opt.label, opt.hint)
-	}
-	return tea.NewView(b.String())
-}
-
-// promptScope runs the interactive scope selector. Returns the chosen scope
-// or an error on cancellation. The caller is responsible for the
-// non-interactive branch — this function unconditionally opens a TTY.
+// promptScope runs the skill-scope selector. Per d-tac-07q the cursor starts on
+// `project` so the keystroke-free path installs into the repo-local tree. The
+// caller owns the non-interactive branch — this unconditionally opens a TTY.
 func promptScope() (model.Scope, error) {
-	m := newScopePromptModel()
-	result, err := tea.NewProgram(m).Run()
+	scopes := []model.Scope{model.ScopeProject, model.ScopeUser}
+	idx, err := tui.RunSelect(tui.SelectPrompt{
+		Header: "Where should skills be installed? (↑/↓ to navigate, enter to confirm)",
+		Options: []tui.SelectOption{
+			{Label: "project", Hint: ".claude/skills/ in this repo (recommended for shared SDD-instrumented repos)"},
+			{Label: "user", Hint: "~/.claude/skills/ shared across all projects on this machine"},
+		},
+	})
 	if err != nil {
 		return "", err
 	}
-	final := result.(scopePromptModel)
-	if !final.done {
-		return "", fmt.Errorf("prompt cancelled")
-	}
-	return final.options[final.cursor].value, nil
+	return scopes[idx], nil
 }
 
-// agentsPromptModel is a bubbletea model for the supported-agents multi-select
-// shown on fresh init. Options are toggled with space and confirmed with enter;
-// at least one must be selected. Claude starts selected so the keystroke-light
-// path matches the pre-multi-agent default.
-type agentsPromptModel struct {
-	options []agentOption
-	cursor  int
-	done    bool
-}
-
-type agentOption struct {
-	value    model.AgentTarget
-	label    string
-	hint     string
-	selected bool
-}
-
-func newAgentsPromptModel() agentsPromptModel {
-	return agentsPromptModel{
-		options: []agentOption{
-			{value: model.AgentClaude, label: "claude", hint: ".claude/skills/ — Claude Code", selected: true},
-			{value: model.AgentCodex, label: "codex", hint: ".agents/skills/ — Codex (Agent Skills standard)"},
-		},
-	}
-}
-
-func (m agentsPromptModel) Init() tea.Cmd { return nil }
-
-func (m agentsPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "enter":
-			for _, o := range m.options {
-				if o.selected {
-					m.done = true
-					return m, tea.Quit
-				}
-			}
-			// No selection yet — ignore enter until at least one is chosen.
-		case " ", "space":
-			m.options[m.cursor].selected = !m.options[m.cursor].selected
-		case "ctrl+c", "esc":
-			return m, tea.Quit
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-		case "down", "j":
-			if m.cursor < len(m.options)-1 {
-				m.cursor++
-			}
-		}
-	}
-	return m, nil
-}
-
-func (m agentsPromptModel) View() tea.View {
-	var b strings.Builder
-	b.WriteString("Which agents should sdd render skills for? (↑/↓ navigate, space toggle, enter confirm)\n")
-	for i, opt := range m.options {
-		cursor := "  "
-		if i == m.cursor {
-			cursor = "› "
-		}
-		check := "[ ]"
-		if opt.selected {
-			check = "[x]"
-		}
-		fmt.Fprintf(&b, "%s%s %s — %s\n", cursor, check, opt.label, opt.hint)
-	}
-	return tea.NewView(b.String())
-}
-
-// promptAgents runs the interactive supported-agents multi-select, returning
-// the chosen targets or an error on cancellation. The caller is responsible for
-// the non-interactive branch — this function unconditionally opens a TTY.
+// promptAgents runs the supported-agents multi-select shown on fresh init.
+// Claude starts selected so the keystroke-light path matches the pre-multi-agent
+// default. The caller owns the non-interactive branch.
 func promptAgents() ([]model.AgentTarget, error) {
-	m := newAgentsPromptModel()
-	result, err := tea.NewProgram(m).Run()
+	targets := []model.AgentTarget{model.AgentClaude, model.AgentCodex}
+	sel, err := tui.RunMultiSelect(tui.MultiSelectPrompt{
+		Header: "Which agents should sdd render skills for? (↑/↓ navigate, space toggle, enter confirm)",
+		Options: []tui.MultiSelectOption{
+			{Label: "claude", Hint: ".claude/skills/ — Claude Code", Selected: true},
+			{Label: "codex", Hint: ".agents/skills/ — Codex (Agent Skills standard)"},
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
-	final := result.(agentsPromptModel)
-	if !final.done {
-		return nil, fmt.Errorf("prompt cancelled")
-	}
-	var chosen []model.AgentTarget
-	for _, o := range final.options {
-		if o.selected {
-			chosen = append(chosen, o.value)
-		}
+	chosen := make([]model.AgentTarget, 0, len(sel))
+	for _, i := range sel {
+		chosen = append(chosen, targets[i])
 	}
 	return chosen, nil
 }
@@ -1529,47 +1256,6 @@ func isTerminal(f *os.File) bool {
 	return term.IsTerminal(f.Fd())
 }
 
-// confirmPromptModel is a bubbletea model for a single-char [y/N]
-// confirmation. Reuses the same textinput.Model infrastructure as
-// graphDirPromptModel for stylistic consistency with the d-tac-s2g flow.
-type confirmPromptModel struct {
-	textInput textinput.Model
-	prompt    string
-	done      bool
-}
-
-func newConfirmPromptModel(prompt string) confirmPromptModel {
-	ti := textinput.New()
-	ti.Placeholder = "N"
-	ti.CharLimit = 1
-	ti.SetWidth(3)
-	ti.Focus()
-	return confirmPromptModel{textInput: ti, prompt: prompt}
-}
-
-func (m confirmPromptModel) Init() tea.Cmd {
-	return textinput.Blink
-}
-
-func (m confirmPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "enter":
-			m.done = true
-			return m, tea.Quit
-		case "ctrl+c", "esc":
-			return m, tea.Quit
-		}
-	}
-	var cmd tea.Cmd
-	m.textInput, cmd = m.textInput.Update(msg)
-	return m, cmd
-}
-
-func (m confirmPromptModel) View() tea.View {
-	return tea.NewView(fmt.Sprintf("%s [y/N]: %s", m.prompt, m.textInput.View()))
-}
-
 // promptOverwriteModified asks the user whether to overwrite a user-edited
 // skill file during sdd init. Default N (preserve). Returns false on empty
 // input, EOF, or cancellation — the safe side is always "leave it alone."
@@ -1578,17 +1264,7 @@ func promptOverwriteModified(absPath string) (bool, error) {
 }
 
 func promptConfirmation(prompt string) (bool, error) {
-	m := newConfirmPromptModel(prompt)
-	result, err := tea.NewProgram(m).Run()
-	if err != nil {
-		return false, err
-	}
-	final := result.(confirmPromptModel)
-	if !final.done {
-		return false, nil
-	}
-	v := strings.ToLower(strings.TrimSpace(final.textInput.Value()))
-	return v == "y" || v == "yes", nil
+	return tui.RunConfirm(tui.ConfirmPrompt{Prompt: prompt})
 }
 
 func chooseLegacySessionMigration(count int, explicit, interactive bool, prompt func(int) (bool, error)) (bool, error) {
