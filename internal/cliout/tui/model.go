@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/networkteam/sdd/internal/cliout"
+	"github.com/networkteam/sdd/internal/command"
 )
 
 // Messages driving the model. logMsg/progressMsg carry pipe data; the *DoneMsg
@@ -35,7 +36,7 @@ type (
 // sized to the whole terminal. Holding until the gate keeps that escape out of
 // the output. The model quits when the log stream finishes.
 type model struct {
-	label string
+	initialPhase command.Phase
 
 	spinner  spinner.Model
 	progress progress.Model
@@ -66,11 +67,11 @@ const firstPaintDelay = 50 * time.Millisecond
 
 func newModel(view View, logs *cliout.LogConsumer, backlog []cliout.LogEntry, interrupt func()) model {
 	m := model{
-		label:     view.Label,
-		spinner:   spinner.New(spinner.WithSpinner(spinner.Dot)),
-		logs:      logs,
-		interrupt: interrupt,
-		held:      backlog,
+		initialPhase: view.InitialPhase,
+		spinner:      spinner.New(spinner.WithSpinner(spinner.Dot)),
+		logs:         logs,
+		interrupt:    interrupt,
+		held:         backlog,
 	}
 	if view.Progress != nil {
 		m.hasProg = true
@@ -201,8 +202,10 @@ func (m model) View() tea.View {
 	var b strings.Builder
 	b.WriteString(m.spinner.View())
 	b.WriteByte(' ')
-	b.WriteString(cliout.StyleLabel.Render(m.label))
-	if m.hasProg {
+	b.WriteString(cliout.StyleLabel.Render(m.phaseLabel()))
+	// The determinate bar is a component that renders only once a total is
+	// known — phase-only work (e.g. syncing a cache) shows the spinner alone.
+	if m.hasProg && m.lastProg.Total > 0 {
 		b.WriteString("  ")
 		b.WriteString(m.progress.View())
 		if c := cliout.RenderCount(m.lastProg); c != "" {
@@ -215,6 +218,15 @@ func (m model) View() tea.View {
 		b.WriteString(cliout.StyleBody.Render(n))
 	}
 	return tea.NewView(b.String())
+}
+
+// phaseLabel is the footer's operation label: the reporter's current phase
+// once one has been reported, else the view's initial phase.
+func (m model) phaseLabel() string {
+	if m.lastProg.Phase != "" {
+		return m.lastProg.Phase.Label()
+	}
+	return m.initialPhase.Label()
 }
 
 // barWidth keeps the determinate bar from crowding the label and count on

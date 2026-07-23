@@ -241,12 +241,12 @@ func (c *Coordinator) handle(e LogEntry) {
 	}
 }
 
-// armFromProgress arms the coordinator on a progress event, but only when the
-// snapshot carries real work (Total or Done advanced). A warm index publishes a
-// zero-total snapshot; arming on it would start a spurious footer while the
-// later query embedding outlasts the debounce.
+// armFromProgress arms the coordinator on a progress event that declares real
+// work: a non-empty phase (the work named its stage) or advanced totals. A warm
+// index publishes a zero-total, phase-less snapshot; arming on it would start a
+// spurious footer while the later query embedding outlasts the debounce.
 func (c *Coordinator) armFromProgress(p Progress) {
-	if p.Total <= 0 && p.Done <= 0 {
+	if p.Phase == "" && p.Total <= 0 && p.Done <= 0 {
 		return
 	}
 	c.mu.Lock()

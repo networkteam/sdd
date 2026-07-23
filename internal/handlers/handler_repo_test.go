@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -103,6 +104,64 @@ func TestRepoAdd_DeclaresDependencyForExistingConnection(t *testing.T) {
 // exercises a pre-cloned member end to end — the cooldown pull runs, the
 // member index is written under (repo-id, fingerprint), and the fill
 // callbacks report the repo and its chunks.
+// Freshening a cross-repo cache reports a phase-true stage — connecting on a
+// first clone, syncing on a due pull — and never indexing (that stage belongs
+// to embedding, which text-only search does not run). This is the s-tac-jbm
+// fix at the layer that knows the transitions.
+func TestEnsureReposFresh_ReportsPhaseNotIndexing(t *testing.T) {
+	const repoID = "github.com/networkteam/other"
+	newHandler := func(t *testing.T) (*Handler, string) {
+		dir := t.TempDir()
+		loc := repos.Locations{
+			ConfigPath: filepath.Join(dir, "xdg", "sdd", "config.yaml"),
+			CacheRoot:  filepath.Join(dir, "cache"),
+		}
+		gcfg := &repos.GlobalConfig{}
+		if err := gcfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repos.SaveConfigTo(loc.ConfigPath, gcfg); err != nil {
+			t.Fatal(err)
+		}
+		reg := repos.NewRegistry(loc)
+		cacheDir, err := reg.CacheDir(repoID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return New(Options{Repos: repos.NewManager(reg, &fakeGit{})}), cacheDir
+	}
+
+	capture := func(t *testing.T, h *Handler) []command.Phase {
+		var phases []command.Phase
+		if _, err := h.EnsureReposFresh(context.Background(), []string{repoID}, func(p command.Phase) {
+			phases = append(phases, p)
+		}); err != nil {
+			t.Fatalf("EnsureReposFresh: %v", err)
+		}
+		if slices.Contains(phases, command.PhaseIndexing) {
+			t.Errorf("freshening must never report indexing; got %v", phases)
+		}
+		return phases
+	}
+
+	t.Run("cold clone reports connecting", func(t *testing.T) {
+		h, _ := newHandler(t)
+		if phases := capture(t, h); !slices.Contains(phases, command.PhaseConnecting) {
+			t.Errorf("cold clone should report connecting; got %v", phases)
+		}
+	})
+
+	t.Run("due pull reports syncing", func(t *testing.T) {
+		h, cacheDir := newHandler(t)
+		if err := os.MkdirAll(filepath.Join(cacheDir, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if phases := capture(t, h); !slices.Contains(phases, command.PhaseSyncing) {
+			t.Errorf("a due pull should report syncing; got %v", phases)
+		}
+	})
+}
+
 func TestBuildConnectedIndexes_FreshensAndFills(t *testing.T) {
 	dir := t.TempDir()
 	loc := repos.Locations{

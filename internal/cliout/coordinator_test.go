@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/networkteam/slogutils"
+
+	"github.com/networkteam/sdd/internal/command"
 )
 
 // fakeStarter stands in for the bubble tea program: it records the opening
@@ -213,6 +215,37 @@ func TestCoordinator_CancellationBecomesSentinel(t *testing.T) {
 	}
 	if fs.didStart() {
 		t.Error("cancelling dormant work must not start a program")
+	}
+}
+
+// A reported phase declares real work, so it arms the coordinator even with
+// zero totals — the footer must appear for phase-only work like a cache sync.
+func TestCoordinator_PhaseArms(t *testing.T) {
+	reporter := NewReporter()
+	coord := NewCoordinator(CoordinatorConfig{
+		Policy:     Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn},
+		Stderr:     io.Discard,
+		StreamLogs: false,
+		Debounce:   20 * time.Millisecond,
+		Progress:   reporter,
+	})
+	fs := newFakeStarter()
+	coord.SetStarter(fs)
+
+	release := make(chan struct{})
+	work := func(ctx context.Context) error {
+		reporter.SetPhase(command.PhaseSyncing) // phase-only, zero totals → must arm
+		<-release
+		reporter.Close()
+		return ctx.Err()
+	}
+	done := make(chan error, 1)
+	go func() { done <- coord.Run(context.Background(), work) }()
+
+	<-fs.started // arms and starts a program on the phase alone
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
 	}
 }
 

@@ -222,34 +222,13 @@ func indexCmd() *cli.Command {
 			force := cmd.Bool("force")
 
 			start := time.Now()
-			reporter := cliout.NewReporter()
-			reporter.SetUnit("chunks")
-			// The denominator grows as each phase (local, then each connected
-			// repo) reports its planned chunks — member work is discovered only
-			// after its cache is fresh, so an accumulating total is the honest
-			// bar rather than a fabricated up-front figure.
-			runningTotal := 0
-			addPlanned := func(n int) { runningTotal += n; reporter.SetTotal(runningTotal) }
-			var curRepo string
-			setNote := func(ids []string, chunks int) {
-				note := embedNote(ids, chunks)
-				if curRepo != "" {
-					note = curRepo + " · " + note
-				}
-				reporter.SetNote(note)
-			}
+			prog := newEmbedProgress()
 
 			var doneIndexed, doneSkipped int
 			var haveSummary bool
-			buildCmd := &command.BuildIndexCmd{
-				Force:          force,
-				OnPlanned:      addPlanned,
-				OnBatchStart:   setNote,
-				OnEntryIndexed: func(_ string, chunks int) { reporter.Add(chunks) },
-				OnComplete: func(indexed, skipped int) {
-					doneIndexed, doneSkipped, haveSummary = indexed, skipped, true
-				},
-			}
+			buildCmd := prog.localBuild(force, func(indexed, skipped int) {
+				doneIndexed, doneSkipped, haveSummary = indexed, skipped, true
+			})
 
 			var reg *repos.Registry
 			var mgr *repos.Manager
@@ -266,13 +245,7 @@ func indexCmd() *cli.Command {
 			}
 			// --force reaches connected member stores too, repairing a stale
 			// or corrupt connected index rather than stopping at the local one.
-			fill := &command.BuildConnectedIndexesCmd{
-				Force:          force,
-				OnRepoStart:    func(id string) { curRepo = id; reporter.SetNote("indexing " + id) },
-				OnPlanned:      addPlanned,
-				OnBatchStart:   setNote,
-				OnEntryIndexed: func(_ string, chunks int) { reporter.Add(chunks) },
-			}
+			fill := prog.connected(force)
 
 			work := func(ctx context.Context) (struct{}, error) {
 				if err := h.Build(ctx, buildCmd); err != nil {
@@ -293,7 +266,7 @@ func indexCmd() *cli.Command {
 			// build arms and shows the inline view.
 			if cliout.IsInteractive(os.Stderr) {
 				_, err = clitui.Interactive(ctx, transientViewPolicy(),
-					clitui.View{Label: "indexing", Progress: reporter, StreamLogs: true}, work)
+					clitui.View{InitialPhase: command.PhaseIndexing, Progress: prog.reporter, StreamLogs: true}, work)
 			} else {
 				_, err = work(ctx)
 			}
@@ -485,33 +458,15 @@ func searchCmd() *cli.Command {
 			// log lines are not streamed. Off-TTY (and for agents) the plain
 			// path stays quiet at the Warn floor.
 			showView := cliout.IsInteractive(os.Stderr)
-			var reporter *cliout.Reporter
-			var addPlanned func(int)
-			var setNote func([]string, int)
-			var curRepo string
+			var prog *embedProgress
 			if showView {
-				reporter = cliout.NewReporter()
-				reporter.SetUnit("chunks")
-				// The denominator grows as each phase (local fill, then each
-				// connected repo) reports its planned chunks — member work is
-				// known only after its cache is fresh.
-				runningTotal := 0
-				addPlanned = func(n int) { runningTotal += n; reporter.SetTotal(runningTotal) }
-				setNote = func(ids []string, chunks int) {
-					note := embedNote(ids, chunks)
-					if curRepo != "" {
-						note = curRepo + " · " + note
-					}
-					reporter.SetNote(note)
-				}
+				prog = newEmbedProgress()
 			}
 			work := func(ctx context.Context) (*query.SearchResult, error) {
 				if needsVector {
 					lazy := &command.LazyFillIndexCmd{}
-					if reporter != nil {
-						lazy.OnPlanned = addPlanned
-						lazy.OnBatchStart = setNote
-						lazy.OnEntryIndexed = func(_ string, chunks int) { reporter.Add(chunks) }
+					if prog != nil {
+						lazy = prog.lazyFill()
 					}
 					if err := ih.LazyFill(ctx, lazy); err != nil {
 						return nil, err
@@ -544,13 +499,8 @@ func searchCmd() *cli.Command {
 					}
 					h := handlers.New(handlers.Options{Reader: reader, Repos: mgr})
 					var fill *command.BuildConnectedIndexesCmd
-					if reporter != nil {
-						fill = &command.BuildConnectedIndexesCmd{
-							OnRepoStart:    func(id string) { curRepo = id; reporter.SetNote("indexing " + id) },
-							OnPlanned:      addPlanned,
-							OnBatchStart:   setNote,
-							OnEntryIndexed: func(_ string, chunks int) { reporter.Add(chunks) },
-						}
+					if prog != nil {
+						fill = prog.connected(false)
 					}
 					if err := h.PrepareCrossRepoSearch(ctx, sq, emb, fill); err != nil {
 						return nil, err
@@ -562,17 +512,17 @@ func searchCmd() *cli.Command {
 
 			var res *query.SearchResult
 			if showView {
-				// The footer tracks the fill (embedding) — that's the work
-				// taking time; the vector query after it is instant. So label it
-				// "indexing", matching what the bar actually measures.
-				view := clitui.View{Label: "indexing", Progress: reporter, StreamLogs: false}
+				// Vector search: the footer tracks the fill (embedding) — the
+				// work taking time; the bar appears once a chunk total is known
+				// and the phase label reads "indexing".
+				view := clitui.View{InitialPhase: command.PhaseIndexing, Progress: prog.reporter, StreamLogs: false}
 				if !needsVector {
 					// Text-only cross-repo does no embedding — the work is
-					// freshening connected caches (first-time clone / pull). A
-					// "chunks" bar would be meaningless and "indexing" a lie, so
-					// drop the bar, label it honestly, and stream the "cloning
-					// connected repo" log rather than hiding the wait.
-					view = clitui.View{Label: "fetching repos", StreamLogs: true}
+					// freshening connected caches. The freshen step reports
+					// connecting/syncing, so the label stays phase-true (never
+					// "indexing"); no chunk bar (no total), and the "cloning
+					// connected repo" log streams rather than hiding the wait.
+					view = clitui.View{InitialPhase: command.PhaseConnecting, Progress: prog.reporter, StreamLogs: true}
 				}
 				res, err = clitui.Interactive(ctx, transientViewPolicy(), view, work)
 			} else {

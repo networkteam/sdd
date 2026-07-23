@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/networkteam/sdd/internal/cliout"
+	"github.com/networkteam/sdd/internal/command"
 )
 
 func logEntry(msg string, attrs ...slog.Attr) cliout.LogEntry {
@@ -23,7 +24,7 @@ func newTestModel(view View, interrupt func()) model {
 }
 
 func TestModel_LogDoneQuits(t *testing.T) {
-	m := newTestModel(View{Label: "indexing"}, nil)
+	m := newTestModel(View{InitialPhase: command.PhaseIndexing}, nil)
 	nm, cmd := m.Update(logDoneMsg{})
 	mm := nm.(model)
 	if !mm.done {
@@ -36,7 +37,7 @@ func TestModel_LogDoneQuits(t *testing.T) {
 
 func TestModel_CtrlCInterruptsAndQuits(t *testing.T) {
 	interrupted := false
-	m := newTestModel(View{Label: "indexing"}, func() { interrupted = true })
+	m := newTestModel(View{InitialPhase: command.PhaseIndexing}, func() { interrupted = true })
 
 	key := tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})
 	if key.String() != "ctrl+c" {
@@ -57,7 +58,7 @@ func TestModel_CtrlCInterruptsAndQuits(t *testing.T) {
 
 func TestModel_ProgressUpdatesLatest(t *testing.T) {
 	reporter := cliout.NewReporter()
-	m := newTestModel(View{Label: "indexing", Progress: reporter}, nil)
+	m := newTestModel(View{InitialPhase: command.PhaseIndexing, Progress: reporter}, nil)
 
 	nm, _ := m.Update(progressMsg(cliout.Progress{Done: 2, Total: 10, Unit: "entries"}))
 	mm := nm.(model)
@@ -68,7 +69,7 @@ func TestModel_ProgressUpdatesLatest(t *testing.T) {
 
 func TestModel_ViewIsInlineFooter(t *testing.T) {
 	reporter := cliout.NewReporter()
-	m := newTestModel(View{Label: "indexing", Progress: reporter}, nil)
+	m := newTestModel(View{InitialPhase: command.PhaseIndexing, Progress: reporter}, nil)
 
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(model)
@@ -93,11 +94,41 @@ func TestModel_ViewIsInlineFooter(t *testing.T) {
 	}
 }
 
+// The footer label derives from the reported phase and switches when the phase
+// does; before any phase is reported it falls back to the view's initial phase.
+// A phase-only snapshot (no total) shows the label without a determinate bar.
+func TestModel_FooterLabelDerivesFromPhase(t *testing.T) {
+	reporter := cliout.NewReporter()
+	m := newTestModel(View{InitialPhase: command.PhaseConnecting, Progress: reporter}, nil)
+
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(model)
+	if got := m.View().Content; !strings.Contains(got, "connecting") {
+		t.Errorf("initial label should be the view's initial phase; content=%q", got)
+	}
+
+	nm, _ = m.Update(progressMsg(cliout.Progress{Phase: command.PhaseSyncing}))
+	m = nm.(model)
+	view := m.View().Content
+	if !strings.Contains(view, "syncing") {
+		t.Errorf("label should switch to the reported phase; content=%q", view)
+	}
+	if strings.Contains(view, "/") {
+		t.Errorf("a phase-only snapshot (no total) must not render a bar/count; content=%q", view)
+	}
+
+	nm, _ = m.Update(progressMsg(cliout.Progress{Phase: command.PhaseIndexing, Done: 1, Total: 4, Unit: "chunks"}))
+	m = nm.(model)
+	if got := m.View().Content; !strings.Contains(got, "indexing") || !strings.Contains(got, "1/4 chunks") {
+		t.Errorf("label should track the latest phase and the bar appear with a total; content=%q", got)
+	}
+}
+
 // The first-paint gate holds durable lines until a WindowSizeMsg plus the
 // first-paint tick; only then do held lines flush and subsequent lines pass
 // straight through.
 func TestModel_FirstPaintGateHoldsThenFlushes(t *testing.T) {
-	m := newTestModel(View{Label: "indexing"}, nil)
+	m := newTestModel(View{InitialPhase: command.PhaseIndexing}, nil)
 
 	nm, _ := m.Update(logMsg(logEntry("early")))
 	m = nm.(model)

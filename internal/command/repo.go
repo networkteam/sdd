@@ -22,6 +22,11 @@ type RepoAddCmd struct {
 	// was present before. Not fired outside an sdd repo (global-only
 	// registration is legitimate — resolution without a dependent graph).
 	OnDeclared func(repoID string, alreadyDeclared bool)
+
+	// OnPhase reports the active stage (connecting → cloning) so the footer
+	// shows real progress rather than a bare eternal "connecting" spinner.
+	// Optional; fired only on the clone path, never the already-connected no-op.
+	OnPhase func(phase Phase)
 }
 
 // Validate checks the command's required fields.

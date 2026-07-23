@@ -80,6 +80,15 @@ func readCachedConfig(dir string) (*model.PerRepoConfig, error) {
 	return model.ParseConfig(data)
 }
 
+// PullDue reports whether a cooldown pull is due — the marker is missing or
+// older than cooldown. The pure phase-intent counterpart to CooldownPull's own
+// gate, so a caller can label the "syncing" phase before the pull runs without
+// mislabeling a fresh-cache no-op.
+func PullDue(dir string, cooldown time.Duration) bool {
+	last, ok := lastPull(dir)
+	return !ok || time.Since(last) >= cooldown
+}
+
 func lastPull(dir string) (time.Time, bool) {
 	info, err := os.Stat(filepath.Join(dir, ".git", lastPullMarker))
 	if err != nil {

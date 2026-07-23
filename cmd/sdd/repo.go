@@ -44,6 +44,10 @@ func repoCmd() *cli.Command {
 					// mid-view would corrupt the footer the coordinator owns.
 					var addedRepoID, addedCacheDir, declaredRepoID string
 					var alreadyDeclared, haveAdded, haveDeclared bool
+					// A phase-only reporter (no chunk total) so the footer label
+					// tracks the reported stage — connecting → cloning — rather
+					// than a bare eternal "connecting".
+					reporter := cliout.NewReporter()
 					addCmd := &command.RepoAddCmd{
 						CloneURL: cmd.Args().First(),
 						OnAdded: func(repoID, cacheDir string) {
@@ -52,6 +56,7 @@ func repoCmd() *cli.Command {
 						OnDeclared: func(repoID string, already bool) {
 							declaredRepoID, alreadyDeclared, haveDeclared = repoID, already, true
 						},
+						OnPhase: func(p command.Phase) { reporter.SetPhase(p) },
 					}
 					work := func(ctx context.Context) (struct{}, error) {
 						return struct{}{}, h.RepoAdd(ctx, addCmd)
@@ -60,11 +65,11 @@ func repoCmd() *cli.Command {
 					// On a TTY the work runs under the coordinator; its dormant /
 					// armed states keep the already-connected no-op silent (no
 					// program, no escape leak) while a real clone gets the inline
-					// spinner and streamed "cloning" log. Off-TTY it stays at the
-					// plain slog floor.
+					// spinner, phase label, and streamed "cloning" log. Off-TTY it
+					// stays at the plain slog floor.
 					if cliout.IsInteractive(os.Stderr) {
 						_, err = clitui.Interactive(ctx, transientViewPolicy(),
-							clitui.View{Label: "connecting", StreamLogs: true}, work)
+							clitui.View{InitialPhase: command.PhaseConnecting, Progress: reporter, StreamLogs: true}, work)
 					} else {
 						_, err = work(ctx)
 					}
@@ -214,6 +219,6 @@ func freshenRepoCaches(ctx context.Context, repoIDs []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = h.EnsureReposFresh(ctx, repoIDs)
+	_, err = h.EnsureReposFresh(ctx, repoIDs, nil)
 	return err
 }

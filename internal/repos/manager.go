@@ -72,7 +72,7 @@ func (m *Manager) CooldownPull(ctx context.Context, dir string, cooldown time.Du
 	if !IsCloned(dir) {
 		return false, fmt.Errorf("no clone at %s", dir)
 	}
-	if last, ok := lastPull(dir); ok && time.Since(last) < cooldown {
+	if !PullDue(dir, cooldown) {
 		return false, nil
 	}
 	return true, m.ForcePull(ctx, dir)

@@ -82,6 +82,12 @@ type BuildConnectedIndexesCmd struct {
 	// caller label the work in flight per repo.
 	OnRepoStart func(repoID string)
 
+	// OnPhase reports the active stage as the fill moves from freshening caches
+	// (syncing) to embedding (indexing). Optional; the CLI maps it onto the
+	// footer label so the transition is phase-true (never "indexing" while only
+	// a cache pull is running). Emitted only when work actually happens.
+	OnPhase func(phase Phase)
+
 	// OnPlanned fires once per repo, after that repo's skip pass, with the
 	// chunk count to embed for it. The caller accumulates these into a
 	// running total — the bar's denominator grows as each repo is reached,
