@@ -63,6 +63,10 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 		return nil
 	}
 
+	// Past the already-connected no-op: real work follows. Report the stages
+	// so the footer shows connecting → cloning rather than a stuck spinner.
+	emitPhase(cmd.OnPhase, model.PhaseConnecting)
+
 	// Clone into a staging location under the cache root first — the
 	// canonical identity (and so the final cache path) is only known once
 	// the clone's declared config is readable.
@@ -79,6 +83,7 @@ func (h *Handler) RepoAdd(ctx context.Context, cmd *command.RepoAddCmd) error {
 	defer func() { _ = os.RemoveAll(staging) }()
 	cloneDir := filepath.Join(staging, "clone")
 	repo := repos.ConnectedRepo{CloneURL: cmd.CloneURL}
+	emitPhase(cmd.OnPhase, model.PhaseCloning)
 	if _, err := h.repos.EnsureCloned(ctx, repo, cloneDir); err != nil {
 		return err
 	}
@@ -149,13 +154,11 @@ func (h *Handler) declareDependency(repoID string, cmd *command.RepoAddCmd) (boo
 	if cfgFile.RepoID == repoID {
 		return false, fmt.Errorf("%q is this repo's own identity — a graph cannot depend on itself", repoID)
 	}
-	for _, dep := range cfgFile.Dependencies {
-		if dep == repoID {
-			if cmd.OnDeclared != nil {
-				cmd.OnDeclared(repoID, true)
-			}
-			return false, nil
+	if slices.Contains(cfgFile.Dependencies, repoID) {
+		if cmd.OnDeclared != nil {
+			cmd.OnDeclared(repoID, true)
 		}
+		return false, nil
 	}
 	patched, err := model.SetYAMLSequence(data, "dependencies", append(cfgFile.Dependencies, repoID))
 	if err != nil {
@@ -342,7 +345,7 @@ func (h *Handler) freshenReferencedRepos(ctx context.Context, refs []model.Ref) 
 	if len(repoIDs) == 0 {
 		return nil
 	}
-	_, err := h.EnsureReposFresh(ctx, repoIDs)
+	_, err := h.EnsureReposFresh(ctx, command.EnsureReposFreshCmd{RepoIDs: repoIDs})
 	return err
 }
 
@@ -440,7 +443,11 @@ func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuer
 	// Text-only search needs fresh caches but no embedding; the vector path
 	// freshens and fills in one pass through BuildConnectedIndexes.
 	if q.Phrase == "" || embedder == nil {
-		_, err := h.EnsureReposFresh(ctx, repoIDs)
+		fresh := command.EnsureReposFreshCmd{RepoIDs: repoIDs}
+		if fill != nil {
+			fresh.OnPhase = fill.OnPhase
+		}
+		_, err := h.EnsureReposFresh(ctx, fresh)
 		return err
 	}
 	return h.BuildConnectedIndexes(ctx, repoIDs, embedder, fill)
@@ -463,7 +470,11 @@ func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, e
 	if len(repoIDs) == 0 {
 		return nil
 	}
-	if _, err := h.EnsureReposFresh(ctx, repoIDs); err != nil {
+	fresh := command.EnsureReposFreshCmd{RepoIDs: repoIDs}
+	if fill != nil {
+		fresh.OnPhase = fill.OnPhase
+	}
+	if _, err := h.EnsureReposFresh(ctx, fresh); err != nil {
 		return err
 	}
 	if embedder == nil {
@@ -522,13 +533,16 @@ func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, e
 	return nil
 }
 
-// EnsureReposFresh brings the caches of the given connected repos up to
-// date for a read: lazy clone when absent, cooldown-gated pull otherwise.
+// EnsureReposFresh brings the caches of the named connected repos up to date
+// for a read: lazy clone when absent, cooldown-gated pull otherwise.
 // Unconnected repo IDs are skipped — the read side renders them unresolved,
-// which is that state's honest surface. Reports whether any cache changed
-// so a long-lived caller can invalidate its GraphSource.
-func (h *Handler) EnsureReposFresh(ctx context.Context, repoIDs []string) (changed bool, err error) {
-	if len(repoIDs) == 0 {
+// which is that state's honest surface. Reports whether any cache changed so a
+// long-lived caller can invalidate its GraphSource. cmd.OnPhase (optional)
+// mirrors RepoAdd — connecting → cloning for a clone, syncing for a due pull,
+// nothing for a fresh-cache no-op — so a text-only cross-repo read shows a
+// phase-true label instead of "indexing".
+func (h *Handler) EnsureReposFresh(ctx context.Context, cmd command.EnsureReposFreshCmd) (changed bool, err error) {
+	if len(cmd.RepoIDs) == 0 {
 		return false, nil
 	}
 	if h.repos == nil {
@@ -539,7 +553,7 @@ func (h *Handler) EnsureReposFresh(ctx context.Context, repoIDs []string) (chang
 		return false, err
 	}
 	logger := slogutils.FromContext(ctx)
-	for _, repoID := range repoIDs {
+	for _, repoID := range cmd.RepoIDs {
 		repo, ok := cfg.Connected(repoID)
 		if !ok {
 			logger.Debug("repo not connected; skipping cache refresh", "repo", repoID)
@@ -548,6 +562,13 @@ func (h *Handler) EnsureReposFresh(ctx context.Context, repoIDs []string) (chang
 		cacheDir, err := h.repos.Registry().CacheDir(repoID)
 		if err != nil {
 			return changed, err
+		}
+		switch {
+		case !repos.IsCloned(cacheDir):
+			emitPhase(cmd.OnPhase, model.PhaseConnecting)
+			emitPhase(cmd.OnPhase, model.PhaseCloning)
+		case repos.PullDue(cacheDir, repos.DefaultPullCooldown):
+			emitPhase(cmd.OnPhase, model.PhaseSyncing)
 		}
 		cloned, err := h.repos.EnsureCloned(ctx, repo, cacheDir)
 		if err != nil {
@@ -564,4 +585,13 @@ func (h *Handler) EnsureReposFresh(ctx context.Context, repoIDs []string) (chang
 		changed = changed || pulled
 	}
 	return changed, nil
+}
+
+// emitPhase fires an optional phase callback, guarding the nil case at the one
+// point phases cross the CQRS boundary (handlers report phases as plain
+// callback data; internal/cliout stays out of these layers).
+func emitPhase(onPhase func(model.Phase), phase model.Phase) {
+	if onPhase != nil {
+		onPhase(phase)
+	}
 }

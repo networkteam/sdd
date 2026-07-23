@@ -1,6 +1,10 @@
 package cliout
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/networkteam/sdd/internal/model"
+)
 
 // Progress is an absolute snapshot of how far an operation has come. Because
 // every snapshot carries the running totals (not a delta), a dropped update
@@ -8,8 +12,9 @@ import "sync"
 type Progress struct {
 	Done  int
 	Total int
-	Unit  string // optional noun for rendering, e.g. "chunks"
-	Note  string // optional live status of the work in flight, e.g. "embedding 4 entries · 37 chunks"
+	Unit  string      // optional noun for rendering, e.g. "chunks"
+	Note  string      // optional live status of the work in flight, e.g. "embedding 4 entries · 37 chunks"
+	Phase model.Phase // active stage; drives the footer label and arms the coordinator
 }
 
 // Ratio returns Done/Total clamped to [0,1], or 0 when Total is unknown.
@@ -38,10 +43,13 @@ type Reporter struct {
 	total int
 	unit  string
 	note  string
+	phase model.Phase
 
 	ch        chan Progress
 	closeCh   chan struct{}
 	closeOnce sync.Once
+
+	onPublish func(Progress) // single subscriber; fired with each published snapshot
 }
 
 // NewReporter builds a reporter with an empty mailbox.
@@ -87,12 +95,37 @@ func (r *Reporter) Add(n int) {
 	r.publish()
 }
 
+// SetPhase records the operation's active stage and publishes a snapshot. A
+// non-empty phase is a display-worthy event: it declares real work, so it arms
+// the coordinator even before any total is known (the footer label derives from
+// it). Sticky until the next call — pass "" only to clear it.
+func (r *Reporter) SetPhase(phase model.Phase) {
+	r.mu.Lock()
+	r.phase = phase
+	r.mu.Unlock()
+	r.publish()
+}
+
+// Notify registers a hook fired with each published snapshot — the coordinator
+// uses it to arm on the first real progress event. Single-subscriber: a later
+// call replaces the hook.
+func (r *Reporter) Notify(fn func(Progress)) {
+	r.mu.Lock()
+	r.onPublish = fn
+	r.mu.Unlock()
+}
+
 // publish drops any stale pending snapshot and posts the current one, so the
 // mailbox always holds the latest state (latest-wins) rather than a backlog.
 func (r *Reporter) publish() {
 	r.mu.Lock()
-	snap := Progress{Done: r.done, Total: r.total, Unit: r.unit, Note: r.note}
+	snap := Progress{Done: r.done, Total: r.total, Unit: r.unit, Note: r.note, Phase: r.phase}
+	notify := r.onPublish
 	r.mu.Unlock()
+
+	if notify != nil {
+		notify(snap)
+	}
 
 	select {
 	case r.ch <- snap:

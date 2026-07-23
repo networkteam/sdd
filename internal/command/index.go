@@ -1,5 +1,7 @@
 package command
 
+import "github.com/networkteam/sdd/internal/model"
+
 // BuildIndexCmd warms up the search index by chunking, embedding, and
 // upserting every entry on disk. Existing rows for re-indexed entries are
 // dropped before the new rows land. The command is idempotent — re-running
@@ -81,6 +83,12 @@ type BuildConnectedIndexesCmd struct {
 	// whose member index is about to be reconciled. Optional; lets the
 	// caller label the work in flight per repo.
 	OnRepoStart func(repoID string)
+
+	// OnPhase reports the active stage as the fill moves from freshening caches
+	// (syncing) to embedding (indexing). Optional; the CLI maps it onto the
+	// footer label so the transition is phase-true (never "indexing" while only
+	// a cache pull is running). Emitted only when work actually happens.
+	OnPhase func(phase model.Phase)
 
 	// OnPlanned fires once per repo, after that repo's skip pass, with the
 	// chunk count to embed for it. The caller accumulates these into a

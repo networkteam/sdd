@@ -14,6 +14,7 @@ import (
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/meta"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/repos"
 )
@@ -44,6 +45,10 @@ func repoCmd() *cli.Command {
 					// mid-view would corrupt the footer the coordinator owns.
 					var addedRepoID, addedCacheDir, declaredRepoID string
 					var alreadyDeclared, haveAdded, haveDeclared bool
+					// A phase-only reporter (no chunk total) so the footer label
+					// tracks the reported stage — connecting → cloning — rather
+					// than a bare eternal "connecting".
+					reporter := cliout.NewReporter()
 					addCmd := &command.RepoAddCmd{
 						CloneURL: cmd.Args().First(),
 						OnAdded: func(repoID, cacheDir string) {
@@ -52,31 +57,20 @@ func repoCmd() *cli.Command {
 						OnDeclared: func(repoID string, already bool) {
 							declaredRepoID, alreadyDeclared, haveDeclared = repoID, already, true
 						},
+						OnPhase: reporter.SetPhase,
 					}
 					work := func(ctx context.Context) (struct{}, error) {
 						return struct{}{}, h.RepoAdd(ctx, addCmd)
 					}
 
-					// The already-connected fast path does no clone. Starting the
-					// transient coordinator for that no-op would drain DEC
-					// mode-query escape sequences onto the shell prompt, so gate
-					// the view on a clone actually being needed — the same
-					// "already connected under this URL" test the handler applies.
-					willClone := true
-					if reg, _, rerr := defaultRepos(); rerr == nil {
-						if cfg, lerr := reg.Load(); lerr == nil {
-							if _, connected := cfg.ConnectedByURL(cmd.Args().First()); connected {
-								willClone = false
-							}
-						}
-					}
-
-					// The clone is the long, previously-silent step. On a TTY it
-					// runs under the inline coordinator (spinner + streamed
-					// "cloning" log); off-TTY it stays at the plain slog floor.
-					if cliout.IsInteractive(os.Stderr) && willClone {
+					// On a TTY the work runs under the coordinator; its dormant /
+					// armed states keep the already-connected no-op silent (no
+					// program, no escape leak) while a real clone gets the inline
+					// spinner, phase label, and streamed "cloning" log. Off-TTY it
+					// stays at the plain slog floor.
+					if cliout.IsInteractive(os.Stderr) {
 						_, err = clitui.Interactive(ctx, transientViewPolicy(),
-							clitui.View{Label: "connecting", StreamLogs: true}, work)
+							clitui.View{InitialPhase: model.PhaseConnecting, Progress: reporter, StreamLogs: true}, work)
 					} else {
 						_, err = work(ctx)
 					}
@@ -226,6 +220,6 @@ func freshenRepoCaches(ctx context.Context, repoIDs []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = h.EnsureReposFresh(ctx, repoIDs)
+	_, err = h.EnsureReposFresh(ctx, command.EnsureReposFreshCmd{RepoIDs: repoIDs})
 	return err
 }

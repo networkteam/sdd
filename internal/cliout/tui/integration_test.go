@@ -4,31 +4,27 @@ import (
 	"bytes"
 	"io"
 	"log/slog"
-	"strings"
+	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
 	"github.com/networkteam/sdd/internal/cliout"
+	sddmodel "github.com/networkteam/sdd/internal/model"
 )
 
-// TestModel_StreamLogsDurable runs the real inline program: a streamed log line
-// must land in the terminal output (durable, above the footer). We wait for it
-// to render before signalling end-of-work — in teatest every message fires
-// instantly, so closing first would quit before tea.Printf flushes (in a real
-// terminal the seconds of embedding work leave ample time).
+// TestModel_StreamLogsDurable runs the real inline program: a durable line
+// handed in as the opening backlog must reach terminal output above the footer,
+// but only after the first-paint gate — then the program quits on end-of-work.
 func TestModel_StreamLogsDurable(t *testing.T) {
-	policy := cliout.Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn}
-	handler, consumer := cliout.NewLogPipe(policy.CaptureFloor())
-	rec := cliout.NewRecorder(policy)
+	consumer := cliout.NewLogConsumer(64)
+	backlog := []cliout.LogEntry{logEntry("indexed", slog.String("entry", "20260101-aaa"))}
 
-	m := newModel(View{Label: "indexing", StreamLogs: true}, consumer, policy, rec, func() {})
+	m := newModel(View{InitialPhase: sddmodel.PhaseIndexing, StreamLogs: true}, consumer, backlog, func() {})
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 24))
 
-	slog.New(handler).Info("indexed", "entry", "20260101-aaa")
-
-	// The streamed line reaches scrollback while the program is still running.
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
 		return bytes.Contains(b, []byte("20260101-aaa"))
 	}, teatest.WithDuration(5*time.Second))
@@ -41,29 +37,71 @@ func TestModel_StreamLogsDurable(t *testing.T) {
 	}
 }
 
-// TestModel_TransientHidesLogs runs the inline program in transient mode: the
-// footer label shows, but per-entry log lines are NOT streamed into output —
-// the "search indexing is transient" behaviour. The program still quits on done.
-func TestModel_TransientHidesLogs(t *testing.T) {
-	policy := cliout.Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn}
-	handler, consumer := cliout.NewLogPipe(policy.CaptureFloor())
-	rec := cliout.NewRecorder(policy)
+// TestModel_NoFullHeightCursorDownBeforeFirstFrame is the s-tac-bnw regression
+// guard: a log line present at program start must not trigger a full-height
+// cursor-down escape (ESC[<n>B at terminal-height scale) before the renderer
+// has flushed its first frame. The first-paint gate holds the line until after
+// a frame tick, by which point the cellbuf is sized to the footer, so any
+// insert-above cursor movement stays small.
+func TestModel_NoFullHeightCursorDownBeforeFirstFrame(t *testing.T) {
+	const height = 24
+	consumer := cliout.NewLogConsumer(64)
+	backlog := []cliout.LogEntry{logEntry("cloning connected repo")}
 
-	m := newModel(View{Label: "indexing", StreamLogs: false}, consumer, policy, rec, func() {})
-	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 24))
+	m := newModel(View{InitialPhase: sddmodel.PhaseConnecting, StreamLogs: true}, consumer, backlog, func() {})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, height))
 
-	logger := slog.New(handler)
-	logger.Info("indexed", "entry", "ZZZ-should-not-appear")
+	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
+		return bytes.Contains(b, []byte("cloning connected repo"))
+	}, teatest.WithDuration(5*time.Second))
+
 	consumer.Close()
-
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 
 	out, _ := io.ReadAll(tm.FinalOutput(t))
-	got := string(out)
-	if strings.Contains(got, "ZZZ-should-not-appear") {
-		t.Errorf("transient mode leaked a per-entry log line into output; output=%q", got)
+	if n := maxCursorDown(out); n >= 10 {
+		t.Errorf("emitted a full-height cursor-down ESC[%dB (terminal height %d) — first-paint gate did not hold the line", n, height)
 	}
-	if !strings.Contains(got, "indexing") {
-		t.Errorf("footer label missing; output=%q", got)
+}
+
+// TestModel_FastDoneBeforePaintHoldsLines is the teardown-race guard: when work
+// ends before the first-paint gate, the held backlog must not be painted (no
+// pre-first-frame cursor-down, nothing printed by the program) — the lines are
+// retained for the coordinator to print plainly after teardown.
+func TestModel_FastDoneBeforePaintHoldsLines(t *testing.T) {
+	const height = 24
+	consumer := cliout.NewLogConsumer(64)
+	backlog := []cliout.LogEntry{logEntry("cloning connected repo")}
+
+	m := newModel(View{InitialPhase: sddmodel.PhaseConnecting, StreamLogs: true}, consumer, backlog, func() {})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, height))
+
+	consumer.Close() // end-of-work immediately, before the first-paint gate
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+
+	out, _ := io.ReadAll(tm.FinalOutput(t))
+	if n := maxCursorDown(out); n >= 10 {
+		t.Errorf("full-height cursor-down ESC[%dB before first paint; the line was painted early", n)
 	}
+	if bytes.Contains(out, []byte("cloning connected repo")) {
+		t.Error("held line was painted by the program; it must be handed back unpainted")
+	}
+	fm := tm.FinalModel(t).(model)
+	if len(fm.held) != 1 || fm.held[0].Message != "cloning connected repo" {
+		t.Errorf("final model must retain the unpainted line; held=%v", fm.held)
+	}
+}
+
+var cursorDownRe = regexp.MustCompile(`\x1b\[(\d+)B`)
+
+// maxCursorDown returns the largest n across all ESC[<n>B (cursor-down) escapes
+// in b, or 0 when there are none.
+func maxCursorDown(b []byte) int {
+	max := 0
+	for _, m := range cursorDownRe.FindAllSubmatch(b, -1) {
+		if n, err := strconv.Atoi(string(m[1])); err == nil && n > max {
+			max = n
+		}
+	}
+	return max
 }

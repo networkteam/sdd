@@ -4,12 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/index"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
 )
 
@@ -94,6 +96,90 @@ func TestRepoAdd_DeclaresDependencyForExistingConnection(t *testing.T) {
 	err = h.RepoAdd(context.Background(), &command.RepoAddCmd{CloneURL: "git@github.com:networkteam/other.git"})
 	if err == nil || !strings.Contains(err.Error(), "already connected and declared") {
 		t.Errorf("second add should report nothing to do, got %v", err)
+	}
+}
+
+// Freshening a cross-repo cache reports a phase-true stage — connecting then
+// cloning on a first clone (mirroring RepoAdd), syncing on a due pull — and
+// never indexing (that stage belongs to embedding, which text-only search does
+// not run). This is the s-tac-jbm fix at the layer that knows the transitions.
+func TestEnsureReposFresh_ReportsPhaseNotIndexing(t *testing.T) {
+	const repoID = "github.com/networkteam/other"
+	newHandler := func(t *testing.T) (*Handler, string) {
+		dir := t.TempDir()
+		loc := repos.Locations{
+			ConfigPath: filepath.Join(dir, "xdg", "sdd", "config.yaml"),
+			CacheRoot:  filepath.Join(dir, "cache"),
+		}
+		gcfg := &repos.GlobalConfig{}
+		if err := gcfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repos.SaveConfigTo(loc.ConfigPath, gcfg); err != nil {
+			t.Fatal(err)
+		}
+		reg := repos.NewRegistry(loc)
+		cacheDir, err := reg.CacheDir(repoID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return New(Options{Repos: repos.NewManager(reg, &fakeGit{})}), cacheDir
+	}
+
+	capture := func(t *testing.T, h *Handler) []model.Phase {
+		var phases []model.Phase
+		if _, err := h.EnsureReposFresh(context.Background(), command.EnsureReposFreshCmd{
+			RepoIDs: []string{repoID},
+			OnPhase: func(p model.Phase) { phases = append(phases, p) },
+		}); err != nil {
+			t.Fatalf("EnsureReposFresh: %v", err)
+		}
+		if slices.Contains(phases, model.PhaseIndexing) {
+			t.Errorf("freshening must never report indexing; got %v", phases)
+		}
+		return phases
+	}
+
+	t.Run("cold clone reports connecting then cloning", func(t *testing.T) {
+		h, _ := newHandler(t)
+		if phases := capture(t, h); len(phases) < 2 || phases[0] != model.PhaseConnecting || phases[1] != model.PhaseCloning {
+			t.Errorf("cold clone should report connecting then cloning; got %v", phases)
+		}
+	})
+
+	t.Run("due pull reports syncing", func(t *testing.T) {
+		h, cacheDir := newHandler(t)
+		if err := os.MkdirAll(filepath.Join(cacheDir, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if phases := capture(t, h); !slices.Contains(phases, model.PhaseSyncing) {
+			t.Errorf("a due pull should report syncing; got %v", phases)
+		}
+	})
+}
+
+// RepoAdd's clone path reports connecting then cloning, in order, before it
+// reaches the identity read — the sequence the footer shows.
+func TestRepoAdd_ClonePathReportsConnectingThenCloning(t *testing.T) {
+	dir := t.TempDir()
+	loc := repos.Locations{
+		ConfigPath: filepath.Join(dir, "xdg", "sdd", "config.yaml"),
+		CacheRoot:  filepath.Join(dir, "cache"),
+	}
+	if err := repos.SaveConfigTo(loc.ConfigPath, &repos.GlobalConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	h := New(Options{Repos: repos.NewManager(repos.NewRegistry(loc), &fakeGit{})})
+
+	// The fake clone leaves no config to read, so RepoAdd errors after cloning;
+	// the phase sequence up to the clone is what we assert.
+	var phases []model.Phase
+	_ = h.RepoAdd(context.Background(), &command.RepoAddCmd{
+		CloneURL: "git@github.com:networkteam/new.git",
+		OnPhase:  func(p model.Phase) { phases = append(phases, p) },
+	})
+	if len(phases) != 2 || phases[0] != model.PhaseConnecting || phases[1] != model.PhaseCloning {
+		t.Errorf("want [connecting cloning]; got %v", phases)
 	}
 }
 
