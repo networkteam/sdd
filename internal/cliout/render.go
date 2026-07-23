@@ -8,11 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Styles for the terminal experience. They follow the CLI color-scheme
-// philosophy (d-cpt-n0f) — one color per concept, prominence by weight — but
-// cover a different surface (log levels, progress chrome) than the
-// entry-rendering palette in internal/presenters, so they live here rather
-// than being shared. Colors emit only on a colorprofile-capable TTY.
+// Log-level + progress-chrome styles; distinct surface from the presenters palette (d-cpt-n0f).
 var (
 	StyleLabel = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")) // operation label (bright white)
 	StyleBody  = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))           // message text (body grey)

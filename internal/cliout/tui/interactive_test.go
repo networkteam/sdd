@@ -11,21 +11,31 @@ import (
 	"github.com/networkteam/sdd/internal/cliout"
 )
 
-// fakeRun stands in for the real program runner. Instant (dormant/armed-fast)
-// operations never start a program, so it is not invoked on these paths — it
-// exists to satisfy the seam and fail loudly if a program starts unexpectedly.
-func fakeRun(m tea.Model) (tea.Model, error) { return m, nil }
+// recordingRun stands in for the real program runner and flags whether a
+// program was ever started — instant (dormant/armed-fast) operations must not
+// start one.
+func recordingRun() (programRunner, *bool) {
+	started := false
+	return func(m tea.Model) (tea.Model, error) {
+		started = true
+		return m, nil
+	}, &started
+}
 
 func TestInteractive_ReturnsResultForInstantWork(t *testing.T) {
 	policy := cliout.Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn}
 	work := func(context.Context) (int, error) { return 42, nil }
 
-	val, err := interactiveWith(context.Background(), policy, View{Label: "indexing"}, work, fakeRun)
+	run, started := recordingRun()
+	val, err := interactiveWith(context.Background(), policy, View{Label: "indexing"}, work, run)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if val != 42 {
 		t.Errorf("result = %d, want 42", val)
+	}
+	if *started {
+		t.Error("instant work must not start a program")
 	}
 }
 
@@ -34,7 +44,8 @@ func TestInteractive_PropagatesWorkError(t *testing.T) {
 	boom := errors.New("boom")
 	work := func(context.Context) (int, error) { return 0, boom }
 
-	_, err := interactiveWith(context.Background(), policy, View{Label: "indexing"}, work, fakeRun)
+	run, _ := recordingRun()
+	_, err := interactiveWith(context.Background(), policy, View{Label: "indexing"}, work, run)
 	if !errors.Is(err, boom) {
 		t.Errorf("error = %v, want %v", err, boom)
 	}
@@ -44,7 +55,8 @@ func TestInteractive_TranslatesCancellationToSentinel(t *testing.T) {
 	policy := cliout.Policy{Display: slog.LevelInfo}
 	work := func(context.Context) (int, error) { return 0, context.Canceled }
 
-	_, err := interactiveWith(context.Background(), policy, View{Label: "indexing"}, work, fakeRun)
+	run, _ := recordingRun()
+	_, err := interactiveWith(context.Background(), policy, View{Label: "indexing"}, work, run)
 	if !errors.Is(err, cliout.ErrUserCancelled) {
 		t.Errorf("error = %v, want ErrUserCancelled", err)
 	}

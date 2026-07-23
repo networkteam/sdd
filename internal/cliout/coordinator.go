@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"os/signal"
 	"sync"
 	"time"
 
@@ -18,10 +20,7 @@ import (
 // "context canceled" string ever reaches the user.
 var ErrUserCancelled = errors.New("cancelled by user")
 
-// armDebounce is how long the coordinator waits, after the first
-// display-worthy event, before starting a bubble tea program. Work that
-// completes inside the window flushes plainly and never starts a program, so
-// instant operations produce no footer flash and no terminal escape leak.
+// armDebounce delays program start after arming; work finishing inside it stays plain.
 const armDebounce = 70 * time.Millisecond
 
 // lifecycleState is the coordinator's explicit display state.
@@ -41,10 +40,12 @@ const (
 // driver goroutine, so it blocks there until the program exits. backlog holds
 // the display lines buffered before the program existed (its opening backlog);
 // live delivers subsequent lines, and its Close signals end-of-work so the
-// program quits. Implemented by internal/cliout/tui — this interface keeps
-// cliout free of any bubble tea import.
+// program quits. Start returns any lines it never painted (work finished before
+// the first-paint gate) so the coordinator can print them plainly after
+// teardown. Implemented by internal/cliout/tui — this interface keeps cliout
+// free of any bubble tea import.
 type DisplayStarter interface {
-	Start(backlog []LogEntry, live *LogConsumer) error
+	Start(backlog []LogEntry, live *LogConsumer) (unpainted []LogEntry, err error)
 }
 
 // Coordinator owns the terminal-output lifecycle for one long-running command.
@@ -59,6 +60,7 @@ type Coordinator struct {
 	streamLogs bool
 	debounce   time.Duration
 	starter    DisplayStarter
+	progress   *Reporter
 
 	mu      sync.Mutex
 	state   lifecycleState
@@ -102,12 +104,13 @@ func NewCoordinator(cfg CoordinatorConfig) *Coordinator {
 		stderr:     stderr,
 		streamLogs: cfg.StreamLogs,
 		debounce:   debounce,
+		progress:   cfg.Progress,
 		rec:        NewRecorder(cfg.Policy),
 		startCh:    make(chan struct{}),
 		doneCh:     make(chan struct{}),
 	}
 	if cfg.Progress != nil {
-		cfg.Progress.Notify(c.Arm)
+		cfg.Progress.Notify(c.armFromProgress)
 	}
 	return c
 }
@@ -115,7 +118,8 @@ func NewCoordinator(cfg CoordinatorConfig) *Coordinator {
 // SetStarter injects the live-program starter (provided by internal/cliout/tui).
 func (c *Coordinator) SetStarter(s DisplayStarter) { c.starter = s }
 
-// Interrupt cancels the work context. The live program's ctrl+c path calls it;
+// Interrupt cancels the work context. Both the SIGINT handler (dormant/armed,
+// terminal in cooked mode) and the live program's ctrl+c key path converge here;
 // the resulting context.Canceled from work is translated to ErrUserCancelled.
 func (c *Coordinator) Interrupt() {
 	if c.cancel != nil {
@@ -127,8 +131,7 @@ func (c *Coordinator) Interrupt() {
 // goroutine, and drives the lifecycle: it starts the program if the armed
 // debounce expires, or returns without one if work finishes first. On teardown
 // it re-emits kept / fingers-crossed entries to the durable sink for
-// footer-only views, exactly as before. A context.Canceled from work surfaces
-// as ErrUserCancelled.
+// footer-only views. A context.Canceled from work surfaces as ErrUserCancelled.
 func (c *Coordinator) Run(ctx context.Context, work func(context.Context) error) error {
 	durable := slogutils.FromContext(ctx)
 
@@ -136,6 +139,21 @@ func (c *Coordinator) Run(ctx context.Context, work func(context.Context) error)
 	workCtx, cancel := context.WithCancel(slogutils.WithLogger(ctx, logger))
 	defer cancel()
 	c.cancel = cancel
+
+	// SIGINT reaches the coordinator for its whole lifetime: dormant/armed run
+	// with the terminal in cooked mode, where ctrl+c is a signal (the live
+	// program uses WithoutSignalHandler and catches the key in raw mode). Both
+	// route to Interrupt so ctrl+c cancels work — never a hard kill — in any state.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Stop(sigCh)
+	go func() {
+		select {
+		case <-sigCh:
+			c.Interrupt()
+		case <-workCtx.Done():
+		}
+	}()
 
 	workErr := make(chan error, 1)
 	go func() {
@@ -150,7 +168,14 @@ func (c *Coordinator) Run(ctx context.Context, work func(context.Context) error)
 		c.mu.Lock()
 		backlog, live := c.backlog, c.live
 		c.mu.Unlock()
-		runErr = c.starter.Start(backlog, live)
+		unpainted, e := c.starter.Start(backlog, live)
+		runErr = e
+		// Lines the program never painted (work finished before the first-paint
+		// gate) print plainly now — after teardown cleared the frame, so no
+		// pre-first-frame cursor-down escape, order preserved.
+		for _, en := range unpainted {
+			c.renderPlain(en)
+		}
 	case <-c.doneCh:
 		// Work finished before a program was needed (dormant or armed within
 		// the debounce window); nothing was rendered by a program.
@@ -216,9 +241,14 @@ func (c *Coordinator) handle(e LogEntry) {
 	}
 }
 
-// Arm is exported for the progress mailbox to arm the coordinator on the first
-// progress event even when no display-eligible log has arrived yet.
-func (c *Coordinator) Arm() {
+// armFromProgress arms the coordinator on a progress event, but only when the
+// snapshot carries real work (Total or Done advanced). A warm index publishes a
+// zero-total snapshot; arming on it would start a spurious footer while the
+// later query embedding outlasts the debounce.
+func (c *Coordinator) armFromProgress(p Progress) {
+	if p.Total <= 0 && p.Done <= 0 {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.state == stateDormant {
@@ -250,6 +280,9 @@ func (c *Coordinator) debounceFired() {
 // goroutine after the result is sent, so the driver's <-workErr sees a fully
 // observed recorder.
 func (c *Coordinator) finishWork() {
+	if c.progress != nil {
+		c.progress.Close() // stop the model's recvProgress command from blocking
+	}
 	c.mu.Lock()
 	if c.timer != nil {
 		c.timer.Stop()

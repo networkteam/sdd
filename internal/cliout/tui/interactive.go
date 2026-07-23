@@ -55,10 +55,14 @@ type starter struct {
 	run       programRunner
 }
 
-func (s starter) Start(backlog []cliout.LogEntry, live *cliout.LogConsumer) error {
+func (s starter) Start(backlog []cliout.LogEntry, live *cliout.LogConsumer) ([]cliout.LogEntry, error) {
 	m := newModel(s.view, live, backlog, s.interrupt)
-	_, err := s.run(m)
-	return err
+	fm, err := s.run(m)
+	var unpainted []cliout.LogEntry
+	if final, ok := fm.(model); ok {
+		unpainted = final.held // lines the gate never released
+	}
+	return unpainted, err
 }
 
 // Interactive runs work under a transient terminal view governed by policy,

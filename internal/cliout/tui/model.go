@@ -145,8 +145,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logDoneMsg:
 		m.done = true
-		// Flush anything still held so a fast finish loses nothing.
-		return m, tea.Sequence(m.flushHeld(), tea.Quit)
+		// Before first paint, held lines must not print (a pre-first-frame
+		// tea.Printf re-opens the full-height cursor-down escape); they stay in
+		// m.held and the coordinator prints them plainly after teardown. Once
+		// painted, held is already empty (flushed at the gate).
+		return m, tea.Quit
 
 	case progressMsg:
 		m.lastProg = cliout.Progress(msg)

@@ -63,6 +63,34 @@ func TestModel_NoFullHeightCursorDownBeforeFirstFrame(t *testing.T) {
 	}
 }
 
+// TestModel_FastDoneBeforePaintHoldsLines is the teardown-race guard: when work
+// ends before the first-paint gate, the held backlog must not be painted (no
+// pre-first-frame cursor-down, nothing printed by the program) — the lines are
+// retained for the coordinator to print plainly after teardown.
+func TestModel_FastDoneBeforePaintHoldsLines(t *testing.T) {
+	const height = 24
+	consumer := cliout.NewLogConsumer(64)
+	backlog := []cliout.LogEntry{logEntry("cloning connected repo")}
+
+	m := newModel(View{Label: "connecting", StreamLogs: true}, consumer, backlog, func() {})
+	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, height))
+
+	consumer.Close() // end-of-work immediately, before the first-paint gate
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
+
+	out, _ := io.ReadAll(tm.FinalOutput(t))
+	if n := maxCursorDown(out); n >= 10 {
+		t.Errorf("full-height cursor-down ESC[%dB before first paint; the line was painted early", n)
+	}
+	if bytes.Contains(out, []byte("cloning connected repo")) {
+		t.Error("held line was painted by the program; it must be handed back unpainted")
+	}
+	fm := tm.FinalModel(t).(model)
+	if len(fm.held) != 1 || fm.held[0].Message != "cloning connected repo" {
+		t.Errorf("final model must retain the unpainted line; held=%v", fm.held)
+	}
+}
+
 var cursorDownRe = regexp.MustCompile(`\x1b\[(\d+)B`)
 
 // maxCursorDown returns the largest n across all ESC[<n>B (cursor-down) escapes

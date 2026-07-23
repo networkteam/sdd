@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,18 +15,21 @@ import (
 
 // fakeStarter stands in for the bubble tea program: it records the opening
 // backlog it was handed and forwards each live line onto a channel, so the
-// coordinator's armed→live handoff is observable without a terminal.
+// coordinator's armed→live handoff is observable without a terminal. unpainted
+// is handed back to the coordinator, standing in for lines the gate never
+// released.
 type fakeStarter struct {
-	started chan struct{}
-	backlog []LogEntry
-	lines   chan LogEntry
+	started   chan struct{}
+	backlog   []LogEntry
+	lines     chan LogEntry
+	unpainted []LogEntry
 }
 
 func newFakeStarter() *fakeStarter {
 	return &fakeStarter{started: make(chan struct{}), lines: make(chan LogEntry, 16)}
 }
 
-func (s *fakeStarter) Start(backlog []LogEntry, live *LogConsumer) error {
+func (s *fakeStarter) Start(backlog []LogEntry, live *LogConsumer) ([]LogEntry, error) {
 	s.backlog = backlog
 	close(s.started)
 	for {
@@ -35,7 +39,7 @@ func (s *fakeStarter) Start(backlog []LogEntry, live *LogConsumer) error {
 		}
 		s.lines <- e
 	}
-	return nil
+	return s.unpainted, nil
 }
 
 func (s *fakeStarter) didStart() bool {
@@ -183,12 +187,15 @@ func TestCoordinator_TransientArmsOnProgressHidesLogs(t *testing.T) {
 	}
 }
 
+// Interrupt during dormant work (no program) still yields the sentinel — the
+// dormant/armed cancellation path that a hard SIGINT would otherwise kill.
 func TestCoordinator_CancellationBecomesSentinel(t *testing.T) {
 	coord := NewCoordinator(CoordinatorConfig{
 		Policy: Policy{Display: slog.LevelInfo},
 		Stderr: io.Discard,
 	})
-	coord.SetStarter(newFakeStarter())
+	fs := newFakeStarter()
+	coord.SetStarter(fs)
 
 	running := make(chan struct{})
 	work := func(ctx context.Context) error {
@@ -203,6 +210,71 @@ func TestCoordinator_CancellationBecomesSentinel(t *testing.T) {
 	coord.Interrupt()
 	if err := <-done; !errors.Is(err, ErrUserCancelled) {
 		t.Errorf("Run error = %v, want ErrUserCancelled", err)
+	}
+	if fs.didStart() {
+		t.Error("cancelling dormant work must not start a program")
+	}
+}
+
+// A warm index publishes a zero-total snapshot; it must not arm, even when the
+// (query-embedding) work that follows outlasts the debounce — no spurious footer.
+func TestCoordinator_ZeroProgressDoesNotArm(t *testing.T) {
+	reporter := NewReporter()
+	coord := NewCoordinator(CoordinatorConfig{
+		Policy:     Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn},
+		Stderr:     io.Discard,
+		StreamLogs: false,
+		Debounce:   20 * time.Millisecond,
+		Progress:   reporter,
+	})
+	fs := newFakeStarter()
+	coord.SetStarter(fs)
+
+	work := func(ctx context.Context) error {
+		reporter.SetTotal(0)                // zero-total: must not arm
+		reporter.SetNote("query embedding") // note only: must not arm
+		time.Sleep(60 * time.Millisecond)   // outlast the debounce a real arm would fire on
+		reporter.Close()
+		return nil
+	}
+	if err := coord.Run(context.Background(), work); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if fs.didStart() {
+		t.Error("warm progress (zero total) must not start a program")
+	}
+}
+
+// Lines the program never painted (handed back as unpainted) print plainly
+// exactly once, after teardown.
+func TestCoordinator_PrintsUnpaintedLinesAfterTeardown(t *testing.T) {
+	var buf bytes.Buffer
+	coord := NewCoordinator(CoordinatorConfig{
+		Policy:     Policy{Display: slog.LevelInfo, KeepAtOrAbove: slog.LevelWarn},
+		Stderr:     &buf,
+		StreamLogs: true,
+		Debounce:   20 * time.Millisecond,
+	})
+	fs := newFakeStarter()
+	fs.unpainted = []LogEntry{entry(slog.LevelInfo, "unpainted-line")}
+	coord.SetStarter(fs)
+
+	release := make(chan struct{})
+	work := func(ctx context.Context) error {
+		slogutils.FromContext(ctx).Info("dormant-line") // printed plainly, arms
+		<-release                                       // block past the debounce so the program starts
+		return ctx.Err()
+	}
+	done := make(chan error, 1)
+	go func() { done <- coord.Run(context.Background(), work) }()
+
+	<-fs.started
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if n := strings.Count(buf.String(), "unpainted-line"); n != 1 {
+		t.Errorf("unpainted line printed %d times, want exactly 1; stderr=%q", n, buf.String())
 	}
 }
 

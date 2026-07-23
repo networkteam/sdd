@@ -43,7 +43,7 @@ type Reporter struct {
 	closeCh   chan struct{}
 	closeOnce sync.Once
 
-	onPublish func() // fired after each publish; the coordinator arms on it
+	onPublish func(Progress) // single subscriber; fired with each published snapshot
 }
 
 // NewReporter builds a reporter with an empty mailbox.
@@ -89,9 +89,10 @@ func (r *Reporter) Add(n int) {
 	r.publish()
 }
 
-// Notify registers a hook fired after each publish — the coordinator uses it to
-// arm on the first progress event even before any display-eligible log.
-func (r *Reporter) Notify(fn func()) {
+// Notify registers a hook fired with each published snapshot — the coordinator
+// uses it to arm on the first real progress event. Single-subscriber: a later
+// call replaces the hook.
+func (r *Reporter) Notify(fn func(Progress)) {
 	r.mu.Lock()
 	r.onPublish = fn
 	r.mu.Unlock()
@@ -106,7 +107,7 @@ func (r *Reporter) publish() {
 	r.mu.Unlock()
 
 	if notify != nil {
-		notify()
+		notify(snap)
 	}
 
 	select {
