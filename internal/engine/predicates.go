@@ -288,11 +288,10 @@ func registerBuiltinCommands(r *Registry) {
 			Writes: []string{fieldPlaybackConfirmation},
 		},
 		Fn: func(ctx *Context) error {
-			ctx.Store.WriteEngine(fieldPlaybackConfirmation, playbackConfirmation{
+			return ctx.Store.WriteEngine(fieldPlaybackConfirmation, playbackConfirmation{
 				Snapshot: ctx.Store.StateSnapshot(),
 				Step:     ctx.Step,
 			})
-			return nil
 		},
 	})
 
@@ -304,8 +303,7 @@ func registerBuiltinCommands(r *Registry) {
 			Writes: []string{fieldPreflightOverride},
 		},
 		Fn: func(ctx *Context) error {
-			ctx.Store.WriteEngine(fieldPreflightOverride, true)
-			return nil
+			return ctx.Store.WriteEngine(fieldPreflightOverride, true)
 		},
 	})
 }
@@ -572,15 +570,13 @@ func noHighFindings(ctx *Context) (bool, error) {
 		// always writes findings, so absence means the gate hasn't run.
 		return false, nil
 	}
-	findings, ok := v.([]query.Finding)
-	if !ok {
-		// Replay path: findings restored from JSON.
-		normalized, err := VarType{Base: TypePreflightFindings}.ValidateValue(v)
-		if err != nil {
-			return false, fmt.Errorf("findings field has unexpected shape: %w", err)
-		}
-		findings = normalized.([]query.Finding)
+	// Store values are normalized JSON documents, so findings always come back
+	// as the []any/map form; the query type reconstructs the typed findings.
+	normalized, err := VarType{Base: TypePreflightFindings}.ValidateValue(v)
+	if err != nil {
+		return false, fmt.Errorf("findings field has unexpected shape: %w", err)
 	}
+	findings := normalized.([]query.Finding)
 	for _, f := range findings {
 		if f.Severity == query.SeverityHigh {
 			return false, nil

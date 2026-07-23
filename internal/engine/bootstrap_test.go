@@ -412,8 +412,12 @@ func (env *bootstrapCaptureEnv) appendEntry(ctx *Context) error {
 		}
 	}
 	env.graph.g = model.NewGraph(append(env.graph.g.Entries, e))
-	ctx.Store.WriteEngine("findings", []query.Finding{})
-	ctx.Store.WriteEngine("entryId", id)
+	if err := ctx.Store.WriteEngine("findings", []query.Finding{}); err != nil {
+		return err
+	}
+	if err := ctx.Store.WriteEngine("entryId", id); err != nil {
+		return err
+	}
 	env.session.LogRead("newEntry", []string{id}, nil)
 	return nil
 }

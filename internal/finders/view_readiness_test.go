@@ -26,7 +26,7 @@ func readinessGraph() *model.Graph {
 func TestView_Readiness_FourLanesParticipantsBriefAndLayerSplit(t *testing.T) {
 	g := readinessGraph()
 	f := New(Options{})
-	result, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayoutAndExpand(t, "readiness")})
+	result, err := f.OnGraph(g).View(query.ViewQuery{Layout: mustParseLayoutAndExpand(t, "readiness")})
 	if err != nil {
 		t.Fatalf("View(readiness): %v", err)
 	}
@@ -68,7 +68,7 @@ func TestView_Readiness_NotOfferedAtSectionStart(t *testing.T) {
 	// valid section macro — the self-contradicting hint the split fixes.
 	g := readinessGraph()
 	f := New(Options{})
-	_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayoutAndExpand(t, "readiness:brief")})
+	_, err := f.OnGraph(g).View(query.ViewQuery{Layout: mustParseLayoutAndExpand(t, "readiness:brief")})
 	if err == nil {
 		t.Fatal("readiness at section start should error")
 	}

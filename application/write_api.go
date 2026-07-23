@@ -29,6 +29,11 @@ type EntryRef struct {
 	Desc string
 }
 
+type FactIndex struct {
+	Title string `json:"title"`
+	Topic string `json:"topic"`
+}
+
 type EntryDraft struct {
 	Target            MutationTarget
 	Kind              string
@@ -41,6 +46,7 @@ type EntryDraft struct {
 	Participants      []string
 	Confidence        string
 	Topics            []string
+	Index             *FactIndex
 	AttachmentHandles []string
 	// Canonical and Aliases carry a kind: actor signal's identity; Actor carries
 	// a kind: role decision's bound actor canonical. Mirrors the CLI-side
@@ -157,10 +163,17 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		}
 		topics = append(topics, topic)
 	}
+	var index *model.FactIndex
+	if draft.Index != nil {
+		index, err = model.NewFactIndex(draft.Index.Title, draft.Index.Topic)
+		if err != nil {
+			return CreateEntryResult{}, err
+		}
+	}
 	entry := &model.Entry{
 		ID: id, Type: entryType, Kind: kind, Layer: layer, Intent: model.Intent(draft.Intent),
 		Content: draft.Body, Participants: append([]string(nil), draft.Participants...),
-		Confidence: draft.Confidence, Topics: topics, Time: runtime.options.Now(),
+		Confidence: draft.Confidence, Topics: topics, Index: index, Time: runtime.options.Now(),
 		Canonical: draft.Canonical, Aliases: append([]string(nil), draft.Aliases...), Actor: draft.Actor,
 		FocusActors: append([]string(nil), draft.FocusActors...), FocusWhen: draft.FocusWhen,
 		Involvement: append([]model.Involvement(nil), draft.Involvement...),
@@ -194,7 +207,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		finder := finders.New(finders.Options{PreflightRunner: runtimeLLMRunner{executor: runtime.options.LLM, purpose: "preflight"}})
 		preflightCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
-		preflight, err := finder.Preflight(preflightCtx, query.PreflightQuery{Entry: entry, Graph: snapshot.graph})
+		preflight, err := finder.Preflight(preflightCtx, snapshot.graph, query.PreflightQuery{Entry: entry})
 		if err != nil {
 			return result, fmt.Errorf("pre-flight: %w", err)
 		}

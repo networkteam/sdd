@@ -13,7 +13,6 @@ import (
 // runner dependency injected into the finder handles the LLM call.
 type PreflightQuery struct {
 	Entry   *model.Entry
-	Graph   *model.Graph
 	Model   string        // LLM model identifier (e.g. "claude-sonnet-4-6")
 	Timeout time.Duration // hard timeout for the validator call
 }

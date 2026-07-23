@@ -99,15 +99,26 @@ func (t TopicPath) HasPrefix(prefix TopicPath) bool {
 	return true
 }
 
-// FoldKey returns a comparable lower-case key for use as a map key when
-// deduplicating paths case-insensitively. The original casing is lost in
-// the key but preserved on the source TopicPath value.
+// FoldKey returns a comparable key for case-insensitive path deduplication.
 func (t TopicPath) FoldKey() string {
 	parts := make([]string, len(t.Components))
 	for i, c := range t.Components {
-		parts[i] = strings.ToLower(c)
+		parts[i] = caseFoldKey(c)
 	}
 	return strings.Join(parts, "/")
+}
+
+// caseFoldKey returns one representative for each strings.EqualFold class.
+func caseFoldKey(s string) string {
+	return strings.Map(func(r rune) rune {
+		canonical := r
+		for folded := unicode.SimpleFold(r); folded != r; folded = unicode.SimpleFold(folded) {
+			if folded < canonical {
+				canonical = folded
+			}
+		}
+		return canonical
+	}, s)
 }
 
 // CanonicalizeTopicPaths walks paths in order and returns a deduplicated

@@ -29,7 +29,10 @@ type Reader interface {
 	// assembly reaches the write path for free at the one seam.
 	CurrentGraph(dir string) (*model.Graph, error)
 	LoadWIPMarkers(graphDir string) ([]*model.WIPMarker, error)
-	Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error)
+	// Preflight validates an entry against a graph the handler already holds.
+	// The graph is passed explicitly (not through the query) because handlers
+	// load and mutate it mid-write; the query stays pure intent.
+	Preflight(ctx context.Context, g *model.Graph, q query.PreflightQuery) (*query.PreflightResult, error)
 	SkillStatus(ctx context.Context, q query.SkillStatusQuery) (*query.SkillStatusResult, error)
 }
 

@@ -125,8 +125,7 @@ func newProcEnv(t *testing.T, canonical string) *procEnv {
 			branch, _ := ctx.Store.Get("baseBranch")
 			env.wipMarkers = append(env.wipMarkers, "start:"+id)
 			env.wipBranches = append(env.wipBranches, branch.(string))
-			ctx.Store.WriteEngine("wipMarker", "wip-"+id)
-			return nil
+			return ctx.Store.WriteEngine("wipMarker", "wip-"+id)
 		},
 	})
 	mustRegisterCommand(reg, Command{
@@ -145,8 +144,7 @@ func newProcEnv(t *testing.T, canonical string) *procEnv {
 			branch, _ := ctx.Store.Get("baseBranch")
 			env.wipMarkers = append(env.wipMarkers, "done:"+id)
 			env.wipBranches = append(env.wipBranches, branch.(string))
-			ctx.Store.WriteEngine("wipMarker", nil)
-			return nil
+			return ctx.Store.WriteEngine("wipMarker", nil)
 		},
 	})
 	// wipRemove removes an agent-identified marker by the report-supplied

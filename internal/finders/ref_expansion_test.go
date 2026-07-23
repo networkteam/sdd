@@ -41,7 +41,7 @@ func refExpansionFixture() (*model.Graph, string) {
 func runView(t *testing.T, g *model.Graph, layout string) *query.ViewResult {
 	t.Helper()
 	f := New(Options{})
-	result, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, layout)})
+	result, err := f.OnGraph(g).View(query.ViewQuery{Layout: mustParseLayout(t, layout)})
 	if err != nil {
 		t.Fatalf("View(%q): %v", layout, err)
 	}
@@ -200,7 +200,7 @@ func TestView_ExpandRefs_RenderShapeAndExclusionErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, tc.layout)})
+			_, err := f.OnGraph(g).View(query.ViewQuery{Layout: mustParseLayout(t, tc.layout)})
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
 			}

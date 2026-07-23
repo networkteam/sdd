@@ -110,3 +110,26 @@ func TestEntries_EmbeddedSetLoads(t *testing.T) {
 		t.Errorf("embedded set must ship the capture procedure, got canonicals %v", canonicals)
 	}
 }
+
+func TestCaptureCarriesFactIndexThroughPlaybackAndWrite(t *testing.T) {
+	entries, err := Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var capture string
+	for _, entry := range entries {
+		if entry.Canonical == "capture" {
+			capture = entry.Content
+		}
+	}
+	for _, want := range []string{
+		"{{if .index}}- index:",
+		"title: {{.index.title}}",
+		"topic: {{.index.topic}}",
+		"optionally enrolls a `fact` in the retrieval index",
+	} {
+		if !strings.Contains(capture, want) {
+			t.Errorf("capture procedure missing %q", want)
+		}
+	}
+}

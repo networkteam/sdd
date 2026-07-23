@@ -59,4 +59,46 @@ func TestReportSchemaForStep(t *testing.T) {
 	if schema["additionalProperties"] != false {
 		t.Error("undeclared fields must be rejected by the schema")
 	}
+
+	index, _ := props["index"].(map[string]any)
+	indexObject := nullableObjectBranch(t, index)
+	if indexObject["additionalProperties"] != false {
+		t.Fatalf("index object schema = %#v", indexObject)
+	}
+	indexProps, _ := indexObject["properties"].(map[string]any)
+	if len(indexProps) != 2 || indexProps["title"] == nil || indexProps["topic"] == nil {
+		t.Fatalf("index properties = %#v", indexProps)
+	}
+	if required, _ := indexObject["required"].([]string); len(required) != 2 {
+		t.Fatalf("index required = %#v", indexObject["required"])
+	}
+
+	answer := env.spec.AnswerSchemaForStep(env.spec.StepByID["playback"])
+	answerProps, _ := answer["properties"].(map[string]any)
+	fields, _ := answerProps["fields"].(map[string]any)
+	fieldProps, _ := fields["properties"].(map[string]any)
+	nullableObjectBranch(t, fieldProps["index"].(map[string]any))
+}
+
+func nullableObjectBranch(t *testing.T, schema map[string]any) map[string]any {
+	t.Helper()
+	branches, _ := schema["anyOf"].([]any)
+	if len(branches) != 2 {
+		t.Fatalf("nullable schema = %#v", schema)
+	}
+	var object map[string]any
+	var hasNull bool
+	for _, branch := range branches {
+		candidate, _ := branch.(map[string]any)
+		switch candidate["type"] {
+		case "object":
+			object = candidate
+		case "null":
+			hasNull = true
+		}
+	}
+	if object == nil || !hasNull {
+		t.Fatalf("nullable schema = %#v", schema)
+	}
+	return object
 }

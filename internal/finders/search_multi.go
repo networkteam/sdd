@@ -8,7 +8,6 @@ import (
 	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/index"
-	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
 )
@@ -56,9 +55,8 @@ func MultiSearch(ctx context.Context, local *SearchFinder, q query.SearchQuery) 
 			continue
 		}
 		mq := q
-		mq.Graph = member.graph
 		mq.Repos, mq.AllRepos = nil, false
-		mres, err := member.finder.Search(ctx, mq)
+		mres, err := member.Search(ctx, mq)
 		if err != nil {
 			return nil, fmt.Errorf("searching %s: %w", repoID, err)
 		}
@@ -78,18 +76,13 @@ func MultiSearch(ctx context.Context, local *SearchFinder, q query.SearchQuery) 
 	return &query.SearchResult{Mode: res.Mode, Entries: merged}, nil
 }
 
-// searchMemberSource is one connected repo's resolved search source.
-type searchMemberSource struct {
-	graph  *model.Graph
-	finder *SearchFinder
-}
-
-// searchMember resolves one selected repo into a search source: its member
-// graph from the query graph's assembly and a finder over its cache graph
-// dir plus per-repo index (vector mode only). nil means the repo is not
-// available — not connected or not cached — which the caller reports.
-func searchMember(q query.SearchQuery, repoID string, local *SearchFinder) (*searchMemberSource, error) {
-	member, err := q.Graph.MemberGraph(repoID)
+// searchMember resolves one selected repo into a SearchFinder: its member
+// graph from the local finder's cross-graph assembly plus a finder over the
+// repo's cache graph dir and per-repo index (vector mode only). nil means the
+// repo is not available — not connected or not cached — which the caller
+// reports.
+func searchMember(q query.SearchQuery, repoID string, local *SearchFinder) (*SearchFinder, error) {
+	member, err := local.graph.MemberGraph(repoID)
 	if err != nil {
 		return nil, err
 	}
@@ -114,12 +107,10 @@ func searchMember(q query.SearchQuery, repoID string, local *SearchFinder) (*sea
 			return nil, fmt.Errorf("opening index for %s: %w", repoID, err)
 		}
 	}
-	return &searchMemberSource{
-		graph: member,
-		finder: NewSearchFinder(SearchFinderOptions{
-			GraphDir:   graphDir,
-			Embedder:   local.embedder,
-			IndexStore: store,
-		}),
-	}, nil
+	return NewSearchFinder(SearchFinderOptions{
+		Graph:      member,
+		GraphDir:   graphDir,
+		Embedder:   local.embedder,
+		IndexStore: store,
+	}), nil
 }

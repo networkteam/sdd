@@ -139,7 +139,7 @@ func TestCreateEntry_FocusRendersThroughAsFocusBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := finders.New(finders.Options{}).View(query.ViewQuery{Graph: g, Layout: layout})
+	result, err := finders.New(finders.Options{}).OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -111,8 +111,7 @@ func TestLoadGraphMergesBaseFact(t *testing.T) {
 	if !fact.Embedded {
 		t.Error("base fact is not marked Embedded")
 	}
-	// Body is generated from the executor vocabulary, not hand-written.
-	if !strings.Contains(fact.Content, "Grammar:") {
+	if !strings.Contains(fact.Content, "## Grammar") {
 		t.Error("base fact body missing generated grammar reference")
 	}
 }
@@ -183,6 +182,57 @@ See [design](./06-115516-s-stg-beh/design.md) for details.`)
 	wantPath := filepath.ToSlash(e.Attachments[0])
 	if wantPath != "2026/04/06-115516-s-stg-beh/design.md" {
 		t.Errorf("Attachments[0] = %q, want %q", wantPath, "2026/04/06-115516-s-stg-beh/design.md")
+	}
+}
+
+// TestLoadGraphRecordsParseFailuresAndKeepsReadableEntries pins partial-read
+// resilience: a malformed entry does not abort the walk — every parseable
+// entry still loads, and the failure is recorded on the graph as a load issue
+// rather than swallowed or fatal.
+func TestLoadGraphRecordsParseFailuresAndKeepsReadableEntries(t *testing.T) {
+	dir := t.TempDir()
+
+	writeGraphEntry(t, dir, "20260406-115516-s-stg-beh", `---
+type: signal
+layer: strategic
+---
+
+Readable signal.`)
+
+	// Unterminated quoted scalar — a YAML syntax error, so ParseEntry fails.
+	writeGraphEntry(t, dir, "20260406-115600-s-stg-bad", `---
+type: signal
+layer: strategic
+refs:
+    - "unterminated
+---
+
+Broken frontmatter.`)
+
+	f := New(Options{})
+	g, err := f.LoadGraph(dir)
+	if err != nil {
+		t.Fatalf("LoadGraph aborted on a malformed entry: %v", err)
+	}
+
+	var readable bool
+	for _, e := range projectEntries(g) {
+		switch e.ID {
+		case "20260406-115516-s-stg-beh":
+			readable = true
+		case "20260406-115600-s-stg-bad":
+			t.Fatalf("malformed entry was admitted to the graph")
+		}
+	}
+	if !readable {
+		t.Fatal("readable entry missing after a sibling failed to parse")
+	}
+
+	if len(g.LoadIssues) != 1 {
+		t.Fatalf("LoadIssues = %+v, want exactly one", g.LoadIssues)
+	}
+	if got := g.LoadIssues[0]; got.Ref != "20260406-115600-s-stg-bad" || got.Message == "" {
+		t.Fatalf("LoadIssue = %+v, want the malformed entry ID and a non-empty message", got)
 	}
 }
 

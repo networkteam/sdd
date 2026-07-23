@@ -263,6 +263,7 @@ type Entry struct {
 	// Warnings rather than failing the parse, matching how other shape rules
 	// are handled.
 	Topics []TopicPath
+	Index  *FactIndex
 	// AnnotationTopics carries the topic assignments declared by a
 	// kind: annotation entry. Each item is either a plain label (Members nil
 	// — applies to all of the annotation's Refs) or a label with explicit
@@ -400,6 +401,7 @@ type frontmatter struct {
 	Class        string            `yaml:"class,omitempty"`
 	Actor        string            `yaml:"actor,omitempty"`
 	Topics       []AnnotationTopic `yaml:"topics,omitempty"`
+	Index        *FactIndex        `yaml:"index,omitempty"`
 	FocusActors  []string          `yaml:"actors,omitempty"`
 	FocusWhen    *FocusWhen        `yaml:"when,omitempty"`
 	Involvement  []involvementYAML `yaml:"involvement,omitempty"`
@@ -409,6 +411,34 @@ type frontmatter struct {
 	Framing      yaml.Node         `yaml:"framing,omitempty"`
 	Preflight    string            `yaml:"preflight,omitempty"`
 	Summary      string            `yaml:"summary,omitempty"`
+}
+
+// UnmarshalYAML distinguishes an absent index from an explicit null.
+func (f *frontmatter) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.MappingNode {
+		for offset := 0; offset < len(node.Content); offset += 2 {
+			if node.Content[offset].Value == "index" && yamlNodeIsNull(node.Content[offset+1]) {
+				return fmt.Errorf("index cannot be null; omit it when the entry is not indexed")
+			}
+		}
+	}
+	type plain frontmatter
+	var decoded plain
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*f = frontmatter(decoded)
+	return nil
+}
+
+func yamlNodeIsNull(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	if node.Tag == "!!null" {
+		return true
+	}
+	return node.Kind == yaml.AliasNode && yamlNodeIsNull(node.Alias)
 }
 
 // involvementYAML mirrors the on-disk shape for involvement triples. The
@@ -461,6 +491,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Aliases:      fm.Aliases,
 		Class:        ProcedureClass(fm.Class),
 		Actor:        fm.Actor,
+		Index:        fm.Index,
 		FocusActors:  fm.FocusActors,
 		FocusWhen:    fm.FocusWhen,
 		Preflight:    fm.Preflight,
@@ -672,6 +703,7 @@ func FormatFrontmatter(e *Entry) string {
 		Aliases:      e.Aliases,
 		Class:        string(e.Class),
 		Actor:        e.Actor,
+		Index:        e.Index,
 		FocusActors:  e.FocusActors,
 		FocusWhen:    e.FocusWhen,
 		Preflight:    e.Preflight,

@@ -276,7 +276,9 @@ func (s *Session) reopenStalePlayback(inst *Instance, failing []FailedPredicate)
 	if conf.Snapshot == inst.Store.StateSnapshot() {
 		return false, nil // confirmation is current; the gate is held by something else
 	}
-	inst.Store.WriteEngine(fieldPlaybackConfirmation, nil)
+	if err := inst.Store.WriteEngine(fieldPlaybackConfirmation, nil); err != nil {
+		return false, err
+	}
 	s.appendEvent(inst.ID, EventOpResult, map[string]any{
 		"step": inst.Step,
 		"fn":   "reopenPlayback",
@@ -298,12 +300,15 @@ func (s *Session) runCommand(inst *Instance, name string) error {
 	if err != nil {
 		return err
 	}
-	inst.Store.beginJournal()
+	candidate := inst.Store.Clone()
+	ctx.Store = candidate
+	candidate.beginJournal()
 	err = cmd.Fn(ctx)
-	writes := inst.Store.drainJournal()
+	writes := candidate.drainJournal()
 	if err != nil {
 		return fmt.Errorf("command %q at step %s: %w", name, inst.Step, err)
 	}
+	inst.Store.commit(candidate)
 	s.appendEvent(inst.ID, EventOpResult, map[string]any{
 		"step":   inst.Step,
 		"fn":     name,

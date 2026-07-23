@@ -26,9 +26,10 @@ func TestView_SourceWip_AsWipList(t *testing.T) {
 		entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective)),
 		entry("20260101-110000-d-tac-bbb", withKind(model.KindDirective)),
 	})
+	g.SetGraphDir(dir)
 	layout := mustParseLayout(t, "source(wip):as-wip-list")
 	f := New(Options{})
-	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout, GraphDir: dir})
+	result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		t.Fatalf("View: %v", err)
 	}
@@ -57,9 +58,10 @@ func TestView_WipMacro_ExpandsToSourceWip(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{
 		entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective)),
 	})
+	g.SetGraphDir(dir)
 	layout := mustParseLayoutAndExpand(t, "wip")
 	f := New(Options{})
-	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout, GraphDir: dir})
+	result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		t.Fatalf("View(wip macro): %v", err)
 	}
@@ -85,6 +87,7 @@ func TestView_SourceWip_RejectsGraphFilters(t *testing.T) {
 		{"layer", "source(wip):layer(tac):as-wip-list", "graph filters"},
 		{"since", "source(wip):since(\"7d\"):as-wip-list", "since()"},
 		{"topic", "source(wip):topic(catch-up-scaling):as-wip-list", "topic() filters"},
+		{"indexed", "source(wip):indexed:as-wip-list", "indexed"},
 		{"rank", "source(wip):rank(heat):as-wip-list", "rank()"},
 		{"n", "source(wip):n(5):as-wip-list", "n()"},
 		{"group", "source(wip):group(by(kind)):as-wip-list", "group()"},
@@ -93,11 +96,12 @@ func TestView_SourceWip_RejectsGraphFilters(t *testing.T) {
 	}
 	g := model.NewGraph(nil)
 	dir := t.TempDir()
+	g.SetGraphDir(dir)
 	f := New(Options{})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			layout := mustParseLayout(t, tc.layout)
-			_, err := f.View(query.ViewQuery{Graph: g, Layout: layout, GraphDir: dir})
+			_, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 			if err == nil {
 				t.Fatalf("expected error mentioning %q for %q", tc.wantSub, tc.layout)
 			}
@@ -111,9 +115,10 @@ func TestView_SourceWip_RejectsGraphFilters(t *testing.T) {
 func TestView_SourceWip_RejectsOtherRenders(t *testing.T) {
 	g := model.NewGraph(nil)
 	dir := t.TempDir()
+	g.SetGraphDir(dir)
 	f := New(Options{})
 	layout := mustParseLayout(t, "source(wip):as-list")
-	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout, GraphDir: dir})
+	_, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err == nil {
 		t.Fatal("expected render-shape error for source(wip):as-list")
 	}
@@ -129,7 +134,7 @@ func TestView_AsWipList_RequiresSourceWip(t *testing.T) {
 	g := model.NewGraph(nil)
 	f := New(Options{})
 	layout := mustParseLayout(t, "as-wip-list")
-	_, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	_, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err == nil {
 		t.Fatal("expected error for as-wip-list with default source")
 	}
@@ -149,7 +154,7 @@ func TestView_SourceWip_MissingGraphDirErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExpandMacros: %v", err)
 	}
-	_, err = f.View(query.ViewQuery{Graph: g, Layout: expanded /* GraphDir omitted */})
+	_, err = f.OnGraph(g).View(query.ViewQuery{Layout: expanded /* graph dir omitted */})
 	if err == nil {
 		t.Fatal("expected error for source(wip) without GraphDir")
 	}
@@ -175,7 +180,7 @@ func TestView_AsParticipantsBlock(t *testing.T) {
 
 	layout := mustParseLayoutAndExpand(t, "participants")
 	f := New(Options{})
-	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		t.Fatalf("View: %v", err)
 	}
@@ -203,7 +208,7 @@ func TestView_AsParticipantsBlock_GraceMode(t *testing.T) {
 	g := model.NewGraph(nil)
 	layout := mustParseLayoutAndExpand(t, "participants")
 	f := New(Options{})
-	result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+	result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		t.Fatalf("View: %v", err)
 	}
@@ -227,7 +232,7 @@ func TestView_AsParticipantsBlock_RejectsRankAndN(t *testing.T) {
 		"kind(actor):n(5):as-participants-block",
 	} {
 		t.Run(layoutStr, func(t *testing.T) {
-			_, err := f.View(query.ViewQuery{Graph: g, Layout: mustParseLayout(t, layoutStr)})
+			_, err := f.OnGraph(g).View(query.ViewQuery{Layout: mustParseLayout(t, layoutStr)})
 			if err == nil {
 				t.Fatal("expected rejection error")
 			}
@@ -263,7 +268,7 @@ func TestView_AutoDeriveSectionName(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			layout := mustParseLayout(t, tc.layout)
-			result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+			result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 			if err != nil {
 				t.Fatalf("View(%q): %v", tc.layout, err)
 			}
@@ -300,7 +305,7 @@ func TestView_NamePrefixComposesWithRank(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			layout := mustParseLayout(t, tc.layout)
-			result, err := f.View(query.ViewQuery{Graph: g, Layout: layout})
+			result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
 			if err != nil {
 				t.Fatalf("View(%q): %v", tc.layout, err)
 			}

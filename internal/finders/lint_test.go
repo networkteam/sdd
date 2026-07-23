@@ -50,7 +50,7 @@ func TestLint_CrossRepoRefUndeclared(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{declaredEntry, undeclaredEntry})
 	f := finders.New(finders.Options{Config: &model.PerRepoConfig{Dependencies: []string{declaredRepo}}})
 
-	res, err := f.Lint(query.LintQuery{Graph: g})
+	res, err := f.OnGraph(g).Lint(query.LintQuery{})
 	if err != nil {
 		t.Fatalf("Lint: %v", err)
 	}
@@ -86,6 +86,36 @@ func TestLint_CrossRepoRefUndeclared(t *testing.T) {
 // lint flags entries with no summary and stays silent on entries that have one.
 // There is no hash check, so no "stale summary hash" or "summary exists but no
 // hash" warning is ever produced.
+// TestLint_LoadErrorsCountedAndReported pins that unreadable entries recorded
+// on the graph surface through the lint result — carried in LoadErrors and
+// counted in TotalIssues so the CLI exit code reflects them.
+func TestLint_LoadErrorsCountedAndReported(t *testing.T) {
+	clean := lintEntry(t, "20260101-120000-s-prc-ok", "A clean summarized entry.")
+	g := model.NewGraphWithLoadIssues([]*model.Entry{clean}, []model.LoadIssue{
+		{Ref: "20260101-120001-s-prc-bad", Message: "parsing frontmatter: unexpected token"},
+	})
+	f := finders.New(finders.Options{})
+
+	res, err := f.OnGraph(g).Lint(query.LintQuery{})
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+
+	if len(res.LoadErrors) != 1 || res.LoadErrors[0].Ref != "20260101-120001-s-prc-bad" {
+		t.Fatalf("LoadErrors = %+v, want the recorded load issue", res.LoadErrors)
+	}
+	warnCount := 0
+	for _, e := range res.Entries {
+		warnCount += len(e.Warnings)
+	}
+	if res.TotalIssues != warnCount+len(res.LoadErrors) {
+		t.Fatalf("TotalIssues = %d, want warnings(%d) + loadErrors(%d)", res.TotalIssues, warnCount, len(res.LoadErrors))
+	}
+	if res.TotalIssues == 0 {
+		t.Fatal("TotalIssues = 0, want the load error counted")
+	}
+}
+
 func TestLint_MissingSummaryOnly(t *testing.T) {
 	withSummary := lintEntry(t, "20260101-120000-s-prc-aaa", "An existing summary.")
 	missing := lintEntry(t, "20260101-120001-s-prc-bbb", "")
@@ -93,7 +123,7 @@ func TestLint_MissingSummaryOnly(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{withSummary, missing})
 	f := finders.New(finders.Options{})
 
-	res, err := f.Lint(query.LintQuery{Graph: g})
+	res, err := f.OnGraph(g).Lint(query.LintQuery{})
 	if err != nil {
 		t.Fatalf("Lint: %v", err)
 	}

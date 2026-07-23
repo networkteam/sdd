@@ -359,9 +359,9 @@ func (s *Session) Start(spec *Spec, params map[string]any, parent string) (*Serv
 		}
 	}
 
-	s.counter++
+	nextCounter := s.counter + 1
 	inst := &Instance{
-		ID:     fmt.Sprintf("i_%d", s.counter),
+		ID:     fmt.Sprintf("i_%d", nextCounter),
 		Spec:   spec,
 		Store:  NewStore(spec),
 		Step:   spec.Steps[0].ID,
@@ -371,13 +371,13 @@ func (s *Session) Start(spec *Spec, params map[string]any, parent string) (*Serv
 	if err := inst.Store.SetStart(params); err != nil {
 		return nil, fmt.Errorf("start %s: %w", spec.Canonical, err)
 	}
-	s.instances[inst.ID] = inst
-	s.order = append(s.order, inst.ID)
-
 	seed, err := s.seedFromParent(inst, parent)
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w", spec.Canonical, err)
 	}
+	s.counter = nextCounter
+	s.instances[inst.ID] = inst
+	s.order = append(s.order, inst.ID)
 
 	data := map[string]any{
 		"procedure": spec.Canonical,
@@ -559,27 +559,24 @@ func (s *Session) Answer(instanceID, chooser, choice string, fields map[string]a
 
 	// Fields on an answer are limited to the option's collect list — the
 	// same state-only trust boundary as reports, narrowed further.
-	if len(fields) > 0 {
-		allowed := make(map[string]bool, len(opt.Collect))
-		for _, cf := range opt.Collect {
-			allowed[cf.Name] = true
-		}
-		for name := range fields {
-			if !allowed[name] {
-				return nil, fmt.Errorf("field %q is not collected by option %q", name, choice)
-			}
-		}
-		if _, err := inst.Store.WriteState(fields); err != nil {
-			return nil, err
+	allowed := make(map[string]bool, len(opt.Collect))
+	for _, cf := range opt.Collect {
+		allowed[cf.Name] = true
+	}
+	for name := range fields {
+		if !allowed[name] {
+			return nil, fmt.Errorf("field %q is not collected by option %q", name, choice)
 		}
 	}
-	for _, cf := range opt.Collect {
-		if cf.Optional {
-			continue
+	if _, err := inst.Store.writeState(fields, func(candidate *Store) error {
+		for _, cf := range opt.Collect {
+			if !cf.Optional && !candidate.Has(cf.Name) {
+				return fmt.Errorf("option %q requires field %q", choice, cf.Name)
+			}
 		}
-		if !inst.Store.Has(cf.Name) {
-			return nil, fmt.Errorf("option %q requires field %q", choice, cf.Name)
-		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	data := map[string]any{

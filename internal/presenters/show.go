@@ -86,24 +86,25 @@ func primaryDisplayID(g query.ShowGroup) string {
 // output order. Summary renders last (and only with --with-summary) so the
 // long opt-in text never pushes the scannable fields down.
 type showEnvelope struct {
-	ID           string      `yaml:"id"`
-	Type         string      `yaml:"type"`
-	Kind         string      `yaml:"kind,omitempty"`
-	Layer        string      `yaml:"layer"`
-	Confidence   string      `yaml:"confidence,omitempty"`
-	Intent       string      `yaml:"intent,omitempty"`
-	Participants []string    `yaml:"participants,omitempty"`
-	Canonical    string      `yaml:"canonical,omitempty"`
-	Aliases      []string    `yaml:"aliases,omitempty"`
-	Actor        string      `yaml:"actor,omitempty"`
-	Topics       []string    `yaml:"topics,omitempty"`
-	Refs         []model.Ref `yaml:"refs,omitempty"`
-	Closes       []string    `yaml:"closes,omitempty"`
-	Supersedes   []string    `yaml:"supersedes,omitempty"`
-	Attachments  []string    `yaml:"attachments,omitempty"`
-	Status       string      `yaml:"status,omitempty"`
-	Time         string      `yaml:"time"`
-	Summary      string      `yaml:"summary,omitempty"`
+	ID           string           `yaml:"id"`
+	Type         string           `yaml:"type"`
+	Kind         string           `yaml:"kind,omitempty"`
+	Layer        string           `yaml:"layer"`
+	Confidence   string           `yaml:"confidence,omitempty"`
+	Intent       string           `yaml:"intent,omitempty"`
+	Participants []string         `yaml:"participants,omitempty"`
+	Canonical    string           `yaml:"canonical,omitempty"`
+	Aliases      []string         `yaml:"aliases,omitempty"`
+	Actor        string           `yaml:"actor,omitempty"`
+	Topics       []string         `yaml:"topics,omitempty"`
+	Index        *model.FactIndex `yaml:"index,omitempty"`
+	Refs         []model.Ref      `yaml:"refs,omitempty"`
+	Closes       []string         `yaml:"closes,omitempty"`
+	Supersedes   []string         `yaml:"supersedes,omitempty"`
+	Attachments  []string         `yaml:"attachments,omitempty"`
+	Status       string           `yaml:"status,omitempty"`
+	Time         string           `yaml:"time"`
+	Summary      string           `yaml:"summary,omitempty"`
 }
 
 func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
@@ -120,6 +121,7 @@ func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		Aliases:      e.Aliases,
 		Actor:        e.Actor,
 		Topics:       topicLabels(g.PrimaryTopics),
+		Index:        e.Index,
 		Refs:         e.Refs,
 		Closes:       e.Closes,
 		Supersedes:   e.Supersedes,

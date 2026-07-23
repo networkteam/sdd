@@ -10,7 +10,7 @@ import (
 
 func testVocabulary() viewlayout.Vocabulary {
 	return viewlayout.Vocabulary{
-		Functions:  []string{"active", "kind", "rank", "n", "as-list"},
+		Functions:  []string{"active", "indexed", "kind", "rank", "n", "as-list"},
 		Renders:    []string{"as-list"},
 		Algorithms: []string{"heat"},
 		Decays:     []string{"exp-14d"},
@@ -43,10 +43,12 @@ func TestEntriesShipViewGrammarFact(t *testing.T) {
 	if len(fact.Refs) != 0 {
 		t.Errorf("base fact carries refs %v, want none", fact.Refs)
 	}
+	const title = "How to compose graph views (view tool): layout grammar, filters, ranking, quoting, and examples"
+	if fact.Index == nil || fact.Index.Title != title || fact.Index.Topic.String() != "cli/view" {
+		t.Errorf("fact index = %+v", fact.Index)
+	}
 }
 
-// The body is generated from the supplied vocabulary and must stay host-
-// neutral (d-cpt-476): no fact may name the sdd CLI or a command to run.
 func TestViewGrammarBodyIsGeneratedAndHostNeutral(t *testing.T) {
 	entries, err := Entries(testVocabulary())
 	if err != nil {
@@ -54,23 +56,29 @@ func TestViewGrammarBodyIsGeneratedAndHostNeutral(t *testing.T) {
 	}
 	body := entries[0].Content
 
-	for _, want := range []string{"active", "heat", "exp-14d", "top(N)", "Grammar:"} {
+	for _, want := range []string{"# How to compose graph views", "## Grammar", "```text", "| Category | Syntax | Meaning |", "active", "heat", "exp-14d", "top(N)", "active:indexed:as-list"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("generated body missing live-vocabulary token %q", want)
 		}
 	}
-	for _, host := range []string{"sdd view", "Usage:", "--layout"} {
+	for _, host := range []string{"sdd view", "Usage:", "--layout", "MCP", "debugging"} {
 		if strings.Contains(body, host) {
 			t.Errorf("base fact body contains host-specific reference %q", host)
 		}
 	}
 }
 
-// A base fact that is not a kind: fact signal is a build mistake and must
-// fail construction rather than reach a graph.
 func TestBuildRejectsNonFact(t *testing.T) {
 	_, err := build("20260101-000000-d-cpt-xxx", "type: decision\nlayer: conceptual\nkind: directive\nconfidence: low\nintent: guiding\n", "body")
 	if err == nil {
 		t.Fatal("build accepted a non-fact base entry, want error")
+	}
+}
+
+func TestBuildRejectsInvalidFactIndexEnrollment(t *testing.T) {
+	frontmatter := "type: signal\nlayer: process\nkind: fact\ntopics: [cli/view]\nindex: {title: Reference, topic: agent/ux}\n"
+	_, err := build("20260101-000000-s-prc-idx", frontmatter, "body")
+	if err == nil || !strings.Contains(err.Error(), "must also appear in topics") {
+		t.Fatalf("build error = %v", err)
 	}
 }

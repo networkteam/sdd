@@ -9,8 +9,8 @@ import (
 // Show resolves the entries named in q and returns groups with upstream and
 // downstream chains. The heavy lifting (tree traversal, dedup, depth limiting)
 // is delegated to model.Graph.BuildShowTree.
-func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
-	if q.Graph == nil {
+func (gf *GraphFinder) Show(q query.ShowQuery) (*query.ShowResult, error) {
+	if gf.graph == nil {
 		return nil, fmt.Errorf("graph is required")
 	}
 
@@ -18,7 +18,7 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 	// local graph and its declared dependencies, so a foreign entry ID handed
 	// to `sdd show` or the `show` MCP tool resolves to its full prefixed form
 	// before the tree build. Both surfaces share this one path.
-	resolved, err := q.Graph.ResolveUnionIDs(q.IDs)
+	resolved, err := gf.graph.ResolveUnionIDs(q.IDs)
 	if err != nil {
 		return nil, err
 	}
@@ -28,14 +28,14 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 	for _, id := range resolved {
 		// Dedup keys are display identities (repo-prefixed for cross-repo
 		// primaries); an unresolvable ID fails below with the caller's text.
-		if key, ok := q.Graph.DisplayID(id); ok {
+		if key, ok := gf.graph.DisplayID(id); ok {
 			primaries[key] = true
 		}
 	}
 
 	groups := make([]query.ShowGroup, 0, len(resolved))
 	for _, id := range resolved {
-		tree := q.Graph.BuildShowTree(id, q.UpDepth, q.DownDepth, rendered, primaries)
+		tree := gf.graph.BuildShowTree(id, q.UpDepth, q.DownDepth, rendered, primaries)
 		if tree == nil {
 			return nil, fmt.Errorf("entry not found: %s", id)
 		}
@@ -51,5 +51,5 @@ func (f *Finder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 		})
 	}
 
-	return &query.ShowResult{Graph: q.Graph, Groups: groups}, nil
+	return &query.ShowResult{Graph: gf.graph, Groups: groups}, nil
 }

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -130,9 +131,11 @@ func newFixtureEnv(t *testing.T) *fixtureEnv {
 					})
 				}
 			}
-			ctx.Store.WriteEngine("findings", findings)
+			if err := ctx.Store.WriteEngine("findings", findings); err != nil {
+				return err
+			}
 			if len(findings) == 0 {
-				ctx.Store.WriteEngine("entryId", fmt.Sprintf("20260702-13000%d-s-tac-new", env.newCalls))
+				return ctx.Store.WriteEngine("entryId", fmt.Sprintf("20260702-13000%d-s-tac-new", env.newCalls))
 			}
 			return nil
 		},
@@ -241,6 +244,64 @@ func TestCapture_OneShotHappyPath(t *testing.T) {
 	}
 	if sv.Produced["entryId"] != "20260702-130001-s-tac-new" {
 		t.Errorf("produced = %v, want the created entry ID", sv.Produced)
+	}
+}
+
+func TestCapture_FactIndexSetThenClearSurvivesReplay(t *testing.T) {
+	env := newFixtureEnv(t)
+	var log strings.Builder
+	env.session.sink = NewWriterSink(&log)
+
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft := fullDraft()
+	draft["entryKind"] = "fact"
+	draft["index"] = map[string]any{"title": "How to compose graph views", "topic": "cli/ux"}
+	sv, err = env.session.Report(sv.Instance, draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const playback = "- index:\n    title: How to compose graph views\n    topic: cli/ux"
+	if !strings.Contains(sv.Instructions, playback) {
+		t.Fatalf("playback missing nested fact index:\n%s", sv.Instructions)
+	}
+	index, ok := env.session.instances[sv.Instance].Store.Get("index")
+	if !ok || !reflect.DeepEqual(index, map[string]any{"title": "How to compose graph views", "topic": "cli/ux"}) {
+		t.Fatalf("stored index = %#v", index)
+	}
+	sv, err = env.session.Answer(sv.Instance, "playback", "adjust", map[string]any{"index": nil}, "remove the index")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sv.Instructions, "- index:") {
+		t.Fatalf("playback retained cleared fact index:\n%s", sv.Instructions)
+	}
+
+	events, err := ReadEvents(strings.NewReader(log.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayedEnv := newFixtureEnv(t)
+	replayed, err := replayedEnv.engine.ReplaySession("s_test", "christopher", events,
+		func(string) (*Spec, error) { return replayedEnv.spec, nil }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, ok := replayed.Instance(sv.Instance)
+	if !ok {
+		t.Fatal("replayed capture instance missing")
+	}
+	if index, ok := instance.Store.Get("index"); ok {
+		t.Fatalf("replayed index = %#v, want cleared", index)
+	}
+	replayedServe, err := replayed.Serve(sv.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(replayedServe.Instructions, "- index:") {
+		t.Fatalf("replayed playback retained cleared fact index:\n%s", replayedServe.Instructions)
 	}
 }
 
@@ -584,5 +645,80 @@ func TestSession_SinkFailureBlocksAdvance(t *testing.T) {
 	if _, err := env.session.Report(sv.Instance, fullDraft()); err == nil ||
 		!strings.Contains(err.Error(), "durability") {
 		t.Errorf("advance after a failed append must refuse, got %v", err)
+	}
+}
+
+func TestRunCommandDiscardsStoreWritesOnError(t *testing.T) {
+	env := newFixtureEnv(t)
+	mustRegisterCommand(env.engine.Registry, Command{
+		Doc: FuncDoc{Name: "failAfterWrite", Doc: "test failure", Writes: []string{"marker", "leaked", "composite"}},
+		Fn: func(ctx *Context) error {
+			composite, _ := ctx.Store.Get("composite")
+			composite.([]any)[0] = "changed"
+			if err := ctx.Store.WriteEngine("marker", "changed"); err != nil {
+				return err
+			}
+			if err := ctx.Store.WriteEngine("leaked", true); err != nil {
+				return err
+			}
+			return fmt.Errorf("injected command failure")
+		},
+	})
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, _ := env.session.Instance(sv.Instance)
+	if err := inst.Store.WriteEngine("marker", "original"); err != nil {
+		t.Fatal(err)
+	}
+	if err := inst.Store.WriteEngine("composite", []any{"original"}); err != nil {
+		t.Fatal(err)
+	}
+	beforeEvents := len(env.sink.events)
+	if err := env.session.runCommand(inst, "failAfterWrite"); err == nil || !strings.Contains(err.Error(), "injected command failure") {
+		t.Fatalf("runCommand error = %v", err)
+	}
+	if marker, _ := inst.Store.Get("marker"); marker != "original" {
+		t.Fatalf("failed command changed existing value to %v", marker)
+	}
+	if _, exists := inst.Store.Get("leaked"); exists {
+		t.Fatal("failed command left a new engine value")
+	}
+	if composite, _ := inst.Store.Get("composite"); !reflect.DeepEqual(composite, []any{"original"}) {
+		t.Fatalf("failed command mutated composite value: %#v", composite)
+	}
+	if len(env.sink.events) != beforeEvents {
+		t.Fatal("failed command appended an op result")
+	}
+}
+
+func TestRunCommandCannotWriteReportState(t *testing.T) {
+	env := newFixtureEnv(t)
+	var writeErr error
+	mustRegisterCommand(env.engine.Registry, Command{
+		Doc: FuncDoc{Name: "attemptStateWrite", Doc: "test command boundary"},
+		Fn: func(ctx *Context) error {
+			_, writeErr = ctx.Store.WriteState(map[string]any{"body": "hidden state write"})
+			return nil
+		},
+	})
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, _ := env.session.Instance(sv.Instance)
+	beforeEvents := len(env.sink.events)
+	if err := env.session.runCommand(inst, "attemptStateWrite"); err != nil {
+		t.Fatal(err)
+	}
+	if writeErr == nil || !strings.Contains(writeErr.Error(), "only through WriteEngine") {
+		t.Fatalf("WriteState error = %v", writeErr)
+	}
+	if _, exists := inst.Store.Get("body"); exists {
+		t.Fatal("command produced an unlogged state write")
+	}
+	if len(env.sink.events) != beforeEvents+1 {
+		t.Fatalf("command events = %d, want one op result", len(env.sink.events)-beforeEvents)
 	}
 }

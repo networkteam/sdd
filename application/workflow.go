@@ -641,7 +641,46 @@ func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity)
 	if err != nil {
 		return nil, err
 	}
-	return append([]string{infoBlock.String()}, lanes...), nil
+	blocks := append([]string{infoBlock.String()}, lanes...)
+	health, err := w.graphHealthBlock()
+	if err != nil {
+		return nil, err
+	}
+	if health != "" {
+		blocks = append(blocks, health)
+	}
+	return blocks, nil
+}
+
+// graphHealthBlock renders a compact framing notice of graph-integrity
+// problems — entry warnings and unreadable (parse-failed) entries — so an
+// agent opening a session notices that the graph carries warnings. It is
+// self-contained: it presents the problem lines themselves and never tells the
+// agent to run a CLI command. Empty when the graph is clean; the list is
+// capped so a badly degraded graph cannot flood the framing.
+func (w *WorkflowSession) graphHealthBlock() (string, error) {
+	graph, err := w.graphs.Current()
+	if err != nil {
+		return "", err
+	}
+	health := graph.Health()
+	if health.Clean() {
+		return "", nil
+	}
+	const maxLines = 5
+	var b strings.Builder
+	fmt.Fprintf(&b, "Graph health: %d warning(s), %d unreadable entry/entries.\n", health.Warnings, health.LoadErrors)
+	shown := health.Issues
+	if len(shown) > maxLines {
+		shown = shown[:maxLines]
+	}
+	for _, issue := range shown {
+		fmt.Fprintf(&b, "%s: %s\n", issue.Ref, issue.Message)
+	}
+	if extra := len(health.Issues) - len(shown); extra > 0 {
+		fmt.Fprintf(&b, "(… and %d more)", extra)
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
 }
 
 // framingLanes renders the shell procedure's declared framing lanes through the

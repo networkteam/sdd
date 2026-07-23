@@ -50,6 +50,9 @@ func build(id, frontmatter, body string) (*model.Entry, error) {
 	if entry.Type != model.TypeSignal || entry.Kind != model.KindFact {
 		return nil, fmt.Errorf("base fact %s is %s %s — base facts ship as kind: fact signals", id, entry.Type, entry.Kind)
 	}
+	if err := entry.Index.ValidateForEntry(entry.Kind, entry.Topics); err != nil {
+		return nil, fmt.Errorf("base fact %s index: %w", id, err)
+	}
 	entry.Embedded = true
 	return entry, nil
 }
@@ -70,6 +73,9 @@ confidence: high
 topics:
     - engine/base-facts
     - cli/view
+index:
+    title: 'How to compose graph views (view tool): layout grammar, filters, ranking, quoting, and examples'
+    topic: cli/view
 summary: >-
     The view layout language composes graph views from a colon-chained
     pipeline — filters, then ranking, paging, and transforms, ending in a
@@ -78,15 +84,6 @@ summary: >-
     quoting rule for multi-word, date, and duration arguments.
 `
 
-// viewGrammarBody renders the fact's body: a short neutral orientation line
-// followed by the host-neutral grammar-and-vocabulary reference generated
-// from the live executor vocabulary. Nothing here names a host command, so
-// the fact stays host-neutral (d-cpt-476).
 func viewGrammarBody(vocab viewlayout.Vocabulary) string {
-	return "Reference for the view layout language — the grammar for composing graph " +
-		"views by pipeline. Pull it when building or debugging a layout: it lists " +
-		"every filter, rank algorithm, transform, render terminator, and macro the " +
-		"executor accepts, and the quoting rule that trips up unquoted multi-word, " +
-		"date, and duration arguments.\n\n" +
-		viewlayout.ReferenceBody(vocab)
+	return viewlayout.Markdown(vocab)
 }

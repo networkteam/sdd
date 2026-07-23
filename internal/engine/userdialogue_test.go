@@ -20,6 +20,10 @@ type shellEnv struct {
 }
 
 func newShellEnv(t *testing.T) *shellEnv {
+	return newShellEnvWithFacts(t, []model.FactIndexRow{{ID: "20260717-110000-s-prc-vwg", Title: "How to compose graph views"}})
+}
+
+func newShellEnvWithFacts(t *testing.T, facts []model.FactIndexRow) *shellEnv {
 	t.Helper()
 	env := &shellEnv{quiescent: true}
 
@@ -37,6 +41,12 @@ func newShellEnv(t *testing.T) *shellEnv {
 		Doc: FuncDoc{Name: "procedureList", Doc: "fake move enumeration"},
 		Fn: func(_ *Context, _ map[string]any) (any, error) {
 			return "- capture — record a signal or decision.\n- engage — anchor on an entry.", nil
+		},
+	})
+	mustRegisterQuery(reg, Query{
+		Doc: FuncDoc{Name: "factIndex", Doc: "fake fact index"},
+		Fn: func(_ *Context, _ map[string]any) (any, error) {
+			return facts, nil
 		},
 	})
 	// The shell declares its framing lanes as viewLayout injects; the MCP shell
@@ -71,6 +81,33 @@ func newShellEnv(t *testing.T) *shellEnv {
 		return ts
 	}))
 	return env
+}
+
+func TestUserDialogueOpeningRendersFactPointersFromData(t *testing.T) {
+	const id = "20991231-235959-s-prc-xyz"
+	env := newShellEnvWithFacts(t, []model.FactIndexRow{{ID: id, Title: "Standalone retrieval cue"}})
+	serve, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "- `" + id + "` — Standalone retrieval cue"
+	if !strings.Contains(serve.Instructions, want) || !strings.Contains(serve.Instructions, "Pull the relevant fact in full first") {
+		t.Fatalf("opening fact index missing %q:\n%s", want, serve.Instructions)
+	}
+	if strings.Contains(env.spec.Units["open"], id) {
+		t.Fatal("opening unit hard-codes a fact ID")
+	}
+}
+
+func TestUserDialogueOpeningOmitsEmptyFactIndex(t *testing.T) {
+	env := newShellEnvWithFacts(t, nil)
+	serve, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(serve.Instructions, "Reference facts available") {
+		t.Fatalf("empty fact index rendered a block:\n%s", serve.Instructions)
+	}
 }
 
 func TestUserDialogue_OpeningServeAndQuietConclude(t *testing.T) {

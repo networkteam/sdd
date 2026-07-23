@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -14,7 +15,12 @@ type Graph struct {
 	RefsTo       map[string][]string // reverse index: entry ID -> IDs that reference it
 	ClosedBy     map[string][]string // reverse index: entry ID -> IDs that close it
 	SupersededBy map[string][]string // reverse index: entry ID -> IDs that supersede it
-	graphDir     string
+	// LoadIssues records entries the I/O loader could not parse. Reading the
+	// graph never stops on a malformed entry: everything parseable still
+	// loads, and each failure is kept here so read surfaces (lint, the
+	// session serve) can surface it — the errors are recorded, not swallowed.
+	LoadIssues []LoadIssue
+	graphDir   string
 	// multi back-wires the cross-graph assembly this graph belongs to (nil
 	// for a standalone graph). Set by NewMultiGraph so traversal code
 	// holding any *Graph can resolve cross-repo references.
@@ -49,14 +55,31 @@ func (g *Graph) qualifyID(id string) string {
 	return g.repoPrefix + id
 }
 
+// LoadIssue records one entry the I/O loader could not parse: the entry ID or
+// path it was reading and the parse error message. It rides on the graph so a
+// malformed entry is surfaced rather than aborting the whole read.
+type LoadIssue struct {
+	Ref     string
+	Message string
+}
+
 // NewGraph builds a graph from the given entries without touching the filesystem.
 func NewGraph(entries []*Entry) *Graph {
+	return NewGraphWithLoadIssues(entries, nil)
+}
+
+// NewGraphWithLoadIssues builds a graph and records load issues the I/O loader
+// collected while reading — entries that failed to parse. Every entry that did
+// parse is still present; issues are carried on the graph for read surfaces to
+// report. Production (finders.LoadGraph) and tests share this one path.
+func NewGraphWithLoadIssues(entries []*Entry, issues []LoadIssue) *Graph {
 	g := &Graph{
 		Entries:      entries,
 		ByID:         make(map[string]*Entry, len(entries)),
 		RefsTo:       make(map[string][]string),
 		ClosedBy:     make(map[string][]string),
 		SupersededBy: make(map[string][]string),
+		LoadIssues:   issues,
 	}
 
 	for _, e := range entries {
@@ -667,6 +690,44 @@ func (g *Graph) Lint() []*Entry {
 	return result
 }
 
+// HealthIssue is one graph-integrity problem as a displayable line: the entry
+// ID (or load ref) it concerns and the human message.
+type HealthIssue struct {
+	Ref     string
+	Message string
+}
+
+// GraphHealth is a flat summary of graph-integrity problems: the count of
+// entry warnings, the count of unreadable (load-failed) entries, and every
+// problem as an ordered line (load failures first, then entry warnings).
+type GraphHealth struct {
+	Warnings   int
+	LoadErrors int
+	Issues     []HealthIssue
+}
+
+// Clean reports whether the graph carries no integrity problems at all.
+func (h GraphHealth) Clean() bool {
+	return h.Warnings == 0 && h.LoadErrors == 0
+}
+
+// Health flattens the graph's load failures and per-entry warnings into one
+// summary. It is a pure read of state already computed at construction
+// (validate) and load time; callers format and cap it for display.
+func (g *Graph) Health() GraphHealth {
+	h := GraphHealth{LoadErrors: len(g.LoadIssues)}
+	for _, issue := range g.LoadIssues {
+		h.Issues = append(h.Issues, HealthIssue(issue))
+	}
+	for _, e := range g.Entries {
+		for _, w := range e.Warnings {
+			h.Warnings++
+			h.Issues = append(h.Issues, HealthIssue{Ref: e.ID, Message: w.Message})
+		}
+	}
+	return h
+}
+
 // validate checks all entries for integrity issues and populates their Warnings fields.
 // Runs per-entry checks first, then graph-level actor/role checks that
 // require the full graph context (chain membership, canonical history,
@@ -760,14 +821,7 @@ func validateActorInvariant(g *Graph) {
 			if c.Head == nil {
 				continue
 			}
-			isInvolved := false
-			for _, hid := range headIDs {
-				if c.Head.ID == hid {
-					isInvolved = true
-					break
-				}
-			}
-			if !isInvolved {
+			if !slices.Contains(headIDs, c.Head.ID) {
 				continue
 			}
 			if !c.HasCanonical(canonical) {
@@ -880,14 +934,7 @@ func validateAliasAmbiguity(g *Graph) {
 			continue
 		}
 		for _, a := range active {
-			isInvolved := false
-			for _, id := range ids {
-				if a.ID == id {
-					isInvolved = true
-					break
-				}
-			}
-			if !isInvolved {
+			if !slices.Contains(ids, a.ID) {
 				continue
 			}
 			a.Warnings = append(a.Warnings, Warning{
@@ -914,8 +961,15 @@ func ValidateEntry(e *Entry, g *Graph) {
 	validateAnnotationFrontmatter(e)
 	validateFocusFrontmatter(e, g)
 	validateInlineTopics(e)
+	validateFactIndex(e)
 	validateDoneSignalRefs(e)
 	validateAttachmentLinks(e)
+}
+
+func validateFactIndex(e *Entry) {
+	if err := e.Index.ValidateForEntry(e.Kind, e.Topics); err != nil {
+		e.Warnings = append(e.Warnings, Warning{Field: "index", Message: err.Error()})
+	}
 }
 
 // validateRefs checks the refs field with kind awareness. Cross-repo refs

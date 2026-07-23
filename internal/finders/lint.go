@@ -14,20 +14,20 @@ import (
 // alongside the total warning count. Pure read — graph validation runs at
 // graph-construction time, this just collects the results. Also flags entries
 // that are missing a summary.
-func (f *Finder) Lint(q query.LintQuery) (*query.LintResult, error) {
-	if q.Graph == nil {
+func (gf *GraphFinder) Lint(_ query.LintQuery) (*query.LintResult, error) {
+	if gf.graph == nil {
 		return nil, fmt.Errorf("graph is required")
 	}
 
-	validateSummaries(q.Graph)
-	f.validateCrossRepoDeps(q.Graph)
+	validateSummaries(gf.graph)
+	gf.finder.validateCrossRepoDeps(gf.graph)
 
-	entries := q.Graph.Lint()
-	total := 0
+	entries := gf.graph.Lint()
+	total := len(gf.graph.LoadIssues)
 	for _, e := range entries {
 		total += len(e.Warnings)
 	}
-	return &query.LintResult{Entries: entries, TotalIssues: total}, nil
+	return &query.LintResult{Entries: entries, TotalIssues: total, LoadErrors: gf.graph.LoadIssues}, nil
 }
 
 // IndexLint fills the index-side fields on a LintResult when an embedding

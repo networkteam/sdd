@@ -58,7 +58,7 @@ func (r *graphReader) CurrentGraph(dir string) (*model.Graph, error) {
 }
 
 func (r *graphReader) LoadWIPMarkers(string) ([]*model.WIPMarker, error) { return nil, nil }
-func (r *graphReader) Preflight(context.Context, query.PreflightQuery) (*query.PreflightResult, error) {
+func (r *graphReader) Preflight(context.Context, *model.Graph, query.PreflightQuery) (*query.PreflightResult, error) {
 	return nil, nil
 }
 func (r *graphReader) SkillStatus(context.Context, query.SkillStatusQuery) (*query.SkillStatusResult, error) {

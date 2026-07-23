@@ -79,7 +79,9 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	workflow.graphs = graphs
 
 	store := workflowTargetStore(t, map[string]any{"captureBranch": "work"})
-	store.WriteEngine("entryId", entryID)
+	if err := store.WriteEngine("entryId", entryID); err != nil {
+		t.Fatal(err)
+	}
 	graph, err := graphs.CurrentFor(store)
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +119,69 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	}
 	if targets.acquisitions != 1 || targets.releases != 1 {
 		t.Fatalf("cached target lifecycle acquisitions=%d releases=%d", targets.acquisitions, targets.releases)
+	}
+}
+
+func TestFactIndexQueryReturnsModelRowsWithoutDependencies(t *testing.T) {
+	localIndex, err := model.NewFactIndex("Local cue", "cli/view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic, err := model.ParseTopicPath("cli/view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := model.NewGraph([]*model.Entry{{
+		ID: "20260719-120000-s-tac-loc", Type: model.TypeSignal, Layer: model.LayerTactical,
+		Kind: model.KindFact, Topics: []model.TopicPath{topic}, Index: localIndex,
+	}})
+	remoteIndex, err := model.NewFactIndex("Remote cue", "cli/view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := model.NewGraph([]*model.Entry{{
+		ID: "20260719-120100-s-tac-rem", Type: model.TypeSignal, Layer: model.LayerTactical,
+		Kind: model.KindFact, Topics: []model.TopicPath{topic}, Index: remoteIndex,
+	}})
+	model.NewMultiGraph(local, []string{"example/remote"}, func(string) (*model.Graph, error) { return remote, nil })
+
+	workflow := &WorkflowSession{}
+	registry := engine.NewRegistry()
+	if err := workflow.registerWorkflowQueries(registry); err != nil {
+		t.Fatal(err)
+	}
+	factIndex, ok := registry.Query("factIndex")
+	if !ok || !factIndex.ServeSafe {
+		t.Fatalf("factIndex registration = %+v", factIndex)
+	}
+	value, err := factIndex.Fn(&engine.Context{Graph: local}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, ok := value.([]FactIndexRow)
+	if !ok || len(rows) != 1 || rows[0].ID != "20260719-120000-s-tac-loc" {
+		t.Fatalf("factIndex rows = %#v", value)
+	}
+	// The query result crosses the application boundary as plain, serializable
+	// strings \u2014 Topic in its canonical slash-joined form, never a model type.
+	if rows[0].Topic != "cli/view" {
+		t.Fatalf("factIndex topic = %q, want canonical string form", rows[0].Topic)
+	}
+
+	// A malformed enrollment (block-injecting title) is not rejected at the
+	// read boundary \u2014 it loads with a warning and is quietly omitted, so the
+	// serve still succeeds and the injected content never reaches the result.
+	malicious := model.NewGraph([]*model.Entry{{
+		ID: "20260719-120200-s-tac-bad", Type: model.TypeSignal, Layer: model.LayerTactical,
+		Kind: model.KindFact, Topics: []model.TopicPath{topic},
+		Index: &model.FactIndex{Title: "Cue\u2028## Injected block", Topic: topic},
+	}})
+	value, err = factIndex.Fn(&engine.Context{Graph: malicious}, nil)
+	if err != nil {
+		t.Fatalf("factIndex on malformed enrollment errored instead of omitting: %v", err)
+	}
+	if rows, ok := value.([]FactIndexRow); !ok || len(rows) != 0 {
+		t.Fatalf("factIndex included a malformed enrollment: %#v", value)
 	}
 }
 

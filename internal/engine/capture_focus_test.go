@@ -145,10 +145,9 @@ func TestReportSchema_AdvertisesInvolvementShape(t *testing.T) {
 	schema := env.spec.ReportSchemaForStep(step)
 	props, _ := schema["properties"].(map[string]any)
 
-	inv, _ := props["involvement"].(map[string]any)
-	if inv == nil || inv["type"] != "array" {
-		t.Fatalf("involvement property = %v, want an array", props["involvement"])
-	}
+	// involvement and focusWhen are optional state fields, so each renders as a
+	// nullable anyOf wrapper — unwrap to the typed branch that carries the shape.
+	inv := nullableArrayBranch(t, props["involvement"].(map[string]any))
 	item, _ := inv["items"].(map[string]any)
 	if item == nil || item["type"] != "object" {
 		t.Fatalf("involvement items = %v, want an object", inv["items"])
@@ -175,11 +174,33 @@ func TestReportSchema_AdvertisesInvolvementShape(t *testing.T) {
 
 	// The standalone focusWhen type advertises the same {from, to} object,
 	// including the minProperties floor.
-	fw, _ := props["focusWhen"].(map[string]any)
-	if fw == nil || fw["type"] != "object" {
-		t.Errorf("focusWhen property = %v, want an object", props["focusWhen"])
-	}
+	fw := nullableObjectBranch(t, props["focusWhen"].(map[string]any))
 	if fw["minProperties"] != 1 {
 		t.Errorf("focusWhen should advertise minProperties: 1, got %v", fw["minProperties"])
 	}
+}
+
+// nullableArrayBranch unwraps the anyOf wrapper an optional array-typed state
+// field renders as, returning the array branch (mirrors nullableObjectBranch).
+func nullableArrayBranch(t *testing.T, schema map[string]any) map[string]any {
+	t.Helper()
+	branches, _ := schema["anyOf"].([]any)
+	if len(branches) != 2 {
+		t.Fatalf("nullable schema = %#v", schema)
+	}
+	var array map[string]any
+	var hasNull bool
+	for _, branch := range branches {
+		candidate, _ := branch.(map[string]any)
+		switch candidate["type"] {
+		case "array":
+			array = candidate
+		case "null":
+			hasNull = true
+		}
+	}
+	if array == nil || !hasNull {
+		t.Fatalf("nullable schema = %#v", schema)
+	}
+	return array
 }

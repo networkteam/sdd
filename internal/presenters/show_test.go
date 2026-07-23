@@ -15,12 +15,12 @@ import (
 // renderShow exercises the finder + presenter together.
 func renderShow(t *testing.T, g *model.Graph, ids []string, opts ...showOpt) string {
 	t.Helper()
-	cfg := showConfig{q: query.ShowQuery{Graph: g, IDs: ids, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth}}
+	cfg := showConfig{q: query.ShowQuery{IDs: ids, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth}}
 	for _, o := range opts {
 		o(&cfg)
 	}
 	f := finders.New(finders.Options{})
-	result, err := f.Show(cfg.q)
+	result, err := f.OnGraph(g).Show(cfg.q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestRenderShow_EntryNotFound(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{})
 
 	f := finders.New(finders.Options{})
-	_, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{"20260410-100000-s-stg-xxx"}})
+	_, err := f.OnGraph(g).Show(query.ShowQuery{IDs: []string{"20260410-100000-s-stg-xxx"}})
 	if err == nil {
 		t.Fatal("expected error for missing entry")
 	}
@@ -297,6 +297,22 @@ func TestRenderShow_SummaryShownWithFlag(t *testing.T) {
 	}
 }
 
+func TestRenderShow_NestedFactIndex(t *testing.T) {
+	index, err := model.NewFactIndex("How to compose graph views", "cli/view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	topic, _ := model.ParseTopicPath("cli/view")
+	e := entry("20260719-120000-s-tac-idx", withKind(model.KindFact), withContent("Reference body."))
+	e.Topics = []model.TopicPath{topic}
+	e.Index = index
+	g := model.NewGraph([]*model.Entry{e})
+	out := renderShow(t, g, []string{e.ID})
+	if !contains(out, "index:\n    title: How to compose graph views\n    topic: cli/view\n") {
+		t.Fatalf("show output missing nested index:\n%s", out)
+	}
+}
+
 func TestRenderShowStyled_ColorDisabled(t *testing.T) {
 	// Writing to a non-TTY buffer downsamples to Ascii through the colorprofile
 	// writer, so the styled output arrives color-free — we assert on its plain
@@ -308,7 +324,7 @@ func TestRenderShowStyled_ColorDisabled(t *testing.T) {
 	g := model.NewGraph([]*model.Entry{root, primary})
 
 	f := finders.New(finders.Options{})
-	result, err := f.Show(query.ShowQuery{Graph: g, IDs: []string{primary.ID}, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth})
+	result, err := f.OnGraph(g).Show(query.ShowQuery{IDs: []string{primary.ID}, UpDepth: query.DefaultUpDepth, DownDepth: query.DefaultDownDepth})
 	if err != nil {
 		t.Fatal(err)
 	}

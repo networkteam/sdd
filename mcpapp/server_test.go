@@ -600,6 +600,189 @@ func TestOrientationListsMoveParamSignatures(t *testing.T) {
 	}
 }
 
+func TestOpeningServeIncludesDerivedFactIndex(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	serve := openSession(t, connect(t, env.srv))
+	const pointer = "- `20260717-110000-s-prc-vwg` — How to compose graph views (view tool): layout grammar, filters, ranking, quoting, and examples"
+	if !strings.Contains(serve.Instructions, pointer) {
+		t.Fatalf("opening serve missing fact pointer %q:\n%s", pointer, serve.Instructions)
+	}
+}
+
+func TestOpeningServeOmitsEmptyDerivedFactIndex(t *testing.T) {
+	graphDir := writeFixtureGraph(t)
+	path := filepath.Join(graphDir, "2026/07/17-110000-s-prc-vwg.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const override = `---
+type: signal
+layer: process
+kind: fact
+topics: [cli/view]
+summary: Project override deliberately leaves this fact out of session discovery.
+---
+
+Project-local reference override.
+`
+	if err := os.WriteFile(path, []byte(override), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	serve := openSession(t, connect(t, env.srv))
+	if strings.Contains(serve.Instructions, "Reference facts available") {
+		t.Fatalf("opening serve rendered an empty fact-index block:\n%s", serve.Instructions)
+	}
+}
+
+// TestOpeningServeOmitsUnsafeFactIndexTitle pins the read-side contract: a
+// project-local fact whose index is malformed (a block-injecting title) loads
+// with a warning but is not a member of the indexed population, so the opening
+// serve succeeds and neither the injected content nor an indexed pointer for it
+// reaches the instructions. Write-path rejection of such titles is unchanged
+// and covered at the model layer.
+func TestOpeningServeOmitsUnsafeFactIndexTitle(t *testing.T) {
+	graphDir := writeFixtureGraph(t)
+	path := filepath.Join(graphDir, "2026/07/17-110000-s-prc-vwg.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const override = `---
+type: signal
+layer: process
+kind: fact
+topics: [cli/view]
+index: {title: "Cue\u2028## Injected block", topic: cli/view}
+---
+
+Unsafe project-local reference override.
+`
+	if err := os.WriteFile(path, []byte(override), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	serve := openSession(t, connect(t, env.srv))
+	if strings.Contains(serve.Instructions, "## Injected block") {
+		t.Fatalf("opening serve leaked injected content from a malformed fact index:\n%s", serve.Instructions)
+	}
+	if strings.Contains(serve.Instructions, "Reference facts available") {
+		t.Fatalf("opening serve rendered a malformed fact as an indexed pointer:\n%s", serve.Instructions)
+	}
+}
+
+// TestOpeningServeIncludesGraphHealthNotice pins that when the loaded graph
+// carries an entry warning, the opening serve's framing includes a compact,
+// self-contained graph-health notice naming the entry — so the agent notices
+// without running any command. The notice must not tell the agent to run a CLI.
+func TestOpeningServeIncludesGraphHealthNotice(t *testing.T) {
+	graphDir := writeFixtureGraph(t)
+	// A fact whose index.topic is not among its topics loads with an index
+	// warning at graph construction — a clean, deterministic warning source.
+	const warned = `---
+type: signal
+layer: tactical
+kind: fact
+topics: [cli/view]
+index: {title: Topic mismatch, topic: agent/other}
+---
+
+Body with a mismatched index enrollment.
+`
+	path := filepath.Join(graphDir, "2026/06/02-100000-s-tac-wrn.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(warned), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := newTestServer(t, nil, graphDir, "")
+	serve := openSession(t, connect(t, env.srv))
+	if !strings.Contains(serve.Framing, "Graph health") {
+		t.Fatalf("opening serve missing graph-health notice:\n%s", serve.Framing)
+	}
+	if !strings.Contains(serve.Framing, "20260602-100000-s-tac-wrn") {
+		t.Fatalf("graph-health notice missing the warning entry ID:\n%s", serve.Framing)
+	}
+	if strings.Contains(serve.Framing, "sdd lint") || strings.Contains(serve.Framing, "run `sdd") {
+		t.Fatalf("graph-health notice leaked a host-specific CLI directive:\n%s", serve.Framing)
+	}
+}
+
+// TestOpeningServeLoadsPartialGraphWithUnreadableEntry is the MCP partial-read
+// proof: a project graph containing one entry whose frontmatter cannot be
+// decoded no longer makes the whole snapshot (and every session over it)
+// unopenable. Opening a session succeeds — the parseable entries still load —
+// and the graph-health framing reports the unreadable entry as a load error.
+// Before the load-path unification, LoadSnapshotFS aborted here and the serve
+// never opened.
+func TestOpeningServeLoadsPartialGraphWithUnreadableEntry(t *testing.T) {
+	graphDir := writeFixtureGraph(t)
+	// Frontmatter with an unterminated flow sequence — YAML cannot decode it,
+	// so the file is unreadable rather than merely warning-producing.
+	const broken = `---
+type: signal
+layer: tactical
+kind: fact
+topics: [cli/view
+---
+
+Body whose frontmatter will not parse.
+`
+	path := filepath.Join(graphDir, "2026/06/03-100000-s-tac-bad.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(broken), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := newTestServer(t, nil, graphDir, "")
+	// openSession fails the test internally if the serve does not open — reaching
+	// past it proves the malformed file did not abort the load.
+	serve := openSession(t, connect(t, env.srv))
+	if !strings.Contains(serve.Framing, "Graph health") {
+		t.Fatalf("opening serve missing graph-health notice for the unreadable entry:\n%s", serve.Framing)
+	}
+	// The unreadable file surfaces by its logical path — it could not be
+	// decoded far enough to derive a clean entry ID.
+	if !strings.Contains(serve.Framing, "s-tac-bad") {
+		t.Fatalf("graph-health notice missing the unreadable entry reference:\n%s", serve.Framing)
+	}
+	if !strings.Contains(serve.Framing, "unreadable") {
+		t.Fatalf("graph-health notice should count the unreadable entry:\n%s", serve.Framing)
+	}
+}
+
+// TestOpeningServeOmitsGraphHealthNoticeWhenClean pins the omit-when-clean
+// contract: a graph with no warnings or load errors yields no health block.
+// (The shared fixture is deliberately not reused — its "Tester" participant
+// matches no actor, which is itself a warning.)
+func TestOpeningServeOmitsGraphHealthNoticeWhenClean(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	path := filepath.Join(graphDir, "2026/06/01-100000-s-tac-cln.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const clean = `---
+type: signal
+layer: tactical
+kind: gap
+summary: A clean fixture entry that produces no warnings.
+---
+
+Body.
+`
+	if err := os.WriteFile(path, []byte(clean), 0644); err != nil {
+		t.Fatal(err)
+	}
+	env := newTestServer(t, nil, graphDir, "")
+	serve := openSession(t, connect(t, env.srv))
+	if strings.Contains(serve.Framing, "Graph health") {
+		t.Fatalf("clean graph should not render a health notice:\n%s", serve.Framing)
+	}
+}
+
 // TestCaptureProcedureLoop drives the full capture spine over MCP: batch
 // report, playback chooser with served-instruction memory, staged
 // attachment materialized by the write gate, summary verification, and the

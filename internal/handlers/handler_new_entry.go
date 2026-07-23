@@ -125,9 +125,8 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 			}
 			pctx, cancel := context.WithTimeout(gctx, timeout)
 			defer cancel()
-			result, err := h.reader.Preflight(pctx, query.PreflightQuery{
+			result, err := h.reader.Preflight(pctx, graph, query.PreflightQuery{
 				Entry:   entry,
-				Graph:   graph,
 				Model:   cmd.PreflightModel,
 				Timeout: timeout,
 			})

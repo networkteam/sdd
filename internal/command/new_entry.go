@@ -68,6 +68,7 @@ type NewEntryCmd struct {
 	// parsing into TopicPath happens during BuildEntry so the command
 	// surface stays simple.
 	TopicLabels []string
+	Index       *model.FactIndex
 
 	// AnnotationTopics carries the topic assignments for a kind: annotation
 	// entry. Each --topic flag at the CLI parses into one entry here. The
@@ -157,6 +158,19 @@ func (c *NewEntryCmd) Validate() error {
 	case c.Class != "" && c.Class != string(model.ProcedureClassMove) && c.Class != string(model.ProcedureClassShell):
 		return fmt.Errorf("invalid class %q (expected move or shell)", c.Class)
 	}
+	if c.Index != nil {
+		topics := make([]model.TopicPath, 0, len(c.TopicLabels))
+		for _, label := range c.TopicLabels {
+			topic, err := model.ParseTopicPath(label)
+			if err != nil {
+				return fmt.Errorf("topics: %w", err)
+			}
+			topics = append(topics, topic)
+		}
+		if err := c.Index.ValidateForEntry(effectiveKind, topics); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -179,6 +193,7 @@ func (c *NewEntryCmd) BuildEntry(id string) (*model.Entry, error) {
 		Aliases:      c.Aliases,
 		Class:        model.ProcedureClass(c.Class),
 		Actor:        c.Actor,
+		Index:        c.Index,
 		FocusActors:  c.FocusActors,
 		FocusWhen:    c.FocusWhen,
 		Involvement:  c.Involvement,

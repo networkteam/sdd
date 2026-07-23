@@ -32,28 +32,25 @@ import (
 //
 // Unknown function names return an error listing the valid set so users
 // (and future-slice tests) get a clear signal.
-func (f *Finder) View(q query.ViewQuery) (*query.ViewResult, error) {
-	if q.Graph == nil {
+func (gf *GraphFinder) View(q query.ViewQuery) (*query.ViewResult, error) {
+	if gf.graph == nil {
 		return nil, fmt.Errorf("graph is required")
 	}
 
-	// Pre-scan: if any section uses source(wip), load markers once and
-	// reuse across sections. Error at scan time (rather than section
-	// time) so a layout that requires markers but lacks GraphDir fails
-	// fast with a single clear message.
+	// Pre-scan: if any section uses source(wip), resolve markers once and
+	// reuse across sections. The finder holds them (or lazy-loads from the
+	// held graph's directory); a layout that needs markers but has neither
+	// fails fast with a single clear message.
 	var wipMarkers []*model.WIPMarker
 	if layoutHasWipSource(q.Layout) {
-		if q.WIPMarkers != nil {
-			wipMarkers = q.WIPMarkers
-		} else if q.GraphDir == "" {
-			return nil, fmt.Errorf("layout uses source(wip) but graph directory is not configured")
-		} else {
-			var err error
-			wipMarkers, err = f.LoadWIPMarkers(q.GraphDir)
-			if err != nil {
-				return nil, fmt.Errorf("loading wip markers: %w", err)
-			}
+		markers, err := gf.WIPMarkers()
+		if err != nil {
+			return nil, fmt.Errorf("loading wip markers: %w", err)
 		}
+		if markers == nil && gf.wip == nil && gf.graph.GraphDir() == "" {
+			return nil, fmt.Errorf("layout uses source(wip) but graph directory is not configured")
+		}
+		wipMarkers = markers
 	}
 
 	// Sections render independently — each surface carries its own
@@ -66,14 +63,14 @@ func (f *Finder) View(q query.ViewQuery) (*query.ViewResult, error) {
 
 	sections := make([]query.SectionResult, 0, len(q.Layout.Sections))
 	for i, section := range q.Layout.Sections {
-		sr, err := executeSection(q.Graph, wipMarkers, section, now)
+		sr, err := executeSection(gf.graph, wipMarkers, section, now)
 		if err != nil {
 			return nil, fmt.Errorf("section %d: %w", i+1, err)
 		}
 		sections = append(sections, sr)
 	}
 
-	return &query.ViewResult{Graph: q.Graph, Sections: sections}, nil
+	return &query.ViewResult{Graph: gf.graph, Sections: sections}, nil
 }
 
 // layoutHasWipSource reports whether any section in the layout uses
@@ -110,7 +107,7 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "indexed", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
 
 // ViewFunctionNames returns the function names accepted by the layout
 // executor. Reference surfaces use this instead of maintaining their own
@@ -240,6 +237,9 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	// post-Graph.Filter() narrowings doesn't affect the result; chosen
 	// here to keep cheaper structural checks before time/topic walks.
 	entries := g.Filter(spec.filter)
+	if spec.indexed {
+		entries = model.FilterIndexed(entries)
+	}
 	for _, kinds := range spec.kindFilters {
 		entries = filterByKinds(entries, kinds)
 	}
@@ -384,6 +384,12 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 			return fmt.Errorf("active takes no arguments")
 		}
 		spec.filter.OpenOnly = true
+
+	case fn.Name == "indexed":
+		if len(fn.Args) > 0 {
+			return fmt.Errorf("indexed takes no arguments")
+		}
+		spec.indexed = true
 
 	case fn.Name == "kind":
 		kinds, err := parseKindArgs(fn.Args)

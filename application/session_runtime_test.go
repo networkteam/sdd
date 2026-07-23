@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/model"
 	localadapter "github.com/networkteam/sdd/local"
 )
 
@@ -390,7 +393,8 @@ func TestPreparedTransitionRejectsEmptyTargetAndStructuredDivergence(t *testing.
 }
 
 func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *testing.T) {
-	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: t.TempDir()})
+	graphDir := t.TempDir()
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: graphDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +436,8 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 	binding := openBinding(t, sessions, identity.Subject, "create-default")
 	t.Chdir(t.TempDir())
 	created, err := application.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
-		Kind: "gap", Layer: "tactical", Body: "Concrete target resolution must remain independent of the process working directory.", Confidence: "high",
+		Kind: "fact", Layer: "tactical", Body: "Concrete target resolution must remain independent of the process working directory.", Confidence: "high",
+		Topics: []string{"implementation/engine"}, Index: &sdd.FactIndex{Title: "Concrete target resolution", Topic: "implementation/engine"},
 	})
 	if err != nil || created.EntryID == "" {
 		t.Fatalf("CreateEntry = %+v, %v", created, err)
@@ -449,6 +454,17 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 	}
 	if !sessionHasEvent(stored.Events, "mutation_intent", `"Target":{"project":"example","branch":"main"}`) {
 		t.Fatalf("ordinary capture did not persist its concrete default target: %+v", stored.Events)
+	}
+	rel, err := model.IDToRelPath(created.EntryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(filepath.Join(graphDir, rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), "index:\n    title: Concrete target resolution\n    topic: implementation/engine\n") {
+		t.Fatalf("written entry missing nested index:\n%s", written)
 	}
 }
 

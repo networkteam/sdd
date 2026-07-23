@@ -7,7 +7,6 @@ import "github.com/networkteam/sdd/internal/model"
 // skips that direction (downstream off, or upstream off, or both → primary
 // only).
 type ShowQuery struct {
-	Graph     *model.Graph
 	IDs       []string
 	UpDepth   int // upstream expansion depth (grounding chain); 0 = no upstream
 	DownDepth int // downstream expansion depth (consumers); 0 = no downstream

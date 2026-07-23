@@ -95,7 +95,7 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 	if err != nil {
 		return ViewResult{}, err
 	}
-	result, err := finders.New(finders.Options{}).View(query.ViewQuery{Graph: snapshot.graph, Layout: layout, WIPMarkers: snapshot.wip})
+	result, err := snapshot.finder.View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		return ViewResult{}, err
 	}
@@ -119,7 +119,7 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 		if err != nil {
 			return ViewResult{}, dependencyUnavailable()
 		}
-		memberResult, err := finders.New(finders.Options{}).View(query.ViewQuery{Graph: member.graph, Layout: layout, WIPMarkers: member.wip})
+		memberResult, err := member.finder.View(query.ViewQuery{Layout: layout})
 		if err != nil {
 			return ViewResult{}, err
 		}
@@ -166,7 +166,7 @@ func (a *Application) Show(ctx context.Context, identity RequestIdentity, projec
 	if up < 0 || down < 0 {
 		return ShowResult{}, fmt.Errorf("sdd: show depths cannot be negative")
 	}
-	result, err := finders.New(finders.Options{}).Show(query.ShowQuery{Graph: snapshot.graph, IDs: request.IDs, UpDepth: up, DownDepth: down})
+	result, err := snapshot.finder.Show(query.ShowQuery{IDs: request.IDs, UpDepth: up, DownDepth: down})
 	if err != nil {
 		return ShowResult{}, err
 	}
@@ -206,7 +206,7 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 		return SearchResult{}, err
 	}
 	q := query.SearchQuery{
-		Graph: snapshot.graph, Terms: request.Terms, Phrase: request.Phrase, Filter: filter,
+		Terms: request.Terms, Phrase: request.Phrase, Filter: filter,
 		IncludeSuperseded: request.IncludeSuperseded, Limit: request.Limit, MaxCitationsPerEntry: request.MaxCitations,
 	}
 	result, err := runtime.searchSnapshot(ctx, snapshot, q)
@@ -226,9 +226,7 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 		if err != nil {
 			return SearchResult{}, dependencyUnavailable()
 		}
-		memberQuery := q
-		memberQuery.Graph = member.graph
-		memberResult, err := dependency.searchSnapshot(ctx, member, memberQuery)
+		memberResult, err := dependency.searchSnapshot(ctx, member, q)
 		if err != nil {
 			return SearchResult{}, err
 		}
@@ -348,7 +346,7 @@ func (a *Application) resolve(ctx context.Context, identity RequestIdentity, pro
 
 func (r *ProjectRuntime) searchSnapshot(ctx context.Context, snapshot *Snapshot, request query.SearchQuery) (*query.SearchResult, error) {
 	if request.Phrase == "" {
-		return finders.NewSearchFinder(finders.SearchFinderOptions{}).Search(ctx, request)
+		return finders.NewSearchFinder(finders.SearchFinderOptions{Graph: snapshot.graph}).Search(ctx, request)
 	}
 	return r.vectorSearch(ctx, snapshot, request)
 }
@@ -386,6 +384,10 @@ func (a *Application) snapshotWithDependenciesFrom(ctx context.Context, identity
 	})
 	clone := *base
 	clone.graph = local
+	// The finder is the read authority, so rewrap it around the cross-graph
+	// assembled graph — otherwise reads through clone.finder would see the
+	// pre-assembly base graph. The base snapshot's WIP markers carry over.
+	clone.finder = finders.New(finders.Options{}).OnGraph(local).WithWIP(base.wip)
 	return &clone, nil
 }
 

@@ -182,6 +182,7 @@ func TestEvalRecall(t *testing.T) {
 		t.Fatal(err)
 	}
 	finder := finders.NewSearchFinder(finders.SearchFinderOptions{
+		Graph:      g,
 		GraphDir:   graphDir,
 		Embedder:   emb,
 		IndexStore: idxStore,
@@ -217,7 +218,6 @@ func TestEvalRecall(t *testing.T) {
 			st := stats[mode]
 			st.total++
 			q := query.SearchQuery{
-				Graph:             g,
 				IncludeSuperseded: true, // eval covers historical pairs too
 				Limit:             evalTopN,
 			}

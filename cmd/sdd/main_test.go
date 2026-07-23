@@ -390,6 +390,30 @@ func TestParseRefFlags_UnknownKindRejectedAtCapture(t *testing.T) {
 	}
 }
 
+func TestParseFactIndexFlag(t *testing.T) {
+	index, err := parseFactIndexFlag(`{"title":"How to compose graph views","topic":"cli/view"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index.Title != "How to compose graph views" || index.Topic.String() != "cli/view" {
+		t.Fatalf("index = %+v", index)
+	}
+	for _, input := range []string{
+		`{"title":"Missing topic"}`,
+		`{"title":" ","topic":"cli/view"}`,
+		`{"title":"Title","topic":"cli view"}`,
+		`{"title":"Title\n## Injected","topic":"cli/view"}`,
+		`{"title":"Title\u0007Injected","topic":"cli/view"}`,
+		`{"title":"Title\u2028Injected","topic":"cli/view"}`,
+		`{"title":"Title","topic":"cli/view","extra":true}`,
+		`{"title":"Title","topic":"cli/view"} {}`,
+	} {
+		if _, err := parseFactIndexFlag(input); err == nil {
+			t.Errorf("parseFactIndexFlag(%q) accepted invalid object", input)
+		}
+	}
+}
+
 func TestParseRefFlags_EmptyInput(t *testing.T) {
 	got, err := parseRefFlags(nil)
 	if err != nil {

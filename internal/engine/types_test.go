@@ -75,6 +75,11 @@ func TestValidateValue(t *testing.T) {
 		{name: "intent ok", typ: "intent", value: "guiding"},
 		{name: "intent unknown", typ: "intent", value: "someday", wantErr: "pending|guiding|settled"},
 		{name: "attachment handle ok", typ: "attachment-handle", value: "att_1"},
+		{name: "fact index ok", typ: "fact-index", value: map[string]any{"title": "View grammar", "topic": "cli/view"}},
+		{name: "fact index partial", typ: "fact-index", value: map[string]any{"title": "View grammar"}, wantErr: "exactly title and topic"},
+		{name: "fact index extra", typ: "fact-index", value: map[string]any{"title": "View grammar", "topic": "cli/view", "extra": true}, wantErr: "exactly title and topic"},
+		{name: "fact index blank title", typ: "fact-index", value: map[string]any{"title": " ", "topic": "cli/view"}, wantErr: "trimmed, non-empty"},
+		{name: "fact index bad topic", typ: "fact-index", value: map[string]any{"title": "View grammar", "topic": "cli view"}, wantErr: "invalid character"},
 		{name: "list ok", typ: "list<label>", value: []any{"cli/ux", "type-system"}},
 		{name: "list element invalid", typ: "list<label>", value: []any{"ok", ""}, wantErr: "item 1"},
 		{name: "list not list", typ: "list<label>", value: "cli/ux", wantErr: "expected a list"},
@@ -102,6 +107,27 @@ func TestValidateValue(t *testing.T) {
 				t.Fatalf("ValidateValue: %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateValueNormalizesFactIndex(t *testing.T) {
+	value, err := (VarType{Base: TypeFactIndex}).ValidateValue(map[string]any{"title": "View grammar", "topic": "cli/view"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != (FactIndex{Title: "View grammar", Topic: "cli/view"}) {
+		t.Fatalf("value = %#v", value)
+	}
+}
+
+func TestValidateValueRejectsUnsafeFactIndexTitle(t *testing.T) {
+	for _, title := range []string{"View grammar\x07Injected", "View grammar\u2028## Injected"} {
+		// The rejection is what matters here; the exact prose is the model's
+		// to own, so assert only that an unsafe title fails validation.
+		_, err := (VarType{Base: TypeFactIndex}).ValidateValue(map[string]any{"title": title, "topic": "cli/view"})
+		if err == nil {
+			t.Fatalf("ValidateValue(%q) accepted an unsafe title", title)
+		}
 	}
 }
 
