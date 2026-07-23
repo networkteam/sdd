@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/networkteam/sdd/internal/cliout"
-	"github.com/networkteam/sdd/internal/command"
+	sddmodel "github.com/networkteam/sdd/internal/model"
 )
 
 // Messages driving the model. logMsg/progressMsg carry pipe data; the *DoneMsg
@@ -36,7 +36,7 @@ type (
 // sized to the whole terminal. Holding until the gate keeps that escape out of
 // the output. The model quits when the log stream finishes.
 type model struct {
-	initialPhase command.Phase
+	initialPhase sddmodel.Phase
 
 	spinner  spinner.Model
 	progress progress.Model
@@ -203,9 +203,10 @@ func (m model) View() tea.View {
 	b.WriteString(m.spinner.View())
 	b.WriteByte(' ')
 	b.WriteString(cliout.StyleLabel.Render(m.phaseLabel()))
-	// The determinate bar is a component that renders only once a total is
-	// known — phase-only work (e.g. syncing a cache) shows the spinner alone.
-	if m.hasProg && m.lastProg.Total > 0 {
+	// The determinate bar belongs to the indexing phase: freshening a cache
+	// (connecting/syncing) shows the spinner alone, never a stale local-build
+	// bar left over from a prior phase.
+	if m.hasProg && m.lastProg.Phase == sddmodel.PhaseIndexing && m.lastProg.Total > 0 {
 		b.WriteString("  ")
 		b.WriteString(m.progress.View())
 		if c := cliout.RenderCount(m.lastProg); c != "" {
@@ -223,10 +224,11 @@ func (m model) View() tea.View {
 // phaseLabel is the footer's operation label: the reporter's current phase
 // once one has been reported, else the view's initial phase.
 func (m model) phaseLabel() string {
-	if m.lastProg.Phase != "" {
-		return m.lastProg.Phase.Label()
+	p := m.lastProg.Phase
+	if p == "" {
+		p = m.initialPhase
 	}
-	return m.initialPhase.Label()
+	return cliout.PhaseLabel(p)
 }
 
 // barWidth keeps the determinate bar from crowding the label and count on

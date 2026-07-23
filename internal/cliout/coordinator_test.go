@@ -12,7 +12,7 @@ import (
 
 	"github.com/networkteam/slogutils"
 
-	"github.com/networkteam/sdd/internal/command"
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // fakeStarter stands in for the bubble tea program: it records the opening
@@ -234,7 +234,7 @@ func TestCoordinator_PhaseArms(t *testing.T) {
 
 	release := make(chan struct{})
 	work := func(ctx context.Context) error {
-		reporter.SetPhase(command.PhaseSyncing) // phase-only, zero totals → must arm
+		reporter.SetPhase(model.PhaseSyncing) // phase-only, zero totals → must arm
 		<-release
 		reporter.Close()
 		return ctx.Err()
@@ -246,6 +246,33 @@ func TestCoordinator_PhaseArms(t *testing.T) {
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatalf("Run: %v", err)
+	}
+}
+
+// A cancelled work context yields the sentinel even when the failed work
+// returned something other than context.Canceled — an exec dependency SIGKILLed
+// mid-run reports "signal: killed", not context.Canceled. The user must still
+// see the calm cancelled message, never a raw error with exit 1.
+func TestCoordinator_CancelledCtxBecomesSentinelDespiteWrappedError(t *testing.T) {
+	coord := NewCoordinator(CoordinatorConfig{
+		Policy: Policy{Display: slog.LevelInfo},
+		Stderr: io.Discard,
+	})
+	coord.SetStarter(newFakeStarter())
+
+	running := make(chan struct{})
+	work := func(ctx context.Context) error {
+		close(running)
+		<-ctx.Done()
+		return errors.New("git clone: signal: killed") // not context.Canceled
+	}
+	done := make(chan error, 1)
+	go func() { done <- coord.Run(context.Background(), work) }()
+
+	<-running
+	coord.Interrupt()
+	if err := <-done; !errors.Is(err, ErrUserCancelled) {
+		t.Errorf("Run error = %v, want ErrUserCancelled", err)
 	}
 }
 

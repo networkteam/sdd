@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/networkteam/sdd/internal/cliout"
-	"github.com/networkteam/sdd/internal/command"
+	sddmodel "github.com/networkteam/sdd/internal/model"
 )
 
 func logEntry(msg string, attrs ...slog.Attr) cliout.LogEntry {
@@ -24,7 +24,7 @@ func newTestModel(view View, interrupt func()) model {
 }
 
 func TestModel_LogDoneQuits(t *testing.T) {
-	m := newTestModel(View{InitialPhase: command.PhaseIndexing}, nil)
+	m := newTestModel(View{InitialPhase: sddmodel.PhaseIndexing}, nil)
 	nm, cmd := m.Update(logDoneMsg{})
 	mm := nm.(model)
 	if !mm.done {
@@ -37,7 +37,7 @@ func TestModel_LogDoneQuits(t *testing.T) {
 
 func TestModel_CtrlCInterruptsAndQuits(t *testing.T) {
 	interrupted := false
-	m := newTestModel(View{InitialPhase: command.PhaseIndexing}, func() { interrupted = true })
+	m := newTestModel(View{InitialPhase: sddmodel.PhaseIndexing}, func() { interrupted = true })
 
 	key := tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl})
 	if key.String() != "ctrl+c" {
@@ -58,7 +58,7 @@ func TestModel_CtrlCInterruptsAndQuits(t *testing.T) {
 
 func TestModel_ProgressUpdatesLatest(t *testing.T) {
 	reporter := cliout.NewReporter()
-	m := newTestModel(View{InitialPhase: command.PhaseIndexing, Progress: reporter}, nil)
+	m := newTestModel(View{InitialPhase: sddmodel.PhaseIndexing, Progress: reporter}, nil)
 
 	nm, _ := m.Update(progressMsg(cliout.Progress{Done: 2, Total: 10, Unit: "entries"}))
 	mm := nm.(model)
@@ -69,11 +69,11 @@ func TestModel_ProgressUpdatesLatest(t *testing.T) {
 
 func TestModel_ViewIsInlineFooter(t *testing.T) {
 	reporter := cliout.NewReporter()
-	m := newTestModel(View{InitialPhase: command.PhaseIndexing, Progress: reporter}, nil)
+	m := newTestModel(View{InitialPhase: sddmodel.PhaseIndexing, Progress: reporter}, nil)
 
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(model)
-	nm, _ = m.Update(progressMsg(cliout.Progress{Done: 3, Total: 10, Unit: "chunks", Note: "embedding 2 entries · 5 chunks"}))
+	nm, _ = m.Update(progressMsg(cliout.Progress{Phase: sddmodel.PhaseIndexing, Done: 3, Total: 10, Unit: "chunks", Note: "embedding 2 entries · 5 chunks"}))
 	m = nm.(model)
 
 	view := m.View()
@@ -99,7 +99,7 @@ func TestModel_ViewIsInlineFooter(t *testing.T) {
 // A phase-only snapshot (no total) shows the label without a determinate bar.
 func TestModel_FooterLabelDerivesFromPhase(t *testing.T) {
 	reporter := cliout.NewReporter()
-	m := newTestModel(View{InitialPhase: command.PhaseConnecting, Progress: reporter}, nil)
+	m := newTestModel(View{InitialPhase: sddmodel.PhaseConnecting, Progress: reporter}, nil)
 
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(model)
@@ -107,7 +107,7 @@ func TestModel_FooterLabelDerivesFromPhase(t *testing.T) {
 		t.Errorf("initial label should be the view's initial phase; content=%q", got)
 	}
 
-	nm, _ = m.Update(progressMsg(cliout.Progress{Phase: command.PhaseSyncing}))
+	nm, _ = m.Update(progressMsg(cliout.Progress{Phase: sddmodel.PhaseSyncing}))
 	m = nm.(model)
 	view := m.View().Content
 	if !strings.Contains(view, "syncing") {
@@ -117,7 +117,7 @@ func TestModel_FooterLabelDerivesFromPhase(t *testing.T) {
 		t.Errorf("a phase-only snapshot (no total) must not render a bar/count; content=%q", view)
 	}
 
-	nm, _ = m.Update(progressMsg(cliout.Progress{Phase: command.PhaseIndexing, Done: 1, Total: 4, Unit: "chunks"}))
+	nm, _ = m.Update(progressMsg(cliout.Progress{Phase: sddmodel.PhaseIndexing, Done: 1, Total: 4, Unit: "chunks"}))
 	m = nm.(model)
 	if got := m.View().Content; !strings.Contains(got, "indexing") || !strings.Contains(got, "1/4 chunks") {
 		t.Errorf("label should track the latest phase and the bar appear with a total; content=%q", got)
@@ -128,7 +128,7 @@ func TestModel_FooterLabelDerivesFromPhase(t *testing.T) {
 // first-paint tick; only then do held lines flush and subsequent lines pass
 // straight through.
 func TestModel_FirstPaintGateHoldsThenFlushes(t *testing.T) {
-	m := newTestModel(View{InitialPhase: command.PhaseIndexing}, nil)
+	m := newTestModel(View{InitialPhase: sddmodel.PhaseIndexing}, nil)
 
 	nm, _ := m.Update(logMsg(logEntry("early")))
 	m = nm.(model)

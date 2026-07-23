@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
 	"github.com/networkteam/sdd/internal/cliout"
-	"github.com/networkteam/sdd/internal/command"
+	sddmodel "github.com/networkteam/sdd/internal/model"
 )
 
 // TestModel_StreamLogsDurable runs the real inline program: a durable line
@@ -22,7 +22,7 @@ func TestModel_StreamLogsDurable(t *testing.T) {
 	consumer := cliout.NewLogConsumer(64)
 	backlog := []cliout.LogEntry{logEntry("indexed", slog.String("entry", "20260101-aaa"))}
 
-	m := newModel(View{InitialPhase: command.PhaseIndexing, StreamLogs: true}, consumer, backlog, func() {})
+	m := newModel(View{InitialPhase: sddmodel.PhaseIndexing, StreamLogs: true}, consumer, backlog, func() {})
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(100, 24))
 
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
@@ -48,7 +48,7 @@ func TestModel_NoFullHeightCursorDownBeforeFirstFrame(t *testing.T) {
 	consumer := cliout.NewLogConsumer(64)
 	backlog := []cliout.LogEntry{logEntry("cloning connected repo")}
 
-	m := newModel(View{InitialPhase: command.PhaseConnecting, StreamLogs: true}, consumer, backlog, func() {})
+	m := newModel(View{InitialPhase: sddmodel.PhaseConnecting, StreamLogs: true}, consumer, backlog, func() {})
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, height))
 
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool {
@@ -73,7 +73,7 @@ func TestModel_FastDoneBeforePaintHoldsLines(t *testing.T) {
 	consumer := cliout.NewLogConsumer(64)
 	backlog := []cliout.LogEntry{logEntry("cloning connected repo")}
 
-	m := newModel(View{InitialPhase: command.PhaseConnecting, StreamLogs: true}, consumer, backlog, func() {})
+	m := newModel(View{InitialPhase: sddmodel.PhaseConnecting, StreamLogs: true}, consumer, backlog, func() {})
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, height))
 
 	consumer.Close() // end-of-work immediately, before the first-paint gate

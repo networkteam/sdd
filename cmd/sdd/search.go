@@ -266,7 +266,7 @@ func indexCmd() *cli.Command {
 			// build arms and shows the inline view.
 			if cliout.IsInteractive(os.Stderr) {
 				_, err = clitui.Interactive(ctx, transientViewPolicy(),
-					clitui.View{InitialPhase: command.PhaseIndexing, Progress: prog.reporter, StreamLogs: true}, work)
+					clitui.View{InitialPhase: model.PhaseIndexing, Progress: prog.reporter, StreamLogs: true}, work)
 			} else {
 				_, err = work(ctx)
 			}
@@ -515,14 +515,14 @@ func searchCmd() *cli.Command {
 				// Vector search: the footer tracks the fill (embedding) — the
 				// work taking time; the bar appears once a chunk total is known
 				// and the phase label reads "indexing".
-				view := clitui.View{InitialPhase: command.PhaseIndexing, Progress: prog.reporter, StreamLogs: false}
+				view := clitui.View{InitialPhase: model.PhaseIndexing, Progress: prog.reporter, StreamLogs: false}
 				if !needsVector {
 					// Text-only cross-repo does no embedding — the work is
 					// freshening connected caches. The freshen step reports
 					// connecting/syncing, so the label stays phase-true (never
 					// "indexing"); no chunk bar (no total), and the "cloning
 					// connected repo" log streams rather than hiding the wait.
-					view = clitui.View{InitialPhase: command.PhaseConnecting, Progress: prog.reporter, StreamLogs: true}
+					view = clitui.View{InitialPhase: model.PhaseConnecting, Progress: prog.reporter, StreamLogs: true}
 				}
 				res, err = clitui.Interactive(ctx, transientViewPolicy(), view, work)
 			} else {

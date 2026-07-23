@@ -14,6 +14,7 @@ import (
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/meta"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/repos"
 )
@@ -56,7 +57,7 @@ func repoCmd() *cli.Command {
 						OnDeclared: func(repoID string, already bool) {
 							declaredRepoID, alreadyDeclared, haveDeclared = repoID, already, true
 						},
-						OnPhase: func(p command.Phase) { reporter.SetPhase(p) },
+						OnPhase: reporter.SetPhase,
 					}
 					work := func(ctx context.Context) (struct{}, error) {
 						return struct{}{}, h.RepoAdd(ctx, addCmd)
@@ -69,7 +70,7 @@ func repoCmd() *cli.Command {
 					// stays at the plain slog floor.
 					if cliout.IsInteractive(os.Stderr) {
 						_, err = clitui.Interactive(ctx, transientViewPolicy(),
-							clitui.View{InitialPhase: command.PhaseConnecting, Progress: reporter, StreamLogs: true}, work)
+							clitui.View{InitialPhase: model.PhaseConnecting, Progress: reporter, StreamLogs: true}, work)
 					} else {
 						_, err = work(ctx)
 					}
@@ -219,6 +220,6 @@ func freshenRepoCaches(ctx context.Context, repoIDs []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = h.EnsureReposFresh(ctx, repoIDs, nil)
+	_, err = h.EnsureReposFresh(ctx, command.EnsureReposFreshCmd{RepoIDs: repoIDs})
 	return err
 }

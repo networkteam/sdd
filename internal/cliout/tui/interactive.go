@@ -15,21 +15,20 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/networkteam/sdd/internal/cliout"
-	"github.com/networkteam/sdd/internal/command"
+	sddmodel "github.com/networkteam/sdd/internal/model"
 )
 
-// View is the declarative spec for one operation's transient display, composed
-// from reusable components: a spinner with a phase label (always), a
-// determinate progress bar (renders only while the reporter carries a total),
-// and an opt-in log stream. The footer label tracks the reporter's current
-// phase, so commands never decide a label string mid-run.
+// View specs a phase-labeled footer for one operation: an initial phase label,
+// an optional progress reporter (phase + count snapshots), and an opt-in log
+// stream. The footer label tracks the reporter's current phase, so commands
+// never decide a label string mid-run.
 type View struct {
 	// InitialPhase is the footer label shown until the work reports its first
 	// phase; from then on the label derives from the reporter's Phase snapshots.
-	InitialPhase command.Phase
+	InitialPhase sddmodel.Phase
 	// Progress carries the phase and count snapshots the footer renders. The
-	// bar appears once a total is present; the caller advances it from the work
-	// goroutine via absolute counts (SetTotal/Add) and phase transitions
+	// bar appears in the indexing phase once a total is present; the caller
+	// advances it via absolute counts (SetTotal/Add) and phase transitions
 	// (SetPhase). Nil leaves a bare spinner with the InitialPhase label.
 	Progress *cliout.Reporter
 	// StreamLogs, when true, emits display-eligible log entries as durable

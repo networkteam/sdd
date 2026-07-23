@@ -34,6 +34,13 @@ func run(ctx context.Context, dir string, args ...string) error {
 	cmd.Stderr = &stderr
 	cmd.Stdout = nil
 	if err := cmd.Run(); err != nil {
+		// A cancelled context SIGKILLs git, so cmd.Run reports "signal: killed"
+		// rather than context.Canceled. Prefer the context error so cancellation
+		// propagates as context.Canceled for every caller (the coordinator maps
+		// it to the calm cancelled-by-user sentinel).
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("git %s: %w", verb, ctxErr)
+		}
 		msg := bytes.TrimSpace(stderr.Bytes())
 		if len(msg) > 0 {
 			return fmt.Errorf("git %s: %w: %s", verb, err, msg)

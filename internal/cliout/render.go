@@ -6,7 +6,13 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/networkteam/sdd/internal/model"
 )
+
+// PhaseLabel is the footer text for a phase. Rendering lives here, not on the
+// domain type, so internal/model stays dependency-free display vocabulary.
+func PhaseLabel(p model.Phase) string { return string(p) }
 
 // Log-level + progress-chrome styles; distinct surface from the presenters palette (d-cpt-n0f).
 var (

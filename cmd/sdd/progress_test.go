@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/networkteam/sdd/internal/command"
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // The shared wiring helper maps every command's callbacks onto one reporter: a
@@ -18,23 +18,23 @@ func TestEmbedProgress_PhaseMapping(t *testing.T) {
 		t.Errorf("warm plan should report no phase; got %q", got)
 	}
 
-	p.connected(false).OnPhase(command.PhaseSyncing)
-	if got := latestPhase(t, p); got != command.PhaseSyncing {
+	p.connected(false).OnPhase(model.PhaseSyncing)
+	if got := latestPhase(t, p); got != model.PhaseSyncing {
 		t.Errorf("freshen should report syncing; got %q", got)
 	}
 
 	p.onPlanned(0) // a warm member fill must not overwrite syncing with indexing
-	if got := latestPhase(t, p); got != command.PhaseSyncing {
+	if got := latestPhase(t, p); got != model.PhaseSyncing {
 		t.Errorf("zero-chunk plan must not clobber syncing; got %q", got)
 	}
 
 	p.onPlanned(5) // real embedding work
-	if got := latestPhase(t, p); got != command.PhaseIndexing {
+	if got := latestPhase(t, p); got != model.PhaseIndexing {
 		t.Errorf("real embedding should report indexing; got %q", got)
 	}
 }
 
-func latestPhase(t *testing.T, p *embedProgress) command.Phase {
+func latestPhase(t *testing.T, p *embedProgress) model.Phase {
 	t.Helper()
 	snap, ok := p.reporter.Recv()
 	if !ok {

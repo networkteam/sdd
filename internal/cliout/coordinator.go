@@ -193,8 +193,11 @@ func (c *Coordinator) Run(ctx context.Context, work func(context.Context) error)
 		WriteEntries(ctx, durable, c.rec.Flush())
 	}
 
+	// Belt and braces: a cancelled work context means the user interrupted,
+	// even when the failed work wrapped something other than context.Canceled
+	// (an exec-based dependency SIGKILLed mid-run reports "signal: killed").
 	switch {
-	case errors.Is(err, context.Canceled):
+	case err != nil && (errors.Is(err, context.Canceled) || workCtx.Err() != nil):
 		return ErrUserCancelled
 	case err != nil:
 		return err

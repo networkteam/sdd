@@ -3,13 +3,11 @@ package main
 import (
 	"github.com/networkteam/sdd/internal/cliout"
 	"github.com/networkteam/sdd/internal/command"
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // embedProgress bridges the embedding and cache-freshening command callbacks
-// onto one cliout.Reporter, shared by `sdd index` and `sdd search` so their
-// footer wiring can't drift. It grows an honest running chunk total (member
-// work is only known after each cache is fresh), prefixes the live note with
-// the repo in flight, and maps handler-reported phases onto the footer label.
+// onto one cliout.Reporter, shared by `sdd index` and `sdd search`.
 type embedProgress struct {
 	reporter *cliout.Reporter
 	total    int
@@ -22,12 +20,12 @@ func newEmbedProgress() *embedProgress {
 	return &embedProgress{reporter: r}
 }
 
-// onPlanned grows the running total and declares the indexing phase once real
-// embedding work is planned — a zero-chunk (warm) plan neither advances the bar
-// nor arms a footer.
+// onPlanned grows the running total (member work is only known after each cache
+// is fresh) and declares the indexing phase once real embedding work is planned
+// — a zero-chunk (warm) plan neither advances the bar nor arms a footer.
 func (p *embedProgress) onPlanned(n int) {
 	if n > 0 {
-		p.reporter.SetPhase(command.PhaseIndexing)
+		p.reporter.SetPhase(model.PhaseIndexing)
 	}
 	p.total += n
 	p.reporter.SetTotal(p.total)
@@ -44,6 +42,15 @@ func (p *embedProgress) onBatchStart(ids []string, chunks int) {
 func (p *embedProgress) onEntryIndexed(_ string, chunks int) { p.reporter.Add(chunks) }
 
 func (p *embedProgress) onRepoStart(id string) { p.curRepo = id }
+
+// onPhase maps a handler-reported freshening phase onto the footer and clears
+// the stale embed note — a cache pull is not embedding any batch.
+func (p *embedProgress) onPhase(ph model.Phase) {
+	if ph == model.PhaseConnecting || ph == model.PhaseSyncing {
+		p.reporter.SetNote("")
+	}
+	p.reporter.SetPhase(ph)
+}
 
 // localBuild wires the local index build; onComplete carries the command's own
 // summary totals back to the caller.
@@ -66,9 +73,8 @@ func (p *embedProgress) lazyFill() *command.LazyFillIndexCmd {
 	}
 }
 
-// connected wires the connected-repo fill: per-repo note prefix, accumulating
-// total, and the syncing → indexing phase transitions that keep the footer
-// label phase-true.
+// connected wires the connected-repo fill, keeping the footer label phase-true
+// across the syncing → indexing transitions.
 func (p *embedProgress) connected(force bool) *command.BuildConnectedIndexesCmd {
 	return &command.BuildConnectedIndexesCmd{
 		Force:          force,
@@ -76,6 +82,6 @@ func (p *embedProgress) connected(force bool) *command.BuildConnectedIndexesCmd 
 		OnPlanned:      p.onPlanned,
 		OnBatchStart:   p.onBatchStart,
 		OnEntryIndexed: p.onEntryIndexed,
-		OnPhase:        p.reporter.SetPhase,
+		OnPhase:        p.onPhase,
 	}
 }

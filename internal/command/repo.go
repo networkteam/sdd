@@ -1,6 +1,10 @@
 package command
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/networkteam/sdd/internal/model"
+)
 
 // RepoAddCmd connects a repo with two writes: the committed dependency
 // declaration in the current repo's .sdd/config.yaml (what this graph
@@ -26,7 +30,19 @@ type RepoAddCmd struct {
 	// OnPhase reports the active stage (connecting → cloning) so the footer
 	// shows real progress rather than a bare eternal "connecting" spinner.
 	// Optional; fired only on the clone path, never the already-connected no-op.
-	OnPhase func(phase Phase)
+	OnPhase func(phase model.Phase)
+}
+
+// EnsureReposFreshCmd freshens the caches of the named connected repos for a
+// read: lazy clone when absent, cooldown-gated pull otherwise. OnPhase reports
+// connecting → cloning for a clone and syncing for a pull, so a text-only
+// cross-repo read shows a phase-true footer; it is never fired for a
+// fresh-cache no-op.
+type EnsureReposFreshCmd struct {
+	RepoIDs []string
+
+	// OnPhase reports the freshening stage. Optional.
+	OnPhase func(phase model.Phase)
 }
 
 // Validate checks the command's required fields.

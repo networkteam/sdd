@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/networkteam/sdd/internal/cliout"
-	"github.com/networkteam/sdd/internal/command"
+	sddmodel "github.com/networkteam/sdd/internal/model"
 )
 
 // recordingRun stands in for the real program runner and flags whether a
@@ -28,7 +28,7 @@ func TestInteractive_ReturnsResultForInstantWork(t *testing.T) {
 	work := func(context.Context) (int, error) { return 42, nil }
 
 	run, started := recordingRun()
-	val, err := interactiveWith(context.Background(), policy, View{InitialPhase: command.PhaseIndexing}, work, run)
+	val, err := interactiveWith(context.Background(), policy, View{InitialPhase: sddmodel.PhaseIndexing}, work, run)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestInteractive_PropagatesWorkError(t *testing.T) {
 	work := func(context.Context) (int, error) { return 0, boom }
 
 	run, _ := recordingRun()
-	_, err := interactiveWith(context.Background(), policy, View{InitialPhase: command.PhaseIndexing}, work, run)
+	_, err := interactiveWith(context.Background(), policy, View{InitialPhase: sddmodel.PhaseIndexing}, work, run)
 	if !errors.Is(err, boom) {
 		t.Errorf("error = %v, want %v", err, boom)
 	}
@@ -57,7 +57,7 @@ func TestInteractive_TranslatesCancellationToSentinel(t *testing.T) {
 	work := func(context.Context) (int, error) { return 0, context.Canceled }
 
 	run, _ := recordingRun()
-	_, err := interactiveWith(context.Background(), policy, View{InitialPhase: command.PhaseIndexing}, work, run)
+	_, err := interactiveWith(context.Background(), policy, View{InitialPhase: sddmodel.PhaseIndexing}, work, run)
 	if !errors.Is(err, cliout.ErrUserCancelled) {
 		t.Errorf("error = %v, want ErrUserCancelled", err)
 	}
