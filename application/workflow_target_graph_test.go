@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd/internal/engine"
@@ -23,12 +25,16 @@ func (workflowTargetGraphStore) ReadAttachmentPage(context.Context, string, stri
 
 type workflowTargetAcquirer struct {
 	graphs       map[string]GraphStore
+	err          error
 	acquisitions int
 	releases     int
 }
 
 func (a *workflowTargetAcquirer) Acquire(_ context.Context, target MutationTarget) (*AcquiredTarget, error) {
 	a.acquisitions++
+	if a.err != nil {
+		return nil, a.err
+	}
 	return &AcquiredTarget{
 		Target: target,
 		Graph:  a.graphs[target.Branch],
@@ -56,6 +62,7 @@ func (a workflowTargetAccess) ResolveDependency(context.Context, Principal, Proj
 
 func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	const entryID = "20260717-120000-s-tac-wrk"
+	const explicitID = "20260717-120001-s-tac-exp"
 	base := workflowTargetSnapshot(t, "base-r1", nil)
 	work := workflowTargetSnapshot(t, "work-r1", []EntryDocument{{
 		LogicalPath: "2026/07/17-120000-s-tac-wrk.md",
@@ -64,8 +71,16 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 		},
 		Body: "The target-aware workflow fixture exists only on the work branch.",
 	}})
+	explicit := workflowTargetSnapshot(t, "explicit-r1", []EntryDocument{{
+		LogicalPath: "2026/07/17-120001-s-tac-exp.md",
+		Frontmatter: map[string]any{
+			"type": "signal", "kind": "gap", "layer": "tactical", "summary": "Stored only on the explicit branch.",
+		},
+		Body: "The explicit target must override the session binding.",
+	}})
 	targets := &workflowTargetAcquirer{graphs: map[string]GraphStore{
-		"work": workflowTargetGraphStore{snapshot: work},
+		"work":     workflowTargetGraphStore{snapshot: work},
+		"explicit": workflowTargetGraphStore{snapshot: explicit},
 	}}
 	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
@@ -74,6 +89,7 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	app := &Application{access: workflowTargetAccess{runtime: runtime}}
 	workflow := &WorkflowSession{
 		app: app, project: "example", identity: RequestIdentity{Subject: "christopher"}, ctx: t.Context(),
+		branch: "work",
 	}
 	graphs := &workflowGraphs{workflow: workflow}
 	workflow.graphs = graphs
@@ -119,6 +135,178 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	}
 	if targets.acquisitions != 1 || targets.releases != 1 {
 		t.Fatalf("cached target lifecycle acquisitions=%d releases=%d", targets.acquisitions, targets.releases)
+	}
+
+	sessionGraph, err := graphs.CurrentFor(workflowTargetStore(t, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sessionGraph.ByID[entryID] == nil {
+		t.Fatal("empty procedure target did not fall back to the session binding")
+	}
+	explicitGraph, err := graphs.CurrentFor(workflowTargetStore(t, map[string]any{"captureBranch": "explicit"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicitGraph.ByID[explicitID] == nil || explicitGraph.ByID[entryID] != nil {
+		t.Fatalf("explicit captureBranch did not override binding: explicit=%v work=%v", explicitGraph.ByID[explicitID], explicitGraph.ByID[entryID])
+	}
+}
+
+func TestWorkflowGraphCacheInvalidatesAcrossRebindingAndClear(t *testing.T) {
+	const (
+		workEntryID     = "20260717-120000-s-tac-wrk"
+		explicitEntryID = "20260717-120001-s-tac-exp"
+	)
+	base := workflowTargetSnapshot(t, "base-r1", nil)
+	work := workflowTargetSnapshot(t, "work-r1", []EntryDocument{{
+		LogicalPath: "2026/07/17-120000-s-tac-wrk.md",
+		Frontmatter: map[string]any{
+			"type": "signal", "kind": "gap", "layer": "tactical", "summary": "Stored only on work.",
+		},
+		Body: "Work branch entry.",
+	}})
+	explicit := workflowTargetSnapshot(t, "explicit-r1", []EntryDocument{{
+		LogicalPath: "2026/07/17-120001-s-tac-exp.md",
+		Frontmatter: map[string]any{
+			"type": "signal", "kind": "gap", "layer": "tactical", "summary": "Stored only on explicit.",
+		},
+		Body: "Explicit branch entry.",
+	}})
+	targets := &workflowTargetAcquirer{graphs: map[string]GraphStore{
+		"work":     workflowTargetGraphStore{snapshot: work},
+		"explicit": workflowTargetGraphStore{snapshot: explicit},
+	}}
+	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
+		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
+		Graph: workflowTargetGraphStore{snapshot: base}, Targets: targets,
+	}}
+	app := &Application{access: workflowTargetAccess{runtime: runtime}}
+	workflow := &WorkflowSession{
+		app: app, project: "example", identity: RequestIdentity{Subject: "christopher"}, ctx: t.Context(),
+		branch: "work",
+	}
+	graphs := &workflowGraphs{workflow: workflow}
+	workflow.graphs = graphs
+
+	graph, err := graphs.CurrentFor(workflowTargetStore(t, nil))
+	if err != nil || graph.ByID[workEntryID] == nil {
+		t.Fatalf("warm work graph: entry=%v err=%v", graph.ByID[workEntryID], err)
+	}
+	workflow.setBranch("explicit")
+	graph, err = graphs.CurrentFor(workflowTargetStore(t, nil))
+	if err != nil || graph.ByID[explicitEntryID] == nil || graph.ByID[workEntryID] != nil {
+		t.Fatalf("rebound explicit graph: explicit=%v work=%v err=%v", graph.ByID[explicitEntryID], graph.ByID[workEntryID], err)
+	}
+	workflow.setBranch("")
+	graph, err = graphs.CurrentFor(workflowTargetStore(t, nil))
+	if err != nil || graph.ByID[workEntryID] != nil || graph.ByID[explicitEntryID] != nil {
+		t.Fatalf("cleared binding graph: work=%v explicit=%v err=%v", graph.ByID[workEntryID], graph.ByID[explicitEntryID], err)
+	}
+}
+
+func TestWorkflowSessionBindingDriftProvenanceOnlyForBindingTargets(t *testing.T) {
+	base := workflowTargetSnapshot(t, "base-r1", nil)
+	driftCause := errors.New("registered checkout disappeared")
+	targets := &workflowTargetAcquirer{graphs: map[string]GraphStore{}, err: driftCause}
+	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
+		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
+		Graph: workflowTargetGraphStore{snapshot: base}, Targets: targets,
+	}}
+	workflow := &WorkflowSession{
+		app: &Application{access: workflowTargetAccess{runtime: runtime}}, project: "example",
+		identity: RequestIdentity{Subject: "christopher"}, ctx: t.Context(), branch: "drifted",
+	}
+
+	_, err := (&workflowGraphs{workflow: workflow}).CurrentFor(workflowTargetStore(t, nil))
+	if err == nil || !strings.Contains(err.Error(), `session is bound to branch "drifted"`) || !strings.Contains(err.Error(), "re-declare the binding or clear it") {
+		t.Fatalf("binding drift error = %v", err)
+	}
+	var acquisition *targetAcquisitionError
+	if !errors.As(err, &acquisition) {
+		t.Fatalf("binding drift did not preserve acquisition cause: %v", err)
+	}
+	if !errors.Is(err, driftCause) {
+		t.Fatalf("binding drift did not preserve original cause: %v", err)
+	}
+	if strings.Contains(err.Error(), "no longer resolves to a checkout") {
+		t.Fatalf("binding drift overclaimed checkout state: %v", err)
+	}
+
+	for _, field := range []string{"captureBranch", "workBranch"} {
+		_, explicitErr := (&workflowGraphs{workflow: workflow}).CurrentFor(workflowTargetStore(t, map[string]any{field: "drifted"}))
+		if explicitErr == nil {
+			t.Fatalf("%s drift unexpectedly succeeded", field)
+		}
+		if strings.Contains(explicitErr.Error(), "session is bound") {
+			t.Fatalf("%s drift was mislabeled as session binding: %v", field, explicitErr)
+		}
+	}
+
+	for name, readErr := range map[string]error{
+		"view": func() error {
+			_, err := workflow.app.View(t.Context(), workflow.identity, "example", ViewRequest{Layout: "active:as-list", Branch: "drifted"})
+			return err
+		}(),
+		"show": func() error {
+			_, err := workflow.app.Show(t.Context(), workflow.identity, "example", ShowRequest{IDs: []string{"20260717-120000-s-tac-wrk"}, Branch: "drifted"})
+			return err
+		}(),
+		"search": func() error {
+			_, err := workflow.app.Search(t.Context(), workflow.identity, "example", SearchRequest{Terms: []string{"routing"}, Branch: "drifted"})
+			return err
+		}(),
+	} {
+		if readErr == nil {
+			t.Fatalf("explicit free-read %s drift unexpectedly succeeded", name)
+		}
+		if strings.Contains(readErr.Error(), "session is bound") {
+			t.Fatalf("explicit free-read %s was mislabeled as session binding: %v", name, readErr)
+		}
+	}
+
+	incompleteTargets := &workflowTargetAcquirer{graphs: map[string]GraphStore{"drifted": nil}}
+	incompleteRuntime := &ProjectRuntime{options: ProjectRuntimeOptions{
+		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
+		Graph: workflowTargetGraphStore{snapshot: base}, Targets: incompleteTargets,
+	}}
+	incompleteWorkflow := &WorkflowSession{
+		app: &Application{access: workflowTargetAccess{runtime: incompleteRuntime}}, project: "example",
+		identity: RequestIdentity{Subject: "christopher"}, ctx: t.Context(), branch: "drifted",
+	}
+	_, incompleteErr := (&workflowGraphs{workflow: incompleteWorkflow}).CurrentFor(workflowTargetStore(t, nil))
+	if incompleteErr == nil ||
+		!strings.Contains(incompleteErr.Error(), `session is bound to branch "drifted"`) ||
+		!strings.Contains(incompleteErr.Error(), "target acquisition returned an incomplete runtime") ||
+		strings.Contains(incompleteErr.Error(), "no longer resolves to a checkout") {
+		t.Fatalf("incomplete binding target error = %v", incompleteErr)
+	}
+}
+
+func TestWorkflowWIPRequiresExplicitBaseBranchBeforeCallingApplication(t *testing.T) {
+	workflow := &WorkflowSession{}
+	registry := engine.NewRegistry()
+	if err := workflow.registerWorkflowWIP(registry); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		command string
+		values  map[string]any
+	}{
+		{command: "wipStart", values: map[string]any{"anchor": "20260717-120000-s-tac-wrk"}},
+		{command: "wipDone", values: map[string]any{"wipMarker": "20260717-120000-christopher"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			command, ok := registry.Command(tt.command)
+			if !ok {
+				t.Fatalf("%s command is not registered", tt.command)
+			}
+			err := command.Fn(&engine.Context{Store: workflowTargetStore(t, tt.values)})
+			if err == nil || err.Error() != "WIP write requires an explicit baseBranch" {
+				t.Fatalf("%s error = %v", tt.command, err)
+			}
+		})
 	}
 }
 
@@ -204,8 +392,12 @@ kind: procedure
 layer: process
 canonical: target-test
 state:
+  anchor: {type: text, optional: true}
+  baseBranch: {type: text, optional: true}
   captureBranch: {type: text, optional: true}
   workBranch: {type: text, optional: true}
+  wipDescription: {type: text, optional: true}
+  wipMarker: {type: text, optional: true}
 steps:
   - id: start
     chooser: agent

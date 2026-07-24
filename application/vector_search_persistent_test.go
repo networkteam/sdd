@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,41 @@ type countingEmbeddings struct {
 	docEmbeds   int
 	queryEmbeds int
 	docInputIDs []string
+}
+
+type branchVectorTargets struct {
+	mu           sync.Mutex
+	graph        sdd.GraphStore
+	acquisitions int
+	releases     int
+	active       bool
+}
+
+func (t *branchVectorTargets) Acquire(_ context.Context, target sdd.MutationTarget) (*sdd.AcquiredTarget, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.acquisitions++
+	t.active = true
+	return &sdd.AcquiredTarget{
+		Target: target,
+		Graph:  t.graph,
+		Release: func() error {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			t.releases++
+			t.active = false
+			return nil
+		},
+	}, nil
+}
+
+type failingAttachmentGraphStore struct {
+	sdd.GraphStore
+	err error
+}
+
+func (s failingAttachmentGraphStore) ReadAttachmentPage(context.Context, string, string, int64, int) (sdd.AttachmentPage, error) {
+	return sdd.AttachmentPage{}, s.err
 }
 
 func (e *countingEmbeddings) Spec(context.Context) (sdd.EmbeddingSpec, error) {
@@ -269,6 +305,103 @@ func TestVectorSearchAttachmentHitPreservesCitation(t *testing.T) {
 	if !strings.Contains(res.Results, "[attachment: ") || !strings.Contains(res.Results, "design.md") {
 		t.Errorf("attachment hit did not render a source citation: %q", res.Results)
 	}
+}
+
+func TestBranchVectorAndHybridSearchUseSelectedAttachmentAuthorityAndRelease(t *testing.T) {
+	const id = "20260101-100000-s-tac-aaa"
+	baseDir := t.TempDir()
+	branchDir := t.TempDir()
+	for _, graphDir := range []string{baseDir, branchDir} {
+		writeCounterEntry(t, graphDir, id, "Neutral attachment summary", "## Section\nNeutral entry body.")
+		attachDir := filepath.Join(graphDir, id[:4], id[4:6], id[6:])
+		if err := os.MkdirAll(attachDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, id[:4], id[4:6], id[6:], "design.md"), []byte("# Design\n\nalpha runtime authority bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(branchDir, id[:4], id[4:6], id[6:], "design.md"), []byte("# Design\n\nbeta branch authority bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: counterProject, GraphDir: baseDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: counterProject, GraphDir: branchDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := &branchVectorTargets{graph: branch}
+	app := newBranchCounterApp(t, base, targets, t.TempDir(), &countingEmbeddings{})
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+
+	for name, request := range map[string]sdd.SearchRequest{
+		"vector": {Phrase: "beta", Branch: "work", Limit: 5, MaxCitations: 3},
+		"hybrid": {Terms: []string{"beta"}, Phrase: "beta", Branch: "work", Limit: 5, MaxCitations: 3},
+	} {
+		result, err := app.Search(t.Context(), identity, counterProject, request)
+		if err != nil {
+			t.Fatalf("%s search: %v", name, err)
+		}
+		if !strings.Contains(result.Results, "beta branch authority bytes") || strings.Contains(result.Results, "alpha runtime authority bytes") {
+			t.Fatalf("%s search used wrong attachment authority:\n%s", name, result.Results)
+		}
+	}
+	targets.mu.Lock()
+	acquisitions, releases, active := targets.acquisitions, targets.releases, targets.active
+	targets.mu.Unlock()
+	if acquisitions != 2 || releases != 2 || active {
+		t.Fatalf("success lifecycle acquisitions=%d releases=%d active=%v", acquisitions, releases, active)
+	}
+
+	attachmentErr := errors.New("selected attachment read failed")
+	failingTargets := &branchVectorTargets{graph: failingAttachmentGraphStore{GraphStore: branch, err: attachmentErr}}
+	failing := newBranchCounterApp(t, base, failingTargets, t.TempDir(), &countingEmbeddings{})
+	_, err = failing.Search(t.Context(), identity, counterProject, sdd.SearchRequest{
+		Phrase: "beta", Branch: "work", Limit: 5, MaxCitations: 3,
+	})
+	if !errors.Is(err, attachmentErr) {
+		t.Fatalf("attachment failure = %v", err)
+	}
+	failingTargets.mu.Lock()
+	acquisitions, releases, active = failingTargets.acquisitions, failingTargets.releases, failingTargets.active
+	failingTargets.mu.Unlock()
+	if acquisitions != 1 || releases != 1 || active {
+		t.Fatalf("error lifecycle acquisitions=%d releases=%d active=%v", acquisitions, releases, active)
+	}
+}
+
+func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAcquirer, cacheRoot string, embeddings sdd.EmbeddingExecutor) *sdd.Application {
+	t.Helper()
+	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		Project: sdd.ProjectRef{ID: counterProject, DisplayName: "Counter"}, DefaultBranch: "main",
+		Graph: base, Targets: targets, Sessions: sessions, StagedBlobs: blobs,
+		Embeddings:  embeddings,
+		SearchIndex: localadapter.NewPersistentSearchIndexStore(counterProject, cacheRoot, "counter/branch"),
+		LLM: sdd.LLMExecutorFuncs{
+			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
+			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
+				return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
 }
 
 func TestVectorSearchIgnoresPersistedRowAbsentFromGraph(t *testing.T) {

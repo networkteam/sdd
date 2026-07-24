@@ -37,6 +37,9 @@ func newBranchBindingApplicationWithStore(t *testing.T, validator sdd.BranchVali
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Branches: validator,
+		Targets: sdd.TargetAcquirerFunc(func(_ context.Context, target sdd.MutationTarget) (*sdd.AcquiredTarget, error) {
+			return &sdd.AcquiredTarget{Target: target, Graph: graph, Release: func() error { return nil }}, nil
+		}),
 		Sessions: sessionStore, StagedBlobs: blobs,
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },

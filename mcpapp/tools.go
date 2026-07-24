@@ -822,6 +822,14 @@ func validAttachmentName(name string) error {
 	return nil
 }
 
+func (s *Server) attachedBranch(session *mcp.ServerSession) (string, bool) {
+	if attached := s.sessions.bound(session); attached != nil {
+		branch := attached.root.Branch()
+		return branch, branch != ""
+	}
+	return "", false
+}
+
 // readHint is the one-line breadcrumb every free read carries while no
 // session is bound: an agent that enters through a pasted entry ID gets its
 // data and the trail to the door. No path through the tool surface avoids a
@@ -889,10 +897,11 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	if args.MaxCitations != nil {
 		maxCitations = *args.MaxCitations
 	}
+	branch, branchFromSession := s.attachedBranch(req.Session)
 	result, err := s.app.Search(ctx, s.requestIdentity(req), s.project, sdd.SearchRequest{
 		Terms: args.Terms, Phrase: args.Query, Type: args.Type, Layer: args.Layer, Kind: args.Kind,
 		IncludeSuperseded: args.IncludeSuperseded, Limit: limit, MaxCitations: maxCitations,
-		Repos: args.Repos, AllRepos: args.AllRepos,
+		Branch: branch, BranchFromSession: branchFromSession, Repos: args.Repos, AllRepos: args.AllRepos,
 	})
 	if err != nil {
 		return nil, SearchResult{}, toolError("searching: %v", err)
@@ -912,7 +921,10 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if strings.TrimSpace(args.Layout) == "" {
 		return nil, ViewResult{}, toolError("layout is required")
 	}
-	result, err := s.app.View(ctx, s.requestIdentity(req), s.project, sdd.ViewRequest{Layout: args.Layout, Repos: args.Repos, AllRepos: args.AllRepos})
+	branch, branchFromSession := s.attachedBranch(req.Session)
+	result, err := s.app.View(ctx, s.requestIdentity(req), s.project, sdd.ViewRequest{
+		Layout: args.Layout, Branch: branch, BranchFromSession: branchFromSession, Repos: args.Repos, AllRepos: args.AllRepos,
+	})
 	if err != nil {
 		return nil, ViewResult{}, toolError("viewing: %v", err)
 	}
@@ -1050,7 +1062,10 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	if down == 0 {
 		down = sdd.DefaultShowDownDepth
 	}
-	result, err := s.app.Show(ctx, s.requestIdentity(req), s.project, sdd.ShowRequest{IDs: args.IDs, UpDepth: up, DownDepth: down})
+	branch, branchFromSession := s.attachedBranch(req.Session)
+	result, err := s.app.Show(ctx, s.requestIdentity(req), s.project, sdd.ShowRequest{
+		IDs: args.IDs, UpDepth: up, DownDepth: down, Branch: branch, BranchFromSession: branchFromSession,
+	})
 	if err != nil {
 		return nil, ShowResult{}, err
 	}

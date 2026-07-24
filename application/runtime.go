@@ -86,20 +86,20 @@ func (r *ProjectRuntime) defaultMutationTarget() (MutationTarget, error) {
 
 func (r *ProjectRuntime) acquire(ctx context.Context, target MutationTarget) (*AcquiredTarget, error) {
 	if err := target.Validate(r.options.Project.ID); err != nil {
-		return nil, err
+		return nil, markTargetAcquisitionError(target, err)
 	}
 	if r.options.Targets == nil {
-		return nil, &ApplicationError{Code: ErrorWriteDenied, Message: "project has no mutation target acquirer"}
+		return nil, markTargetAcquisitionError(target, &ApplicationError{Code: ErrorWriteDenied, Message: "project has no mutation target acquirer"})
 	}
 	acquired, err := r.options.Targets.Acquire(ctx, target)
 	if err != nil {
-		return nil, err
+		return nil, markTargetAcquisitionError(target, err)
 	}
 	if err := acquired.validate(target); err != nil {
 		if acquired != nil && acquired.Release != nil {
-			return nil, errors.Join(err, acquired.Release())
+			return nil, markTargetAcquisitionError(target, errors.Join(err, acquired.Release()))
 		}
-		return nil, err
+		return nil, markTargetAcquisitionError(target, err)
 	}
 	return acquired, nil
 }

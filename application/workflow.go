@@ -423,7 +423,7 @@ func (w *WorkflowSession) StillHeld(ctx context.Context, identity RequestIdentit
 	// CAS conflict: once the store confirms this connection still holds the
 	// attachment, refresh the cached durable metadata before serving.
 	w.binding.Version = stored.Version
-	w.branch = stored.Metadata.Branch
+	w.setBranch(stored.Metadata.Branch)
 	return true, nil
 }
 
@@ -432,6 +432,13 @@ func (w *WorkflowSession) Project() ProjectID { return w.project }
 func (w *WorkflowSession) Binding() SessionBinding { return w.binding }
 
 func (w *WorkflowSession) Branch() string { return w.branch }
+
+func (w *WorkflowSession) setBranch(branch string) {
+	if w.branch != branch && w.graphs != nil {
+		w.graphs.Invalidate()
+	}
+	w.branch = branch
+}
 
 func (w *WorkflowSession) OpenInstances() []WorkflowInstanceSummary {
 	var result []WorkflowInstanceSummary
@@ -726,7 +733,7 @@ func (w *WorkflowSession) bindBranchOnce(branch string, clear bool) error {
 		return err
 	}
 	w.binding.Version = next
-	w.branch = metadata.Branch
+	w.setBranch(metadata.Branch)
 	return nil
 }
 
@@ -781,7 +788,15 @@ func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity)
 // agent to run a CLI command. Empty when the graph is clean; the list is
 // capped so a badly degraded graph cannot flood the framing.
 func (w *WorkflowSession) graphHealthBlock() (string, error) {
-	graph, err := w.graphs.Current()
+	var (
+		graph *model.Graph
+		err   error
+	)
+	if shell, ok := w.session.Instance(w.shell); ok {
+		graph, err = w.graphs.CurrentFor(shell.Store)
+	} else {
+		graph, err = w.graphs.Current()
+	}
 	if err != nil {
 		return "", err
 	}
@@ -1101,10 +1116,14 @@ func (g *workflowGraphs) Current() (*model.Graph, error) {
 // The application owns those meanings while the engine remains unaware of
 // branch semantics.
 func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
-	target := g.workflow.readTarget(store)
+	target, fromBinding := g.workflow.readTarget(store)
 	if target == (MutationTarget{}) {
 		return g.Current()
 	}
+	return g.currentTarget(target, fromBinding)
+}
+
+func (g *workflowGraphs) currentTarget(target MutationTarget, fromBinding bool) (*model.Graph, error) {
 	_, runtime, err := g.workflow.app.resolve(g.workflow.ctx, g.workflow.identity, g.workflow.project, AccessRead)
 	if err != nil {
 		return nil, err
@@ -1122,7 +1141,7 @@ func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
 	// with their read cache while preserving explicit target authority.
 	snapshot, err := snapshotMutationTarget(g.workflow.ctx, runtime, target)
 	if err != nil {
-		return nil, err
+		return nil, withSessionBindingTargetError(g.workflow.branch, fromBinding, err)
 	}
 	snapshot, err = g.workflow.app.snapshotWithDependenciesFrom(g.workflow.ctx, g.workflow.identity, runtime, snapshot)
 	if err != nil {
@@ -1144,15 +1163,18 @@ func (g *workflowGraphs) Invalidate() {
 // state fields that carry branch authority for graph reads. A procedure that
 // introduces another branch-bearing field must register it here so reads do
 // not silently fall back to the session graph.
-var workflowReadTargetFields = [...]string{"captureBranch", "workBranch"}
+var workflowReadTargetFields = [...]string{"captureBranch", "resolvedCaptureBranch", "workBranch"}
 
-func (w *WorkflowSession) readTarget(store *engine.Store) MutationTarget {
+func (w *WorkflowSession) readTarget(store *engine.Store) (MutationTarget, bool) {
 	for _, field := range workflowReadTargetFields {
 		if target := w.mutationTarget(store, field); target != (MutationTarget{}) {
-			return target
+			return target, false
 		}
 	}
-	return MutationTarget{}
+	if w.branch != "" {
+		return MutationTarget{Project: w.project, Branch: w.branch}, true
+	}
+	return MutationTarget{}, false
 }
 
 type workflowSink struct{ workflow *WorkflowSession }
@@ -1211,7 +1233,7 @@ func (w *WorkflowSession) resyncBindingVersion() error {
 		return err
 	}
 	w.binding.Version = stored.Version
-	w.branch = stored.Metadata.Branch
+	w.setBranch(stored.Metadata.Branch)
 	return nil
 }
 

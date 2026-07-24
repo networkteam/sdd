@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -69,6 +70,44 @@ type BranchValidatorFunc func(context.Context, MutationTarget) error
 
 func (f BranchValidatorFunc) ValidateBranch(ctx context.Context, target MutationTarget) error {
 	return f(ctx, target)
+}
+
+// targetAcquisitionError marks failures from the one shared target-acquisition
+// boundary without changing their public message or typed cause. Workflow
+// routing uses the marker to add session-binding provenance only when the
+// session binding actually supplied the target.
+type targetAcquisitionError struct {
+	target MutationTarget
+	cause  error
+}
+
+func (e *targetAcquisitionError) Error() string { return e.cause.Error() }
+func (e *targetAcquisitionError) Unwrap() error { return e.cause }
+
+func markTargetAcquisitionError(target MutationTarget, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	var marked *targetAcquisitionError
+	if errors.As(cause, &marked) {
+		return cause
+	}
+	return &targetAcquisitionError{target: target, cause: cause}
+}
+
+// withSessionBindingTargetError adds routing provenance only when the failed
+// target came from a durable session declaration. Explicit branch reads and
+// procedure-owned targets deliberately retain the underlying acquisition
+// error unchanged.
+func withSessionBindingTargetError(branch string, fromBinding bool, err error) error {
+	if err == nil || !fromBinding {
+		return err
+	}
+	var acquisition *targetAcquisitionError
+	if !errors.As(err, &acquisition) || acquisition.target.Branch != branch {
+		return err
+	}
+	return fmt.Errorf("session is bound to branch %q and acquiring that branch failed; if the binding is stale, re-declare the binding or clear it: %w", branch, err)
 }
 
 // FixedTargetAcquirer is a small composition adapter for stores whose one
