@@ -569,7 +569,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "c9924f3a3c106ddaf5e58cb61bdf0fb520f82299c11b4b1e4d203210022b85e6"
+	const want = "b95dab3a368a2687961a523885189eda1270a28a1ee44dec8d6847c647b406ce"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -3008,6 +3008,43 @@ func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 		events = append(events, event)
 	}
 	return events, nil
+}
+
+func TestStandingNoticeIsServedAtSessionDoorsAndDiscovery(t *testing.T) {
+	const notice = "Session relocation required: run `sdd init`."
+	current := notice
+	env := newTestServer(t, nil, "", "", func(opts *mcpserver.Options) {
+		opts.StandingNotice = func() string { return current }
+	})
+	cs := connect(t, env.srv)
+	started := openSession(t, cs)
+	if !strings.Contains(started.Framing, notice) {
+		t.Fatalf("start_session framing lacks standing notice: %q", started.Framing)
+	}
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{}, &resumed)
+	if !strings.Contains(resumed.Framing, notice) {
+		t.Fatalf("resume_session framing lacks standing notice: %q", resumed.Framing)
+	}
+
+	var listed mcpserver.ListSessionsResult
+	call(t, cs, "list_sessions", map[string]any{}, &listed)
+	if listed.Notice != notice {
+		t.Fatalf("list_sessions notice = %q", listed.Notice)
+	}
+
+	var info mcpserver.InfoResult
+	call(t, cs, "info", map[string]any{}, &info)
+	if info.Notice != notice {
+		t.Fatalf("info notice = %q", info.Notice)
+	}
+
+	current = "Session relocation required: old server recreated state."
+	call(t, cs, "info", map[string]any{}, &info)
+	if info.Notice != current {
+		t.Fatalf("dynamic info notice = %q, want %q", info.Notice, current)
+	}
 }
 
 // TestResumeConsentDecisionTable pins the four-row consent table (d-cpt-9of I5,

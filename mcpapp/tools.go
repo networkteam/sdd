@@ -136,6 +136,7 @@ type ListSessionsArgs struct{}
 
 type ListSessionsResult struct {
 	Sessions []sessionDescriptor `json:"sessions"`
+	Notice   string              `json:"notice,omitempty" jsonschema:"standing operational notice that remains until the host condition is resolved"`
 }
 
 type ResumeSessionArgs struct {
@@ -240,6 +241,7 @@ type InfoResult struct {
 	Recovery    string `json:"recovery,omitempty" jsonschema:"host-neutral actionable recovery notices; empty when no write awaits explicit recovery"`
 	Version     string `json:"version,omitempty"`
 	Hint        string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
+	Notice      string `json:"notice,omitempty" jsonschema:"standing operational notice that remains until the host condition is resolved"`
 }
 
 type RegistryArgs struct {
@@ -641,7 +643,7 @@ func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ L
 	if err != nil {
 		return nil, ListSessionsResult{}, err
 	}
-	var result ListSessionsResult
+	result := ListSessionsResult{Notice: s.currentStandingNotice()}
 	for _, item := range items {
 		if len(item.Open) == 0 {
 			continue
@@ -1050,7 +1052,11 @@ func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, _ InfoArgs)
 	if err != nil {
 		return nil, InfoResult{}, err
 	}
-	return nil, InfoResult{Participant: info.Participant, Language: info.Language, Search: info.Search, Recovery: info.Recovery, Version: s.version, Hint: s.readHint(req.Session)}, nil
+	return nil, InfoResult{
+		Participant: info.Participant, Language: info.Language, Search: info.Search,
+		Recovery: info.Recovery, Version: s.version, Hint: s.readHint(req.Session),
+		Notice: s.currentStandingNotice(),
+	}, nil
 
 }
 
@@ -1091,6 +1097,24 @@ func (s *Server) composeFraming(ms *mcp.ServerSession, blocks []string) string {
 	return strings.Join(served, "\n\n")
 }
 
+func (s *Server) withStandingNotice(framing string) string {
+	notice := s.currentStandingNotice()
+	if notice == "" {
+		return framing
+	}
+	if framing == "" {
+		return notice
+	}
+	return notice + "\n\n" + framing
+}
+
+func (s *Server) currentStandingNotice() string {
+	if s.standingNotice == nil {
+		return ""
+	}
+	return s.standingNotice()
+}
+
 // toRootServeResult converts an engine serve into the tool response. The shell's
 // open-work block lists this dialogue's own threads only; other dialogues never
 // appear here (the door's one-line count is composed at the start_session call
@@ -1116,7 +1140,7 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return ServeResult{}, err
 	}
-	res.Framing = s.composeFraming(req.Session, framing)
+	res.Framing = s.withStandingNotice(s.composeFraming(req.Session, framing))
 	if ss.root.IsShell(serve.Instance) {
 		res.OpenThreads = s.openThreadsRoot(req, ss)
 	}
@@ -1173,7 +1197,7 @@ func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss
 	if err != nil {
 		return ResumeSessionResult{}, err
 	}
-	result.Framing = s.composeFraming(req.Session, framing)
+	result.Framing = s.withStandingNotice(s.composeFraming(req.Session, framing))
 	for i := range source.Open {
 		mapped, err := s.toRootServeResult(ctx, req, ss, &source.Open[i])
 		if err != nil {

@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,8 +21,23 @@ import (
 // FilesystemSessionStore persists each session as append-only JSONL. Events
 // stay opaque and every append is version-CAS protected.
 type FilesystemSessionStore struct {
-	dir string
-	mu  sync.Mutex
+	dir                  string
+	trustedStateRoot     string
+	mu                   sync.Mutex
+	beforeRootedMutation func()
+}
+
+// NewFilesystemSessionStoreAtStateRoot is the production constructor for a
+// machine-global store. It is read-only at construction time; each operation
+// resolves the category/key below the explicit state-root descriptor.
+func NewFilesystemSessionStoreAtStateRoot(stateRoot, dir string) (*FilesystemSessionStore, error) {
+	if stateRoot == "" || dir == "" {
+		return nil, fmt.Errorf("sdd: trusted state root and session directory are required")
+	}
+	if !pathAtOrInside(filepath.Join(stateRoot, "sessions"), dir) {
+		return nil, fmt.Errorf("sdd: session directory escapes trusted state root")
+	}
+	return &FilesystemSessionStore{dir: dir, trustedStateRoot: stateRoot}, nil
 }
 
 func NewFilesystemSessionStore(dir string) (*FilesystemSessionStore, error) {
@@ -35,6 +53,9 @@ func NewFilesystemSessionStore(dir string) (*FilesystemSessionStore, error) {
 func (s *FilesystemSessionStore) Create(_ context.Context, metadata app.SessionMetadata) (app.StoredSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.trustedStateRoot != "" {
+		return s.createRooted(metadata)
+	}
 	if metadata.ID == "" || metadata.Subject == "" || metadata.Project == "" {
 		return app.StoredSession{}, fmt.Errorf("sdd: session ID, subject, and project are required")
 	}
@@ -70,6 +91,9 @@ func (s *FilesystemSessionStore) Create(_ context.Context, metadata app.SessionM
 func (s *FilesystemSessionStore) Load(_ context.Context, id app.SessionID) (app.StoredSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.trustedStateRoot != "" {
+		return s.loadRooted(id)
+	}
 	lock, err := s.lock(id)
 	if err != nil {
 		return app.StoredSession{}, err
@@ -132,6 +156,9 @@ func (s *FilesystemSessionStore) loadLocked(id app.SessionID) (app.StoredSession
 func (s *FilesystemSessionStore) List(_ context.Context, filter app.SessionFilter) ([]app.StoredSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.trustedStateRoot != "" {
+		return s.listRooted(filter)
+	}
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, err
@@ -177,6 +204,9 @@ func (s *FilesystemSessionStore) List(_ context.Context, filter app.SessionFilte
 func (s *FilesystemSessionStore) Append(_ context.Context, id app.SessionID, expectedVersion uint64, appendData app.SessionAppend) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.trustedStateRoot != "" {
+		return s.appendRooted(id, expectedVersion, appendData)
+	}
 	lock, err := s.lock(id)
 	if err != nil {
 		return 0, err
@@ -214,6 +244,259 @@ func (s *FilesystemSessionStore) Append(_ context.Context, id app.SessionID, exp
 		return 0, err
 	}
 	return stored.Version, nil
+}
+
+func (s *FilesystemSessionStore) openRooted(create bool) (*trustedStoreRoot, error) {
+	return openTrustedStoreRoot(s.trustedStateRoot, "sessions", s.dir, create)
+}
+
+func rootedSessionName(id app.SessionID) (string, error) {
+	if id == "" || strings.ContainsAny(string(id), `/\`) || filepath.Base(string(id)) != string(id) {
+		return "", fmt.Errorf("sdd: invalid session ID %q", id)
+	}
+	return string(id) + ".jsonl", nil
+}
+
+func lockRootedSession(root *os.Root, name string) (*pinnedFileLock, error) {
+	file, err := root.OpenFile(name+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	lock, err := lockPinnedFile(file)
+	if err != nil {
+		return nil, errors.Join(err, file.Close())
+	}
+	return lock, nil
+}
+
+func (s *FilesystemSessionStore) createRooted(metadata app.SessionMetadata) (app.StoredSession, error) {
+	if metadata.ID == "" || metadata.Subject == "" || metadata.Project == "" {
+		return app.StoredSession{}, fmt.Errorf("sdd: session ID, subject, and project are required")
+	}
+	name, err := rootedSessionName(metadata.ID)
+	if err != nil {
+		return app.StoredSession{}, err
+	}
+	roots, err := s.openRooted(true)
+	if err != nil {
+		return app.StoredSession{}, err
+	}
+	defer func() { _ = roots.close() }()
+	if s.beforeRootedMutation != nil {
+		s.beforeRootedMutation()
+		s.beforeRootedMutation = nil
+		if err := roots.revalidate(); err != nil {
+			return app.StoredSession{}, err
+		}
+	}
+	lock, err := lockRootedSession(roots.store, name)
+	if err != nil {
+		return app.StoredSession{}, err
+	}
+	defer func() { _ = lock.Unlock() }()
+	if _, err := roots.store.Lstat(name); err == nil {
+		return app.StoredSession{}, &app.ApplicationError{Code: app.ErrorSessionConflict, Message: "session already exists"}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return app.StoredSession{}, err
+	}
+	file, err := roots.store.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return app.StoredSession{}, err
+	}
+	if err := appendSessionLine(file, sessionLine{Version: 1, Metadata: &metadata}); err != nil {
+		_ = file.Close()
+		return app.StoredSession{}, err
+	}
+	if err := file.Close(); err != nil {
+		return app.StoredSession{}, err
+	}
+	if err := roots.revalidate(); err != nil {
+		return app.StoredSession{}, err
+	}
+	return app.StoredSession{Metadata: metadata, Version: 1}, nil
+}
+
+func (s *FilesystemSessionStore) loadRooted(id app.SessionID) (app.StoredSession, error) {
+	name, err := rootedSessionName(id)
+	if err != nil {
+		return app.StoredSession{}, err
+	}
+	roots, err := s.openRooted(false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return app.StoredSession{}, fmt.Errorf("%w: %s", app.ErrSessionNotFound, id)
+	}
+	if err != nil {
+		return app.StoredSession{}, err
+	}
+	defer func() { _ = roots.close() }()
+	lock, err := lockRootedSession(roots.store, name)
+	if err != nil {
+		return app.StoredSession{}, err
+	}
+	defer func() { _ = lock.Unlock() }()
+	return loadRootedSession(roots.store, name, id)
+}
+
+func loadRootedSession(root *os.Root, name string, id app.SessionID) (app.StoredSession, error) {
+	file, err := openRootedRegular(root, name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return app.StoredSession{}, fmt.Errorf("%w: %s", app.ErrSessionNotFound, id)
+	}
+	if err != nil {
+		return app.StoredSession{}, err
+	}
+	defer func() { _ = file.Close() }()
+	format, err := classifySessionHandle(file)
+	if err != nil {
+		return app.StoredSession{}, err
+	}
+	if format != sessionFormatCurrent {
+		return app.StoredSession{}, sessionMigrationRequired()
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return app.StoredSession{}, err
+	}
+	return decodeStoredSession(file, id)
+}
+
+func decodeStoredSession(file io.Reader, id app.SessionID) (app.StoredSession, error) {
+	var stored app.StoredSession
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	lineNumber := 0
+	for scanner.Scan() {
+		lineNumber++
+		var line sessionLine
+		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
+			return app.StoredSession{}, fmt.Errorf("sdd: decoding session %s line %d: %w", id, lineNumber, err)
+		}
+		if line.Version != uint64(lineNumber) {
+			return app.StoredSession{}, fmt.Errorf("sdd: session %s has non-sequential version %d at line %d", id, line.Version, lineNumber)
+		}
+		if line.Metadata != nil {
+			stored.Metadata = *line.Metadata
+		}
+		stored.Events = append(stored.Events, line.Events...)
+		stored.Version = line.Version
+	}
+	if err := scanner.Err(); err != nil {
+		return app.StoredSession{}, err
+	}
+	if lineNumber == 0 || stored.Metadata.ID != id {
+		return app.StoredSession{}, fmt.Errorf("sdd: invalid or empty session %s", id)
+	}
+	return stored, nil
+}
+
+func (s *FilesystemSessionStore) listRooted(filter app.SessionFilter) ([]app.StoredSession, error) {
+	roots, err := s.openRooted(false)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = roots.close() }()
+	entries, err := fs.ReadDir(roots.store.FS(), ".")
+	if err != nil {
+		return nil, err
+	}
+	var sessions []app.StoredSession
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		id := app.SessionID(strings.TrimSuffix(entry.Name(), ".jsonl"))
+		probe, err := openRootedRegular(roots.store, entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		format, classifyErr := classifySessionHandle(probe)
+		closeErr := probe.Close()
+		if err := errors.Join(classifyErr, closeErr); err != nil {
+			return nil, err
+		}
+		if format != sessionFormatCurrent {
+			continue
+		}
+		lock, err := lockRootedSession(roots.store, entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		stored, loadErr := loadRootedSession(roots.store, entry.Name(), id)
+		unlockErr := lock.Unlock()
+		if err := errors.Join(loadErr, unlockErr); err != nil {
+			return nil, err
+		}
+		if filter.Subject != "" && stored.Metadata.Subject != filter.Subject {
+			continue
+		}
+		if filter.Project != "" && stored.Metadata.Project != filter.Project {
+			continue
+		}
+		sessions = append(sessions, stored)
+	}
+	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Metadata.ID < sessions[j].Metadata.ID })
+	return sessions, roots.revalidate()
+}
+
+func (s *FilesystemSessionStore) appendRooted(
+	id app.SessionID,
+	expectedVersion uint64,
+	appendData app.SessionAppend,
+) (uint64, error) {
+	name, err := rootedSessionName(id)
+	if err != nil {
+		return 0, err
+	}
+	roots, err := s.openRooted(false)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = roots.close() }()
+	if s.beforeRootedMutation != nil {
+		s.beforeRootedMutation()
+		s.beforeRootedMutation = nil
+		if err := roots.revalidate(); err != nil {
+			return 0, err
+		}
+	}
+	lock, err := lockRootedSession(roots.store, name)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = lock.Unlock() }()
+	stored, err := loadRootedSession(roots.store, name, id)
+	if err != nil {
+		return 0, err
+	}
+	if stored.Version != expectedVersion {
+		return stored.Version, &app.ApplicationError{Code: app.ErrorSessionConflict, Message: "session version changed"}
+	}
+	if appendData.Metadata != nil {
+		if appendData.Metadata.ID != id || appendData.Metadata.Subject != stored.Metadata.Subject ||
+			appendData.Metadata.Project != stored.Metadata.Project {
+			return stored.Version, &app.ApplicationError{Code: app.ErrorSessionOwnership, Message: "session identity and project are immutable"}
+		}
+	}
+	file, err := roots.store.OpenFile(name, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	next := stored.Version + 1
+	if err := appendSessionLine(file, sessionLine{
+		Version: next, Metadata: appendData.Metadata, Events: appendData.Events,
+	}); err != nil {
+		_ = file.Close()
+		return 0, err
+	}
+	if err := file.Close(); err != nil {
+		return 0, err
+	}
+	if err := roots.revalidate(); err != nil {
+		return 0, err
+	}
+	return next, nil
 }
 
 func (s *FilesystemSessionStore) lock(id app.SessionID) (*flock.Flock, error) {
@@ -263,7 +546,13 @@ func classifySessionFile(filename string) (sessionFormat, error) {
 		return sessionFormatLegacy, err
 	}
 	defer func() { _ = file.Close() }()
+	return classifySessionHandle(file)
+}
 
+func classifySessionHandle(file *os.File) (sessionFormat, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return sessionFormatLegacy, err
+	}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {

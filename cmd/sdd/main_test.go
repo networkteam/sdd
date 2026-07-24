@@ -10,28 +10,74 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-func TestChooseLegacySessionMigrationRequiresExplicitNonInteractiveOptIn(t *testing.T) {
+func TestSessionStoreCollisionMessageIsSourceNeutral(t *testing.T) {
+	message := sessionStoreCollisionMessage("/old-global/session.jsonl", "/desired/session.jsonl")
+	if strings.Contains(message, "in-tree") || !strings.Contains(message, "source-store relocation") {
+		t.Fatalf("source-specific collision message = %q", message)
+	}
+}
+
+func TestChooseSessionStoreRelocationRequiresExplicitNonInteractiveOptIn(t *testing.T) {
 	promptCalls := 0
-	prompt := func(int) (bool, error) {
+	prompt := func() (bool, error) {
 		promptCalls++
 		return true, nil
 	}
 
-	got, err := chooseLegacySessionMigration(2, false, false, prompt)
+	got, err := chooseSessionStoreRelocation(true, false, false, prompt)
 	if err != nil || got || promptCalls != 0 {
 		t.Fatalf("non-interactive choice = %v, %v; prompt calls %d", got, err, promptCalls)
 	}
-	got, err = chooseLegacySessionMigration(2, true, false, prompt)
+	got, err = chooseSessionStoreRelocation(true, true, false, prompt)
 	if err != nil || !got || promptCalls != 0 {
 		t.Fatalf("explicit non-interactive choice = %v, %v; prompt calls %d", got, err, promptCalls)
 	}
-	got, err = chooseLegacySessionMigration(2, false, true, prompt)
+	got, err = chooseSessionStoreRelocation(true, false, true, prompt)
 	if err != nil || !got || promptCalls != 1 {
 		t.Fatalf("interactive choice = %v, %v; prompt calls %d", got, err, promptCalls)
 	}
-	declined, err := chooseLegacySessionMigration(2, false, true, func(int) (bool, error) { return false, nil })
+	declined, err := chooseSessionStoreRelocation(true, false, true, func() (bool, error) { return false, nil })
 	if err != nil || declined {
 		t.Fatalf("declined interactive choice = %v, %v", declined, err)
+	}
+}
+
+func TestSessionStoreTransitionSummaryDescribesActualTransitionKinds(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary sessionStoreTransitionSummary
+		want    []string
+		avoid   string
+	}{
+		{
+			name: "in-tree only", summary: sessionStoreTransitionSummary{InTreePayloads: 2},
+			want: []string{"2 in-tree", "machine-global store"}, avoid: "rekeying",
+		},
+		{
+			name: "old global rekey", summary: sessionStoreTransitionSummary{OldKeyPayloads: 3},
+			want: []string{"3 identity-less global", "rekeying", "repository-ID"}, avoid: "in-tree",
+		},
+		{
+			name: "marker only", summary: sessionStoreTransitionSummary{MarkerOnly: true},
+			want: []string{"previously declined", "remains pending"}, avoid: "payload file",
+		},
+		{
+			name: "old-target tombstone", summary: sessionStoreTransitionSummary{OldTargetTombstone: true},
+			want: []string{"earlier in-tree relocation", "identity-less global store", "repository-ID cutover"}, avoid: "payload file",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := test.summary.description()
+			for _, want := range test.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("description %q lacks %q", got, want)
+				}
+			}
+			if test.avoid != "" && strings.Contains(got, test.avoid) {
+				t.Fatalf("description %q unexpectedly contains %q", got, test.avoid)
+			}
+		})
 	}
 }
 
@@ -98,7 +144,7 @@ func TestParseAttachSpec(t *testing.T) {
 }
 
 func TestParseAttachFlags_PlainPath(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalTempDir(t)
 	f := filepath.Join(tmp, "design.md")
 	if err := os.WriteFile(f, []byte("# Design"), 0644); err != nil {
 		t.Fatal(err)
@@ -120,7 +166,7 @@ func TestParseAttachFlags_PlainPath(t *testing.T) {
 }
 
 func TestParseAttachFlags_SourceTargetMapping(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalTempDir(t)
 	f := filepath.Join(tmp, "tmpXXX.md")
 	if err := os.WriteFile(f, []byte("content"), 0644); err != nil {
 		t.Fatal(err)
@@ -195,7 +241,7 @@ func TestParseAttachFlags_MissingFileError(t *testing.T) {
 }
 
 func TestParseAttachFlags_MultipleAttachments(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalTempDir(t)
 	f1 := filepath.Join(tmp, "a.md")
 	f2 := filepath.Join(tmp, "b.md")
 	if err := os.WriteFile(f1, []byte("a"), 0644); err != nil {

@@ -130,7 +130,7 @@ func TestFilesystemGraphStoreCurrentCannotObservePartialBatch(t *testing.T) {
 
 func atomicGraphFixture(t *testing.T) (*FilesystemGraphStore, string, app.MutationBatch, map[string][]byte) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := canonicalTempDir(t)
 	originals := map[string][]byte{
 		"2026/07/13-070000-s-tac-one.md": atomicEntry("First original summary.", "First original body."),
 		"2026/07/13-070100-s-tac-two.md": atomicEntry("Second original summary.", "Second original body."),

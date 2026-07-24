@@ -1261,8 +1261,8 @@ func promptConfirmation(prompt string) (bool, error) {
 	return tui.RunConfirm(tui.ConfirmPrompt{Prompt: prompt})
 }
 
-func chooseLegacySessionMigration(count int, explicit, interactive bool, prompt func(int) (bool, error)) (bool, error) {
-	if count == 0 {
+func chooseSessionStoreRelocation(pending, explicit, interactive bool, prompt func() (bool, error)) (bool, error) {
+	if !pending {
 		return false, nil
 	}
 	if explicit {
@@ -1271,14 +1271,42 @@ func chooseLegacySessionMigration(count int, explicit, interactive bool, prompt 
 	if !interactive {
 		return false, nil
 	}
-	return prompt(count)
+	return prompt()
 }
 
-func promptLegacySessionMigration(count int) (bool, error) {
-	return promptConfirmation(fmt.Sprintf(
-		"%d legacy session(s) need migration. Confirm no session server is currently using this repository and migrate them now?",
-		count,
-	))
+type sessionStoreTransitionSummary struct {
+	InTreePayloads     int
+	OldKeyPayloads     int
+	OldTargetTombstone bool
+	MarkerOnly         bool
+}
+
+func (s sessionStoreTransitionSummary) pending() bool {
+	return s.InTreePayloads > 0 || s.OldKeyPayloads > 0 || s.OldTargetTombstone || s.MarkerOnly
+}
+
+func (s sessionStoreTransitionSummary) description() string {
+	var parts []string
+	if s.InTreePayloads > 0 {
+		parts = append(parts, fmt.Sprintf("%d in-tree session or staged-blob payload file(s) need relocation to the machine-global store", s.InTreePayloads))
+	}
+	if s.OldKeyPayloads > 0 {
+		parts = append(parts, fmt.Sprintf("%d identity-less global session or staged-blob payload file(s) need rekeying to the repository-ID store", s.OldKeyPayloads))
+	}
+	if s.OldTargetTombstone {
+		parts = append(parts, "an earlier in-tree relocation still points at the identity-less global store and needs repository-ID cutover")
+	}
+	if s.MarkerOnly {
+		parts = append(parts, "a previously declined old-key to repository-ID transition remains pending")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func promptSessionStoreRelocation(summary sessionStoreTransitionSummary) (bool, error) {
+	return promptConfirmation(
+		summary.description() +
+			". Stop every `sdd serve` process using this repository and restart its agent sessions before continuing. Relocate now?",
+	)
 }
 
 func initCmd() *cli.Command {
@@ -1317,7 +1345,7 @@ func initCmd() *cli.Command {
 			},
 			&cli.BoolFlag{
 				Name:  "migrate-sessions",
-				Usage: "Migrate all legacy sessions; acknowledges that no session server is actively using this repository",
+				Usage: "Acknowledge offline session-store relocation after stopping sdd serve processes and restarting agent sessions; also migrate legacy formats",
 			},
 		},
 		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
@@ -1355,7 +1383,10 @@ func initCmd() *cli.Command {
 			if sddExists {
 				// Overlay-aware: a participant configured globally counts
 				// as configured, so init does not demand a per-repo one.
-				existingMerged, _ = resolveConfigAt(sddDir)
+				existingMerged, err = resolveConfigAt(sddDir)
+				if err != nil {
+					return fmt.Errorf("resolving existing configuration before init: %w", err)
+				}
 			}
 			recordedParticipant := ""
 			if existingMerged != nil {
@@ -1376,29 +1407,86 @@ func initCmd() *cli.Command {
 				}
 			}
 
-			var sessionMigrator handlers.LegacySessionMigrator
-			var legacySessionPaths []string
-			if sddExists {
-				project := sdd.ProjectID("local")
-				if existingMerged != nil && existingMerged.RepoID != "" {
-					project = sdd.ProjectID(existingMerged.RepoID)
-				} else if repoID, deriveErr := model.DeriveRepoID(remoteURL); deriveErr == nil {
-					project = sdd.ProjectID(repoID)
-				}
-				migrator, err := localadapter.NewFilesystemLegacySessionMigrator(
-					filepath.Join(sddDir, "sessions"),
-					filepath.Join(sddDir, "staged-blobs"),
-					"local",
-					project,
+			storeCfg, project := sessionStoreIdentity(existingMerged, remoteURL)
+			locations, err := repos.DefaultLocations()
+			if err != nil {
+				return err
+			}
+			globalPaths, err := resolveLocalStorePaths(sddDir, storeCfg, locations)
+			if err != nil {
+				return err
+			}
+			transition := globalPaths.Transition
+			sessionMigrator, err := localadapter.NewFilesystemLegacySessionMigratorAtStateRoot(
+				locations.StateRoot,
+				globalPaths.Sessions, globalPaths.StagedBlobs, "local",
+				routedSessionProject(storeCfg, globalPaths),
+			)
+			if err != nil {
+				return fmt.Errorf("preparing legacy session migration: %w", err)
+			}
+			relocatedSessionMigrator, err := localadapter.NewFilesystemLegacySessionMigratorAtStateRoot(
+				locations.StateRoot,
+				globalPaths.DesiredSessions, globalPaths.DesiredBlobs, "local", project,
+			)
+			if err != nil {
+				_ = sessionMigrator.Close()
+				return fmt.Errorf("preparing relocated legacy session migration: %w", err)
+			}
+			var (
+				preRelocationMigrators []handlers.LegacySessionMigrator
+				preMigrationClosers    []*localadapter.FilesystemLegacySessionMigrator
+			)
+			if len(globalPaths.OldLegacySessions) > 0 {
+				oldMigrator, err := localadapter.NewFilesystemLegacySessionMigratorAtStateRoot(
+					locations.StateRoot,
+					globalPaths.OldSessions, globalPaths.OldBlobs, "local", "local",
 				)
 				if err != nil {
-					return fmt.Errorf("preparing legacy session migration: %w", err)
+					_ = sessionMigrator.Close()
+					_ = relocatedSessionMigrator.Close()
+					return fmt.Errorf("preparing old-store legacy recovery: %w", err)
 				}
-				sessionMigrator = migrator
-				legacySessionPaths, err = migrator.ListLegacySessions(ctx)
+				preRelocationMigrators = append(preRelocationMigrators, oldMigrator)
+				preMigrationClosers = append(preMigrationClosers, oldMigrator)
+			}
+			if len(globalPaths.InTreeLegacySessions) > 0 {
+				inTreeMigrator, err := localadapter.NewFilesystemLegacySessionMigrator(
+					filepath.Join(sddDir, "sessions"), filepath.Join(sddDir, "staged-blobs"),
+					"local", "local",
+				)
 				if err != nil {
-					return fmt.Errorf("detecting legacy sessions: %w", err)
+					_ = sessionMigrator.Close()
+					_ = relocatedSessionMigrator.Close()
+					for _, closer := range preMigrationClosers {
+						_ = closer.Close()
+					}
+					return fmt.Errorf("preparing in-tree legacy recovery: %w", err)
 				}
+				preRelocationMigrators = append(preRelocationMigrators, inTreeMigrator)
+				preMigrationClosers = append(preMigrationClosers, inTreeMigrator)
+			}
+			sources, authorizedOldSource := relocationSourcesForInit(globalPaths, sddDir)
+			sessionRelocator, err := localadapter.NewFilesystemSessionStoreRelocator(
+				localadapter.FilesystemSessionStoreRelocatorOptions{
+					Sources:                   sources,
+					AuthorizedOldGlobalSource: &authorizedOldSource,
+					TrustedStateRoot:          locations.StateRoot,
+					StableRepoAuthority:       globalPaths.StableRepoAuthority,
+					AuthorizeInTreeSource: func(ctx context.Context, authority, sessions, blobs string) error {
+						return git.AuthorizeInTreeSessionSource(ctx, repoRoot, authority, sessions, blobs)
+					},
+					TargetSessions: globalPaths.DesiredSessions, TargetBlobs: globalPaths.DesiredBlobs,
+					TargetProject: project, Transformer: sdd.CurrentSessionIdentityTransformer{}, Transition: transition,
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("preparing session store relocation: %w", err)
+			}
+
+			legacySessionPaths, err := sessionMigrator.ListLegacySessions(ctx)
+			if err != nil {
+				return fmt.Errorf("detecting machine-global legacy sessions: %w", err)
 			}
 
 			// Aggregated non-interactive error (AC 5): a single message
@@ -1502,34 +1590,63 @@ func initCmd() *cli.Command {
 				targets = chosen
 			}
 
-			migrateSessions, err := chooseLegacySessionMigration(
-				len(legacySessionPaths),
-				cmd.Bool("migrate-sessions"),
-				isTerminal(os.Stdin),
-				promptLegacySessionMigration,
-			)
-			if err != nil {
-				return fmt.Errorf("prompt: %w", err)
+			transitionSummary := sessionStoreTransitionSummary{
+				InTreePayloads: len(globalPaths.InTreeMaterial) +
+					len(globalPaths.InTreeLegacySessions),
+			}
+			if globalPaths.DesiredKey != globalPaths.OldKey {
+				transitionSummary.OldKeyPayloads =
+					len(globalPaths.OldMaterial) + len(globalPaths.OldLegacySessions)
+				transitionSummary.OldTargetTombstone = globalPaths.InTreeTombstoneNeedsUpdate
+				transitionSummary.MarkerOnly = globalPaths.PendingIdentity &&
+					len(globalPaths.InTreeMaterial) == 0 &&
+					len(globalPaths.InTreeLegacySessions) == 0 &&
+					len(globalPaths.OldMaterial) == 0 &&
+					len(globalPaths.OldLegacySessions) == 0 &&
+					!globalPaths.InTreeTombstoneNeedsUpdate
+			}
+			relocateSessions := globalPaths.Interrupted
+			if !relocateSessions {
+				relocateSessions, err = chooseSessionStoreRelocation(
+					transitionSummary.pending(),
+					cmd.Bool("migrate-sessions"),
+					isTerminal(os.Stdin),
+					func() (bool, error) { return promptSessionStoreRelocation(transitionSummary) },
+				)
+				if err != nil {
+					return fmt.Errorf("prompt: %w", err)
+				}
+			}
+			migrateSessions := cmd.Bool("migrate-sessions") || relocateSessions
+			if transitionSummary.pending() && !relocateSessions {
+				fmt.Fprintf(os.Stderr, "  %s; left unchanged. Stop `sdd serve`, restart agent sessions, then rerun with --migrate-sessions\n", transitionSummary.description())
 			}
 			if len(legacySessionPaths) > 0 && !migrateSessions {
-				fmt.Fprintf(os.Stderr, "  %d legacy session(s) need migration and were left unchanged; after stopping all session servers, rerun with --migrate-sessions\n", len(legacySessionPaths))
+				fmt.Fprintf(os.Stderr, "  %d machine-global legacy session(s) were left unchanged; rerun with --migrate-sessions after stopping session servers\n", len(legacySessionPaths))
 			}
 
+			stableRepoRoot, err := git.StableRepoRoot(repoRoot)
+			if err != nil {
+				return err
+			}
 			icmd := &command.InitCmd{
-				RepoRoot:              repoRoot,
-				GraphDir:              graphDir,
-				DefaultBranch:         defaultBranch,
-				Participant:           participant,
-				Language:              language,
-				BinaryVersion:         version,
-				Targets:               targets,
-				Scope:                 scope,
-				ScopeExplicit:         scopeExplicit,
-				UserHome:              userHome,
-				RemoteURL:             remoteURL,
-				Force:                 cmd.Bool("force"),
-				Bump:                  cmd.Bool("bump"),
-				MigrateLegacySessions: migrateSessions,
+				RepoRoot:                repoRoot,
+				StableRepoRoot:          stableRepoRoot,
+				GraphDir:                graphDir,
+				DefaultBranch:           defaultBranch,
+				Participant:             participant,
+				Language:                language,
+				BinaryVersion:           version,
+				Targets:                 targets,
+				Scope:                   scope,
+				ScopeExplicit:           scopeExplicit,
+				UserHome:                userHome,
+				RemoteURL:               remoteURL,
+				Force:                   cmd.Bool("force"),
+				Bump:                    cmd.Bool("bump"),
+				MigrateLegacySessions:   migrateSessions,
+				RelocateSessionStore:    relocateSessions,
+				HoldSessionStoreRouting: globalPaths.PendingIdentity,
 				OnMinimumVersionBumped: func(previous, current string) {
 					if previous == "" {
 						fmt.Printf("  minimum_version: → %s\n", current)
@@ -1594,6 +1711,12 @@ func initCmd() *cli.Command {
 				OnSessionMigrated: func(path string) {
 					fmt.Printf("  session migrated: %s\n", path)
 				},
+				OnSessionStoreRelocated: func(source, destination string) {
+					fmt.Printf("  session state relocated: %s → %s\n", source, destination)
+				},
+				OnSessionStoreCollision: func(source, destination string) {
+					fmt.Fprintln(os.Stderr, sessionStoreCollisionMessage(source, destination))
+				},
 			}
 
 			reader, err := newReadFinder()
@@ -1605,18 +1728,36 @@ func initCmd() *cli.Command {
 				return err
 			}
 			handler := handlers.New(handlers.Options{
-				Reader:    reader,
-				Committer: git.CLI{},
-				Repos:     mgr,
-				Sessions:  sessionMigrator,
+				Reader:                          reader,
+				Committer:                       git.CLI{},
+				Repos:                           mgr,
+				Sessions:                        sessionMigrator,
+				PreRelocationSessions:           preRelocationMigrators,
+				PreRelocationRecoveryConfigured: true,
+				RelocatedSessions:               relocatedSessionMigrator,
+				Relocator:                       sessionRelocator,
 			})
-			if err := handler.Init(ctx, icmd); err != nil {
+			initErr := handler.Init(ctx, icmd)
+			closeErrs := []error{
+				initErr, sessionMigrator.Close(), relocatedSessionMigrator.Close(),
+			}
+			for _, closer := range preMigrationClosers {
+				closeErrs = append(closeErrs, closer.Close())
+			}
+			if err := errors.Join(closeErrs...); err != nil {
 				return err
 			}
 			notifyUnconnectedDependencies(sddDir)
 			return nil
 		}),
 	}
+}
+
+func sessionStoreCollisionMessage(source, destination string) string {
+	return fmt.Sprintf(
+		"  session state collision: %s conflicts with %s; the acknowledged source-store relocation remains pending and no conflicting state was overwritten",
+		source, destination,
+	)
 }
 
 // notifyUnconnectedDependencies reports declared dependencies that have no

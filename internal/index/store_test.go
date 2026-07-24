@@ -3,11 +3,14 @@ package index
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	gitadapter "github.com/networkteam/sdd/internal/git"
 )
 
 func TestRepoKey(t *testing.T) {
@@ -24,6 +27,47 @@ func TestRepoKey(t *testing.T) {
 	}
 	if again := RepoKey("", "/home/u/project-a"); again != a {
 		t.Errorf("keying must be deterministic: %q vs %q", again, a)
+	}
+}
+
+func TestRepoKeyIdentityLessWorktreeInvariant(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "--quiet", "--initial-branch=main")
+	run("config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(root, "seed"), []byte("seed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "seed")
+	run("commit", "--quiet", "-m", "seed")
+	worktree := filepath.Join(t.TempDir(), "linked")
+	run("worktree", "add", "--quiet", "-b", "linked", worktree)
+
+	baseStableRoot, err := gitadapter.StableRepoRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktreeStableRoot, err := gitadapter.StableRepoRoot(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseKey := RepoKey("", baseStableRoot)
+	worktreeKey := RepoKey("", worktreeStableRoot)
+	if baseKey != worktreeKey {
+		t.Fatalf("identity-less worktree keys differ: %q vs %q", baseKey, worktreeKey)
 	}
 }
 

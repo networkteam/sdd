@@ -91,7 +91,7 @@ func TestServeUsesPersistentMachineGlobalIndex(t *testing.T) {
 	server := httptest.NewServer(ollama)
 	defer server.Close()
 
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	graphRel := filepath.Join(".sdd", "graph")
 	graphDir := filepath.Join(root, graphRel)
 	if err := os.MkdirAll(graphDir, 0o755); err != nil {

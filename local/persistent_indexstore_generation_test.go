@@ -12,7 +12,7 @@ import (
 // reload the snapshot exactly once, and a write bumps the generation so the
 // next read reloads exactly once more.
 func TestPersistentStoreReusesSnapshotUntilWrite(t *testing.T) {
-	cacheRoot := t.TempDir()
+	cacheRoot := canonicalTempDir(t)
 	const project = app.ProjectID("gen")
 	ns := app.IndexNamespace{Project: project, Fingerprint: "fp", Metric: "cosine"}
 	store := NewPersistentSearchIndexStore(project, cacheRoot, "gen/repo")

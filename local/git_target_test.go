@@ -29,7 +29,7 @@ func TestMatchingWorktreesExactBranchAndDetached(t *testing.T) {
 
 func TestGitWorktreeAcquirerRejectsMultipleMatchesAndChangedHEAD(t *testing.T) {
 	acquirer, err := NewGitWorktreeAcquirer(GitWorktreeAcquirerOptions{
-		Project: "example", ServerCheckout: t.TempDir(),
+		Project: "example", ServerCheckout: canonicalTempDir(t),
 		Factory: func(context.Context, string, app.MutationTarget) (app.GraphStore, []app.MutationFinalizer, func() error, error) {
 			t.Fatal("factory must not run for an invalid checkout")
 			return nil, nil, nil, nil
@@ -71,7 +71,7 @@ func TestGitWorktreeAcquirerRejectsMultipleMatchesAndChangedHEAD(t *testing.T) {
 }
 
 func TestGitWorktreeAcquirerResolvesRegisteredCheckoutAndReleases(t *testing.T) {
-	repo := t.TempDir()
+	repo := canonicalTempDir(t)
 	runGitTargetTest(t, repo, "init", "-b", "main")
 	runGitTargetTest(t, repo, "config", "user.name", "Test")
 	runGitTargetTest(t, repo, "config", "user.email", "test@example.invalid")
@@ -81,7 +81,7 @@ func TestGitWorktreeAcquirerResolvesRegisteredCheckoutAndReleases(t *testing.T) 
 	}
 	runGitTargetTest(t, repo, "add", "README.md")
 	runGitTargetTest(t, repo, "commit", "-m", "fixture")
-	worktree := filepath.Join(t.TempDir(), "feature")
+	worktree := filepath.Join(canonicalTempDir(t), "feature")
 	runGitTargetTest(t, repo, "worktree", "add", "-b", "feature", worktree)
 	graph, err := NewFilesystemGraphStore(FilesystemGraphStoreOptions{Project: "example", GraphDir: filepath.Join(worktree, ".sdd", "graph")})
 	if err != nil {
