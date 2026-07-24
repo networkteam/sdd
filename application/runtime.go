@@ -21,6 +21,7 @@ type ProjectRuntimeOptions struct {
 	Dependencies  []string
 	Graph         GraphStore
 	Targets       TargetAcquirer
+	Branches      BranchValidator
 	Recovery      RecoveryAuthorizer
 	Sessions      SessionStore
 	StagedBlobs   StagedBlobStore

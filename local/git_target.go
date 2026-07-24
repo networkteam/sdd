@@ -44,27 +44,9 @@ func runGitTargetCommand(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func (a *GitWorktreeAcquirer) Acquire(ctx context.Context, target app.MutationTarget) (*app.AcquiredTarget, error) {
-	if err := target.Validate(a.project); err != nil {
+	checkout, err := a.resolveCheckout(ctx, target)
+	if err != nil {
 		return nil, err
-	}
-	if output, err := a.runGit(ctx, "check-ref-format", "--branch", target.Branch); err != nil {
-		return nil, fmt.Errorf("sdd: invalid mutation target branch %q: %s (%w)", target.Branch, strings.TrimSpace(string(output)), err)
-	}
-	output, err := a.runGit(ctx, "-C", a.serverCheckout, "worktree", "list", "--porcelain", "-z")
-	if err != nil {
-		return nil, fmt.Errorf("sdd: listing registered worktrees: %w", err)
-	}
-	matches := matchingWorktrees(output, "refs/heads/"+target.Branch)
-	if len(matches) != 1 {
-		return nil, fmt.Errorf("sdd: mutation target branch %q must have exactly one registered checkout (found %d)", target.Branch, len(matches))
-	}
-	checkout := matches[0]
-	head, err := a.runGit(ctx, "-C", checkout, "symbolic-ref", "--quiet", "HEAD")
-	if err != nil {
-		return nil, fmt.Errorf("sdd: mutation target checkout %q is detached or unreadable: %w", checkout, err)
-	}
-	if actual := strings.TrimSpace(string(head)); actual != "refs/heads/"+target.Branch {
-		return nil, fmt.Errorf("sdd: mutation target checkout HEAD changed: got %q, want %q", actual, "refs/heads/"+target.Branch)
 	}
 	graph, finalizers, release, err := a.factory(ctx, checkout, target)
 	if err != nil {
@@ -74,6 +56,39 @@ func (a *GitWorktreeAcquirer) Acquire(ctx context.Context, target app.MutationTa
 		release = func() error { return nil }
 	}
 	return &app.AcquiredTarget{Target: target, Graph: graph, Finalizers: finalizers, Release: release}, nil
+}
+
+// ValidateBranch applies the live acquisition rule without opening graph
+// adapters or finalizers.
+func (a *GitWorktreeAcquirer) ValidateBranch(ctx context.Context, target app.MutationTarget) error {
+	_, err := a.resolveCheckout(ctx, target)
+	return err
+}
+
+func (a *GitWorktreeAcquirer) resolveCheckout(ctx context.Context, target app.MutationTarget) (string, error) {
+	if err := target.Validate(a.project); err != nil {
+		return "", err
+	}
+	if output, err := a.runGit(ctx, "check-ref-format", "--branch", target.Branch); err != nil {
+		return "", fmt.Errorf("sdd: invalid mutation target branch %q: %s (%w)", target.Branch, strings.TrimSpace(string(output)), err)
+	}
+	output, err := a.runGit(ctx, "-C", a.serverCheckout, "worktree", "list", "--porcelain", "-z")
+	if err != nil {
+		return "", fmt.Errorf("sdd: listing registered worktrees: %w", err)
+	}
+	matches := matchingWorktrees(output, "refs/heads/"+target.Branch)
+	if len(matches) != 1 {
+		return "", fmt.Errorf("sdd: mutation target branch %q must have exactly one registered checkout (found %d)", target.Branch, len(matches))
+	}
+	checkout := matches[0]
+	head, err := a.runGit(ctx, "-C", checkout, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("sdd: mutation target checkout %q is detached or unreadable: %w", checkout, err)
+	}
+	if actual := strings.TrimSpace(string(head)); actual != "refs/heads/"+target.Branch {
+		return "", fmt.Errorf("sdd: mutation target checkout HEAD changed: got %q, want %q", actual, "refs/heads/"+target.Branch)
+	}
+	return checkout, nil
 }
 
 func matchingWorktrees(output []byte, branchRef string) []string {

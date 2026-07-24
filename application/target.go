@@ -57,6 +57,20 @@ func (f TargetAcquirerFunc) Acquire(ctx context.Context, target MutationTarget) 
 	return f(ctx, target)
 }
 
+// BranchValidator resolves branch authority without opening graph adapters or
+// finalizers. It is the declare-time half of TargetAcquirer: local
+// compositions use the same live checkout rule for both.
+type BranchValidator interface {
+	ValidateBranch(context.Context, MutationTarget) error
+}
+
+// BranchValidatorFunc adapts a function to BranchValidator.
+type BranchValidatorFunc func(context.Context, MutationTarget) error
+
+func (f BranchValidatorFunc) ValidateBranch(ctx context.Context, target MutationTarget) error {
+	return f(ctx, target)
+}
+
 // FixedTargetAcquirer is a small composition adapter for stores whose one
 // configured runtime already represents a concrete target. It exact-matches
 // the target and never interprets cwd.

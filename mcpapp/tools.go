@@ -95,6 +95,7 @@ type ChooserResult struct {
 // stands, what advances it, and the material to work with.
 type ServeResult struct {
 	Session        string            `json:"session" jsonschema:"session handle; sessions survive restarts and resume via resume_session"`
+	Branch         string            `json:"branch,omitempty" jsonschema:"the session's declared branch binding"`
 	Instance       string            `json:"instance"`
 	Procedure      string            `json:"procedure"`
 	Status         string            `json:"status" jsonschema:"running, completed, or abandoned"`
@@ -119,6 +120,7 @@ type ServeResult struct {
 // schema acyclic.
 type BaseServe struct {
 	Session        string         `json:"session"`
+	Branch         string         `json:"branch,omitempty"`
 	Instance       string         `json:"instance"`
 	Procedure      string         `json:"procedure"`
 	Status         string         `json:"status"`
@@ -155,9 +157,21 @@ type ResumeSessionResult struct {
 	Session      string        `json:"session"`
 	Participant  string        `json:"participant,omitempty"`
 	Label        string        `json:"label,omitempty" jsonschema:"the session's subject label, when one was recorded"`
+	Branch       string        `json:"branch,omitempty" jsonschema:"the session's declared branch binding"`
 	Open         []ServeResult `json:"open_instances" jsonschema:"current serve for every running instance; the session shell's serve carries the open-threads block"`
 	Framing      string        `json:"framing,omitempty"`
 	Instructions string        `json:"instructions,omitempty"`
+}
+
+type BindBranchArgs struct {
+	Session string `json:"session" jsonschema:"session handle this connection is attached to"`
+	Branch  string `json:"branch,omitempty" jsonschema:"branch to bind this session to"`
+	Clear   bool   `json:"clear,omitempty" jsonschema:"clear the current branch binding"`
+}
+
+type BindBranchResult struct {
+	Branch string `json:"branch,omitempty" jsonschema:"the now-effective branch binding; empty after clear"`
+	Status string `json:"status"`
 }
 
 type StageAttachmentArgs struct {
@@ -331,6 +345,13 @@ func (s *Server) registerTools() {
 			"dropped them, pass fullReplay:true for the complete re-serve. Omit session while unattached " +
 			"and the rejection carries the sessions with open work to attach to.",
 	}, s.resumeSession)
+
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "bind_branch",
+		Description: "Declare or clear the attached session's durable branch binding. Pass exactly one of " +
+			"branch or clear:true. Setting validates the live registered checkout before changing the " +
+			"session; clearing needs no branch capability.",
+	}, s.bindBranch)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "stage_attachment",
@@ -650,7 +671,7 @@ func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ L
 		}
 		desc := sessionDescriptor{
 			Session: string(item.Session), Label: item.Label, Participant: item.Participant,
-			Anchor: item.Anchor, Activity: activityTag(item.Active),
+			Branch: item.Branch, Anchor: item.Anchor, Activity: activityTag(item.Active),
 		}
 		if item.Attachment != nil {
 			desc.ClientName = item.Attachment.ClientName
@@ -735,6 +756,29 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 	current.rootIdentity = identity
 	mapped, err := s.mapRootResume(ctx, req, current, result)
 	return nil, mapped, err
+}
+
+func (s *Server) bindBranch(ctx context.Context, req *mcp.CallToolRequest, args BindBranchArgs) (*mcp.CallToolResult, BindBranchResult, error) {
+	if args.Branch != strings.TrimSpace(args.Branch) {
+		return nil, BindBranchResult{}, toolError("branch must not have leading or trailing whitespace")
+	}
+	if (args.Branch != "") == args.Clear {
+		return nil, BindBranchResult{}, toolError("pass exactly one of a nonblank branch or clear=true")
+	}
+	ss, err := s.attachedSession(ctx, req, args.Session)
+	if err != nil {
+		return nil, BindBranchResult{}, err
+	}
+	identity := s.requestIdentity(req)
+	if err := ss.root.BindBranch(ctx, identity, args.Branch, args.Clear); err != nil {
+		return nil, BindBranchResult{}, err
+	}
+	ss.rootIdentity = identity
+	status := "bound"
+	if args.Clear {
+		status = "cleared"
+	}
+	return nil, BindBranchResult{Branch: ss.root.Branch(), Status: status}, nil
 }
 
 // ensureShellInstance re-derives the session's shell instance after replay
@@ -1121,7 +1165,7 @@ func (s *Server) currentStandingNotice() string {
 // sites, not in this shared converter).
 func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res := ServeResult{
-		Session: string(serve.Session), Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
+		Session: string(serve.Session), Branch: serve.Branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
 		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Execution: serve.Execution,
 		Collected: capCollected(serve.Collected),
@@ -1157,7 +1201,7 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 			return ServeResult{}, err
 		}
 		res.Base = &BaseServe{
-			Session: base.Session, Instance: base.Instance, Procedure: base.Procedure, Status: base.Status,
+			Session: base.Session, Branch: base.Branch, Instance: base.Instance, Procedure: base.Procedure, Status: base.Status,
 			Step: base.Step, Goal: base.Goal, Instructions: base.Instructions, PendingChooser: base.PendingChooser,
 			Framing: base.Framing, OpenThreads: base.OpenThreads,
 		}
@@ -1167,7 +1211,7 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 
 func rootBaseServe(result ServeResult) *BaseServe {
 	return &BaseServe{
-		Session: result.Session, Instance: result.Instance, Procedure: result.Procedure, Status: result.Status,
+		Session: result.Session, Branch: result.Branch, Instance: result.Instance, Procedure: result.Procedure, Status: result.Status,
 		Step: result.Step, Goal: result.Goal, Instructions: result.Instructions, PendingChooser: result.PendingChooser,
 		Framing: result.Framing, OpenThreads: result.OpenThreads,
 	}
@@ -1190,7 +1234,7 @@ func attachNote(source sdd.WorkflowResumeResult) string {
 
 func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, source sdd.WorkflowResumeResult) (ResumeSessionResult, error) {
 	result := ResumeSessionResult{
-		Session: string(source.Session), Participant: source.Participant, Label: source.Label,
+		Session: string(source.Session), Participant: source.Participant, Label: source.Label, Branch: source.Branch,
 		Instructions: attachNote(source) + resumeInstructions,
 	}
 	framing, err := ss.root.Framing(ctx, s.requestIdentity(req))

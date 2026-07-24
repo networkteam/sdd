@@ -286,6 +286,15 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, DefaultBranch: "main", Language: language,
 		Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: func() time.Time { return now },
+		Branches: sdd.BranchValidatorFunc(func(_ context.Context, target sdd.MutationTarget) error {
+			if target.Project != "test" {
+				return fmt.Errorf("unexpected branch project %q", target.Project)
+			}
+			if target.Branch == "missing" {
+				return fmt.Errorf("branch %q has no registered checkout", target.Branch)
+			}
+			return nil
+		}),
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
 			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
@@ -541,12 +550,95 @@ func TestToolSurfaceMatchesSpec(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{
-		"abandon", "info", "list_sessions", "next", "park", "read_attachment",
+		"abandon", "bind_branch", "info", "list_sessions", "next", "park", "read_attachment",
 		"registry", "resume_session", "search", "show", "stage_attachment",
 		"start_procedure", "start_session", "view",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tool surface diverges from spec:\n got %v\nwant %v", got, want)
+	}
+}
+
+func TestBindBranchToolPersistsAndProjectsAcrossResume(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+
+	var bound mcpserver.BindBranchResult
+	call(t, cs, "bind_branch", map[string]any{"session": door.Session, "branch": "feature/session"}, &bound)
+	if bound.Branch != "feature/session" || bound.Status != "bound" {
+		t.Fatalf("bind result = %+v", bound)
+	}
+
+	// A fresh start_session call re-serves this connection's current door and
+	// carries the now-durable branch in the session info.
+	var reopened mcpserver.ServeResult
+	call(t, cs, "start_session", map[string]any{}, &reopened)
+	if reopened.Session != door.Session || reopened.Branch != "feature/session" {
+		t.Fatalf("door projection = %+v", reopened)
+	}
+	if !strings.Contains(reopened.Framing, "Branch binding: feature/session") {
+		t.Fatalf("bound door framing = %q", reopened.Framing)
+	}
+
+	// Keep one move open so the dialogue appears in discovery.
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &serve)
+
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	var listed mcpserver.ListSessionsResult
+	call(t, cs2, "list_sessions", map[string]any{}, &listed)
+	if len(listed.Sessions) != 1 || listed.Sessions[0].Branch != "feature/session" {
+		t.Fatalf("list projection after restart = %+v", listed.Sessions)
+	}
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs2, "resume_session", map[string]any{
+		"session": door.Session, "userWords": "resume the bound branch session",
+	}, &resumed)
+	if resumed.Branch != "feature/session" {
+		t.Fatalf("resume projection = %+v", resumed)
+	}
+	if !strings.Contains(resumed.Framing, "Branch binding: feature/session") {
+		t.Fatalf("fresh resume framing = %q", resumed.Framing)
+	}
+	call(t, cs2, "resume_session", map[string]any{}, &resumed)
+	if resumed.Branch != "feature/session" {
+		t.Fatalf("reorientation projection = %+v", resumed)
+	}
+
+	var cleared mcpserver.BindBranchResult
+	call(t, cs2, "bind_branch", map[string]any{"session": door.Session, "clear": true}, &cleared)
+	if cleared.Branch != "" || cleared.Status != "cleared" {
+		t.Fatalf("clear result = %+v", cleared)
+	}
+}
+
+func TestBindBranchToolValidatesArgumentsAndAttachment(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+
+	for name, args := range map[string]map[string]any{
+		"neither":    {"session": door.Session},
+		"both":       {"session": door.Session, "branch": "feature", "clear": true},
+		"whitespace": {"session": door.Session, "branch": " feature "},
+	} {
+		msg := callExpectError(t, cs, "bind_branch", args)
+		if name == "whitespace" {
+			if !strings.Contains(msg, "whitespace") {
+				t.Fatalf("%s error = %q", name, msg)
+			}
+		} else if !strings.Contains(msg, "exactly one") {
+			t.Fatalf("%s error = %q", name, msg)
+		}
+	}
+
+	unbound := connect(t, env.srv)
+	msg := callExpectError(t, unbound, "bind_branch", map[string]any{"session": door.Session, "branch": "feature"})
+	if !strings.Contains(msg, "not attached") || !strings.Contains(msg, "resume_session") {
+		t.Fatalf("attachment-gate error = %q", msg)
 	}
 }
 
@@ -569,7 +661,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "b95dab3a368a2687961a523885189eda1270a28a1ee44dec8d6847c647b406ce"
+	const want = "fb220018e04c56ef0a5a196e4e29db08c892883bffb775f2901b59dab89eaaf5"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1888,6 +1980,7 @@ func TestWorkToolWrongSessionFunnels(t *testing.T) {
 		"start_procedure":  {"session": foreign, "canonical": "capture"},
 		"next":             {"session": foreign, "instance": serve.Instance, "report": assembleReport()},
 		"park":             {"session": foreign, "instance": serve.Instance},
+		"bind_branch":      {"session": foreign, "branch": "feature"},
 		"stage_attachment": {"session": foreign, "name": "a.md", "content": "x"},
 		"abandon":          {"session": foreign, "instance": serve.Instance},
 	}
