@@ -140,7 +140,7 @@ Branch-targeted workflow reads need to follow the written artifact.
 	implementation = advanceWorkflow(t, workflow, identity, implementation.Instance, map[string]any{"baseBranch": "main"})
 	implementation = advanceWorkflow(t, workflow, identity, implementation.Instance, map[string]any{
 		"chooser": "setup", "choice": "worktree", "userWords": "use a worktree",
-		"fields": map[string]any{"wipDescription": "target-aware workflow reads"},
+		"fields": map[string]any{"wipDescription": "target-aware workflow reads", "worktreeMode": "worktree"},
 	})
 	implementation = advanceWorkflow(t, workflow, identity, implementation.Instance, map[string]any{"workBranch": "explicit"})
 	implementation = advanceWorkflow(t, workflow, identity, implementation.Instance, map[string]any{
