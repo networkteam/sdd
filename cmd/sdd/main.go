@@ -1285,7 +1285,10 @@ func (s sessionStoreTransitionSummary) pending() bool {
 	return s.InTreePayloads > 0 || s.OldKeyPayloads > 0 || s.OldTargetTombstone || s.MarkerOnly
 }
 
-func (s sessionStoreTransitionSummary) description() string {
+// pendingItems enumerates what the transition still owes, one clause per item.
+// Both the non-interactive notice and the interactive prompt render from this
+// single list, so the two surfaces cannot drift apart.
+func (s sessionStoreTransitionSummary) pendingItems() []string {
 	var parts []string
 	if s.InTreePayloads > 0 {
 		parts = append(parts, fmt.Sprintf("%d in-tree session or staged-blob payload file(s) need relocation to the machine-global store", s.InTreePayloads))
@@ -1299,14 +1302,47 @@ func (s sessionStoreTransitionSummary) description() string {
 	if s.MarkerOnly {
 		parts = append(parts, "a previously declined old-key to repository-ID transition remains pending")
 	}
-	return strings.Join(parts, "; ")
+	return parts
 }
 
+func (s sessionStoreTransitionSummary) description() string {
+	return strings.Join(s.pendingItems(), "; ")
+}
+
+// promptHeader gives the census, the precondition, and the question their own
+// lines. Fused into one sentence they read as a status report, which is how the
+// acknowledgement this directive requires (d-tac-g7r) went unnoticed.
+func (s sessionStoreTransitionSummary) promptHeader() string {
+	var b strings.Builder
+	b.WriteString("Session store relocation is pending:\n")
+	for _, item := range s.pendingItems() {
+		fmt.Fprintf(&b, "  - %s\n", item)
+	}
+	b.WriteString("\nStop every `sdd serve` process using this repository and restart its agent sessions before continuing.\n")
+	b.WriteString("\nRelocate now?")
+	return b.String()
+}
+
+// promptSessionStoreRelocation asks as a select rather than a typed y/N: the
+// options are always on screen as their own lines, so the choice cannot hide
+// behind the text that introduces it. Cancelling declines, keeping the safe
+// side of an offline migration the default in every exit path.
 func promptSessionStoreRelocation(summary sessionStoreTransitionSummary) (bool, error) {
-	return promptConfirmation(
-		summary.description() +
-			". Stop every `sdd serve` process using this repository and restart its agent sessions before continuing. Relocate now?",
-	)
+	relocate, err := tui.RunSelect(tui.SelectPrompt[bool]{
+		Header: summary.promptHeader(),
+		Options: []tui.SelectOption[bool]{
+			{Label: "Relocate now", Hint: "move session state to the machine-global store", Value: true},
+			{Label: "Leave unchanged", Hint: "rerun later with --migrate-sessions", Value: false},
+		},
+		Cursor: 1,
+	})
+	if err != nil {
+		if errors.Is(err, tui.ErrPromptCancelled) {
+			return false, nil
+		}
+		return false, err
+	}
+	return relocate, nil
 }
 
 func initCmd() *cli.Command {

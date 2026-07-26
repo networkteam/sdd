@@ -78,7 +78,9 @@ func TestConfirm_YesAndDefaultNo(t *testing.T) {
 
 func TestConfirm_View(t *testing.T) {
 	m := newConfirmPromptModel(ConfirmPrompt{Prompt: "Overwrite user-edited x?"})
-	if got := m.View().Content; !strings.HasPrefix(got, "Overwrite user-edited x? [y/N]: ") {
+	// The affordance sits on its own line so a long prompt cannot push it off
+	// the terminal edge, where bubble tea truncates rather than wraps.
+	if got := m.View().Content; !strings.HasPrefix(got, "Overwrite user-edited x?\n[y/N]: ") {
 		t.Errorf("view = %q", got)
 	}
 }

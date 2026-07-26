@@ -81,6 +81,57 @@ func TestSessionStoreTransitionSummaryDescribesActualTransitionKinds(t *testing.
 	}
 }
 
+// The prompt header is the regression test for the acknowledgement that read as
+// a status line: the census, the precondition and the question have to occupy
+// separate lines, and no single line may be long enough to be truncated at a
+// terminal edge before the reader reaches the question.
+func TestSessionStoreTransitionPromptHeaderSeparatesCensusPreconditionAndQuestion(t *testing.T) {
+	summary := sessionStoreTransitionSummary{InTreePayloads: 145, OldKeyPayloads: 2}
+	header := summary.promptHeader()
+	lines := strings.Split(header, "\n")
+
+	if lines[0] != "Session store relocation is pending:" {
+		t.Errorf("first line = %q, want the heading alone", lines[0])
+	}
+	if got := lines[len(lines)-1]; got != "Relocate now?" {
+		t.Errorf("last line = %q, want the question alone", got)
+	}
+
+	var censusItems, precondition int
+	for _, line := range lines {
+		if strings.HasPrefix(line, "  - ") {
+			censusItems++
+		}
+		if strings.Contains(line, "Stop every `sdd serve` process") {
+			precondition++
+			if strings.Contains(line, "Relocate now?") {
+				t.Error("precondition and question share a line")
+			}
+		}
+	}
+	if censusItems != 2 {
+		t.Errorf("census items = %d, want one line per pending item", censusItems)
+	}
+	if precondition != 1 {
+		t.Errorf("precondition lines = %d, want exactly one", precondition)
+	}
+}
+
+// Both surfaces render from one list, so a pending kind can never appear in the
+// prompt but go missing from the non-interactive notice.
+func TestSessionStoreTransitionDescriptionAndPromptShareTheSameItems(t *testing.T) {
+	summary := sessionStoreTransitionSummary{InTreePayloads: 4, OldKeyPayloads: 1, MarkerOnly: true}
+	header := summary.promptHeader()
+	for _, item := range summary.pendingItems() {
+		if !strings.Contains(summary.description(), item) {
+			t.Errorf("description is missing pending item %q", item)
+		}
+		if !strings.Contains(header, item) {
+			t.Errorf("prompt header is missing pending item %q", item)
+		}
+	}
+}
+
 // TestSplitCSV_TrimsWhitespaceAndDropsEmpty is the regression test for the
 // CSV whitespace-trim bug (s-prc-omw, d-tac-955) and the d-prc-8vh contract
 // requiring regression tests for bug fixes. Before the fix,
