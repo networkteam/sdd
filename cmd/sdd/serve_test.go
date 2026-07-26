@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestLocalGitFinalizerCommitsBatchOnce(t *testing.T) {
-	checkout := t.TempDir()
+	checkout := canonicalTempDir(t)
 	runGit := func(args ...string) string {
 		t.Helper()
 		command := exec.Command("git", append([]string{"-C", checkout}, args...)...)
@@ -111,7 +111,7 @@ func TestLocalHTTPBearerAuth(t *testing.T) {
 }
 
 func TestServeStdioTransport(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	if err := os.MkdirAll(filepath.Join(root, ".sdd", "graph"), 0o755); err != nil {
 		t.Fatal(err)
 	}

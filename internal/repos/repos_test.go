@@ -64,6 +64,7 @@ func TestGlobalConfigRoundTrip(t *testing.T) {
 func TestDefaultLocationsHonorXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-config")
 	t.Setenv("XDG_CACHE_HOME", "/tmp/xdg-cache")
+	t.Setenv("XDG_STATE_HOME", "/tmp/xdg-state")
 
 	loc, err := DefaultLocations()
 	if err != nil {
@@ -74,6 +75,9 @@ func TestDefaultLocationsHonorXDG(t *testing.T) {
 	}
 	if loc.CacheRoot != "/tmp/xdg-cache/sdd" {
 		t.Errorf("CacheRoot = %q", loc.CacheRoot)
+	}
+	if loc.StateRoot != "/tmp/xdg-state/sdd" {
+		t.Errorf("StateRoot = %q", loc.StateRoot)
 	}
 
 	reg := NewRegistry(loc)
@@ -86,6 +90,15 @@ func TestDefaultLocationsHonorXDG(t *testing.T) {
 	}
 	if _, err := reg.CacheDir("not a repo id"); err == nil {
 		t.Error("CacheDir must validate the repo id")
+	}
+}
+
+func TestDefaultLocationsRejectsRelativeStateHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-config")
+	t.Setenv("XDG_CACHE_HOME", "/tmp/xdg-cache")
+	t.Setenv("XDG_STATE_HOME", "relative/state")
+	if _, err := DefaultLocations(); err == nil {
+		t.Fatal("relative XDG_STATE_HOME accepted")
 	}
 }
 

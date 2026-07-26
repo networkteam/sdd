@@ -27,7 +27,7 @@ import (
 //  4. resolves each hit's entry against the current graph and applies filter,
 //     status, supersession, and embedded-entry rules at read time;
 //  5. renders citations from stored hit metadata; fuses with text for hybrid.
-func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, request query.SearchQuery) (*query.SearchResult, error) {
+func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, attachments GraphStore, request query.SearchQuery) (*query.SearchResult, error) {
 	if r.options.Embeddings == nil || r.options.SearchIndex == nil {
 		return nil, errVectorUnavailable
 	}
@@ -43,12 +43,12 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, r
 	// The current state hash of every entry that belongs in the store, computed
 	// once: reconcile compares it against stored versions for presence, and the
 	// read-time filter compares it against each hit's version.
-	hashes, err := r.currentEntryHashes(ctx, snapshot)
+	hashes, err := r.currentEntryHashes(ctx, snapshot, attachments)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := r.reconcileVectorIndex(ctx, snapshot, namespace, hashes); err != nil {
+	if err := r.reconcileVectorIndex(ctx, snapshot, attachments, namespace, hashes); err != nil {
 		return nil, err
 	}
 
@@ -96,8 +96,8 @@ type versionKey struct {
 // through the GraphStore exactly as chunking derives them. Reconcile compares
 // these against stored versions for presence; the read-time filter compares
 // them against each hit's version.
-func (r *ProjectRuntime) currentEntryHashes(ctx context.Context, snapshot *Snapshot) (map[string]string, error) {
-	attachments := graphStoreAttachmentReader{store: r.options.Graph}
+func (r *ProjectRuntime) currentEntryHashes(ctx context.Context, snapshot *Snapshot, store GraphStore) (map[string]string, error) {
+	attachments := graphStoreAttachmentReader{store: store}
 	hashes := make(map[string]string, len(snapshot.graph.Entries))
 	for _, entry := range snapshot.graph.Entries {
 		if !chunking.IncludeEntry(entry, r.options.ExcludeEmbeddedFromIndex) {
@@ -119,7 +119,7 @@ func (r *ProjectRuntime) currentEntryHashes(ctx context.Context, snapshot *Snaps
 // that entry once and ADDS a version — never deleting another. A third-party
 // store without the capability falls back to chunk-identity comparison. Both
 // ignore graph revision and never issue deletes.
-func (r *ProjectRuntime) reconcileVectorIndex(ctx context.Context, snapshot *Snapshot, namespace IndexNamespace, hashes map[string]string) error {
+func (r *ProjectRuntime) reconcileVectorIndex(ctx context.Context, snapshot *Snapshot, attachments GraphStore, namespace IndexNamespace, hashes map[string]string) error {
 	if manifestCap, ok := r.options.SearchIndex.(SearchIndexEntryManifest); ok {
 		indexed, err := manifestCap.IndexedEntries(ctx, namespace)
 		if err != nil {
@@ -139,9 +139,9 @@ func (r *ProjectRuntime) reconcileVectorIndex(ctx context.Context, snapshot *Sna
 			}
 			absent = append(absent, entry)
 		}
-		return r.embedEntries(ctx, snapshot, namespace, absent, hashes, nil)
+		return r.embedEntries(ctx, snapshot, attachments, namespace, absent, hashes, nil)
 	}
-	return r.reconcileByChunkIdentity(ctx, snapshot, namespace, hashes)
+	return r.reconcileByChunkIdentity(ctx, snapshot, attachments, namespace, hashes)
 }
 
 // reconcileByChunkIdentity is the compatibility path for third-party stores
@@ -150,7 +150,7 @@ func (r *ProjectRuntime) reconcileVectorIndex(ctx context.Context, snapshot *Sna
 // store — graph revision ignored, no deletes. Because chunk IDs are now
 // version-qualified, a changed entry produces new IDs and its new version is
 // embedded while old-version rows remain (monotonic).
-func (r *ProjectRuntime) reconcileByChunkIdentity(ctx context.Context, snapshot *Snapshot, namespace IndexNamespace, hashes map[string]string) error {
+func (r *ProjectRuntime) reconcileByChunkIdentity(ctx context.Context, snapshot *Snapshot, attachments GraphStore, namespace IndexNamespace, hashes map[string]string) error {
 	manifest, err := r.options.SearchIndex.Manifest(ctx, namespace)
 	if err != nil {
 		return err
@@ -170,7 +170,7 @@ func (r *ProjectRuntime) reconcileByChunkIdentity(ctx context.Context, snapshot 
 		ref, ok := stored[chunk.ID]
 		return ok && ref.ContentHash == chunk.ContentHash
 	}
-	return r.embedEntries(ctx, snapshot, namespace, entries, hashes, keep)
+	return r.embedEntries(ctx, snapshot, attachments, namespace, entries, hashes, keep)
 }
 
 // embedEntries derives, embeds, and persists the chunks of the given entries
@@ -179,11 +179,11 @@ func (r *ProjectRuntime) reconcileByChunkIdentity(ctx context.Context, snapshot 
 // and are not re-embedded (the compatibility path uses this; the entry-manifest
 // path passes nil because it only ever hands over absent entries). Attachments
 // are read through the GraphStore so MCP and the CLI derive identical content.
-func (r *ProjectRuntime) embedEntries(ctx context.Context, snapshot *Snapshot, namespace IndexNamespace, entries []*model.Entry, hashes map[string]string, skip func(CanonicalChunk) bool) error {
+func (r *ProjectRuntime) embedEntries(ctx context.Context, snapshot *Snapshot, store GraphStore, namespace IndexNamespace, entries []*model.Entry, hashes map[string]string, skip func(CanonicalChunk) bool) error {
 	if len(entries) == 0 {
 		return nil
 	}
-	attachments := graphStoreAttachmentReader{store: r.options.Graph}
+	attachments := graphStoreAttachmentReader{store: store}
 	splitter := textsplitter.NewSplitter()
 
 	canonical := map[string]CanonicalChunk{}

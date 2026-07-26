@@ -247,6 +247,42 @@ func TestCapture_OneShotHappyPath(t *testing.T) {
 	}
 }
 
+func TestCapture_PlaybackNamesTargetPrecedenceFromTypedAndServedState(t *testing.T) {
+	env := newFixtureEnv(t)
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, fullDraft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"explicit typed `captureBranch` wins",
+		"current session binding wins",
+		"served session framing declares it",
+		"configured default branch",
+		"Do not invent a branch from cwd",
+	} {
+		if !strings.Contains(sv.Instructions, want) {
+			t.Fatalf("unbound playback missing target-precedence wording %q:\n%s", want, sv.Instructions)
+		}
+	}
+
+	explicit := newFixtureEnv(t)
+	sv, err = explicit.session.Start(explicit.spec, map[string]any{"captureBranch": "feature/work"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = explicit.session.Report(sv.Instance, fullDraft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sv.Instructions, "- target branch: feature/work (explicit `captureBranch`)") {
+		t.Fatalf("explicit playback did not render typed captureBranch:\n%s", sv.Instructions)
+	}
+}
+
 func TestCapture_FactIndexSetThenClearSurvivesReplay(t *testing.T) {
 	env := newFixtureEnv(t)
 	var log strings.Builder

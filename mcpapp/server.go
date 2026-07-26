@@ -32,6 +32,10 @@ type Options struct {
 	// read_attachment results. Canonical attachment reads remain path-free.
 	LocalAttachmentPath func(entryID, filename string) (string, error)
 	Version             string
+	// StandingNotice resolves a local operational condition on each served
+	// response, so leftovers recreated by an older process become visible
+	// without restarting this server.
+	StandingNotice func() string
 }
 
 // Server wires the MCP protocol surface to the engine and the SDD read and
@@ -44,6 +48,7 @@ type Server struct {
 	local               bool
 	localAttachmentPath func(string, string) (string, error)
 	version             string
+	standingNotice      func() string
 	sessions            *sessionStore
 
 	// servedBlocks is the served-once memory: per connection, the content
@@ -80,6 +85,7 @@ func New(opts Options) (*Server, error) {
 		local:               opts.LocalClient,
 		localAttachmentPath: opts.LocalAttachmentPath,
 		version:             opts.Version,
+		standingNotice:      opts.StandingNotice,
 		sessions:            newSessionStore(),
 		servedBlocks:        map[*mcp.ServerSession]map[[sha256.Size]byte]bool{},
 	}

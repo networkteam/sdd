@@ -91,6 +91,7 @@ type sessionDescriptor struct {
 	Session      string               `json:"session" jsonschema:"session handle; pass to resume_session"`
 	Label        string               `json:"label,omitempty" jsonschema:"the session's subject — agent-supplied, falling back to the first line of the most recent drafted body; blank when nothing was drafted"`
 	Participant  string               `json:"participant,omitempty"`
+	Branch       string               `json:"branch,omitempty" jsonschema:"the session's declared branch binding"`
 	Anchor       string               `json:"anchor,omitempty" jsonschema:"entry the session's work is anchored on, when a procedure param carried one"`
 	Open         []instanceDescriptor `json:"open_instances" jsonschema:"running move instances with their current step (the session shell is not listed)"`
 	ClientName   string               `json:"client_name,omitempty" jsonschema:"name of the client whose attachment last drove the session, when one has"`

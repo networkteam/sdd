@@ -36,9 +36,98 @@ type fakeLegacySessionMigrator struct {
 	paths    []string
 	failPath string
 	seen     []string
+	label    string
+	order    *[]string
+}
+
+type fakeSessionStoreRelocator struct {
+	called bool
+	held   bool
+	order  *[]string
+}
+
+func (r *fakeSessionStoreRelocator) EnsurePending(context.Context) error {
+	r.held = true
+	return nil
+}
+
+func (r *fakeSessionStoreRelocator) Relocate(_ context.Context, onMoved, onSkipped func(string, string)) error {
+	r.called = true
+	if r.order != nil {
+		*r.order = append(*r.order, "relocate")
+	}
+	if onMoved != nil {
+		onMoved("/repo/.sdd/sessions/moved.jsonl", "/state/sessions/repo/moved.jsonl")
+	}
+	if onSkipped != nil {
+		onSkipped("/repo/.sdd/sessions/collision.jsonl", "/state/sessions/repo/collision.jsonl")
+	}
+	return nil
+}
+
+func TestInitRelocatesSessionStoreAndReportsCollisions(t *testing.T) {
+	relocator := &fakeSessionStoreRelocator{}
+	migrator := &fakeLegacySessionMigrator{}
+	h := handlers.New(handlers.Options{
+		Reader: finders.New(finders.Options{}), Relocator: relocator,
+		PreRelocationRecoveryConfigured: true,
+		RelocatedSessions:               migrator,
+	})
+	var moved, skipped []string
+	err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:                t.TempDir(),
+		BinaryVersion:           "v0.2.0",
+		Targets:                 []model.AgentTarget{model.AgentClaude},
+		Scope:                   model.ScopeProject,
+		RelocateSessionStore:    true,
+		MigrateLegacySessions:   true,
+		HoldSessionStoreRouting: true,
+		OnSessionStoreRelocated: func(source, destination string) {
+			moved = append(moved, source+" -> "+destination)
+		},
+		OnSessionStoreCollision: func(source, destination string) {
+			skipped = append(skipped, source+" -> "+destination)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !relocator.called {
+		t.Fatal("session store relocator was not called")
+	}
+	if relocator.held {
+		t.Fatal("handler established pending separately from the locked relocation transaction")
+	}
+	if len(moved) != 1 || !strings.Contains(moved[0], "moved.jsonl") {
+		t.Fatalf("moved callbacks = %v", moved)
+	}
+	if len(skipped) != 1 || !strings.Contains(skipped[0], "collision.jsonl") {
+		t.Fatalf("collision callbacks = %v", skipped)
+	}
+}
+
+func TestInitPersistsSessionRoutingHoldOnlyWhenRelocationIsDeclined(t *testing.T) {
+	relocator := &fakeSessionStoreRelocator{}
+	h := handlers.New(handlers.Options{
+		Reader: finders.New(finders.Options{}), Relocator: relocator,
+	})
+	err := h.Init(t.Context(), &command.InitCmd{
+		RepoRoot: t.TempDir(), BinaryVersion: "v0.2.0",
+		Targets: []model.AgentTarget{model.AgentClaude}, Scope: model.ScopeProject,
+		HoldSessionStoreRouting: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !relocator.held || relocator.called {
+		t.Fatalf("declined routing hold: held=%t relocated=%t", relocator.held, relocator.called)
+	}
 }
 
 func (m *fakeLegacySessionMigrator) ListLegacySessions(context.Context) ([]string, error) {
+	if m.order != nil {
+		*m.order = append(*m.order, m.label)
+	}
 	return append([]string(nil), m.paths...), nil
 }
 
@@ -48,6 +137,83 @@ func (m *fakeLegacySessionMigrator) MigrateLegacySession(_ context.Context, path
 		return fmt.Errorf("injected malformed session")
 	}
 	return nil
+}
+
+func TestInitRecoversRoutedLegacyControlsBeforeRelocationAndMigratesTargetAfter(t *testing.T) {
+	var order []string
+	routed := &fakeLegacySessionMigrator{
+		paths: []string{"/old/legacy.jsonl"}, label: "recover-old", order: &order,
+	}
+	desired := &fakeLegacySessionMigrator{
+		paths: []string{"/desired/in-tree.jsonl"}, label: "migrate-desired", order: &order,
+	}
+	relocator := &fakeSessionStoreRelocator{order: &order}
+	h := handlers.New(handlers.Options{
+		Reader: finders.New(finders.Options{}), Sessions: routed,
+		PreRelocationSessions:           []handlers.LegacySessionMigrator{routed},
+		PreRelocationRecoveryConfigured: true,
+		RelocatedSessions:               desired,
+		Relocator:                       relocator,
+	})
+	err := h.Init(t.Context(), &command.InitCmd{
+		RepoRoot: t.TempDir(), BinaryVersion: "v0.2.0",
+		Targets: []model.AgentTarget{model.AgentClaude}, Scope: model.ScopeProject,
+		MigrateLegacySessions: true, RelocateSessionStore: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(order, []string{"recover-old", "relocate", "migrate-desired"}) {
+		t.Fatalf("legacy recovery/relocation order = %v", order)
+	}
+	if !slices.Equal(routed.seen, routed.paths) || !slices.Equal(desired.seen, desired.paths) {
+		t.Fatalf("two-phase migrations = old %v, desired %v", routed.seen, desired.seen)
+	}
+}
+
+func TestInitRelocationDependenciesFailBeforeMutation(t *testing.T) {
+	migrator := &fakeLegacySessionMigrator{}
+	relocator := &fakeSessionStoreRelocator{}
+	for _, test := range []struct {
+		name    string
+		migrate bool
+		options handlers.Options
+	}{
+		{
+			name: "migration flag missing",
+			options: handlers.Options{
+				Relocator: relocator, PreRelocationRecoveryConfigured: true,
+				RelocatedSessions: migrator,
+			},
+		},
+		{
+			name: "pre-relocation recovery wiring missing", migrate: true,
+			options: handlers.Options{Relocator: relocator, RelocatedSessions: migrator},
+		},
+		{
+			name: "desired migrator missing", migrate: true,
+			options: handlers.Options{
+				Relocator: relocator, PreRelocationRecoveryConfigured: true,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := t.TempDir()
+			test.options.Reader = finders.New(finders.Options{})
+			h := handlers.New(test.options)
+			err := h.Init(t.Context(), &command.InitCmd{
+				RepoRoot: repo, BinaryVersion: "v0.2.0",
+				Targets: []model.AgentTarget{model.AgentClaude}, Scope: model.ScopeProject,
+				RelocateSessionStore: true, MigrateLegacySessions: test.migrate,
+			})
+			if err == nil {
+				t.Fatal("incomplete relocation wiring succeeded")
+			}
+			if _, statErr := os.Stat(filepath.Join(repo, model.SDDDirName)); !os.IsNotExist(statErr) {
+				t.Fatalf("dependency failure mutated repo: %v", statErr)
+			}
+		})
+	}
 }
 
 func TestInit_LegacySessionMigrationContinuesAfterPerSessionFailure(t *testing.T) {

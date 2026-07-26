@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -250,6 +252,43 @@ type testEnv struct {
 	graphDir    string
 	sessionsDir string
 	sessions    *localadapter.FilesystemSessionStore
+	targets     *testBranchTargets
+}
+
+type testBranchTargets struct {
+	mu       sync.RWMutex
+	fallback sdd.GraphStore
+	graphs   map[string]sdd.GraphStore
+	errors   map[string]error
+}
+
+func (t *testBranchTargets) Acquire(_ context.Context, target sdd.MutationTarget) (*sdd.AcquiredTarget, error) {
+	t.mu.RLock()
+	acquireErr := t.errors[target.Branch]
+	graph := t.graphs[target.Branch]
+	if graph == nil {
+		graph = t.fallback
+	}
+	t.mu.RUnlock()
+	if acquireErr != nil {
+		return nil, acquireErr
+	}
+	return &sdd.AcquiredTarget{Target: target, Graph: graph, Release: func() error { return nil }}, nil
+}
+
+func (t *testBranchTargets) set(branch string, graph sdd.GraphStore) {
+	t.mu.Lock()
+	t.graphs[branch] = graph
+	t.mu.Unlock()
+}
+
+func (t *testBranchTargets) setError(branch string, err error) {
+	t.mu.Lock()
+	if t.errors == nil {
+		t.errors = make(map[string]error)
+	}
+	t.errors[branch] = err
+	t.mu.Unlock()
 }
 
 var testRuntimeGeneration atomic.Int64
@@ -282,10 +321,20 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	if err != nil {
 		t.Fatal(err)
 	}
+	targets := &testBranchTargets{fallback: graph, graphs: map[string]sdd.GraphStore{"main": graph}}
 	now := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC).Add(time.Duration(testRuntimeGeneration.Add(1)) * time.Hour)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, DefaultBranch: "main", Language: language,
-		Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: func() time.Time { return now },
+		Graph: graph, Targets: targets, Sessions: sessions, StagedBlobs: blobs, Now: func() time.Time { return now },
+		Branches: sdd.BranchValidatorFunc(func(_ context.Context, target sdd.MutationTarget) error {
+			if target.Project != "test" {
+				return fmt.Errorf("unexpected branch project %q", target.Project)
+			}
+			if target.Branch == "missing" {
+				return fmt.Errorf("branch %q has no registered checkout", target.Branch)
+			}
+			return nil
+		}),
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
 			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
@@ -325,7 +374,7 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	if err != nil {
 		t.Fatal(err)
 	}
-	return testEnv{srv: srv, graphDir: graphDir, sessionsDir: sessionsDir, sessions: sessions}
+	return testEnv{srv: srv, graphDir: graphDir, sessionsDir: sessionsDir, sessions: sessions, targets: targets}
 }
 
 // connect attaches an in-memory client session to the server.
@@ -541,12 +590,195 @@ func TestToolSurfaceMatchesSpec(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{
-		"abandon", "info", "list_sessions", "next", "park", "read_attachment",
+		"abandon", "bind_branch", "info", "list_sessions", "next", "park", "read_attachment",
 		"registry", "resume_session", "search", "show", "stage_attachment",
 		"start_procedure", "start_session", "view",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tool surface diverges from spec:\n got %v\nwant %v", got, want)
+	}
+}
+
+func TestBindBranchToolPersistsAndProjectsAcrossResume(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+
+	var bound mcpserver.BindBranchResult
+	call(t, cs, "bind_branch", map[string]any{"session": door.Session, "branch": "feature/session"}, &bound)
+	if bound.Branch != "feature/session" || bound.Status != "bound" {
+		t.Fatalf("bind result = %+v", bound)
+	}
+
+	// A fresh start_session call re-serves this connection's current door and
+	// carries the now-durable branch in the session info.
+	var reopened mcpserver.ServeResult
+	call(t, cs, "start_session", map[string]any{}, &reopened)
+	if reopened.Session != door.Session || reopened.Branch != "feature/session" {
+		t.Fatalf("door projection = %+v", reopened)
+	}
+	if !strings.Contains(reopened.Framing, "Branch binding: feature/session") {
+		t.Fatalf("bound door framing = %q", reopened.Framing)
+	}
+
+	// Keep one move open so the dialogue appears in discovery.
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &serve)
+
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	var listed mcpserver.ListSessionsResult
+	call(t, cs2, "list_sessions", map[string]any{}, &listed)
+	if len(listed.Sessions) != 1 || listed.Sessions[0].Branch != "feature/session" {
+		t.Fatalf("list projection after restart = %+v", listed.Sessions)
+	}
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs2, "resume_session", map[string]any{
+		"session": door.Session, "userWords": "resume the bound branch session",
+	}, &resumed)
+	if resumed.Branch != "feature/session" {
+		t.Fatalf("resume projection = %+v", resumed)
+	}
+	if !strings.Contains(resumed.Framing, "Branch binding: feature/session") {
+		t.Fatalf("fresh resume framing = %q", resumed.Framing)
+	}
+	call(t, cs2, "resume_session", map[string]any{}, &resumed)
+	if resumed.Branch != "feature/session" {
+		t.Fatalf("reorientation projection = %+v", resumed)
+	}
+
+	var cleared mcpserver.BindBranchResult
+	call(t, cs2, "bind_branch", map[string]any{"session": door.Session, "clear": true}, &cleared)
+	if cleared.Branch != "" || cleared.Status != "cleared" {
+		t.Fatalf("clear result = %+v", cleared)
+	}
+}
+
+func TestBindBranchToolValidatesArgumentsAndAttachment(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+
+	for name, args := range map[string]map[string]any{
+		"neither":    {"session": door.Session},
+		"both":       {"session": door.Session, "branch": "feature", "clear": true},
+		"whitespace": {"session": door.Session, "branch": " feature "},
+	} {
+		msg := callExpectError(t, cs, "bind_branch", args)
+		if name == "whitespace" {
+			if !strings.Contains(msg, "whitespace") {
+				t.Fatalf("%s error = %q", name, msg)
+			}
+		} else if !strings.Contains(msg, "exactly one") {
+			t.Fatalf("%s error = %q", name, msg)
+		}
+	}
+
+	unbound := connect(t, env.srv)
+	msg := callExpectError(t, unbound, "bind_branch", map[string]any{"session": door.Session, "branch": "feature"})
+	if !strings.Contains(msg, "not attached") || !strings.Contains(msg, "resume_session") {
+		t.Fatalf("attachment-gate error = %q", msg)
+	}
+}
+
+func TestAttachedFreeReadsUseBoundBranchOnly(t *testing.T) {
+	const (
+		branch     = "feature/read-routing"
+		branchID   = "20260724-220000-s-tac-brn"
+		branchText = "Branch-only nebula routing evidence"
+	)
+	env := newTestServer(t, nil, "", "")
+	branchDir := filepath.Join(t.TempDir(), "graph")
+	branchPath := filepath.Join(branchDir, "2026/07/24-220000-s-tac-brn.md")
+	if err := os.MkdirAll(filepath.Dir(branchPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(branchPath, []byte(`---
+type: signal
+kind: gap
+layer: tactical
+confidence: high
+topics:
+    - testing/routing
+summary: Branch-only nebula routing evidence.
+---
+
+Branch-only nebula routing evidence exists exclusively on the bound branch.
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	branchGraph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "test", GraphDir: branchDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.targets.set(branch, branchGraph)
+
+	boundClient := connect(t, env.srv)
+	door := openSession(t, boundClient)
+	var binding mcpserver.BindBranchResult
+	call(t, boundClient, "bind_branch", map[string]any{"session": door.Session, "branch": branch}, &binding)
+
+	assertBranchReads := func(t *testing.T, client *mcp.ClientSession, seesBranch bool) {
+		t.Helper()
+		var showOutput string
+		if seesBranch {
+			var shown mcpserver.ShowResult
+			call(t, client, "show", map[string]any{"ids": []string{branchID}}, &shown)
+			showOutput = shown.Entries
+		} else {
+			showOutput = callExpectError(t, client, "show", map[string]any{"ids": []string{branchID}})
+		}
+		var searched mcpserver.SearchResult
+		call(t, client, "search", map[string]any{"terms": []string{"nebula routing evidence"}}, &searched)
+		var viewed mcpserver.ViewResult
+		call(t, client, "view", map[string]any{"layout": "active:as-list"}, &viewed)
+		for surface, output := range map[string]string{
+			"show": showOutput, "search": searched.Results, "view": viewed.Sections,
+		} {
+			if got := strings.Contains(output, branchText); got != seesBranch {
+				t.Fatalf("%s branch visibility = %v, want %v:\n%s", surface, got, seesBranch, output)
+			}
+		}
+	}
+	assertBranchReads(t, boundClient, true)
+
+	unattached := connect(t, env.srv)
+	assertBranchReads(t, unattached, false)
+
+	unboundClient := connect(t, env.srv)
+	openSession(t, unboundClient)
+	assertBranchReads(t, unboundClient, false)
+}
+
+func TestAttachedFreeReadDriftNamesSessionBindingOnEverySurface(t *testing.T) {
+	const branch = "feature/drifted"
+	env := newTestServer(t, nil, "", "")
+	client := connect(t, env.srv)
+	door := openSession(t, client)
+	var binding mcpserver.BindBranchResult
+	call(t, client, "bind_branch", map[string]any{"session": door.Session, "branch": branch}, &binding)
+
+	env.targets.setError(branch, errors.New("target factory is temporarily unavailable"))
+	for name, args := range map[string]map[string]any{
+		"show":   {"ids": []string{fixtureGapID}},
+		"search": {"terms": []string{"oscillation"}},
+		"view":   {"layout": "active:as-list"},
+	} {
+		message := callExpectError(t, client, name, args)
+		for _, want := range []string{
+			`session is bound to branch "feature/drifted"`,
+			"acquiring that branch failed",
+			"re-declare the binding or clear it",
+			"target factory is temporarily unavailable",
+		} {
+			if !strings.Contains(message, want) {
+				t.Fatalf("%s drift error missing %q: %q", name, want, message)
+			}
+		}
+		if strings.Contains(message, "no longer resolves to a checkout") {
+			t.Fatalf("%s drift error overclaimed checkout state: %q", name, message)
+		}
 	}
 }
 
@@ -569,7 +801,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "c9924f3a3c106ddaf5e58cb61bdf0fb520f82299c11b4b1e4d203210022b85e6"
+	const want = "fb220018e04c56ef0a5a196e4e29db08c892883bffb775f2901b59dab89eaaf5"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1888,6 +2120,7 @@ func TestWorkToolWrongSessionFunnels(t *testing.T) {
 		"start_procedure":  {"session": foreign, "canonical": "capture"},
 		"next":             {"session": foreign, "instance": serve.Instance, "report": assembleReport()},
 		"park":             {"session": foreign, "instance": serve.Instance},
+		"bind_branch":      {"session": foreign, "branch": "feature"},
 		"stage_attachment": {"session": foreign, "name": "a.md", "content": "x"},
 		"abandon":          {"session": foreign, "instance": serve.Instance},
 	}
@@ -3008,6 +3241,43 @@ func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 		events = append(events, event)
 	}
 	return events, nil
+}
+
+func TestStandingNoticeIsServedAtSessionDoorsAndDiscovery(t *testing.T) {
+	const notice = "Session relocation required: run `sdd init`."
+	current := notice
+	env := newTestServer(t, nil, "", "", func(opts *mcpserver.Options) {
+		opts.StandingNotice = func() string { return current }
+	})
+	cs := connect(t, env.srv)
+	started := openSession(t, cs)
+	if !strings.Contains(started.Framing, notice) {
+		t.Fatalf("start_session framing lacks standing notice: %q", started.Framing)
+	}
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{}, &resumed)
+	if !strings.Contains(resumed.Framing, notice) {
+		t.Fatalf("resume_session framing lacks standing notice: %q", resumed.Framing)
+	}
+
+	var listed mcpserver.ListSessionsResult
+	call(t, cs, "list_sessions", map[string]any{}, &listed)
+	if listed.Notice != notice {
+		t.Fatalf("list_sessions notice = %q", listed.Notice)
+	}
+
+	var info mcpserver.InfoResult
+	call(t, cs, "info", map[string]any{}, &info)
+	if info.Notice != notice {
+		t.Fatalf("info notice = %q", info.Notice)
+	}
+
+	current = "Session relocation required: old server recreated state."
+	call(t, cs, "info", map[string]any{}, &info)
+	if info.Notice != current {
+		t.Fatalf("dynamic info notice = %q, want %q", info.Notice, current)
+	}
 }
 
 // TestResumeConsentDecisionTable pins the four-row consent table (d-cpt-9of I5,

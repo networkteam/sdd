@@ -72,14 +72,15 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 	if err := registry.RegisterQuery(engine.Query{
 		Doc:       engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store. Optional arg maxBytes: cap the rendered result on a line boundary (0 = uncapped), for a framing lane that must stay bounded."},
 		ServeSafe: true,
-		Fn: func(_ *engine.Context, args map[string]any) (any, error) {
+		Fn: func(ctx *engine.Context, args map[string]any) (any, error) {
 			layout, _ := args["layout"].(string)
 			if strings.TrimSpace(layout) == "" {
 				return nil, fmt.Errorf("viewLayout needs arg layout")
 			}
-			result, err := w.app.View(w.ctx, w.identity, w.project, ViewRequest{Layout: layout})
+			target, fromBinding := w.readTarget(ctx.Store)
+			result, err := w.app.View(w.ctx, w.identity, w.project, ViewRequest{Layout: layout, Branch: target.Branch})
 			if err != nil {
-				return nil, err
+				return nil, w.withSessionBindingTargetError(err, fromBinding)
 			}
 			return capOnLineBoundary(result.Sections, workflowIntArg(args, "maxBytes", 0)), nil
 		},
@@ -100,11 +101,13 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 			if len(ids) == 0 {
 				return nil, fmt.Errorf("entryChains: neither anchor nor targets is set in the store")
 			}
+			target, fromBinding := w.readTarget(ctx.Store)
 			result, err := w.app.Show(w.ctx, w.identity, w.project, ShowRequest{
 				IDs: ids, UpDepth: workflowIntArg(args, "up", query.DefaultUpDepth), DownDepth: workflowIntArg(args, "down", query.DefaultDownDepth),
+				Branch: target.Branch,
 			})
 			if err != nil {
-				return nil, err
+				return nil, w.withSessionBindingTargetError(err, fromBinding)
 			}
 			w.session.LogRead("inject:entryChains", result.FullIDs, result.SummaryIDs)
 			return result.Entries, nil
@@ -146,7 +149,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 	if err := registry.RegisterCommand(engine.Command{
 		Doc: engine.FuncDoc{
 			Name: "newEntry", Doc: "Creates the entry from the capture state fields (pre-flight inside; staged attachments materialized from handles; a recorded override skips pre-flight, durably logged).",
-			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "index", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "canonical", "aliases", "roleActor", "involvement", "focusActors", "focusWhen", "preflightOverride"}, Writes: []string{"entryId", "findings"},
+			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "index", "confidence", "intent", "attachments", "participants", "supersedes", "closes", "canonical", "aliases", "roleActor", "involvement", "focusActors", "focusWhen", "preflightOverride"}, Writes: []string{"resolvedCaptureBranch", "entryId", "findings"},
 		},
 		MutatesGraph: true,
 		Fn:           w.runWorkflowNewEntry,
@@ -165,7 +168,9 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 			if !ok {
 				return fmt.Errorf("replaceSummary: correctedSummary is not set")
 			}
-			result, err := w.app.ReplaceSummary(w.ctx, w.identity, w.project, w.binding, w.mutationTarget(ctx.Store, "captureBranch"), id, text)
+			target, fromBinding := w.captureMutationTarget(ctx.Store)
+			result, err := w.app.ReplaceSummary(w.ctx, w.identity, w.project, w.binding, target, id, text)
+			err = w.withSessionBindingTargetError(err, fromBinding)
 			if err == nil {
 				w.binding = result.Binding
 			}
@@ -184,7 +189,11 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 				return fmt.Errorf("wipStart: anchor is not set")
 			}
 			description, _ := workflowStoreString(ctx.Store, "wipDescription")
-			marker, result, err := w.app.StartWIP(w.ctx, w.identity, w.project, w.binding, w.mutationTarget(ctx.Store, "baseBranch"), anchor, description)
+			target := w.mutationTarget(ctx.Store, "baseBranch")
+			if target == (MutationTarget{}) {
+				return fmt.Errorf("WIP write requires an explicit baseBranch")
+			}
+			marker, result, err := w.app.StartWIP(w.ctx, w.identity, w.project, w.binding, target, anchor, description)
 			if err != nil {
 				return err
 			}
@@ -202,7 +211,11 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 			if !ok {
 				return fmt.Errorf("wipDone: wipMarker is not set")
 			}
-			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, w.mutationTarget(ctx.Store, "baseBranch"), marker)
+			target := w.mutationTarget(ctx.Store, "baseBranch")
+			if target == (MutationTarget{}) {
+				return fmt.Errorf("WIP write requires an explicit baseBranch")
+			}
+			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, target, marker)
 			if err != nil {
 				return err
 			}
@@ -242,8 +255,12 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	if !ok {
 		return fmt.Errorf("newEntry: body is not set")
 	}
+	target, fromBinding, resolvedDefault, err := w.concreteCaptureMutationTarget(ctx.Store)
+	if err != nil {
+		return err
+	}
 	draft := EntryDraft{
-		Target: w.mutationTarget(ctx.Store, "captureBranch"),
+		Target: target,
 		Kind:   entryKind, Layer: layer, Body: body, Topics: workflowStoreStrings(ctx.Store, "topics"),
 		Closes: workflowStoreStrings(ctx.Store, "closes"), Supersedes: workflowStoreStrings(ctx.Store, "supersedes"),
 		AttachmentHandles: workflowStoreStrings(ctx.Store, "attachments"), Participants: workflowStoreStrings(ctx.Store, "participants"),
@@ -292,6 +309,7 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		draft.Refs = append(draft.Refs, EntryRef{ID: id, Kind: kind, Desc: desc})
 	}
 	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
+	err = w.withSessionBindingTargetError(err, fromBinding)
 	// A structural validation failure re-serves as high findings instead of
 	// wedging the instance: the write step's `otherwise` routes to
 	// reviseOrOverride, whose revise returns to assemble to fix the named rule
@@ -333,6 +351,11 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 			return nil
 		}
 	}
+	if resolvedDefault {
+		if err := ctx.Store.WriteEngine("resolvedCaptureBranch", target.Branch); err != nil {
+			return fmt.Errorf("newEntry: pinning default capture branch: %w", err)
+		}
+	}
 	if err := ctx.Store.WriteEngine("entryId", result.EntryID); err != nil {
 		return fmt.Errorf("newEntry: %w", err)
 	}
@@ -346,6 +369,47 @@ func (w *WorkflowSession) mutationTarget(store *engine.Store, branchField string
 		return MutationTarget{}
 	}
 	return MutationTarget{Project: w.project, Branch: branch}
+}
+
+// captureMutationTarget is the sole ordinary-capture precedence rule:
+// an explicit per-procedure captureBranch wins, then an authority already
+// resolved at the write gate, then the durable session binding, then a zero
+// target lets the application resolve configured default_branch. No cwd or
+// other ambient state participates.
+func (w *WorkflowSession) captureMutationTarget(store *engine.Store) (MutationTarget, bool) {
+	if target := w.mutationTarget(store, "captureBranch"); target != (MutationTarget{}) {
+		return target, false
+	}
+	if target := w.mutationTarget(store, "resolvedCaptureBranch"); target != (MutationTarget{}) {
+		return target, false
+	}
+	if w.branch != "" {
+		return MutationTarget{Project: w.project, Branch: w.branch}, true
+	}
+	return MutationTarget{}, false
+}
+
+// concreteCaptureMutationTarget resolves the configured default without
+// mutating procedure state. The write gate records that default as an
+// engine-owned resolvedCaptureBranch only after CreateEntry reports that an
+// artifact was actually written.
+func (w *WorkflowSession) concreteCaptureMutationTarget(store *engine.Store) (MutationTarget, bool, bool, error) {
+	if target, fromBinding := w.captureMutationTarget(store); target != (MutationTarget{}) {
+		return target, fromBinding, false, nil
+	}
+	_, runtime, err := w.app.resolve(w.ctx, w.identity, w.project, AccessRead)
+	if err != nil {
+		return MutationTarget{}, false, false, err
+	}
+	target, err := runtime.defaultMutationTarget()
+	if err != nil {
+		return MutationTarget{}, false, false, err
+	}
+	return target, false, true, nil
+}
+
+func (w *WorkflowSession) withSessionBindingTargetError(err error, fromBinding bool) error {
+	return withSessionBindingTargetError(w.branch, fromBinding, err)
 }
 
 // focusWhenFromDocument builds a model.FocusWhen from a normalized store value.

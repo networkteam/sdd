@@ -2,8 +2,8 @@
 // references: the user-global configuration naming which repositories this
 // user is connected to, and the managed read-only clone caches those
 // connections resolve against. The package reads no ambient state — the
-// config path and cache root arrive as an explicit Locations value, resolved
-// once at the composition root (repos.DefaultLocations for the XDG
+// config, cache, and state roots arrive as an explicit Locations value,
+// resolved once at the composition root (repos.DefaultLocations for the XDG
 // convention). Pure reads live on Registry; the side-effectful cache
 // lifecycle (clone, pull, config save) lives on Manager, orchestrated by
 // handlers that invalidate the read side's GraphSource on completion.
@@ -21,7 +21,7 @@ import (
 )
 
 // Locations names the user-global places the connected-repos machinery works
-// against: the config file and the cache root. Resolved once at the
+// against: the config file, cache root, and state root. Resolved once at the
 // composition root and passed down explicitly — tests point both at temp
 // dirs, no environment involved.
 type Locations struct {
@@ -31,18 +31,22 @@ type Locations struct {
 	// CacheRoot is the base directory for connected-repo clone caches
 	// (default $XDG_CACHE_HOME/sdd).
 	CacheRoot string
+	// StateRoot is the base directory for durable machine-local state
+	// (default $XDG_STATE_HOME/sdd).
+	StateRoot string
 }
 
 // DefaultLocations resolves the conventional locations: the XDG base
-// directories, defaulting to ~/.config and ~/.cache. Implemented against the
-// XDG convention directly (not os.UserConfigDir) so the paths are uniform
-// across platforms and match the documented locations. This is the only
-// place the package touches the environment — called by composition roots,
-// never by library code.
+// directories, defaulting to ~/.config, ~/.cache, and ~/.local/state.
+// Implemented against the XDG convention directly (not os.UserConfigDir) so
+// the paths are uniform across platforms and match the documented locations.
+// This is the only place the package touches the environment — called by
+// composition roots, never by library code.
 func DefaultLocations() (Locations, error) {
 	cfgBase := os.Getenv("XDG_CONFIG_HOME")
 	cacheBase := os.Getenv("XDG_CACHE_HOME")
-	if cfgBase == "" || cacheBase == "" {
+	stateBase := os.Getenv("XDG_STATE_HOME")
+	if cfgBase == "" || cacheBase == "" || stateBase == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return Locations{}, fmt.Errorf("resolving home dir: %w", err)
@@ -53,10 +57,17 @@ func DefaultLocations() (Locations, error) {
 		if cacheBase == "" {
 			cacheBase = filepath.Join(home, ".cache")
 		}
+		if stateBase == "" {
+			stateBase = filepath.Join(home, ".local", "state")
+		}
+	}
+	if !filepath.IsAbs(stateBase) {
+		return Locations{}, fmt.Errorf("XDG_STATE_HOME must be an absolute path: %q", stateBase)
 	}
 	return Locations{
 		ConfigPath: filepath.Join(cfgBase, "sdd", "config.yaml"),
 		CacheRoot:  filepath.Join(cacheBase, "sdd"),
+		StateRoot:  filepath.Join(stateBase, "sdd"),
 	}, nil
 }
 

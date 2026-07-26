@@ -17,6 +17,7 @@ const (
 	ErrorActionRequired         ErrorCode = "action_required"
 	ErrorReadDenied             ErrorCode = "read_denied"
 	ErrorWriteDenied            ErrorCode = "write_denied"
+	ErrorBranchUnavailable      ErrorCode = "branch_unavailable"
 	ErrorSessionOwnership       ErrorCode = "session_ownership_mismatch"
 	ErrorSessionConflict        ErrorCode = "session_conflict"
 	ErrorSessionDisplaced       ErrorCode = "session_displaced"

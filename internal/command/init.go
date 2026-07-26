@@ -16,6 +16,11 @@ type InitCmd struct {
 	// will live.
 	RepoRoot string
 
+	// StableRepoRoot is the Git common-directory identity invariant across
+	// linked worktrees, used only for identity-less machine-global store keys.
+	// Empty falls back to RepoRoot for non-Git callers and tests.
+	StableRepoRoot string
+
 	// GraphDir is the graph directory path relative to RepoRoot. Empty
 	// defaults to model.DefaultGraphDir (".sdd/graph").
 	GraphDir string
@@ -89,6 +94,14 @@ type InitCmd struct {
 	// non-interactive acknowledgement.
 	MigrateLegacySessions bool
 
+	// RelocateSessionStore records the explicit offline acknowledgement to
+	// move coupled in-tree session state into the machine-global store.
+	RelocateSessionStore bool
+
+	// HoldSessionStoreRouting persists the bounded old-key routing marker even
+	// when the operator declines this init's offline relocation.
+	HoldSessionStoreRouting bool
+
 	// OnMinimumVersionBumped fires when minimum_version was raised by a
 	// `sdd init --bump` invocation, carrying the previous value (empty
 	// when no floor was recorded) and the new value.
@@ -126,6 +139,14 @@ type InitCmd struct {
 	// OnSessionMigrated fires after one legacy session was atomically replaced
 	// by the current envelope.
 	OnSessionMigrated func(path string)
+
+	// OnSessionStoreRelocated fires for each in-tree session-store file moved
+	// into its machine-global destination.
+	OnSessionStoreRelocated func(source, destination string)
+
+	// OnSessionStoreCollision fires for each source file left in place because
+	// its machine-global destination already exists.
+	OnSessionStoreCollision func(source, destination string)
 
 	// --- Always-fire callbacks (both initial and repeat runs) ---
 

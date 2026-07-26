@@ -20,9 +20,11 @@ type InfoResult struct {
 }
 
 type ViewRequest struct {
-	Layout   string
-	Repos    []string
-	AllRepos bool
+	Layout            string
+	Branch            string
+	BranchFromSession bool
+	Repos             []string
+	AllRepos          bool
 }
 
 type ViewResult struct {
@@ -41,9 +43,11 @@ type ViewResult struct {
 }
 
 type ShowRequest struct {
-	IDs       []string
-	UpDepth   int
-	DownDepth int
+	IDs               []string
+	UpDepth           int
+	DownDepth         int
+	Branch            string
+	BranchFromSession bool
 }
 
 type ShowResult struct {
@@ -56,6 +60,8 @@ type ShowResult struct {
 type SearchRequest struct {
 	Terms             []string
 	Phrase            string
+	Branch            string
+	BranchFromSession bool
 	Type              string
 	Layer             string
 	Kind              string

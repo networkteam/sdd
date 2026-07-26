@@ -34,7 +34,7 @@ Local GraphStore conformance fixture.`
 
 func TestFilesystemGraphStoreConformance(t *testing.T) {
 	sddtest.RunGraphStoreTests(t, func(t *testing.T) sddtest.GraphStoreFixture {
-		store, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: t.TempDir()})
+		store, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: canonicalTempDir(t)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ func TestFilesystemGraphStoreConformance(t *testing.T) {
 
 func TestFilesystemSessionStoreConformance(t *testing.T) {
 	sddtest.RunSessionStoreTests(t, func(t *testing.T) sddtest.SessionStoreFixture {
-		store, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+		store, err := localadapter.NewFilesystemSessionStore(canonicalTempDir(t))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +87,7 @@ func TestFilesystemSessionStoreConformance(t *testing.T) {
 
 func TestFilesystemStagedBlobStoreConformance(t *testing.T) {
 	sddtest.RunStagedBlobStoreTests(t, func(t *testing.T) sddtest.StagedBlobStoreFixture {
-		store, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+		store, err := localadapter.NewFilesystemStagedBlobStore(canonicalTempDir(t))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -150,7 +150,7 @@ func TestMemorySearchIndexStoreConforms(t *testing.T) {
 // including the reopen-persistence assertion (a fresh adapter over the same
 // cache directory still answers with the reconciled chunks).
 func TestPersistentSearchIndexStoreConforms(t *testing.T) {
-	cacheRoot := t.TempDir()
+	cacheRoot := canonicalTempDir(t)
 	const project = sdd.ProjectID("persistent")
 	const repoKey = "example.org/repo"
 	namespace := sdd.IndexNamespace{Project: project, Fingerprint: "fixture", Metric: "cosine"}
@@ -283,7 +283,7 @@ func TestAccessResolverConformance(t *testing.T) {
 }
 
 func TestSessionAttachmentMetadataRoundTrips(t *testing.T) {
-	store, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	store, err := localadapter.NewFilesystemSessionStore(canonicalTempDir(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestSessionAttachmentMetadataRoundTrips(t *testing.T) {
 // binary carrying the removed holder JSON still loads — the unknown fields are
 // ignored and the attachment reads nil.
 func TestSessionLoadToleratesLegacyHolderMetadata(t *testing.T) {
-	dir := t.TempDir()
+	dir := canonicalTempDir(t)
 	store, err := localadapter.NewFilesystemSessionStore(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +329,7 @@ func TestSessionLoadToleratesLegacyHolderMetadata(t *testing.T) {
 }
 
 func TestFilesystemSessionStoreCASFencesIndependentInstances(t *testing.T) {
-	dir := t.TempDir()
+	dir := canonicalTempDir(t)
 	first, err := localadapter.NewFilesystemSessionStore(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +351,7 @@ func TestFilesystemSessionStoreCASFencesIndependentInstances(t *testing.T) {
 }
 
 func TestFilesystemSessionStoreIgnoresLegacyAndUnreadableRecords(t *testing.T) {
-	dir := t.TempDir()
+	dir := canonicalTempDir(t)
 	store, err := localadapter.NewFilesystemSessionStore(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -400,7 +400,7 @@ func TestFilesystemSessionStoreIgnoresLegacyAndUnreadableRecords(t *testing.T) {
 }
 
 func TestFilesystemLegacySessionMigrationPreservesEventsAndStagedAttachments(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	sessionsDir := filepath.Join(root, "sessions")
 	blobsDir := filepath.Join(root, "staged-blobs")
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
@@ -589,7 +589,7 @@ func TestFilesystemLegacySessionMigrationPreservesEventsAndStagedAttachments(t *
 }
 
 func TestFilesystemLegacySessionMigrationLeavesMalformedRecordUntouched(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	sessionsDir := filepath.Join(root, "sessions")
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -607,7 +607,7 @@ func TestFilesystemLegacySessionMigrationLeavesMalformedRecordUntouched(t *testi
 	if err := os.WriteFile(stagedPath, []byte("legacy evidence"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	migrator, err := localadapter.NewFilesystemLegacySessionMigrator(sessionsDir, filepath.Join(root, "blobs"), "local", "example")
+	migrator, err := localadapter.NewFilesystemLegacySessionMigrator(sessionsDir, filepath.Join(root, "staged-blobs"), "local", "example")
 	if err != nil {
 		t.Fatal(err)
 	}

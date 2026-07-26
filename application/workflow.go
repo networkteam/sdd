@@ -19,6 +19,8 @@ import (
 const (
 	WorkflowEventCode      = "workflow_event"
 	workflowStagedBlobCode = "workflow_staged_blob"
+	BranchBoundEventCode   = "branchBound"
+	BranchClearedEventCode = "branchCleared"
 	DefaultShellCanonical  = "user-dialogue"
 	WorkflowMaxLabelLength = 120
 	ExecutionForkPreferred = "fork-preferred"
@@ -70,6 +72,7 @@ type WorkflowChooser struct {
 
 type WorkflowServe struct {
 	Session         SessionID
+	Branch          string
 	Instance        string
 	Procedure       string
 	Status          string
@@ -115,6 +118,7 @@ type WorkflowSessionSummary struct {
 	Session      SessionID
 	Label        string
 	Participant  string
+	Branch       string
 	Anchor       string
 	Open         []WorkflowInstanceSummary
 	LastActivity time.Time
@@ -126,6 +130,7 @@ type WorkflowResumeResult struct {
 	Session      SessionID
 	Participant  string
 	Label        string
+	Branch       string
 	Open         []WorkflowServe
 	Instructions string
 	// Displaced names the attachment this attach ended (nil when the session was
@@ -160,6 +165,7 @@ type WorkflowSession struct {
 	identity RequestIdentity
 	ctx      context.Context
 	binding  SessionBinding
+	branch   string
 	engine   *engine.Engine
 	session  *engine.Session
 	graphs   *workflowGraphs
@@ -194,7 +200,7 @@ func (a *Application) OpenWorkflow(ctx context.Context, identity RequestIdentity
 	if err != nil {
 		return nil, nil, err
 	}
-	w, err := a.newWorkflow(ctx, identity, info.Project.ID, sessionBindingFrom(created))
+	w, err := a.newWorkflow(ctx, identity, info.Project.ID, sessionBindingFrom(created), created.Metadata.Branch)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -260,7 +266,7 @@ func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdenti
 			return nil, WorkflowResumeResult{}, err
 		}
 	}
-	w, err := a.newWorkflow(ctx, identity, runtime.options.Project.ID, sessionBindingFrom(stored))
+	w, err := a.newWorkflow(ctx, identity, runtime.options.Project.ID, sessionBindingFrom(stored), stored.Metadata.Branch)
 	if err != nil {
 		return nil, WorkflowResumeResult{}, err
 	}
@@ -373,8 +379,8 @@ func newAttachment(subject, mcpSessionID, clientName, clientVersion string, now 
 	return &Attachment{Subject: subject, MCPSessionID: mcpSessionID, ClientName: clientName, ClientVersion: clientVersion, LastActivity: now, UserWords: strings.TrimSpace(userWords)}
 }
 
-func (a *Application) newWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding) (*WorkflowSession, error) {
-	w := &WorkflowSession{app: a, project: project, identity: identity, ctx: ctx, binding: binding, staged: map[string]string{}}
+func (a *Application) newWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, branch string) (*WorkflowSession, error) {
+	w := &WorkflowSession{app: a, project: project, identity: identity, ctx: ctx, binding: binding, branch: branch, staged: map[string]string{}}
 	w.graphs = &workflowGraphs{workflow: w}
 	w.sink = &workflowSink{workflow: w}
 	registry, err := w.buildRegistry()
@@ -403,13 +409,36 @@ func (w *WorkflowSession) StillHeld(ctx context.Context, identity RequestIdentit
 		}
 		return false, err
 	}
+	if err := validateStoredSession(stored); err != nil {
+		return false, err
+	}
+	if stored.Metadata.ID != w.binding.SessionID || stored.Metadata.Subject != w.binding.Subject || stored.Metadata.Project != w.binding.Project {
+		return false, &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
+	}
 	att := stored.Metadata.Attachment
-	return att != nil && att.MCPSessionID == w.binding.MCPSessionID, nil
+	if att == nil || att.MCPSessionID != w.binding.MCPSessionID {
+		return false, nil
+	}
+	// Reorientation is also the convergence path after a terminal same-writer
+	// CAS conflict: once the store confirms this connection still holds the
+	// attachment, refresh the cached durable metadata before serving.
+	w.binding.Version = stored.Version
+	w.setBranch(stored.Metadata.Branch)
+	return true, nil
 }
 
 func (w *WorkflowSession) Project() ProjectID { return w.project }
 
 func (w *WorkflowSession) Binding() SessionBinding { return w.binding }
+
+func (w *WorkflowSession) Branch() string { return w.branch }
+
+func (w *WorkflowSession) setBranch(branch string) {
+	if w.branch != branch && w.graphs != nil {
+		w.graphs.Invalidate()
+	}
+	w.branch = branch
+}
 
 func (w *WorkflowSession) OpenInstances() []WorkflowInstanceSummary {
 	var result []WorkflowInstanceSummary
@@ -527,7 +556,7 @@ func (w *WorkflowSession) ServeAll(ctx context.Context, identity RequestIdentity
 }
 
 func (w *WorkflowSession) resumeResult() (WorkflowResumeResult, error) {
-	result := WorkflowResumeResult{Session: w.ID(), Participant: w.session.Participant, Label: w.session.Label}
+	result := WorkflowResumeResult{Session: w.ID(), Participant: w.session.Participant, Label: w.session.Label, Branch: w.branch}
 	for _, inst := range w.session.Instances() {
 		if inst.Status != engine.StatusRunning {
 			continue
@@ -611,6 +640,103 @@ func (w *WorkflowSession) StageAttachment(ctx context.Context, identity RequestI
 	return filename, nil
 }
 
+type branchBoundEvent struct {
+	Branch string `json:"branch"`
+}
+
+type branchClearedEvent struct {
+	Branch string `json:"branch"`
+}
+
+// BindBranch changes the durable session-level branch declaration. Setting a
+// binding resolves the branch against the runtime's live branch capability
+// before the CAS append; clearing is store-only and works without that
+// capability.
+func (w *WorkflowSession) BindBranch(ctx context.Context, identity RequestIdentity, branch string, clear bool) error {
+	w.setOperation(ctx, identity)
+	if branch != strings.TrimSpace(branch) {
+		return &ApplicationError{Code: ErrorInvalidArgument, Message: "branch must not have leading or trailing whitespace"}
+	}
+	if (branch != "") == clear {
+		return &ApplicationError{Code: ErrorInvalidArgument, Message: "pass exactly one of a nonblank branch or clear=true"}
+	}
+	err := w.bindBranchOnce(branch, clear)
+	var appErr *ApplicationError
+	if !errors.As(err, &appErr) || appErr.Code != ErrorSessionConflict {
+		return err
+	}
+	if err := w.resyncBindingVersion(); err != nil {
+		return err
+	}
+	err = w.bindBranchOnce(branch, clear)
+	if errors.As(err, &appErr) && appErr.Code == ErrorSessionConflict {
+		return &ApplicationError{Code: ErrorSessionConflict, Message: appErr.Message + " — " + reorientSuffix}
+	}
+	return err
+}
+
+func (w *WorkflowSession) bindBranchOnce(branch string, clear bool) error {
+	principal, runtime, err := w.app.resolve(w.ctx, w.identity, w.project, AccessRead)
+	if err != nil {
+		return err
+	}
+	stored, err := runtime.options.Sessions.Load(w.ctx, w.ID())
+	if err != nil {
+		return err
+	}
+	if err := verifyBinding(stored, w.binding); err != nil {
+		return err
+	}
+	if !clear {
+		if runtime.options.Branches == nil {
+			return &ApplicationError{Code: ErrorBranchUnavailable, Message: "this deployment has no branch concept"}
+		}
+		target := MutationTarget{Project: runtime.options.Project.ID, Branch: branch}
+		if err := runtime.options.Branches.ValidateBranch(w.ctx, target); err != nil {
+			return err
+		}
+	}
+
+	metadata := stored.Metadata
+	eventCode := BranchBoundEventCode
+	eventBranch := branch
+	if clear {
+		eventCode = BranchClearedEventCode
+		eventBranch = metadata.Branch
+		metadata.Branch = ""
+	} else {
+		metadata.Branch = branch
+	}
+	now := runtime.options.Now().UTC().Round(0)
+	metadata.UpdatedAt = now
+	if metadata.Attachment != nil {
+		attachment := *metadata.Attachment
+		attachment.LastActivity = now
+		metadata.Attachment = &attachment
+	}
+	if metadata.Subject != principal.Subject {
+		return &ApplicationError{Code: ErrorSessionOwnership, Message: "session subject changed"}
+	}
+	var event any = branchBoundEvent{Branch: eventBranch}
+	if clear {
+		event = branchClearedEvent{Branch: eventBranch}
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	next, err := runtime.options.Sessions.Append(w.ctx, w.ID(), stored.Version, SessionAppend{
+		Metadata: &metadata,
+		Events:   []StoredEvent{{CodecVersion: SessionCodecVersion, Code: eventCode, Payload: payload}},
+	})
+	if err != nil {
+		return err
+	}
+	w.binding.Version = next
+	w.setBranch(metadata.Branch)
+	return nil
+}
+
 func (w *WorkflowSession) LogRead(ctx context.Context, identity RequestIdentity, tool string, full, summary []string) error {
 	w.setOperation(ctx, identity)
 	w.session.LogRead(tool, full, summary)
@@ -637,6 +763,9 @@ func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity)
 		fmt.Fprintf(&infoBlock, "Language: %s\n", info.Language)
 	}
 	fmt.Fprintf(&infoBlock, "Search: %s", info.Search)
+	if w.branch != "" {
+		fmt.Fprintf(&infoBlock, "\nBranch binding: %s", w.branch)
+	}
 	lanes, err := w.framingLanes()
 	if err != nil {
 		return nil, err
@@ -659,7 +788,15 @@ func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity)
 // agent to run a CLI command. Empty when the graph is clean; the list is
 // capped so a badly degraded graph cannot flood the framing.
 func (w *WorkflowSession) graphHealthBlock() (string, error) {
-	graph, err := w.graphs.Current()
+	var (
+		graph *model.Graph
+		err   error
+	)
+	if shell, ok := w.session.Instance(w.shell); ok {
+		graph, err = w.graphs.CurrentFor(shell.Store)
+	} else {
+		graph, err = w.graphs.Current()
+	}
 	if err != nil {
 		return "", err
 	}
@@ -761,6 +898,7 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 			summary.Label = workflowBodyLabel(events)
 		}
 		summary.Participant = item.Metadata.Participant
+		summary.Branch = item.Metadata.Branch
 		if item.Metadata.UpdatedAt.After(summary.LastActivity) {
 			summary.LastActivity = item.Metadata.UpdatedAt
 		}
@@ -808,7 +946,7 @@ func (a *Application) AbandonWorkflowSession(ctx context.Context, identity Reque
 			"%s is currently held by %s (last active %s) and may be actively driven — conclude it there, take it over first (resume_session with the user's ask), or wait.",
 			request.SessionID, ClientLabel(current.ClientName), current.LastActivity.Format(attachmentTimeFormat))}
 	}
-	w, err := a.newWorkflow(ctx, identity, runtime.options.Project.ID, sessionBindingFrom(stored))
+	w, err := a.newWorkflow(ctx, identity, runtime.options.Project.ID, sessionBindingFrom(stored), stored.Metadata.Branch)
 	if err != nil {
 		return WorkflowAbandonResult{}, err
 	}
@@ -926,7 +1064,7 @@ func (w *WorkflowSession) loadProcedure(canonical string) (*engine.Spec, error) 
 
 func (w *WorkflowSession) publicServe(serve *engine.Serve) *WorkflowServe {
 	result := &WorkflowServe{
-		Session: w.ID(), Instance: serve.Instance, Procedure: serve.Procedure, Status: string(serve.Status),
+		Session: w.ID(), Branch: w.branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: string(serve.Status),
 		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Diagnostics: append([]string(nil), serve.Diagnostics...), InstructionUnit: serve.UnitText,
 	}
@@ -978,10 +1116,14 @@ func (g *workflowGraphs) Current() (*model.Graph, error) {
 // The application owns those meanings while the engine remains unaware of
 // branch semantics.
 func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
-	target := g.workflow.readTarget(store)
+	target, fromBinding := g.workflow.readTarget(store)
 	if target == (MutationTarget{}) {
 		return g.Current()
 	}
+	return g.currentTarget(target, fromBinding)
+}
+
+func (g *workflowGraphs) currentTarget(target MutationTarget, fromBinding bool) (*model.Graph, error) {
 	_, runtime, err := g.workflow.app.resolve(g.workflow.ctx, g.workflow.identity, g.workflow.project, AccessRead)
 	if err != nil {
 		return nil, err
@@ -999,7 +1141,7 @@ func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
 	// with their read cache while preserving explicit target authority.
 	snapshot, err := snapshotMutationTarget(g.workflow.ctx, runtime, target)
 	if err != nil {
-		return nil, err
+		return nil, withSessionBindingTargetError(g.workflow.branch, fromBinding, err)
 	}
 	snapshot, err = g.workflow.app.snapshotWithDependenciesFrom(g.workflow.ctx, g.workflow.identity, runtime, snapshot)
 	if err != nil {
@@ -1021,15 +1163,18 @@ func (g *workflowGraphs) Invalidate() {
 // state fields that carry branch authority for graph reads. A procedure that
 // introduces another branch-bearing field must register it here so reads do
 // not silently fall back to the session graph.
-var workflowReadTargetFields = [...]string{"captureBranch", "workBranch"}
+var workflowReadTargetFields = [...]string{"captureBranch", "resolvedCaptureBranch", "workBranch"}
 
-func (w *WorkflowSession) readTarget(store *engine.Store) MutationTarget {
+func (w *WorkflowSession) readTarget(store *engine.Store) (MutationTarget, bool) {
 	for _, field := range workflowReadTargetFields {
 		if target := w.mutationTarget(store, field); target != (MutationTarget{}) {
-			return target
+			return target, false
 		}
 	}
-	return MutationTarget{}
+	if w.branch != "" {
+		return MutationTarget{Project: w.project, Branch: w.branch}, true
+	}
+	return MutationTarget{}, false
 }
 
 type workflowSink struct{ workflow *WorkflowSession }
@@ -1088,6 +1233,7 @@ func (w *WorkflowSession) resyncBindingVersion() error {
 		return err
 	}
 	w.binding.Version = stored.Version
+	w.setBranch(stored.Metadata.Branch)
 	return nil
 }
 

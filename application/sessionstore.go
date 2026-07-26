@@ -11,12 +11,15 @@ type SessionID string
 // SessionMetadata is structured routing and ownership data. Dialogue events
 // remain opaque to the store.
 type SessionMetadata struct {
-	CodecVersion      uint32
-	ID                SessionID
-	Subject           string
-	Project           ProjectID
-	Participant       string
-	Label             string
+	CodecVersion uint32
+	ID           SessionID
+	Subject      string
+	Project      ProjectID
+	Participant  string
+	Label        string
+	// Branch is the session's explicit branch binding. Empty means unbound;
+	// compositions without a branch concept leave it empty.
+	Branch            string `json:"branch,omitempty"`
 	Attachment        *Attachment
 	AttachmentHistory []AttachmentRecord
 	UpdatedAt         time.Time

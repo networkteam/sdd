@@ -14,6 +14,7 @@ import (
 	clitui "github.com/networkteam/sdd/internal/cliout/tui"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
+	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/llm"
@@ -119,7 +120,11 @@ func resolveIndexStore(emb llm.Embedder) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	key := index.RepoKey(repoID, filepath.Dir(sddDir))
+	stableRoot, err := git.StableRepoRoot(filepath.Dir(sddDir))
+	if err != nil {
+		return "", err
+	}
+	key := index.RepoKey(repoID, stableRoot)
 	return index.StoreDir(loc.CacheRoot, key, emb.Fingerprint()), nil
 }
 

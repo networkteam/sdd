@@ -78,15 +78,17 @@ func (a *Application) Vocabulary(ctx context.Context, identity RequestIdentity, 
 	return fmt.Sprintf("(configured graph language %q has no bundled vocabulary reference — render user-facing terms in English canonical form; adding references/vocabulary-%s.md is a framework-level contribution)", info.Language, base), nil
 }
 
-func (a *Application) View(ctx context.Context, identity RequestIdentity, project ProjectID, request ViewRequest) (ViewResult, error) {
+func (a *Application) View(ctx context.Context, identity RequestIdentity, project ProjectID, request ViewRequest) (result ViewResult, err error) {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return ViewResult{}, err
 	}
-	snapshot, err := runtime.options.Graph.Current(ctx)
+	selected, err := acquireSnapshotForReadBranch(ctx, runtime, request.Branch)
 	if err != nil {
-		return ViewResult{}, err
+		return ViewResult{}, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
 	}
+	defer selected.releaseInto(&err)
+	snapshot := selected.snapshot
 	layout, err := query.ParseLayout(request.Layout)
 	if err != nil {
 		return ViewResult{}, err
@@ -95,17 +97,17 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 	if err != nil {
 		return ViewResult{}, err
 	}
-	result, err := snapshot.finder.View(query.ViewQuery{Layout: layout})
+	viewResult, err := snapshot.finder.View(query.ViewQuery{Layout: layout})
 	if err != nil {
 		return ViewResult{}, err
 	}
 	var rendered bytes.Buffer
-	presenters.RenderView(&rendered, result)
+	presenters.RenderView(&rendered, viewResult)
 	// Matched count is a read-side fact owned by the finder; sum it across the
 	// local graph and every queried dependency so "empty" means nothing
 	// rendered anywhere, not just an empty rendered string (which is also false
 	// once a repo header or recovery notice prints).
-	matched := result.MatchedCount()
+	matched := viewResult.MatchedCount()
 	repos, err := a.selectedDependencies(request.Repos, request.AllRepos, runtime.options.Dependencies)
 	if err != nil {
 		return ViewResult{}, err
@@ -150,7 +152,7 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 	}, nil
 }
 
-func (a *Application) Show(ctx context.Context, identity RequestIdentity, project ProjectID, request ShowRequest) (ShowResult, error) {
+func (a *Application) Show(ctx context.Context, identity RequestIdentity, project ProjectID, request ShowRequest) (result ShowResult, err error) {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return ShowResult{}, err
@@ -158,7 +160,13 @@ func (a *Application) Show(ctx context.Context, identity RequestIdentity, projec
 	if len(request.IDs) == 0 {
 		return ShowResult{}, fmt.Errorf("sdd: at least one entry ID is required")
 	}
-	snapshot, err := a.snapshotWithDependencies(ctx, identity, runtime)
+	selected, err := acquireSnapshotForReadBranch(ctx, runtime, request.Branch)
+	if err != nil {
+		return ShowResult{}, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
+	}
+	defer selected.releaseInto(&err)
+	local := selected.snapshot
+	snapshot, err := a.snapshotWithDependenciesFrom(ctx, identity, runtime, local)
 	if err != nil {
 		return ShowResult{}, err
 	}
@@ -166,14 +174,14 @@ func (a *Application) Show(ctx context.Context, identity RequestIdentity, projec
 	if up < 0 || down < 0 {
 		return ShowResult{}, fmt.Errorf("sdd: show depths cannot be negative")
 	}
-	result, err := snapshot.finder.Show(query.ShowQuery{IDs: request.IDs, UpDepth: up, DownDepth: down})
+	showResult, err := snapshot.finder.Show(query.ShowQuery{IDs: request.IDs, UpDepth: up, DownDepth: down})
 	if err != nil {
 		return ShowResult{}, err
 	}
 	var rendered bytes.Buffer
-	presenters.RenderShow(&rendered, result, presenters.ShowOptions{})
+	presenters.RenderShow(&rendered, showResult, presenters.ShowOptions{})
 	show := ShowResult{Project: runtime.options.Project, Entries: strings.TrimRight(rendered.String(), "\n")}
-	for _, group := range result.Groups {
+	for _, group := range showResult.Groups {
 		if group.Primary != nil {
 			if group.PrimaryID != "" {
 				show.FullIDs = append(show.FullIDs, group.PrimaryID)
@@ -192,15 +200,17 @@ func (a *Application) Show(ctx context.Context, identity RequestIdentity, projec
 	return show, nil
 }
 
-func (a *Application) Search(ctx context.Context, identity RequestIdentity, project ProjectID, request SearchRequest) (SearchResult, error) {
+func (a *Application) Search(ctx context.Context, identity RequestIdentity, project ProjectID, request SearchRequest) (result SearchResult, err error) {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return SearchResult{}, err
 	}
-	snapshot, err := runtime.options.Graph.Current(ctx)
+	selected, err := acquireSnapshotForReadBranch(ctx, runtime, request.Branch)
 	if err != nil {
-		return SearchResult{}, err
+		return SearchResult{}, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
 	}
+	defer selected.releaseInto(&err)
+	snapshot := selected.snapshot
 	filter, err := publicGraphFilter(request)
 	if err != nil {
 		return SearchResult{}, err
@@ -209,7 +219,7 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 		Terms: request.Terms, Phrase: request.Phrase, Filter: filter,
 		IncludeSuperseded: request.IncludeSuperseded, Limit: request.Limit, MaxCitationsPerEntry: request.MaxCitations,
 	}
-	result, err := runtime.searchSnapshot(ctx, snapshot, q)
+	searchResult, err := runtime.searchSnapshot(ctx, snapshot, selected.store, q)
 	if err != nil {
 		return SearchResult{}, err
 	}
@@ -226,28 +236,76 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 		if err != nil {
 			return SearchResult{}, dependencyUnavailable()
 		}
-		memberResult, err := dependency.searchSnapshot(ctx, member, q)
+		memberResult, err := dependency.searchSnapshot(ctx, member, dependency.options.Graph, q)
 		if err != nil {
 			return SearchResult{}, err
 		}
 		for i := range memberResult.Entries {
 			memberResult.Entries[i].RepoID = repoID
 		}
-		result.Entries = append(result.Entries, memberResult.Entries...)
+		searchResult.Entries = append(searchResult.Entries, memberResult.Entries...)
 	}
-	sort.SliceStable(result.Entries, func(i, j int) bool { return result.Entries[i].Score > result.Entries[j].Score })
-	if limit := q.EffectiveLimit(); len(result.Entries) > limit {
-		result.Entries = result.Entries[:limit]
+	sort.SliceStable(searchResult.Entries, func(i, j int) bool { return searchResult.Entries[i].Score > searchResult.Entries[j].Score })
+	if limit := q.EffectiveLimit(); len(searchResult.Entries) > limit {
+		searchResult.Entries = searchResult.Entries[:limit]
 	}
 	var rendered bytes.Buffer
-	presenters.RenderSearch(&rendered, result, snapshot.graph)
+	presenters.RenderSearch(&rendered, searchResult, snapshot.graph)
 	search := SearchResult{Project: runtime.options.Project, Results: strings.TrimRight(rendered.String(), "\n")}
-	for _, entry := range result.Entries {
+	for _, entry := range searchResult.Entries {
 		if entry.Entry != nil {
 			search.EntryIDs = append(search.EntryIDs, entry.DisplayID())
 		}
 	}
 	return search, nil
+}
+
+type readSnapshotSelection struct {
+	snapshot *Snapshot
+	store    GraphStore
+	release  func() error
+	branch   string
+}
+
+// acquireSnapshotForReadBranch selects only the local project's read
+// authority. Empty means the runtime's current graph, not DefaultBranch:
+// DefaultBranch is a write-routing fallback and may intentionally point at a
+// different checkout. A concrete branch stays acquired until the caller has
+// finished reading both the snapshot and its attachments.
+func acquireSnapshotForReadBranch(ctx context.Context, runtime *ProjectRuntime, branch string) (*readSnapshotSelection, error) {
+	if branch == "" {
+		snapshot, err := runtime.options.Graph.Current(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &readSnapshotSelection{snapshot: snapshot, store: runtime.options.Graph}, nil
+	}
+	target, err := resolveMutationTarget(runtime, MutationTarget{Project: runtime.options.Project.ID, Branch: branch})
+	if err != nil {
+		return nil, err
+	}
+	acquired, err := runtime.acquire(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := acquired.Graph.Current(ctx)
+	if err != nil {
+		releaseErr := acquired.Release()
+		if releaseErr != nil {
+			releaseErr = fmt.Errorf("releasing read target %s after snapshot failure: %w", branch, releaseErr)
+		}
+		return nil, errors.Join(err, releaseErr)
+	}
+	return &readSnapshotSelection{snapshot: snapshot, store: acquired.Graph, release: acquired.Release, branch: branch}, nil
+}
+
+func (s *readSnapshotSelection) releaseInto(errp *error) {
+	if s == nil || s.release == nil {
+		return
+	}
+	if releaseErr := s.release(); releaseErr != nil {
+		*errp = errors.Join(*errp, fmt.Errorf("releasing read target %s: %w", s.branch, releaseErr))
+	}
 }
 
 func (a *Application) ReadAttachment(ctx context.Context, identity RequestIdentity, project ProjectID, request ReadAttachmentRequest) (ReadAttachmentResult, error) {
@@ -344,11 +402,11 @@ func (a *Application) resolve(ctx context.Context, identity RequestIdentity, pro
 	return principal, runtime, nil
 }
 
-func (r *ProjectRuntime) searchSnapshot(ctx context.Context, snapshot *Snapshot, request query.SearchQuery) (*query.SearchResult, error) {
+func (r *ProjectRuntime) searchSnapshot(ctx context.Context, snapshot *Snapshot, attachments GraphStore, request query.SearchQuery) (*query.SearchResult, error) {
 	if request.Phrase == "" {
 		return finders.NewSearchFinder(finders.SearchFinderOptions{Graph: snapshot.graph}).Search(ctx, request)
 	}
-	return r.vectorSearch(ctx, snapshot, request)
+	return r.vectorSearch(ctx, snapshot, attachments, request)
 }
 
 func (a *Application) snapshotWithDependencies(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime) (*Snapshot, error) {

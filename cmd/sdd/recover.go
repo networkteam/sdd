@@ -12,6 +12,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/repos"
 	localadapter "github.com/networkteam/sdd/local"
 )
 
@@ -127,23 +128,32 @@ func buildLocalRecoveryApplication(ctx context.Context, cmd *cli.Command) (*sdd.
 	if cfg == nil || cfg.DefaultBranch == "" {
 		return nil, "", sdd.RequestIdentity{}, fmt.Errorf("default_branch is required in .sdd/config.yaml before recovering mutations")
 	}
-	project := sdd.ProjectID("local")
-	if cfg.RepoID != "" {
-		project = sdd.ProjectID(cfg.RepoID)
+	locations, err := repos.DefaultLocations()
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
 	}
+	storePaths, err := resolveLocalStorePaths(sddDir, cfg, locations)
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	project := routedSessionProject(cfg, storePaths)
 	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: graphDir})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(filepath.Join(sddDir, "sessions"))
+	sessions, err := localadapter.NewFilesystemSessionStoreAtStateRoot(locations.StateRoot, storePaths.Sessions)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(sddDir, "staged-blobs"))
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAtStateRoot(locations.StateRoot, storePaths.StagedBlobs)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	targets, err := newLocalMutationTargets(project, filepath.Dir(sddDir))
+	var heldRepoID sdd.ProjectID
+	if storePaths.PendingIdentity {
+		heldRepoID = sdd.ProjectID(cfg.RepoID)
+	}
+	targets, err := newLocalMutationTargets(project, filepath.Dir(sddDir), heldRepoID)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
