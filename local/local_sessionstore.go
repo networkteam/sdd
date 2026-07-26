@@ -530,6 +530,60 @@ type sessionLine struct {
 	Events   []app.StoredEvent    `json:"events,omitempty"`
 }
 
+// decodeSessionLine strictly decodes one current-envelope session log line,
+// skipping only the metadata fields an earlier codec wrote and the model has
+// since retired. Read-compatibility with every shape sdd has written is
+// permanent (d-cpt-i2x), so a retired field is converted away instead of
+// rejected — while every other unknown field still fails, keeping strict
+// decoding useful as a drift alarm. This is the one strict session-line
+// decoder; readers that need the tolerance go through it rather than repeating
+// the rules.
+func decodeSessionLine(raw []byte, line *sessionLine) error {
+	normalized, err := dropRetiredSessionMetadata(raw)
+	if err != nil {
+		return err
+	}
+	return decodeStrictJSON(normalized, line)
+}
+
+// dropRetiredSessionMetadata removes retired metadata fields from one raw
+// session line. It returns the input untouched when there is nothing to drop,
+// so a log written by the current codec is decoded without a re-encode.
+func dropRetiredSessionMetadata(raw []byte) ([]byte, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, err
+	}
+	encodedMetadata, ok := envelope["metadata"]
+	if !ok {
+		return raw, nil
+	}
+	var metadata map[string]json.RawMessage
+	if err := json.Unmarshal(encodedMetadata, &metadata); err != nil {
+		return nil, err
+	}
+	var codec struct{ CodecVersion uint32 }
+	if err := json.Unmarshal(encodedMetadata, &codec); err != nil {
+		return nil, err
+	}
+	dropped := false
+	for _, field := range app.RetiredSessionMetadataFields(codec.CodecVersion) {
+		if _, present := metadata[field]; present {
+			delete(metadata, field)
+			dropped = true
+		}
+	}
+	if !dropped {
+		return raw, nil
+	}
+	rewritten, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, err
+	}
+	envelope["metadata"] = rewritten
+	return json.Marshal(envelope)
+}
+
 type sessionFormat uint8
 
 const (

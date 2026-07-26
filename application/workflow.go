@@ -1285,7 +1285,7 @@ func (w *WorkflowSession) restoreStagedBlobs(events []StoredEvent) error {
 		if stored.Code != workflowStagedBlobCode {
 			continue
 		}
-		if stored.CodecVersion != SessionCodecVersion {
+		if !SupportedSessionCodecVersion(stored.CodecVersion) {
 			return &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported staged blob event codec", Version: stored.CodecVersion}
 		}
 		var item struct {
@@ -1324,7 +1324,7 @@ func decodeWorkflowEvents(stored []StoredEvent) ([]engine.Event, error) {
 		if item.Code != WorkflowEventCode {
 			continue
 		}
-		if item.CodecVersion != SessionCodecVersion {
+		if !SupportedSessionCodecVersion(item.CodecVersion) {
 			return nil, &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported workflow event codec", Version: item.CodecVersion}
 		}
 		var event engine.Event

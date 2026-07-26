@@ -22,6 +22,41 @@ const reorientSuffix = "reorient with resume_session or start fresh"
 
 const SessionCodecVersion uint32 = 1
 
+// FirstSessionCodecVersion is the oldest persisted session codec this binary
+// still reads.
+const FirstSessionCodecVersion uint32 = 1
+
+// SupportedSessionCodecVersion reports whether a persisted codec version is one
+// this binary can read. Read-compatibility with every shape sdd has written is
+// permanent (d-cpt-i2x), so the whole range through the current version is
+// accepted and superseded shapes are converted at decode; only a version this
+// binary predates is a migration error.
+func SupportedSessionCodecVersion(version uint32) bool {
+	return version >= FirstSessionCodecVersion && version <= SessionCodecVersion
+}
+
+// retiredSessionMetadataFields records, per codec version, the SessionMetadata
+// fields that version wrote and the model no longer defines. Codec 1 carried a
+// holder lease until attachment stamps replaced it, so logs written before that
+// still hold the pair — a strict decode has to skip them rather than reject the
+// very files it exists to read.
+//
+// Dropping a field from SessionMetadata means registering it here and bumping
+// SessionCodecVersion. A removal that skips both steps is invisible until some
+// strict reader meets an older log, which is exactly how the relocation outage
+// this table answers came about.
+var retiredSessionMetadataFields = map[uint32][]string{
+	1: {"Holder", "HolderHistory"},
+}
+
+// RetiredSessionMetadataFields returns the metadata field names a persisted
+// codec version wrote that the current model no longer defines. Decoders skip
+// these; every other unknown field stays an error, so the strictness keeps
+// working as a drift alarm.
+func RetiredSessionMetadataFields(version uint32) []string {
+	return retiredSessionMetadataFields[version]
+}
+
 // SessionRecencyWindow is the single threshold separating an active attachment
 // from an idle one. Erring long is cheap, so it is generous.
 const SessionRecencyWindow = 15 * time.Minute
@@ -99,11 +134,11 @@ func sessionBindingFrom(stored StoredSession) SessionBinding {
 }
 
 func validateStoredSession(stored StoredSession) error {
-	if stored.Metadata.CodecVersion != SessionCodecVersion {
+	if !SupportedSessionCodecVersion(stored.Metadata.CodecVersion) {
 		return &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported session codec version", Version: stored.Metadata.CodecVersion}
 	}
 	for _, event := range stored.Events {
-		if event.CodecVersion != SessionCodecVersion {
+		if !SupportedSessionCodecVersion(event.CodecVersion) {
 			return &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported session event codec version", Version: event.CodecVersion}
 		}
 	}
