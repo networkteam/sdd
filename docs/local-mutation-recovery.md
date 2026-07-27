@@ -12,17 +12,32 @@ Pending intent never runs automatically during startup, session resume, orientat
 
 ## Recovery states and actions
 
-Applied state comes from the recorded outcome: the canonical apply outcome when it
-is definitive, otherwise a recovery attempt's reconciliation. The durable
-projection distinguishes:
+The projection answers three separate questions in three fields, so none of them
+has to encode the others.
 
-- `unknown`: no definitive canonical outcome and no reconciliation establishing one;
-- `not-applied-awaiting-decision`: the batch is definitively absent;
-- `applied-finalization-pending`: the batch landed, and finalization is still owed — either a recorded finalizer outcome failed, or no finalizer outcome is recorded at all, which means none ran;
-- `applied-finalized`: the batch landed and at least one finalizer outcome is recorded, all of them successful, with no terminal written; nothing awaits action, so it is reported only under history;
-- `discarded`: definitively absent and terminally discarded;
-- `abandoned-unknown`: terminally acknowledged without claiming absence;
-- `recovered`: applied and fully finalized.
+**State** answers only whether delivery was reached, and has three values:
+
+- `delivered`: the batch landed and finalization is proven — at least one recorded finalizer outcome, all successful. Nothing is owed;
+- `pending`: delivery is not proven. This is exactly the actionable condition; nothing else is actionable and no pending item is not;
+- `abandoned`: a participant decided to stop pursuing delivery.
+
+**Reason** qualifies a state that does not explain itself. For `pending` it names
+what delivery waits on; for `abandoned`, which decision ended it; for `delivered`
+it is empty.
+
+- `outcome-unknown`: no definitive canonical outcome and no reconciliation establishing one;
+- `not-applied`: the batch is definitively absent;
+- `finalization-owed`: the batch landed, but either a recorded finalizer outcome failed or no finalizer outcome is recorded at all, which means none ran;
+- `discarded`: abandoned as definitively absent;
+- `abandoned-unknown`: abandoned without claiming absence.
+
+Applied state itself comes from the recorded outcome: the canonical apply outcome
+when it is definitive, otherwise a recovery attempt's reconciliation.
+
+**Recovered** is provenance, not state: it records that recovery machinery — a
+reconciliation or a verb — touched this mutation. A write that simply succeeded is
+`delivered` with the flag unset; one that needed help is `delivered` with it set.
+Both are equally delivered, which is why this is a flag and not a state.
 
 Every recovery action resolves current authorization using the actor, original owner and session, concrete target, and a distinct verb. It then reacquires and reconciles batch ID plus digest before acting:
 

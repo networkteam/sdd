@@ -8,15 +8,19 @@ import (
 )
 
 func TestRecoveryInteractiveSelectionReconcilesUnknownBeforeOfferingVerbs(t *testing.T) {
-	unknown := sdd.RecoveryItem{State: sdd.RecoveryUnknown}
+	unknown := sdd.RecoveryItem{State: sdd.RecoveryPending, Reason: sdd.RecoveryReasonOutcomeUnknown}
 	if !recoveryNeedsReconciliation(unknown, "") {
 		t.Fatal("interactive unknown recovery must reconcile before verb selection")
 	}
 	if recoveryNeedsReconciliation(unknown, "apply") {
 		t.Fatal("an explicit non-interactive verb reconciles inside RecoverMutation")
 	}
-	if recoveryNeedsReconciliation(sdd.RecoveryItem{State: sdd.RecoveryUnknown, LegacyUnroutable: true}, "") {
+	if recoveryNeedsReconciliation(sdd.RecoveryItem{State: sdd.RecoveryPending, Reason: sdd.RecoveryReasonOutcomeUnknown, LegacyUnroutable: true}, "") {
 		t.Fatal("legacy recovery must bind its target before reconciliation")
+	}
+	// A pending item whose outcome is already definitive needs no reconciliation.
+	if recoveryNeedsReconciliation(sdd.RecoveryItem{State: sdd.RecoveryPending, Reason: sdd.RecoveryReasonFinalizationOwed}, "") {
+		t.Fatal("a definitive outcome must not be reconciled again before verb selection")
 	}
 }
 
@@ -26,10 +30,10 @@ func TestRecoveryVerbMenusCoverEveryActionableProjection(t *testing.T) {
 		item sdd.RecoveryItem
 		want []sdd.RecoveryVerb
 	}{
-		{name: "not applied", item: sdd.RecoveryItem{State: sdd.RecoveryNotAppliedAwaitingDecision}, want: []sdd.RecoveryVerb{sdd.RecoveryApply, sdd.RecoveryDiscard}},
-		{name: "applied", item: sdd.RecoveryItem{State: sdd.RecoveryAppliedFinalizationPending}, want: []sdd.RecoveryVerb{sdd.RecoveryFinalizeRetry}},
-		{name: "unknown evidence", item: sdd.RecoveryItem{State: sdd.RecoveryUnknown}, want: []sdd.RecoveryVerb{sdd.RecoveryAbandonUnknown}},
-		{name: "legacy", item: sdd.RecoveryItem{State: sdd.RecoveryUnknown, LegacyUnroutable: true}, want: []sdd.RecoveryVerb{sdd.RecoveryBindTarget}},
+		{name: "not applied", item: sdd.RecoveryItem{State: sdd.RecoveryPending, Reason: sdd.RecoveryReasonNotApplied}, want: []sdd.RecoveryVerb{sdd.RecoveryApply, sdd.RecoveryDiscard}},
+		{name: "finalization owed", item: sdd.RecoveryItem{State: sdd.RecoveryPending, Reason: sdd.RecoveryReasonFinalizationOwed}, want: []sdd.RecoveryVerb{sdd.RecoveryFinalizeRetry}},
+		{name: "unknown evidence", item: sdd.RecoveryItem{State: sdd.RecoveryPending, Reason: sdd.RecoveryReasonOutcomeUnknown}, want: []sdd.RecoveryVerb{sdd.RecoveryAbandonUnknown}},
+		{name: "legacy", item: sdd.RecoveryItem{State: sdd.RecoveryPending, Reason: sdd.RecoveryReasonOutcomeUnknown, LegacyUnroutable: true}, want: []sdd.RecoveryVerb{sdd.RecoveryBindTarget}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

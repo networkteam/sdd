@@ -102,11 +102,7 @@ func recoverCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			state := result.Item.State
-			if state == "" && result.Transition.Apply.State != "" {
-				state = sdd.RecoveryState(result.Transition.Apply.State)
-			}
-			fmt.Fprintf(os.Stdout, "Recovery recorded: %s · %s · %s\n", item.MutationID, verb, state)
+			fmt.Fprintf(os.Stdout, "Recovery recorded: %s · %s · %s\n", item.MutationID, verb, recoveryStateLabel(result.Item))
 			return nil
 		}),
 	}
@@ -194,11 +190,25 @@ func renderRecoveryItems(items []sdd.RecoveryItem) {
 		return
 	}
 	for index, item := range items {
-		fmt.Fprintf(os.Stdout, "%d. %s · %s · %s · owner %s · session %s\n", index+1, item.MutationID, item.State, recoveryTargetLabel(item), item.OriginalSubject, item.Session)
+		fmt.Fprintf(os.Stdout, "%d. %s · %s · %s · owner %s · session %s\n", index+1, item.MutationID, recoveryStateLabel(item), recoveryTargetLabel(item), item.OriginalSubject, item.Session)
 		if item.LastEvidence != "" {
 			fmt.Fprintf(os.Stdout, "   evidence: %s\n", item.LastEvidence)
 		}
 	}
+}
+
+// recoveryStateLabel renders delivery state, qualified by the reason where one
+// applies, and marks the items a recovery verb actually touched — so a write that
+// simply succeeded never reads as recovered.
+func recoveryStateLabel(item sdd.RecoveryItem) string {
+	label := string(item.State)
+	if item.Reason != "" {
+		label += " (" + string(item.Reason) + ")"
+	}
+	if item.Recovered {
+		label += " · recovered"
+	}
+	return label
 }
 
 func selectRecoveryItem(items []sdd.RecoveryItem, cmd *cli.Command) (sdd.RecoveryItem, error) {
@@ -244,17 +254,19 @@ func selectRecoveryVerb(item sdd.RecoveryItem, cmd *cli.Command) (sdd.RecoveryVe
 }
 
 func recoveryNeedsReconciliation(item sdd.RecoveryItem, explicitVerb string) bool {
-	return strings.TrimSpace(explicitVerb) == "" && !item.LegacyUnroutable && item.State == sdd.RecoveryUnknown
+	return strings.TrimSpace(explicitVerb) == "" && !item.LegacyUnroutable && item.Reason == sdd.RecoveryReasonOutcomeUnknown
 }
 
+// recoveryVerbs offers the actions that answer what a pending item is waiting
+// on, so it keys on the reason rather than on delivery state.
 func recoveryVerbs(item sdd.RecoveryItem) []sdd.RecoveryVerb {
 	if item.LegacyUnroutable {
 		return []sdd.RecoveryVerb{sdd.RecoveryBindTarget}
 	}
-	switch item.State {
-	case sdd.RecoveryNotAppliedAwaitingDecision:
+	switch item.Reason {
+	case sdd.RecoveryReasonNotApplied:
 		return []sdd.RecoveryVerb{sdd.RecoveryApply, sdd.RecoveryDiscard}
-	case sdd.RecoveryAppliedFinalizationPending:
+	case sdd.RecoveryReasonFinalizationOwed:
 		return []sdd.RecoveryVerb{sdd.RecoveryFinalizeRetry}
 	default:
 		return []sdd.RecoveryVerb{sdd.RecoveryAbandonUnknown}

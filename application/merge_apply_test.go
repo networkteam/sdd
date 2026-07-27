@@ -101,7 +101,7 @@ func TestApplyPreparedExhaustedConflictFailsTypedNeverRecovery(t *testing.T) {
 		t.Fatalf("exhausted conflict actionable recovery = %+v, %v; want none", pending, err)
 	}
 	history, err := application.ListRecoveries(t.Context(), identity, "example", true)
-	if err != nil || len(history.Items) != 1 || history.Items[0].State != sdd.RecoveryDiscarded || history.Items[0].Actionable {
+	if err != nil || len(history.Items) != 1 || history.Items[0].State != sdd.RecoveryAbandoned || history.Items[0].Reason != sdd.RecoveryReasonDiscarded || history.Items[0].Actionable() {
 		t.Fatalf("exhausted conflict terminal history = %+v, %v; want one non-actionable discarded item", history, err)
 	}
 }

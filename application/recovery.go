@@ -24,36 +24,58 @@ const recoveryCauseGraphContention = "graph-contention"
 
 type RecoveryState string
 
+// State answers one question — has delivery been reached — so it carries the two
+// durable conditions of the delivery contract plus the one outcome that is a
+// participant's decision rather than a delivery result.
 const (
-	RecoveryUnknown                    RecoveryState = "unknown"
-	RecoveryNotAppliedAwaitingDecision RecoveryState = "not-applied-awaiting-decision"
-	RecoveryAppliedFinalizationPending RecoveryState = "applied-finalization-pending"
-	RecoveryDiscarded                  RecoveryState = "discarded"
-	RecoveryAbandonedUnknown           RecoveryState = "abandoned-unknown"
-	RecoveryRecovered                  RecoveryState = "recovered"
-	// RecoveryAppliedFinalized names the state the record itself proves and
-	// nothing more: the mutation applied and every finalizer outcome the store
-	// recorded succeeded. It is not a terminal verb's state — no recovery
-	// decision was taken — it is the projection reading a write that already
-	// reached its desired state, whether or not a terminal event closed it.
-	RecoveryAppliedFinalized RecoveryState = "applied-finalized"
+	// RecoveryDelivered means the write reached its desired state: the batch
+	// applied and finalization is proven. Nothing is owed.
+	RecoveryDelivered RecoveryState = "delivered"
+	// RecoveryPending means delivery is not proven yet. Pending is exactly the
+	// actionable condition, and Reason names what is owed.
+	RecoveryPending RecoveryState = "pending"
+	// RecoveryAbandoned means a participant decided to stop pursuing delivery.
+	// Reason names the decision.
+	RecoveryAbandoned RecoveryState = "abandoned"
+)
+
+// RecoveryReason qualifies a state that does not explain itself: what delivery
+// is waiting on, or which decision ended it.
+type RecoveryReason string
+
+const (
+	RecoveryReasonOutcomeUnknown   RecoveryReason = "outcome-unknown"
+	RecoveryReasonNotApplied       RecoveryReason = "not-applied"
+	RecoveryReasonFinalizationOwed RecoveryReason = "finalization-owed"
+	RecoveryReasonDiscarded        RecoveryReason = "discarded"
+	RecoveryReasonAbandonedUnknown RecoveryReason = "abandoned-unknown"
 )
 
 type RecoveryItem struct {
-	Session          SessionID
-	MutationID       string
-	Digest           string
-	Target           MutationTarget
-	OriginalSubject  string
-	State            RecoveryState
+	Session         SessionID
+	MutationID      string
+	Digest          string
+	Target          MutationTarget
+	OriginalSubject string
+	State           RecoveryState
+	// Reason qualifies State: what delivery waits on while pending, or which
+	// decision ended it while abandoned. Empty when delivered.
+	Reason RecoveryReason
+	// Recovered records that recovery machinery touched this mutation — a
+	// reconciliation or a verb. It is provenance, not state: a recovered write is
+	// delivered exactly like one that never needed help.
+	Recovered        bool
 	LegacyUnroutable bool
-	Actionable       bool
 	EntryIDs         []string
 	LastEvidence     string
 	// Cause is the terminal's structured cause (e.g. graph-contention for an
-	// engine-recorded discard), empty for operator decisions and open items.
+	// engine-recorded discard), empty for participant decisions and open items.
 	Cause string
 }
+
+// Actionable reports whether this item awaits a recovery decision. It is derived
+// from State rather than stored beside it, so the two cannot disagree.
+func (i RecoveryItem) Actionable() bool { return i.State == RecoveryPending }
 
 type RecoveryList struct {
 	Project ProjectRef
@@ -150,7 +172,7 @@ func listRecoveriesRuntime(ctx context.Context, runtime *ProjectRuntime, include
 				return RecoveryList{}, err
 			}
 			item := recoveryItem(stored, replay)
-			if !includeClosed && !item.Actionable {
+			if !includeClosed && !item.Actionable() {
 				continue
 			}
 			result.Items = append(result.Items, item)
@@ -176,7 +198,7 @@ func renderRecoveryNotices(items []RecoveryItem) string {
 		if item.LegacyUnroutable {
 			target = "target binding required"
 		}
-		fmt.Fprintf(&rendered, "  a pending write awaits explicit recovery: %s · %s · %s\n", item.MutationID, item.State, target)
+		fmt.Fprintf(&rendered, "  a pending write awaits explicit recovery: %s · %s · %s\n", item.MutationID, item.Reason, target)
 	}
 	return strings.TrimRight(rendered.String(), "\n")
 }
@@ -336,7 +358,7 @@ func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdent
 		if request.Verb != RecoveryAbandonUnknown {
 			return RecoveryResult{Project: runtime.options.Project, Transition: TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationUnknown}}}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "recovery target acquisition failed; only abandon-unknown may terminally acknowledge this evidence", Cause: acquireErr}
 		}
-		return a.terminalRecovery(ctx, runtime, stored, prepared, binding, principal.Subject, request, RecoveryAbandonedUnknown)
+		return a.terminalRecovery(ctx, runtime, stored, prepared, binding, principal.Subject, request, RecoveryReasonAbandonedUnknown)
 	}
 	release := true
 	defer func() {
@@ -372,7 +394,7 @@ func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdent
 		if reconciled.State != MutationNotApplied || reconcileErr != nil {
 			return RecoveryResult{}, recoveryStateError(request.Verb, reconciled.State, reconcileErr)
 		}
-		return a.terminalRecovery(ctx, runtime, stored, prepared, binding, principal.Subject, request, RecoveryDiscarded)
+		return a.terminalRecovery(ctx, runtime, stored, prepared, binding, principal.Subject, request, RecoveryReasonDiscarded)
 	case RecoveryFinalizeRetry:
 		if reconciled.State != MutationApplied || reconcileErr != nil {
 			return RecoveryResult{}, recoveryStateError(request.Verb, reconciled.State, reconcileErr)
@@ -383,13 +405,13 @@ func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdent
 		if reconciled.State != MutationUnknown {
 			return RecoveryResult{}, recoveryStateError(request.Verb, reconciled.State, reconcileErr)
 		}
-		return a.terminalRecovery(ctx, runtime, stored, prepared, binding, principal.Subject, request, RecoveryAbandonedUnknown)
+		return a.terminalRecovery(ctx, runtime, stored, prepared, binding, principal.Subject, request, RecoveryReasonAbandonedUnknown)
 	default:
 		return RecoveryResult{}, fmt.Errorf("sdd: unknown recovery verb %q", request.Verb)
 	}
 }
 
-func (a *Application) terminalRecovery(ctx context.Context, runtime *ProjectRuntime, stored StoredSession, prepared PreparedTransition, binding SessionBinding, actor string, request RecoveryRequest, state RecoveryState) (RecoveryResult, error) {
+func (a *Application) terminalRecovery(ctx context.Context, runtime *ProjectRuntime, stored StoredSession, prepared PreparedTransition, binding SessionBinding, actor string, request RecoveryRequest, reason RecoveryReason) (RecoveryResult, error) {
 	next, err := releaseAndRecordTerminal(ctx, runtime, binding, prepared, recoveryTerminalEvent{
 		MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
 		OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID,
@@ -401,7 +423,7 @@ func (a *Application) terminalRecovery(ctx context.Context, runtime *ProjectRunt
 	binding.Version = next
 	item := RecoveryItem{
 		Session: stored.Metadata.ID, MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
-		OriginalSubject: stored.Metadata.Subject, State: state, EntryIDs: mutationEntryIDs(prepared.Batch),
+		OriginalSubject: stored.Metadata.Subject, State: RecoveryAbandoned, Reason: reason, Recovered: true, EntryIDs: mutationEntryIDs(prepared.Batch),
 	}
 	return RecoveryResult{Project: runtime.options.Project, Item: item, Transition: TransitionResult{Project: runtime.options.Project, Binding: binding}}, nil
 }
@@ -436,10 +458,12 @@ func (a *Application) bindLegacyTarget(ctx context.Context, runtime *ProjectRunt
 	if err != nil {
 		return RecoveryResult{}, err
 	}
+	// Binding supplies the target a pending legacy intent was missing; delivery is
+	// still owed, so the item stays pending with its recorded reason intact.
 	item := recoveryItem(stored, replay)
 	item.Target = request.Target
 	item.LegacyUnroutable = false
-	item.Actionable = true
+	item.Recovered = true
 	return RecoveryResult{Project: runtime.options.Project, Item: item, Transition: TransitionResult{Project: runtime.options.Project, Binding: SessionBinding{SessionID: stored.Metadata.ID, Subject: stored.Metadata.Subject, Project: stored.Metadata.Project, Version: version}}}, nil
 }
 
@@ -592,40 +616,40 @@ func recoveryItem(stored StoredSession, replay mutationRecoveryReplay) RecoveryI
 	}
 	if replay.attempt != nil {
 		item.LastEvidence = replay.attempt.Evidence
+		item.Recovered = true
 	}
+	// A terminal is written by the ordinary write path too, so its presence says
+	// nothing about provenance — only a recorded attempt does.
 	if replay.terminal != nil {
 		item.Cause = replay.terminal.Cause
 		switch replay.terminal.Verb {
 		case RecoveryDiscard:
-			item.State = RecoveryDiscarded
+			item.State, item.Reason = RecoveryAbandoned, RecoveryReasonDiscarded
 		case RecoveryAbandonUnknown:
-			item.State = RecoveryAbandonedUnknown
+			item.State, item.Reason = RecoveryAbandoned, RecoveryReasonAbandonedUnknown
 		default:
-			item.State = RecoveryRecovered
+			item.State = RecoveryDelivered
 		}
 		return item
 	}
-	// Actionability derives from the recorded outcome, never from a terminal's
+	// Delivery derives from the recorded outcome, never from a terminal's
 	// absence: the v1 writer recorded an applied, finalized mutation and never
 	// wrote a terminal event, so terminal absence alone is not open work.
 	switch replay.recordedApplyState() {
 	case MutationApplied:
 		if replay.finalizationOwed() {
-			item.State = RecoveryAppliedFinalizationPending
-			item.Actionable = true
+			item.State, item.Reason = RecoveryPending, RecoveryReasonFinalizationOwed
 		} else {
-			item.State = RecoveryAppliedFinalized
+			item.State = RecoveryDelivered
 		}
 	case MutationNotApplied:
-		item.State = RecoveryNotAppliedAwaitingDecision
-		item.Actionable = true
+		item.State, item.Reason = RecoveryPending, RecoveryReasonNotApplied
 	default:
-		item.State = RecoveryUnknown
-		item.Actionable = true
+		item.State, item.Reason = RecoveryPending, RecoveryReasonOutcomeUnknown
 	}
 	// An unbound legacy intent is unroutable only while a verb is still owed;
 	// a write that already landed needs no target to act on.
-	if item.Actionable && replay.prepared.Version == LegacyPreparedTransitionVersion && replay.bound == nil {
+	if item.Actionable() && replay.prepared.Version == LegacyPreparedTransitionVersion && replay.bound == nil {
 		item.LegacyUnroutable = true
 	}
 	return item

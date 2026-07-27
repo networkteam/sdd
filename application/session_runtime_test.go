@@ -269,7 +269,7 @@ func TestPreparedTransitionRecoversUnknownApplyAndFinalizer(t *testing.T) {
 		t.Fatalf("second recovery = %+v, %v; finalizer calls=%d released=%d", recovered, err, finalizer.calls, blobs.released)
 	}
 	history, err := application.ListRecoveries(t.Context(), identity, "example", true)
-	if err != nil || len(history.Items) != 1 || history.Items[0].State != sdd.RecoveryRecovered || history.Items[0].Actionable {
+	if err != nil || len(history.Items) != 1 || history.Items[0].State != sdd.RecoveryDelivered || history.Items[0].Actionable() {
 		t.Fatalf("recovered history = %+v, %v", history, err)
 	}
 	restarted, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: graph.dir})
@@ -328,7 +328,7 @@ func TestReconcileMutationRefreshesIntentOnlyProjectionBeforeVerbSelection(t *te
 	refreshed, err := application.ReconcileMutation(t.Context(), identity, "example", sdd.RecoveryReconcileRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID,
 	})
-	if err != nil || refreshed.Item.State != sdd.RecoveryNotAppliedAwaitingDecision || refreshed.Transition.Apply.State != sdd.MutationNotApplied {
+	if err != nil || refreshed.Item.State != sdd.RecoveryPending || refreshed.Item.Reason != sdd.RecoveryReasonNotApplied || refreshed.Transition.Apply.State != sdd.MutationNotApplied {
 		t.Fatalf("ReconcileMutation = %+v, %v", refreshed, err)
 	}
 	stored, err := sessions.Load(t.Context(), binding.SessionID)
@@ -351,7 +351,7 @@ func TestReconcileMutationRefreshesIntentOnlyProjectionBeforeVerbSelection(t *te
 		t.Fatalf("recovery apply = %+v, %v; released=%d", applied, err, blobs.released)
 	}
 	history, err := application.ListRecoveries(t.Context(), identity, "example", true)
-	if err != nil || len(history.Items) != 1 || history.Items[0].State != sdd.RecoveryRecovered || history.Items[0].Actionable {
+	if err != nil || len(history.Items) != 1 || history.Items[0].State != sdd.RecoveryDelivered || history.Items[0].Actionable() {
 		t.Fatalf("recovery apply history = %+v, %v", history, err)
 	}
 }
@@ -579,7 +579,7 @@ func TestLegacyIntentRequiresAuthorizedAuditedTargetBinding(t *testing.T) {
 		t.Fatalf("legacy binding audit = %+v", stored.Events)
 	}
 	refreshed, err := application.ReconcileMutation(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, "example", sdd.RecoveryReconcileRequest{Session: metadata.ID, MutationID: prepared.Batch.ID})
-	if err != nil || refreshed.Item.State != sdd.RecoveryNotAppliedAwaitingDecision {
+	if err != nil || refreshed.Item.State != sdd.RecoveryPending || refreshed.Item.Reason != sdd.RecoveryReasonNotApplied {
 		t.Fatalf("bound legacy reconciliation = %+v, %v", refreshed, err)
 	}
 }
@@ -608,7 +608,7 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 		}
 		targets.setReleaseError(errors.New("injected target release failure"))
 		discarded, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard})
-		if discarded.Item.State != sdd.RecoveryDiscarded || err == nil || !strings.Contains(err.Error(), "injected target release failure") {
+		if discarded.Item.State != sdd.RecoveryAbandoned || discarded.Item.Reason != sdd.RecoveryReasonDiscarded || err == nil || !strings.Contains(err.Error(), "injected target release failure") {
 			t.Fatalf("discard = %+v, %v", discarded, err)
 		}
 	})
@@ -630,7 +630,7 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 		}
 		targets.setReleaseError(errors.New("injected target release failure"))
 		abandoned, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryAbandonUnknown})
-		if abandoned.Item.State != sdd.RecoveryAbandonedUnknown || err == nil || !strings.Contains(err.Error(), "injected target release failure") {
+		if abandoned.Item.State != sdd.RecoveryAbandoned || abandoned.Item.Reason != sdd.RecoveryReasonAbandonedUnknown || err == nil || !strings.Contains(err.Error(), "injected target release failure") {
 			t.Fatalf("abandon = %+v, %v", abandoned, err)
 		}
 	})
@@ -679,7 +679,7 @@ func TestReadSurfacesNeverReplayPendingMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(info.Recovery, "pending-unknown") || !strings.Contains(info.Recovery, string(sdd.RecoveryUnknown)) {
+	if !strings.Contains(info.Recovery, "pending-unknown") || !strings.Contains(info.Recovery, string(sdd.RecoveryReasonOutcomeUnknown)) {
 		t.Fatalf("Info recovery notice = %q", info.Recovery)
 	}
 	view, err := application.View(t.Context(), identity, "example", sdd.ViewRequest{Layout: "active:as-list"})
@@ -708,7 +708,7 @@ func TestReadSurfacesNeverReplayPendingMutation(t *testing.T) {
 	abandoned, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryAbandonUnknown, Reason: "operator accepts unknown history",
 	})
-	if err != nil || abandoned.Item.State != sdd.RecoveryAbandonedUnknown || blobs.released != 1 {
+	if err != nil || abandoned.Item.State != sdd.RecoveryAbandoned || abandoned.Item.Reason != sdd.RecoveryReasonAbandonedUnknown || blobs.released != 1 {
 		t.Fatalf("abandon unknown = %+v, %v; released=%d", abandoned, err, blobs.released)
 	}
 }

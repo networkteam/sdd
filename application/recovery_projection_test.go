@@ -94,15 +94,21 @@ func TestRecoveryProjectionClearsAppliedLegacyIntent(t *testing.T) {
 	}
 
 	item := recoveryItem(stored, replay)
-	if item.Actionable {
+	if item.Actionable() {
 		t.Errorf("recoveryItem(%s).Actionable = true, want false: the store records apply=%s with the git finalizer succeeded, so there is no pending write to recover",
 			strandedFixtureMutationID, replay.apply.State)
 	}
 	if item.LegacyUnroutable {
 		t.Errorf("recoveryItem(%s).LegacyUnroutable = true, want false: an already-applied write needs no target binding", strandedFixtureMutationID)
 	}
-	if item.State == RecoveryUnknown {
-		t.Errorf("recoveryItem(%s).State = %q, want a state reflecting the recorded applied outcome, not unknown", strandedFixtureMutationID, item.State)
+	if item.State != RecoveryDelivered {
+		t.Errorf("recoveryItem(%s).State = %q, want %q: the recorded outcome proves the write reached its desired state", strandedFixtureMutationID, item.State, RecoveryDelivered)
+	}
+	if item.Reason != "" {
+		t.Errorf("recoveryItem(%s).Reason = %q, want empty: a delivered write owes nothing", strandedFixtureMutationID, item.Reason)
+	}
+	if item.Recovered {
+		t.Errorf("recoveryItem(%s).Recovered = true, want false: no recovery verb ever touched this mutation", strandedFixtureMutationID)
 	}
 }
 
@@ -128,7 +134,7 @@ func TestRecoveryProjectionKeepsAppliedLegacyIntentWithFailedFinalizerActionable
 	}
 
 	item := recoveryItem(stored, replay)
-	if !item.Actionable {
+	if !item.Actionable() {
 		t.Errorf("recoveryItem(%s).Actionable = false, want true: the recorded git finalizer failed, so finalization is still owed",
 			strandedFixtureMutationID)
 	}
@@ -171,12 +177,12 @@ func TestRecoveryProjectionKeepsAppliedIntentWithoutFinalizerRecordActionable(t 
 	}
 
 	item := recoveryItem(stored, replay)
-	if !item.Actionable {
+	if !item.Actionable() {
 		t.Errorf("recoveryItem(%s).Actionable = false, want true: no finalizer outcome is recorded, so the commit is still owed",
 			strandedFixtureMutationID)
 	}
-	if item.State != RecoveryAppliedFinalizationPending {
-		t.Errorf("recoveryItem(%s).State = %q, want %q", strandedFixtureMutationID, item.State, RecoveryAppliedFinalizationPending)
+	if item.State != RecoveryPending {
+		t.Errorf("recoveryItem(%s).State = %q, want %q", strandedFixtureMutationID, item.State, RecoveryPending)
 	}
 }
 
@@ -217,11 +223,50 @@ func TestRecoveryProjectionKeepsReconciledAppliedIntentActionable(t *testing.T) 
 	}
 
 	item := recoveryItem(stored, replay)
-	if !item.Actionable {
+	if !item.Actionable() {
 		t.Errorf("recoveryItem(%s).Actionable = false, want true: reconciliation proved the apply landed but no finalizer has run",
 			strandedFixtureMutationID)
 	}
-	if item.State != RecoveryAppliedFinalizationPending {
-		t.Errorf("recoveryItem(%s).State = %q, want %q", strandedFixtureMutationID, item.State, RecoveryAppliedFinalizationPending)
+	if item.State != RecoveryPending {
+		t.Errorf("recoveryItem(%s).State = %q, want %q", strandedFixtureMutationID, item.State, RecoveryPending)
+	}
+	if !item.Recovered {
+		t.Errorf("recoveryItem(%s).Recovered = false, want true: a reconciliation attempt is recorded", strandedFixtureMutationID)
+	}
+}
+
+// TestRecoveryProjectionDoesNotCallOrdinaryWritesRecovered pins provenance to the
+// only evidence that carries it. The ordinary write path closes an applied
+// mutation with a terminal whose verb is `apply`, so terminal presence says
+// nothing about whether recovery machinery ran — reading it as provenance labels
+// every successful write recovered, which is what this guards.
+func TestRecoveryProjectionDoesNotCallOrdinaryWritesRecovered(t *testing.T) {
+	stored := loadRecoveryFixture(t, "sessions")
+	terminal, err := storedEvent(eventRecoveryTerminal, recoveryTerminalEvent{
+		MutationID: strandedFixtureMutationID,
+		Verb:       RecoveryApply,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Events = append(stored.Events, terminal)
+
+	replay, err := replayRecovery(stored.Events, strandedFixtureMutationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.terminal == nil || replay.attempt != nil {
+		t.Fatalf("replay terminal=%+v attempt=%+v, want a terminal and no attempt", replay.terminal, replay.attempt)
+	}
+
+	item := recoveryItem(stored, replay)
+	if item.State != RecoveryDelivered {
+		t.Errorf("recoveryItem(%s).State = %q, want %q", strandedFixtureMutationID, item.State, RecoveryDelivered)
+	}
+	if item.Recovered {
+		t.Errorf("recoveryItem(%s).Recovered = true, want false: an ordinary write closes with an apply terminal and no recovery ever ran", strandedFixtureMutationID)
+	}
+	if item.Actionable() {
+		t.Errorf("recoveryItem(%s).Actionable = true, want false", strandedFixtureMutationID)
 	}
 }
