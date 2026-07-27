@@ -516,7 +516,7 @@ func mutationIDs(events []StoredEvent) ([]string, error) {
 func replayRecovery(events []StoredEvent, mutationID string) (mutationRecoveryReplay, error) {
 	replay := mutationRecoveryReplay{apply: ApplyResult{State: MutationUnknown}, finalizers: map[string]FinalizerOutcome{}}
 	for _, event := range events {
-		if event.CodecVersion != SessionCodecVersion {
+		if !SupportedSessionCodecVersion(event.CodecVersion) {
 			return mutationRecoveryReplay{}, &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported session event codec version", Version: event.CodecVersion}
 		}
 		switch event.Code {

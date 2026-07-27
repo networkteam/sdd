@@ -1665,17 +1665,17 @@ func (r *FilesystemSessionStoreRelocator) copySessionLog(input *os.File, destina
 	for scanner.Scan() {
 		lineNumber++
 		var line sessionLine
-		if err := decodeStrictJSON(scanner.Bytes(), &line); err != nil {
+		if err := decodeSessionLine(scanner.Bytes(), &line); err != nil {
 			return fmt.Errorf("decoding current session line %d: %w", lineNumber, err)
 		}
-		if line.Metadata != nil && line.Metadata.CodecVersion != app.SessionCodecVersion {
+		if line.Metadata != nil && !app.SupportedSessionCodecVersion(line.Metadata.CodecVersion) {
 			return fmt.Errorf(
 				"decoding current session line %d: unsupported metadata codec version %d",
 				lineNumber, line.Metadata.CodecVersion,
 			)
 		}
 		for _, event := range line.Events {
-			if event.CodecVersion != app.SessionCodecVersion {
+			if !app.SupportedSessionCodecVersion(event.CodecVersion) {
 				return fmt.Errorf(
 					"decoding current session line %d: unsupported event codec version %d",
 					lineNumber, event.CodecVersion,

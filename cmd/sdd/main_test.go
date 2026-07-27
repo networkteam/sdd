@@ -81,6 +81,83 @@ func TestSessionStoreTransitionSummaryDescribesActualTransitionKinds(t *testing.
 	}
 }
 
+// The prompt header is the regression test for the acknowledgement that read as
+// a status line: the census, the precondition and the question have to occupy
+// separate lines, and no single line may be long enough to be truncated at a
+// terminal edge before the reader reaches the question.
+func TestSessionStoreTransitionPromptHeaderSeparatesCensusPreconditionAndQuestion(t *testing.T) {
+	summary := sessionStoreTransitionSummary{InTreePayloads: 145, OldKeyPayloads: 2}
+	header := summary.promptHeader()
+	lines := strings.Split(header, "\n")
+
+	if lines[0] != "Session store relocation is pending:" {
+		t.Errorf("first line = %q, want the heading alone", lines[0])
+	}
+	if got := lines[len(lines)-1]; got != "Relocate now?" {
+		t.Errorf("last line = %q, want the question alone", got)
+	}
+
+	var censusItems, precondition int
+	for _, line := range lines {
+		if strings.HasPrefix(line, "  - ") {
+			censusItems++
+		}
+		if strings.Contains(line, "Stop every `sdd serve` process") {
+			precondition++
+			if strings.Contains(line, "Relocate now?") {
+				t.Error("precondition and question share a line")
+			}
+		}
+	}
+	if censusItems != 2 {
+		t.Errorf("census items = %d, want one line per pending item", censusItems)
+	}
+	if precondition != 1 {
+		t.Errorf("precondition lines = %d, want exactly one", precondition)
+	}
+}
+
+// Both surfaces render from one list, so a pending kind can never appear in the
+// prompt but go missing from the non-interactive notice. Only the header is
+// worth asserting: description() is a join over the same slice, so checking it
+// against its own input could not fail.
+func TestSessionStoreTransitionPromptHeaderCarriesEveryPendingItem(t *testing.T) {
+	summary := sessionStoreTransitionSummary{InTreePayloads: 4, OldKeyPayloads: 1, MarkerOnly: true}
+	items := summary.pendingItems()
+	if len(items) != 3 {
+		t.Fatalf("pending items = %d, want one per pending kind", len(items))
+	}
+	header := summary.promptHeader()
+	for _, item := range items {
+		if !strings.Contains(header, item) {
+			t.Errorf("prompt header is missing pending item %q", item)
+		}
+	}
+}
+
+// Enter must leave the store alone. This is the safety property the whole
+// prompt exists for: the defect it replaced silently answered for the user, and
+// a default landing on "Relocate now" would do the same thing in the opposite
+// direction. It must survive any future change of prompt widget.
+func TestRelocationPromptDefaultsToDeclining(t *testing.T) {
+	options := relocationPromptOptions()
+	if relocationPromptDefaultCursor < 0 || relocationPromptDefaultCursor >= len(options) {
+		t.Fatalf("default cursor %d is outside the offered options", relocationPromptDefaultCursor)
+	}
+	if preselected := options[relocationPromptDefaultCursor]; preselected.Value {
+		t.Errorf("enter preselects %q, which relocates; the default must decline", preselected.Label)
+	}
+	var relocating int
+	for _, option := range options {
+		if option.Value {
+			relocating++
+		}
+	}
+	if relocating != 1 {
+		t.Errorf("relocating options = %d, want exactly one", relocating)
+	}
+}
+
 // TestSplitCSV_TrimsWhitespaceAndDropsEmpty is the regression test for the
 // CSV whitespace-trim bug (s-prc-omw, d-tac-955) and the d-prc-8vh contract
 // requiring regression tests for bug fixes. Before the fix,

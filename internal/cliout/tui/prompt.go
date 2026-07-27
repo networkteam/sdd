@@ -89,6 +89,7 @@ type ConfirmPrompt struct {
 type confirmPromptModel struct {
 	cfg   ConfirmPrompt
 	input textinput.Model
+	width int
 	done  bool
 }
 
@@ -104,8 +105,11 @@ func newConfirmPromptModel(cfg ConfirmPrompt) confirmPromptModel {
 func (m confirmPromptModel) Init() tea.Cmd { return textinput.Blink }
 
 func (m confirmPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+	case tea.KeyPressMsg:
+		switch msg.String() {
 		case "enter":
 			m.done = true
 			return m, tea.Quit
@@ -118,8 +122,15 @@ func (m confirmPromptModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// View keeps the affordance on a line of its own rather than trailing the
+// prompt: a wrapped question still ends wherever it ends, and an answer the
+// user cannot see they are being asked for is not a question.
 func (m confirmPromptModel) View() tea.View {
-	return tea.NewView(fmt.Sprintf("%s [y/N]: %s", m.cfg.Prompt, m.input.View()))
+	return tea.NewView(fmt.Sprintf(
+		"%s\n[y/N]: %s",
+		wrapPromptText(m.cfg.Prompt, m.width),
+		m.input.View(),
+	))
 }
 
 func (m confirmPromptModel) result() bool {
@@ -160,6 +171,7 @@ type selectModel[T any] struct {
 	header  string
 	options []SelectOption[T]
 	cursor  int
+	width   int
 	done    bool
 }
 
@@ -170,6 +182,9 @@ func newSelectModel[T any](cfg SelectPrompt[T]) selectModel[T] {
 func (m selectModel[T]) Init() tea.Cmd { return nil }
 
 func (m selectModel[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = size.Width
+	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "enter":
@@ -192,7 +207,7 @@ func (m selectModel[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m selectModel[T]) View() tea.View {
 	var b strings.Builder
-	b.WriteString(m.header + "\n")
+	b.WriteString(wrapPromptText(m.header, m.width) + "\n")
 	for i, opt := range m.options {
 		marker := "  "
 		if i == m.cursor {
@@ -238,6 +253,7 @@ type multiSelectModel[T any] struct {
 	header  string
 	options []MultiSelectOption[T]
 	cursor  int
+	width   int
 	done    bool
 }
 
@@ -250,6 +266,9 @@ func newMultiSelectModel[T any](cfg MultiSelectPrompt[T]) multiSelectModel[T] {
 func (m multiSelectModel[T]) Init() tea.Cmd { return nil }
 
 func (m multiSelectModel[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = size.Width
+	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "enter":
@@ -279,7 +298,7 @@ func (m multiSelectModel[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m multiSelectModel[T]) View() tea.View {
 	var b strings.Builder
-	b.WriteString(m.header + "\n")
+	b.WriteString(wrapPromptText(m.header, m.width) + "\n")
 	for i, opt := range m.options {
 		cursor := "  "
 		if i == m.cursor {
