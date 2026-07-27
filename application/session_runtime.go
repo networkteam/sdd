@@ -35,16 +35,23 @@ func SupportedSessionCodecVersion(version uint32) bool {
 	return version >= FirstSessionCodecVersion && version <= SessionCodecVersion
 }
 
-// retiredSessionMetadataFields records, per codec version, the SessionMetadata
-// fields that version wrote and the model no longer defines. Codec 1 carried a
-// holder lease until attachment stamps replaced it, so logs written before that
-// still hold the pair — a strict decode has to skip them rather than reject the
-// very files it exists to read.
+// retiredSessionMetadataFields records, per codec version, the top-level
+// SessionMetadata fields that version wrote and the model no longer defines.
+// Codec 1 carried a holder lease until attachment stamps replaced it, so logs
+// written before that still hold the pair — a strict decode has to skip them
+// rather than reject the very files it exists to read.
 //
-// Dropping a field from SessionMetadata means registering it here and bumping
-// SessionCodecVersion. A removal that skips both steps is invisible until some
-// strict reader meets an older log, which is exactly how the relocation outage
-// this table answers came about.
+// Dropping a top-level field from SessionMetadata means registering it here and
+// bumping SessionCodecVersion. A removal that skips both steps is invisible
+// until some strict reader meets an older log, which is exactly how the
+// relocation outage this table answers came about.
+//
+// The reach is deliberately top-level only: a field retired from a nested type
+// (an AttachmentRecord member, say) cannot be expressed here and would need the
+// decode to walk into that value. Nothing in the store requires that today, and
+// inventing the traversal for a case that has not happened would be machinery
+// nobody asked for — but a nested removal does not get to assume this table
+// covers it.
 var retiredSessionMetadataFields = map[uint32][]string{
 	1: {"Holder", "HolderHistory"},
 }

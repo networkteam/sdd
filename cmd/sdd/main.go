@@ -1323,18 +1323,31 @@ func (s sessionStoreTransitionSummary) promptHeader() string {
 	return b.String()
 }
 
+// relocationPromptDefaultCursor preselects the declining option, so pressing
+// enter leaves the store alone. Which option enter lands on is the whole safety
+// property of this prompt — a default that silently relocated would be the same
+// class of failure as the invisible one it replaced — so it is named and pinned
+// by test rather than left as a literal.
+const relocationPromptDefaultCursor = 1
+
+// relocationPromptOptions is the offered choice, kept separate from the prompt
+// runner so the default can be asserted without driving a terminal.
+func relocationPromptOptions() []tui.SelectOption[bool] {
+	return []tui.SelectOption[bool]{
+		{Label: "Relocate now", Hint: "move session state to the machine-global store", Value: true},
+		{Label: "Leave unchanged", Hint: "rerun later with --migrate-sessions", Value: false},
+	}
+}
+
 // promptSessionStoreRelocation asks as a select rather than a typed y/N: the
 // options are always on screen as their own lines, so the choice cannot hide
 // behind the text that introduces it. Cancelling declines, keeping the safe
 // side of an offline migration the default in every exit path.
 func promptSessionStoreRelocation(summary sessionStoreTransitionSummary) (bool, error) {
 	relocate, err := tui.RunSelect(tui.SelectPrompt[bool]{
-		Header: summary.promptHeader(),
-		Options: []tui.SelectOption[bool]{
-			{Label: "Relocate now", Hint: "move session state to the machine-global store", Value: true},
-			{Label: "Leave unchanged", Hint: "rerun later with --migrate-sessions", Value: false},
-		},
-		Cursor: 1,
+		Header:  summary.promptHeader(),
+		Options: relocationPromptOptions(),
+		Cursor:  relocationPromptDefaultCursor,
 	})
 	if err != nil {
 		if errors.Is(err, tui.ErrPromptCancelled) {

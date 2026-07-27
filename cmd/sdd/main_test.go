@@ -118,17 +118,43 @@ func TestSessionStoreTransitionPromptHeaderSeparatesCensusPreconditionAndQuestio
 }
 
 // Both surfaces render from one list, so a pending kind can never appear in the
-// prompt but go missing from the non-interactive notice.
-func TestSessionStoreTransitionDescriptionAndPromptShareTheSameItems(t *testing.T) {
+// prompt but go missing from the non-interactive notice. Only the header is
+// worth asserting: description() is a join over the same slice, so checking it
+// against its own input could not fail.
+func TestSessionStoreTransitionPromptHeaderCarriesEveryPendingItem(t *testing.T) {
 	summary := sessionStoreTransitionSummary{InTreePayloads: 4, OldKeyPayloads: 1, MarkerOnly: true}
+	items := summary.pendingItems()
+	if len(items) != 3 {
+		t.Fatalf("pending items = %d, want one per pending kind", len(items))
+	}
 	header := summary.promptHeader()
-	for _, item := range summary.pendingItems() {
-		if !strings.Contains(summary.description(), item) {
-			t.Errorf("description is missing pending item %q", item)
-		}
+	for _, item := range items {
 		if !strings.Contains(header, item) {
 			t.Errorf("prompt header is missing pending item %q", item)
 		}
+	}
+}
+
+// Enter must leave the store alone. This is the safety property the whole
+// prompt exists for: the defect it replaced silently answered for the user, and
+// a default landing on "Relocate now" would do the same thing in the opposite
+// direction. It must survive any future change of prompt widget.
+func TestRelocationPromptDefaultsToDeclining(t *testing.T) {
+	options := relocationPromptOptions()
+	if relocationPromptDefaultCursor < 0 || relocationPromptDefaultCursor >= len(options) {
+		t.Fatalf("default cursor %d is outside the offered options", relocationPromptDefaultCursor)
+	}
+	if preselected := options[relocationPromptDefaultCursor]; preselected.Value {
+		t.Errorf("enter preselects %q, which relocates; the default must decline", preselected.Label)
+	}
+	var relocating int
+	for _, option := range options {
+		if option.Value {
+			relocating++
+		}
+	}
+	if relocating != 1 {
+		t.Errorf("relocating options = %d, want exactly one", relocating)
 	}
 }
 
