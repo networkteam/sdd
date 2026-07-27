@@ -12,12 +12,14 @@ Pending intent never runs automatically during startup, session resume, orientat
 
 ## Recovery states and actions
 
-The durable projection distinguishes:
+Applied state comes from the recorded outcome: the canonical apply outcome when it
+is definitive, otherwise a recovery attempt's reconciliation. The durable
+projection distinguishes:
 
-- `unknown`: no definitive canonical outcome;
+- `unknown`: no definitive canonical outcome and no reconciliation establishing one;
 - `not-applied-awaiting-decision`: the batch is definitively absent;
-- `applied-finalization-pending`: canonical state landed, and finalization is still owed — a recorded finalizer outcome failed, or no finalizer has reported yet;
-- `applied-finalized`: canonical state landed and every recorded finalizer outcome succeeded, with no terminal written; nothing awaits action, so it is reported only under history;
+- `applied-finalization-pending`: the batch landed, and finalization is still owed — either a recorded finalizer outcome failed, or no finalizer outcome is recorded at all, which means none ran;
+- `applied-finalized`: the batch landed and at least one finalizer outcome is recorded, all of them successful, with no terminal written; nothing awaits action, so it is reported only under history;
 - `discarded`: definitively absent and terminally discarded;
 - `abandoned-unknown`: terminally acknowledged without claiming absence;
 - `recovered`: applied and fully finalized.
