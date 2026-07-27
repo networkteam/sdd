@@ -31,6 +31,12 @@ const (
 	RecoveryDiscarded                  RecoveryState = "discarded"
 	RecoveryAbandonedUnknown           RecoveryState = "abandoned-unknown"
 	RecoveryRecovered                  RecoveryState = "recovered"
+	// RecoveryAppliedFinalized names the state the record itself proves and
+	// nothing more: the mutation applied and every finalizer outcome the store
+	// recorded succeeded. It is not a terminal verb's state — no recovery
+	// decision was taken — it is the projection reading a write that already
+	// reached its desired state, whether or not a terminal event closed it.
+	RecoveryAppliedFinalized RecoveryState = "applied-finalized"
 )
 
 type RecoveryItem struct {
@@ -599,27 +605,55 @@ func recoveryItem(stored StoredSession, replay mutationRecoveryReplay) RecoveryI
 		}
 		return item
 	}
-	item.Actionable = true
-	if replay.prepared.Version == LegacyPreparedTransitionVersion && replay.bound == nil {
-		item.LegacyUnroutable = true
-		item.State = RecoveryUnknown
-		return item
-	}
-	switch replay.apply.State {
+	// Actionability derives from the recorded outcome, never from a terminal's
+	// absence: the v1 writer recorded an applied, finalized mutation and never
+	// wrote a terminal event, so terminal absence alone is not open work.
+	switch replay.recordedApplyState() {
+	case MutationApplied:
+		if replay.finalizationOwed() {
+			item.State = RecoveryAppliedFinalizationPending
+			item.Actionable = true
+		} else {
+			item.State = RecoveryAppliedFinalized
+		}
 	case MutationNotApplied:
 		item.State = RecoveryNotAppliedAwaitingDecision
-	case MutationApplied:
-		item.State = RecoveryAppliedFinalizationPending
+		item.Actionable = true
 	default:
-		if replay.attempt != nil && replay.attempt.Reconciled.State == MutationNotApplied {
-			item.State = RecoveryNotAppliedAwaitingDecision
-		} else if replay.attempt != nil && replay.attempt.Reconciled.State == MutationApplied {
-			item.State = RecoveryAppliedFinalizationPending
-		} else {
-			item.State = RecoveryUnknown
-		}
+		item.State = RecoveryUnknown
+		item.Actionable = true
+	}
+	// An unbound legacy intent is unroutable only while a verb is still owed;
+	// a write that already landed needs no target to act on.
+	if item.Actionable && replay.prepared.Version == LegacyPreparedTransitionVersion && replay.bound == nil {
+		item.LegacyUnroutable = true
 	}
 	return item
+}
+
+// recordedApplyState is the mutation's outcome as the store records it: the
+// canonical apply outcome, or the latest recovery attempt's reconciliation when
+// the canonical outcome never became definitive.
+func (r mutationRecoveryReplay) recordedApplyState() ApplyState {
+	if r.apply.State != MutationUnknown {
+		return r.apply.State
+	}
+	if r.attempt != nil {
+		return r.attempt.Reconciled.State
+	}
+	return MutationUnknown
+}
+
+// finalizationOwed reports whether a recorded finalizer outcome failed. A failed
+// finalizer is independently retryable work, so it keeps an applied mutation
+// actionable; an absent outcome is not evidence of failure.
+func (r mutationRecoveryReplay) finalizationOwed() bool {
+	for _, outcome := range r.finalizers {
+		if !outcome.Succeeded {
+			return true
+		}
+	}
+	return false
 }
 
 func mutationEntryIDs(batch MutationBatch) []string {
