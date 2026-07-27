@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -136,7 +135,7 @@ func TestExternalCompositionCompilesAgainstPublicPorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var handler http.Handler = server.Handler()
+	handler := server.Handler()
 	if handler == nil {
 		t.Fatal("shared HTTP handler is nil")
 	}

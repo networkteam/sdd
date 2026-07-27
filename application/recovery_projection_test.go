@@ -24,9 +24,11 @@ type recoveryFixtureLine struct {
 	Events   []StoredEvent    `json:"events,omitempty"`
 }
 
-func loadRecoveryFixture(t *testing.T, variant, session string) StoredSession {
+// loadRecoveryFixture reads the stranded fixture session in the named variant
+// directory; each variant holds the same session under a different outcome.
+func loadRecoveryFixture(t *testing.T, variant string) StoredSession {
 	t.Helper()
-	filename := filepath.Join("testdata", "recovery", variant, session+".jsonl")
+	filename := filepath.Join("testdata", "recovery", variant, strandedFixtureSession+".jsonl")
 	file, err := os.Open(filename)
 	if err != nil {
 		t.Fatal(err)
@@ -58,14 +60,14 @@ func loadRecoveryFixture(t *testing.T, variant, session string) StoredSession {
 	return stored
 }
 
-// TestRecoveryProjectionClearsAppliedLegacyIntent is the primary red test. A
-// real v1 intent whose recorded apply outcome is applied and whose git
-// finalizer succeeded is a finished write: the store plainly records the
-// desired state as reached. The projection must not report it as an actionable
-// pending write, and must not demand a target binding for a write that no
-// longer needs a target.
+// TestRecoveryProjectionClearsAppliedLegacyIntent covers the stranded shape the
+// live store holds. A real v1 intent whose recorded apply outcome is applied and
+// whose git finalizer succeeded is a finished write: the store plainly records
+// the desired state as reached. The projection must not report it as an
+// actionable pending write, and must not demand a target binding for a write
+// that no longer needs a target.
 func TestRecoveryProjectionClearsAppliedLegacyIntent(t *testing.T) {
-	stored := loadRecoveryFixture(t, "sessions", strandedFixtureSession)
+	stored := loadRecoveryFixture(t, "sessions")
 	replay, err := replayRecovery(stored.Events, strandedFixtureMutationID)
 	if err != nil {
 		t.Fatal(err)
@@ -105,11 +107,11 @@ func TestRecoveryProjectionClearsAppliedLegacyIntent(t *testing.T) {
 }
 
 // TestRecoveryProjectionKeepsAppliedLegacyIntentWithFailedFinalizerActionable
-// pins the boundary the coming fix must not cross. The same real applied intent
-// with a failed git finalizer is not a notice to clear: the finalizer is
-// independently retryable, so the item stays actionable.
+// pins one half of the delivery boundary. The same real applied intent with a
+// failed git finalizer is not a notice to clear: the finalizer is independently
+// retryable, so the item stays actionable.
 func TestRecoveryProjectionKeepsAppliedLegacyIntentWithFailedFinalizerActionable(t *testing.T) {
-	stored := loadRecoveryFixture(t, "finalizer-failed", strandedFixtureSession)
+	stored := loadRecoveryFixture(t, "finalizer-failed")
 	replay, err := replayRecovery(stored.Events, strandedFixtureMutationID)
 	if err != nil {
 		t.Fatal(err)
@@ -129,5 +131,97 @@ func TestRecoveryProjectionKeepsAppliedLegacyIntentWithFailedFinalizerActionable
 	if !item.Actionable {
 		t.Errorf("recoveryItem(%s).Actionable = false, want true: the recorded git finalizer failed, so finalization is still owed",
 			strandedFixtureMutationID)
+	}
+}
+
+// TestRecoveryProjectionKeepsAppliedIntentWithoutFinalizerRecordActionable pins
+// the other half of the delivery boundary: silence is not proof. An applied
+// mutation carrying no finalizer outcome at all landed in the graph with its
+// commit still owed — the writer records each finalizer's outcome only after
+// running it, so an absent record means none ran. Suppressing that notice would
+// strand the write with no way to reach finalize-retry.
+//
+// The input is the real stranded triple with its finalizer outcome removed, so
+// the shape stays derived from what the v1 writer actually produced rather than
+// hand-assembled. The live store holds no such session today; this guards the
+// case forward.
+func TestRecoveryProjectionKeepsAppliedIntentWithoutFinalizerRecordActionable(t *testing.T) {
+	stored := loadRecoveryFixture(t, "sessions")
+	withoutFinalizer := make([]StoredEvent, 0, len(stored.Events))
+	for _, event := range stored.Events {
+		if event.Code == eventFinalizerOutcome {
+			continue
+		}
+		withoutFinalizer = append(withoutFinalizer, event)
+	}
+	if len(withoutFinalizer) == len(stored.Events) {
+		t.Fatalf("fixture %s carries no %s event to remove", strandedFixtureSession, eventFinalizerOutcome)
+	}
+	stored.Events = withoutFinalizer
+
+	replay, err := replayRecovery(stored.Events, strandedFixtureMutationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.apply.State != MutationApplied {
+		t.Fatalf("fixture apply state = %q, want %q", replay.apply.State, MutationApplied)
+	}
+	if len(replay.finalizers) != 0 {
+		t.Fatalf("replay recorded %d finalizer outcomes, want none", len(replay.finalizers))
+	}
+
+	item := recoveryItem(stored, replay)
+	if !item.Actionable {
+		t.Errorf("recoveryItem(%s).Actionable = false, want true: no finalizer outcome is recorded, so the commit is still owed",
+			strandedFixtureMutationID)
+	}
+	if item.State != RecoveryAppliedFinalizationPending {
+		t.Errorf("recoveryItem(%s).State = %q, want %q", strandedFixtureMutationID, item.State, RecoveryAppliedFinalizationPending)
+	}
+}
+
+// TestRecoveryProjectionKeepsReconciledAppliedIntentActionable pins the
+// reconciliation path. A mutation whose canonical outcome never became
+// definitive, and which a recovery attempt later reconciled to applied, has by
+// construction no finalizer outcome: the writer runs finalizers only from a
+// definitive apply. It must stay actionable so finalize-retry remains reachable.
+func TestRecoveryProjectionKeepsReconciledAppliedIntentActionable(t *testing.T) {
+	stored := loadRecoveryFixture(t, "sessions")
+	intentOnly := make([]StoredEvent, 0, len(stored.Events))
+	for _, event := range stored.Events {
+		if event.Code == eventMutationOutcome || event.Code == eventFinalizerOutcome {
+			continue
+		}
+		intentOnly = append(intentOnly, event)
+	}
+	stored.Events = intentOnly
+
+	attempt, err := storedEvent(eventRecoveryAttempt, recoveryAttemptEvent{
+		MutationID: strandedFixtureMutationID,
+		Reconciled: ApplyResult{State: MutationApplied, Revision: "sha256:reconciled"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.Events = append(stored.Events, attempt)
+
+	replay, err := replayRecovery(stored.Events, strandedFixtureMutationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replay.apply.State != MutationUnknown {
+		t.Fatalf("replay apply state = %q, want %q", replay.apply.State, MutationUnknown)
+	}
+	if replay.attempt == nil || replay.attempt.Reconciled.State != MutationApplied {
+		t.Fatalf("replay attempt = %+v, want a reconciliation recording %q", replay.attempt, MutationApplied)
+	}
+
+	item := recoveryItem(stored, replay)
+	if !item.Actionable {
+		t.Errorf("recoveryItem(%s).Actionable = false, want true: reconciliation proved the apply landed but no finalizer has run",
+			strandedFixtureMutationID)
+	}
+	if item.State != RecoveryAppliedFinalizationPending {
+		t.Errorf("recoveryItem(%s).State = %q, want %q", strandedFixtureMutationID, item.State, RecoveryAppliedFinalizationPending)
 	}
 }

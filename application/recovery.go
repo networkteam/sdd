@@ -632,10 +632,11 @@ func recoveryItem(stored StoredSession, replay mutationRecoveryReplay) RecoveryI
 }
 
 // recordedApplyState is the mutation's outcome as the store records it: the
-// canonical apply outcome, or the latest recovery attempt's reconciliation when
-// the canonical outcome never became definitive.
+// canonical apply outcome when it is definitive, otherwise the latest recovery
+// attempt's reconciliation. Only the two definitive states short-circuit, so an
+// absent or unrecognized canonical state still consults the attempt.
 func (r mutationRecoveryReplay) recordedApplyState() ApplyState {
-	if r.apply.State != MutationUnknown {
+	if r.apply.State == MutationApplied || r.apply.State == MutationNotApplied {
 		return r.apply.State
 	}
 	if r.attempt != nil {
@@ -644,10 +645,16 @@ func (r mutationRecoveryReplay) recordedApplyState() ApplyState {
 	return MutationUnknown
 }
 
-// finalizationOwed reports whether a recorded finalizer outcome failed. A failed
-// finalizer is independently retryable work, so it keeps an applied mutation
-// actionable; an absent outcome is not evidence of failure.
+// finalizationOwed reports whether finalization is still owed. Delivery needs
+// positive proof — a recorded outcome that succeeded. No recorded outcome at all
+// means no finalizer ever reported, so the write landed with its commit still
+// owed, and a recorded failure is independently retryable work; both keep an
+// applied mutation actionable. A target configuring no finalizers never reaches
+// here, because an applied mutation records its terminal regardless of count.
 func (r mutationRecoveryReplay) finalizationOwed() bool {
+	if len(r.finalizers) == 0 {
+		return true
+	}
 	for _, outcome := range r.finalizers {
 		if !outcome.Succeeded {
 			return true

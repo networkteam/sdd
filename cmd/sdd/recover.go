@@ -275,6 +275,9 @@ func recoveryTargetLabel(item sdd.RecoveryItem) string {
 	if item.LegacyUnroutable {
 		return "target binding required"
 	}
+	if item.Target.Project == "" && item.Target.Branch == "" {
+		return "no recorded target"
+	}
 	return fmt.Sprintf("%s@%s", item.Target.Project, item.Target.Branch)
 }
 

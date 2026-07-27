@@ -16,7 +16,8 @@ The durable projection distinguishes:
 
 - `unknown`: no definitive canonical outcome;
 - `not-applied-awaiting-decision`: the batch is definitively absent;
-- `applied-finalization-pending`: canonical state landed but finalization is incomplete;
+- `applied-finalization-pending`: canonical state landed, and finalization is still owed — a recorded finalizer outcome failed, or no finalizer has reported yet;
+- `applied-finalized`: canonical state landed and every recorded finalizer outcome succeeded, with no terminal written; nothing awaits action, so it is reported only under history;
 - `discarded`: definitively absent and terminally discarded;
 - `abandoned-unknown`: terminally acknowledged without claiming absence;
 - `recovered`: applied and fully finalized.
