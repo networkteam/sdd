@@ -974,7 +974,7 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 			wantWarns: 0,
 		},
 		{
-			name: "decision cannot close decision (same kind)",
+			name: "valid: directive closes directive (retirement without replacement)",
 			entries: []*Entry{
 				entry("20260406-100000-d-tac-aaa"),
 				func() *Entry {
@@ -983,8 +983,15 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 					return e
 				}(),
 			},
-			wantWarns: 1,
-			wantMsg:   "decision cannot close another decision",
+			wantWarns: 0,
+		},
+		{
+			name: "valid: directive closes plan (retirement without replacement)",
+			entries: []*Entry{
+				entry("20260406-100000-d-tac-pln", withKind(KindPlan)),
+				entry("20260406-100100-d-tac-ret", withKind(KindDirective), withCloses("20260406-100000-d-tac-pln")),
+			},
+			wantWarns: 0,
 		},
 		{
 			name: "plan decision cannot close contract",
@@ -997,7 +1004,7 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 				}(),
 			},
 			wantWarns: 1,
-			wantMsg:   "decision cannot close another decision",
+			wantMsg:   "only a kind: directive decision may close another decision",
 		},
 		{
 			name: "settled directive cannot be closed",

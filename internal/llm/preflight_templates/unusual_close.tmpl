@@ -7,7 +7,8 @@
 - `kind: done` signal closes a decision (completion record)
 - `kind: done` signal closes a `kind: gap` signal (short-loop)
 - `kind: fact` or `kind: insight` signal closes a `kind: question` signal (dissolution)
-- `kind: directive` decision closes a stable-kind entry (`fact` / `insight` / `contract` / `aspiration`) — retirement with rationale
+- `kind: directive` decision closes a stable-kind signal (`fact` / `insight`) — retirement with rationale
+- `kind: directive` decision closes any decision — retirement without replacement, with rationale (a commitment abandoned rather than delivered; a `done` signal is the closer when the work actually completed)
 
 Anything outside this matrix — same-kind close where supersede would fit, or an atypical cross-kind close — is unusual. Unusual patterns are **allowed-and-flagged**: severity is gated by whether the narrative captures rationale for using `closes` in this specific shape.
 
@@ -18,5 +19,5 @@ Anything outside this matrix — same-kind close where supersede would fit, or a
 - `low` — Close pattern is unusual BUT rationale is clear in prose. The close is valid; surface the atypical pattern for reader awareness. Examples:
   - `insight` closes `fact` with "Retiring this fact because the measurement was taken pre-launch and no longer applies post-market-shift"
   - `fact` closes `fact` with "Not superseding — no updated measurement available; just retiring the stale value"
-- No finding — The proposed entry carries no `closes`, OR the close uses a standard pattern from the matrix above. A decision closing a signal, a done signal closing a decision, short-loop, dissolution, and directive-retires-stable-kind are all normal and need no surfacing.
+- No finding — The proposed entry carries no `closes`, OR the close uses a standard pattern from the matrix above. A decision closing a signal, a done signal closing a decision, short-loop, dissolution, and directive-retires (any decision, or a stable-kind signal) are all normal and need no surfacing.
 {{ end }}

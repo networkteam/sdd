@@ -1044,9 +1044,9 @@ func validateIDRefs(e *Entry, g *Graph, field string, ids []string) {
 // validateCloses checks type constraints on closes references.
 // Valid: decision closes signal; done-kind signal closes decision or signal;
 // a fact or insight signal closes (dissolves) a question; kind: directive
-// decision closes a stable-kind decision (contract or aspiration) as retirement.
-// Invalid: any other non-done signal close; any decision-closes-decision
-// other than directive→{contract|aspiration}.
+// decision closes any decision as retirement without replacement.
+// Invalid: any other non-done signal close; any non-directive decision
+// closing a decision.
 func validateCloses(e *Entry, g *Graph) {
 	for _, id := range e.Closes {
 		target, ok := g.ByID[id]
@@ -1082,18 +1082,21 @@ func validateCloses(e *Entry, g *Graph) {
 				Message: fmt.Sprintf("only done-kind signals may close entries, or a fact/insight dissolving a question (got %s signal closing %s %s)", e.Kind, target.Type, id),
 			})
 		case e.Type == TypeDecision && target.Type == TypeDecision:
-			// Retirement exception: a kind: directive decision may close a
-			// kind: contract, aspiration, or procedure decision with
-			// rationale — the retire-without-replacement path for standing
-			// kinds. Every other decision-closes-decision pattern uses
-			// supersedes.
-			if e.Kind == KindDirective && (target.Kind == KindContract || target.Kind == KindAspiration || target.Kind == KindProcedure) {
+			// Retirement without replacement: a kind: directive decision may
+			// close any decision, stating rationale in its body. closes
+			// retires, supersedes replaces with lineage, and which relation
+			// holds is the author's judgment about the work — forcing a
+			// retirement into supersedes would fabricate a successor that
+			// does not exist. Every other decision kind still uses
+			// supersedes; a done signal remains the closer for work that
+			// actually completed.
+			if e.Kind == KindDirective {
 				continue
 			}
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "closes",
 				Value:   id,
-				Message: fmt.Sprintf("decision cannot close another decision — use supersedes instead (closes decision %s)", id),
+				Message: fmt.Sprintf("only a kind: directive decision may close another decision — use supersedes instead (%s closing decision %s)", e.Kind, id),
 			})
 		}
 	}
