@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: e9c18fd03ec42e0c95868e32a3d56f3488f2c880e2bc3161a4ccbd8595627566
+sdd-content-hash: 36f58cafe193a55777392fd23ec8cd208b3fe994d0dda6ca2ef1ab6be108c935
 sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -178,7 +178,7 @@ Per-kind retirement paths:
 | focus | replacement focus (priorities shift mid-cycle) | done signal (cycle ended naturally); directive retiring it |
 | procedure | revised procedure (project customization or shipped successor) | directive retiring the move without replacement |
 
-**Retirement rationale is required** when closing a stable-kind entry (fact, insight, contract, aspiration). Pre-flight checks that the narrative states *why* — not whether the why is correct.
+**Retirement rationale is required** whenever a directive closes an entry rather than a done signal recording completion — any decision kind, or a stable-kind signal (fact, insight). Pre-flight checks that the narrative states *why* — not whether the why is correct. It matters most where a commitment is retired unbuilt: a `done` signal says what was delivered, a retiring directive must say why nothing will be.
 
 ## Short-loop closure
 

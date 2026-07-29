@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: e667e2c48fa4ddae662eb8aea38e5f32974ab8e4a7fd1c084a225524cc484056
+sdd-content-hash: b4558ddc0f0b8d84b48457f98839c39de180a380a140ab1dc92b86f1715c99c6
 sdd-version: dev
 ---
 # Grooming Playbook
@@ -22,7 +22,7 @@ For each candidate, based on its pattern:
 
 **Pattern C (stale, no activity)** — No evidence of resolution. Brief the user on the entry and the current context: "This has been open since [date] with no activity. Given [current state / related decisions since then], is this still relevant?" Three outcomes:
 - **Still relevant**: Leave it open. Optionally capture a fresh signal that updates the context or re-frames the concern.
-- **No longer relevant**: For a gap, capture a done signal with `--closes [id]` noting why — context changed, concern was absorbed by another direction, no longer applies. For a stable-kind target (fact, insight, contract, aspiration), capture a directive with `--closes [id]` and retirement rationale.
+- **No longer relevant**: For a gap, capture a done signal with `--closes [id]` noting why — context changed, concern was absorbed by another direction, no longer applies. For a decision of any kind, or a stable-kind signal (fact, insight), capture a directive with `--closes [id]` and retirement rationale — that is the retire-without-replacement path, distinct from a done signal recording work that completed.
 - **Partially relevant**: The original framing is stale but the underlying concern persists. Capture a new signal that re-frames it, then close the old one with `--closes`.
 
 **Pattern C with Git evidence** — The sub-skill found commits that look related. Show the commit(s) and ask: "This commit looks like it addresses this entry. Want to capture a done signal for it?" If yes, capture the done signal with `--closes [id]`.
