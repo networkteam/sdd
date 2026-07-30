@@ -16,6 +16,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/slogutils"
+
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/meta"
@@ -69,6 +71,9 @@ func serveCmd() *cli.Command {
 			}
 			application, project, identity, err := buildLocalApplication(ctx, cmd, dir, sddDir, cfg, reg, runner)
 			if err != nil {
+				return err
+			}
+			if err := collectSessions(ctx, application, project, identity, cfg); err != nil {
 				return err
 			}
 
@@ -340,6 +345,39 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		return nil, "", sdd.RequestIdentity{}, err
 	}
 	return application, project, identity, nil
+}
+
+// collectSessions runs one reclamation pass at startup. This is the trigger
+// rather than a command because the store is being opened anyway and collection
+// involves no procedure and no served instruction, so it stays host-neutral by
+// construction.
+//
+// The error is propagated rather than warned about. Everything the pass expects
+// to meet — an unreadable session, an already-deleted target, a payload it
+// cannot replay — it absorbs internally by design, so an error reaching here is
+// a store it genuinely cannot operate on.
+func collectSessions(
+	ctx context.Context,
+	application *sdd.Application,
+	project sdd.ProjectID,
+	identity sdd.RequestIdentity,
+	cfg *model.PerRepoConfig,
+) error {
+	result, err := application.CollectSessions(ctx, identity, project, sdd.CollectSessionsCmd{
+		Retention: model.ResolveSessionRetention(cfg),
+	})
+	if err != nil {
+		return fmt.Errorf("collecting session scaffolding: %w", err)
+	}
+	if len(result.RemovedSessions) > 0 || len(result.RemovedOwners) > 0 || result.DrainedIntents > 0 {
+		slogutils.FromContext(ctx).Info("collected session scaffolding",
+			"sessions", len(result.RemovedSessions),
+			"staged_owners", len(result.RemovedOwners),
+			"drained_intents", result.DrainedIntents,
+			"skipped", len(result.Skipped),
+		)
+	}
+	return nil
 }
 
 func newLocalMutationTargets(project sdd.ProjectID, serverCheckout string) (*localadapter.GitWorktreeAcquirer, error) {

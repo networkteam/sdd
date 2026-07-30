@@ -52,6 +52,12 @@ const (
 	// when last-fetch exceeds this duration. Applied when Config.Sync.Cooldown
 	// is empty or unparseable.
 	DefaultSyncCooldown = "15m"
+
+	// DefaultSessionRetention is how long an ended engine session's log is
+	// kept before collection removes it. Sessions are scaffolding, but a
+	// dialogue that has just ended is exactly the one worth reading when
+	// something went wrong inside it, so the window buys inspectability.
+	DefaultSessionRetention = "336h"
 )
 
 // BaseConfig holds the shared user/machine settings every config location
@@ -65,6 +71,7 @@ type BaseConfig struct {
 	LLM       LLMConfig       `yaml:"llm,omitempty"`
 	Embedding EmbeddingConfig `yaml:"embedding,omitempty"`
 	Sync      SyncConfig      `yaml:"sync,omitempty"`
+	Sessions  SessionsConfig  `yaml:"sessions,omitempty"`
 	// Participant is the canonical name used for entry authorship when
 	// --participants / --participant is omitted at capture time. Typically
 	// set once in the user-global config; a per-repo override covers a
@@ -136,6 +143,14 @@ type SyncConfig struct {
 	// Cooldown is the minimum interval between background git fetches. Go
 	// duration string (e.g. "15m", "1h"). Empty means DefaultSyncCooldown.
 	Cooldown string `yaml:"cooldown,omitempty"`
+}
+
+// SessionsConfig holds settings for engine session lifetime.
+type SessionsConfig struct {
+	// Retention is how long an ended session is kept before collection
+	// removes it. Go duration string (e.g. "336h" for 14 days). Empty means
+	// DefaultSessionRetention.
+	Retention string `yaml:"retention,omitempty"`
 }
 
 // EmbeddingConfig holds settings for the search index's embedding provider.
@@ -556,6 +571,16 @@ func FormatConfig(cfg PerRepoConfig) string {
 		"#   cooldown: " + DefaultSyncCooldown + "\n"
 }
 
+// ResolveSessionRetention returns the effective session retention from cfg,
+// falling back to DefaultSessionRetention on empty or unparseable values.
+func ResolveSessionRetention(cfg *PerRepoConfig) time.Duration {
+	raw := ""
+	if cfg != nil {
+		raw = cfg.Sessions.Retention
+	}
+	return parsePositiveDuration(raw, DefaultSessionRetention)
+}
+
 // ResolveSyncCooldown returns the effective cooldown duration from cfg,
 // falling back to DefaultSyncCooldown on empty or unparseable values.
 func ResolveSyncCooldown(cfg *PerRepoConfig) time.Duration {
@@ -563,12 +588,17 @@ func ResolveSyncCooldown(cfg *PerRepoConfig) time.Duration {
 	if cfg != nil {
 		raw = cfg.Sync.Cooldown
 	}
-	if raw == "" {
-		raw = DefaultSyncCooldown
+	return parsePositiveDuration(raw, DefaultSyncCooldown)
+}
+
+// parsePositiveDuration reads a configured duration, falling back to a baked
+// default when it is empty, malformed or not positive.
+func parsePositiveDuration(raw, fallback string) time.Duration {
+	if raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
 	}
-	if d, err := time.ParseDuration(raw); err == nil && d > 0 {
-		return d
-	}
-	d, _ := time.ParseDuration(DefaultSyncCooldown)
+	d, _ := time.ParseDuration(fallback)
 	return d
 }
