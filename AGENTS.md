@@ -56,7 +56,10 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 
 - **Single path**: I/O functions (file loading, etc.) should delegate to in-memory constructors. Don't duplicate indexing or initialization logic between production and test code paths.
 
-- **Comments explain the current why, not history**: Don't narrate how the code used to be ("previously…", "with the old X…", "changed from Y"). Git carries history. A comment should justify the current code where the why isn't self-evident — and nothing more.
+- **Minimal comment hygiene**: A comment earns its place only by carrying a *why* the code cannot show. Default to none; when one is warranted, one line is perfectly fine.
+  - **No history.** Don't narrate how the code used to be ("previously…", "with the old X…", "changed from Y"). Git carries that.
+  - **No duplication — comments are subject to DRY.** Never restate what the code already says, and never re-explain a concept or decision that is stated once elsewhere (a doc comment on the type, a graph entry, `AGENTS.md`). Duplicated prose drifts out of sync with the code it shadows; that drift is debt. State it in one place and let the reader find it there — reference an entry ID or type name instead of paraphrasing it.
+  - **Keep it small.** No section banners, no restating the signature, no step-by-step narration of the lines below. Prefer a shorter comment over a fuller one; prefer deleting it over shortening it if the code now speaks for itself.
 
 - **Logging**: Use `log/slog`; retrieve the logger via `slogutils.FromContext(ctx)` (from `github.com/networkteam/slogutils`). Handler entry points take `ctx` and pull the logger from it — do not pass loggers as separate arguments, and do not use `fmt.Fprintf(h.stderr, ...)` for operational messages. Stderr writes are reserved for user-facing CLI output that isn't logging (prompts, structured CLI results).
 
