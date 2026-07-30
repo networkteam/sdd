@@ -20,7 +20,7 @@ type CollectSessionsCmd struct {
 // which sessions it could not read so a caller can log them.
 type CollectSessionsResult struct {
 	RemovedSessions []SessionID
-	RemovedOwners   []BlobOwner
+	RemovedStaged   []SessionRef
 	DrainedIntents  int
 	Skipped         []SessionID
 }
@@ -91,43 +91,43 @@ func collectRuntime(
 			return result, err
 		}
 		result.RemovedSessions = append(result.RemovedSessions, id)
-		owner := BlobOwner{Subject: session.Metadata.Subject, Session: id}
-		if err := blobs.DeleteOwner(ctx, owner); err != nil {
+		ref := SessionRef{Subject: session.Metadata.Subject, Session: id}
+		if err := blobs.DeleteStaged(ctx, ref); err != nil {
 			return result, err
 		}
-		result.RemovedOwners = append(result.RemovedOwners, owner)
+		result.RemovedStaged = append(result.RemovedStaged, ref)
 	}
 
-	orphans, err := collectOrphanOwners(ctx, sessions, blobs)
+	orphans, err := collectOrphanStaging(ctx, sessions, blobs)
 	if err != nil {
 		return result, err
 	}
-	result.RemovedOwners = append(result.RemovedOwners, orphans...)
+	result.RemovedStaged = append(result.RemovedStaged, orphans...)
 	return result, nil
 }
 
-// collectOrphanOwners removes staged blobs whose session is gone. Absence is
+// collectOrphanStaging removes staging areas whose session is gone. Absence is
 // distinguished from unreadability deliberately: a session this binary cannot
-// decode still exists, so its blobs are not orphans.
-func collectOrphanOwners(
+// decode still exists, so its staged blobs are not orphans.
+func collectOrphanStaging(
 	ctx context.Context,
 	sessions SessionStore,
 	blobs StagedBlobStore,
-) ([]BlobOwner, error) {
-	owners, err := blobs.Owners(ctx)
+) ([]SessionRef, error) {
+	refs, err := blobs.StagedSessions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var removed []BlobOwner
-	for _, owner := range owners {
-		_, err := sessions.Load(ctx, owner.Session)
+	var removed []SessionRef
+	for _, ref := range refs {
+		_, err := sessions.Load(ctx, ref.Session)
 		if err == nil || !errors.Is(err, ErrSessionNotFound) {
 			continue
 		}
-		if err := blobs.DeleteOwner(ctx, owner); err != nil {
+		if err := blobs.DeleteStaged(ctx, ref); err != nil {
 			return removed, err
 		}
-		removed = append(removed, owner)
+		removed = append(removed, ref)
 	}
 	return removed, nil
 }
@@ -164,7 +164,7 @@ func discardUnroutable(
 	version uint64,
 ) (uint64, error) {
 	prepared := replay.prepared
-	if err := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, mutationID); err != nil {
+	if err := runtime.options.StagedBlobs.Release(ctx, prepared.Staged, mutationID); err != nil {
 		return version, err
 	}
 	binding := SessionBinding{

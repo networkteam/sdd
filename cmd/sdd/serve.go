@@ -73,9 +73,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			if err := collectSessions(ctx, application, project, identity, cfg); err != nil {
-				return err
-			}
+			collectSessions(ctx, application, project, identity, cfg)
 
 			transport := cmd.String("transport")
 			srv, err := mcpserver.New(mcpserver.Options{
@@ -352,32 +350,32 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 // involves no procedure and no served instruction, so it stays host-neutral by
 // construction.
 //
-// The error is propagated rather than warned about. Everything the pass expects
-// to meet — an unreadable session, an already-deleted target, a payload it
-// cannot replay — it absorbs internally by design, so an error reaching here is
-// a store it genuinely cannot operate on.
+// CollectSessions itself returns its error, so a composition calling it on a
+// schedule can act on one. This adapter cannot: over stdio a server that exits
+// leaves the agent with a dead pipe and no way to act, which is worse than the
+// unreclaimed disk it would be reporting. So startup logs and serves.
 func collectSessions(
 	ctx context.Context,
 	application *sdd.Application,
 	project sdd.ProjectID,
 	identity sdd.RequestIdentity,
 	cfg *model.PerRepoConfig,
-) error {
+) {
 	result, err := application.CollectSessions(ctx, identity, project, sdd.CollectSessionsCmd{
 		Retention: model.ResolveSessionRetention(cfg),
 	})
 	if err != nil {
-		return fmt.Errorf("collecting session scaffolding: %w", err)
+		slogutils.FromContext(ctx).Warn("session collection did not complete", "err", err)
+		return
 	}
-	if len(result.RemovedSessions) > 0 || len(result.RemovedOwners) > 0 || result.DrainedIntents > 0 {
+	if len(result.RemovedSessions) > 0 || len(result.RemovedStaged) > 0 || result.DrainedIntents > 0 {
 		slogutils.FromContext(ctx).Info("collected session scaffolding",
 			"sessions", len(result.RemovedSessions),
-			"staged_owners", len(result.RemovedOwners),
+			"staged_sessions", len(result.RemovedStaged),
 			"drained_intents", result.DrainedIntents,
 			"skipped", len(result.Skipped),
 		)
 	}
-	return nil
 }
 
 func newLocalMutationTargets(project sdd.ProjectID, serverCheckout string) (*localadapter.GitWorktreeAcquirer, error) {

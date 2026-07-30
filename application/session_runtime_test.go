@@ -24,14 +24,14 @@ type trackingBlobStore struct {
 	releaseErr error
 }
 
-func (s *trackingBlobStore) Retain(ctx context.Context, owner sdd.BlobOwner, id string, blobs []string) error {
+func (s *trackingBlobStore) Retain(ctx context.Context, owner sdd.SessionRef, id string, blobs []string) error {
 	s.mu.Lock()
 	s.retained++
 	s.mu.Unlock()
 	return s.StagedBlobStore.Retain(ctx, owner, id, blobs)
 }
 
-func (s *trackingBlobStore) Release(ctx context.Context, owner sdd.BlobOwner, id string) error {
+func (s *trackingBlobStore) Release(ctx context.Context, owner sdd.SessionRef, id string) error {
 	s.mu.Lock()
 	s.released++
 	err := s.releaseErr
@@ -499,7 +499,7 @@ func TestPreparedAttachmentCrossesHomeStagingIntoTargetGraph(t *testing.T) {
 	application, sessions, blobs, _ := newDurableApplicationWithHomeAndTargets(t, home, targets)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
 	binding := openBinding(t, sessions, identity.Subject, "cross-target-attachment")
-	owner := sdd.BlobOwner{Subject: binding.Subject, Session: binding.SessionID}
+	owner := sdd.SessionRef{Subject: binding.Subject, Session: binding.SessionID}
 	want := []byte("evidence from the home session\n")
 	blob, err := application.StageBlob(t.Context(), identity, "example", owner, "evidence.txt", want)
 	if err != nil {
@@ -897,7 +897,7 @@ func preparedEntry(t *testing.T, graph sdd.GraphStore, binding sdd.SessionBindin
 	batch.Digest = digest
 	return sdd.PreparedTransition{
 		Version: sdd.PreparedTransitionVersion, Target: sdd.MutationTarget{Project: "example", Branch: "main"}, ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
-		BlobOwner: sdd.BlobOwner{Subject: binding.Subject, Session: binding.SessionID},
+		Staged: sdd.SessionRef{Subject: binding.Subject, Session: binding.SessionID},
 	}
 }
 

@@ -34,8 +34,10 @@ type PreparedTransition struct {
 	// concurrent unrelated append merges cleanly instead of failing the pin.
 	ExpectedGraphRevision string
 	Batch                 MutationBatch
-	BlobOwner             BlobOwner
-	BlobIDs               []string
+	// Staged keeps its persisted name so an in-flight intent stays replayable
+	// across an upgrade.
+	Staged  SessionRef `json:"BlobOwner"`
+	BlobIDs []string
 }
 
 type FinalizerOutcome struct {
@@ -88,12 +90,12 @@ func (a *Application) ApplyPrepared(ctx context.Context, identity RequestIdentit
 	if err != nil {
 		return TransitionResult{}, err
 	}
-	if err := runtime.options.StagedBlobs.Retain(ctx, prepared.BlobOwner, prepared.Batch.ID, prepared.BlobIDs); err != nil {
+	if err := runtime.options.StagedBlobs.Retain(ctx, prepared.Staged, prepared.Batch.ID, prepared.BlobIDs); err != nil {
 		return TransitionResult{}, err
 	}
 	version, err := runtime.options.Sessions.Append(ctx, binding.SessionID, stored.Version, SessionAppend{Events: []StoredEvent{intent}})
 	if err != nil {
-		if releaseErr := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID); releaseErr != nil {
+		if releaseErr := runtime.options.StagedBlobs.Release(ctx, prepared.Staged, prepared.Batch.ID); releaseErr != nil {
 			return TransitionResult{}, errors.Join(err, fmt.Errorf("releasing staged blob retention after intent append failed: %w", releaseErr))
 		}
 		return TransitionResult{}, err
@@ -123,7 +125,7 @@ func (a *Application) applyOnAcquired(ctx context.Context, runtime *ProjectRunti
 		if revalidateErr := revalidatePreparedTransition(ctx, snapshot, prepared); revalidateErr != nil {
 			return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationNotApplied, Revision: snapshot.Revision()}}, revalidateErr
 		}
-		apply, applyErr = acquired.Graph.Apply(ctx, snapshot.Revision(), prepared.Batch, ownedBlobReader{store: runtime.options.StagedBlobs, owner: prepared.BlobOwner})
+		apply, applyErr = acquired.Graph.Apply(ctx, snapshot.Revision(), prepared.Batch, ownedBlobReader{store: runtime.options.StagedBlobs, ref: prepared.Staged})
 		if !isGraphConflict(applyErr) || attempt >= maxApplyAttempts {
 			break
 		}
@@ -177,12 +179,12 @@ func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRunt
 		}
 	}
 	if apply.State == MutationApplied {
-		if err := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID); err != nil {
+		if err := runtime.options.StagedBlobs.Release(ctx, prepared.Staged, prepared.Batch.ID); err != nil {
 			return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "staged blob retention could not be released", ApplyState: apply.State, Revision: apply.Revision, Cause: err}
 		}
 		next, err := appendRecoveryTerminal(ctx, runtime.options.Sessions, result.Binding, recoveryTerminalEvent{
 			MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
-			OriginalSubject: prepared.BlobOwner.Subject, OriginalSession: prepared.BlobOwner.Session,
+			OriginalSubject: prepared.Staged.Subject, OriginalSession: prepared.Staged.Session,
 			Actor: actor, Verb: terminalVerb,
 		})
 		if err != nil {
@@ -220,7 +222,7 @@ func isGraphConflict(err error) bool {
 func (a *Application) discardContendedTransition(ctx context.Context, runtime *ProjectRuntime, result TransitionResult, prepared PreparedTransition, actor string) (TransitionResult, error) {
 	next, err := releaseAndRecordTerminal(ctx, runtime, result.Binding, prepared, recoveryTerminalEvent{
 		MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
-		OriginalSubject: prepared.BlobOwner.Subject, OriginalSession: prepared.BlobOwner.Session,
+		OriginalSubject: prepared.Staged.Subject, OriginalSession: prepared.Staged.Session,
 		Actor: actor, Verb: RecoveryDiscard, Cause: recoveryCauseGraphContention,
 		Reason: "graph contention: bounded apply retries exhausted",
 	})
@@ -239,7 +241,7 @@ func validatePreparedTransition(prepared PreparedTransition, principal Principal
 	if prepared.Version != PreparedTransitionVersion {
 		return &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported prepared transition version", Version: prepared.Version}
 	}
-	if binding.Subject != principal.Subject || binding.Project != project || prepared.BlobOwner.Subject != principal.Subject || prepared.BlobOwner.Session != binding.SessionID {
+	if binding.Subject != principal.Subject || binding.Project != project || prepared.Staged.Subject != principal.Subject || prepared.Staged.Session != binding.SessionID {
 		return &ApplicationError{Code: ErrorSessionOwnership, Message: "prepared transition ownership mismatch"}
 	}
 	if err := prepared.Target.Validate(project); err != nil {
@@ -265,9 +267,9 @@ func storedEvent(code string, value any) (StoredEvent, error) {
 
 type ownedBlobReader struct {
 	store StagedBlobStore
-	owner BlobOwner
+	ref   SessionRef
 }
 
 func (r ownedBlobReader) Open(ctx context.Context, id string) (io.ReadCloser, error) {
-	return r.store.Open(ctx, r.owner, id)
+	return r.store.Open(ctx, r.ref, id)
 }

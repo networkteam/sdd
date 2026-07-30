@@ -3,7 +3,6 @@ package local
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -20,16 +19,18 @@ import (
 )
 
 const (
-	blobSuffix          = ".blob"
-	blobMetadataSuffix  = ".json"
-	blobRetentionsName  = "retentions.json"
-	blobOwnerRecordName = "owner.json"
+	blobSuffix         = ".blob"
+	blobMetadataSuffix = ".json"
+	blobRetentionsName = "retentions.json"
 )
 
-// FilesystemStagedBlobStore keeps immutable session-scoped bytes plus the
-// retentions holding them. Like the session store it reads across every
-// configured location and writes where it resolved, so material staged by an
-// earlier version stays reachable where it lies.
+// FilesystemStagedBlobStore keeps a session's staged bytes under
+// <subject>/<session>/, so the path itself says whose they are. That is what
+// makes a sweep possible without reading anything: enumeration is a directory
+// walk, and a staging area with nothing in it is still fully identified.
+//
+// Like the session store it reads across every configured location and writes
+// where it resolved.
 type FilesystemStagedBlobStore struct {
 	locations []StoreLocation
 	mu        sync.Mutex
@@ -55,11 +56,11 @@ func NewFilesystemStagedBlobStoreAt(dir string) (*FilesystemStagedBlobStore, err
 
 func (s *FilesystemStagedBlobStore) Stage(
 	_ context.Context,
-	owner app.BlobOwner,
+	ref app.SessionRef,
 	filename string,
 	content io.Reader,
 ) (app.StagedBlob, error) {
-	ownerDir, err := ownerDirName(owner)
+	dir, err := stagingDir(ref)
 	if err != nil {
 		return app.StagedBlob{}, err
 	}
@@ -78,110 +79,123 @@ func (s *FilesystemStagedBlobStore) Stage(
 		return app.StagedBlob{}, err
 	}
 	defer func() { _ = root.Close() }()
-	if err := root.MkdirAll(ownerDir, 0o700); err != nil {
+	if err := root.MkdirAll(dir, 0o700); err != nil {
 		return app.StagedBlob{}, err
 	}
-	if err := publishJSON(root, filepath.Join(ownerDir, blobOwnerRecordName), owner); err != nil {
-		return app.StagedBlob{}, err
-	}
-
 	id, err := randomBlobID()
 	if err != nil {
 		return app.StagedBlob{}, err
 	}
 	blob := app.StagedBlob{
-		ID: id, Owner: owner, Digest: sha256Digest(data), Size: int64(len(data)), Filename: filename,
+		ID: id, Session: ref, Digest: sha256Digest(data), Size: int64(len(data)), Filename: filename,
 		CreatedAt: time.Now().UTC().Round(0),
 	}
-	blobName := filepath.Join(ownerDir, id+blobSuffix)
+	blobName := filepath.Join(dir, id+blobSuffix)
 	if err := publishBytes(root, blobName, data); err != nil {
 		return app.StagedBlob{}, err
 	}
-	if err := publishJSON(root, filepath.Join(ownerDir, id+blobMetadataSuffix), blob); err != nil {
+	if err := publishJSON(root, filepath.Join(dir, id+blobMetadataSuffix), blob); err != nil {
 		return app.StagedBlob{}, errors.Join(err, root.Remove(blobName))
 	}
 	return blob, nil
 }
 
-func (s *FilesystemStagedBlobStore) Stat(_ context.Context, owner app.BlobOwner, id string) (app.StagedBlob, error) {
+func (s *FilesystemStagedBlobStore) Stat(_ context.Context, ref app.SessionRef, id string) (app.StagedBlob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	root, ownerDir, err := s.resolveOwner(owner)
+	root, dir, err := s.resolve(ref)
 	if err != nil {
 		return app.StagedBlob{}, err
 	}
 	defer func() { _ = root.Close() }()
-	return readBlobMetadata(root, ownerDir, owner, id)
+	return readBlobMetadata(root, dir, ref, id)
 }
 
-func (s *FilesystemStagedBlobStore) Open(_ context.Context, owner app.BlobOwner, id string) (io.ReadCloser, error) {
+func (s *FilesystemStagedBlobStore) Open(_ context.Context, ref app.SessionRef, id string) (io.ReadCloser, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	root, ownerDir, err := s.resolveOwner(owner)
+	root, dir, err := s.resolve(ref)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
-	if _, err := readBlobMetadata(root, ownerDir, owner, id); err != nil {
+	if _, err := readBlobMetadata(root, dir, ref, id); err != nil {
 		return nil, err
 	}
-	return root.Open(filepath.Join(ownerDir, id+blobSuffix))
+	return root.Open(filepath.Join(dir, id+blobSuffix))
 }
 
 func (s *FilesystemStagedBlobStore) Retain(
 	_ context.Context,
-	owner app.BlobOwner,
+	ref app.SessionRef,
 	retentionID string,
 	ids []string,
 ) error {
 	if retentionID == "" {
 		return fmt.Errorf("sdd: retention ID is required")
 	}
+	// A retention over no blobs holds nothing, so it writes nothing. This is
+	// what keeps a session that staged nothing from leaving a staging area
+	// behind for a sweep to puzzle over later.
+	if len(ids) == 0 {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	root, ownerDir, err := s.resolveOwner(owner)
+	root, dir, err := s.resolve(ref)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = root.Close() }()
+	if err := root.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
 	for _, id := range ids {
-		if _, err := readBlobMetadata(root, ownerDir, owner, id); err != nil {
+		if _, err := readBlobMetadata(root, dir, ref, id); err != nil {
 			return err
 		}
 	}
-	retentions, err := readRetentions(root, ownerDir)
+	retentions, err := readRetentions(root, dir)
 	if err != nil {
 		return err
 	}
 	retentions[retentionID] = append([]string(nil), ids...)
-	return publishJSON(root, filepath.Join(ownerDir, blobRetentionsName), retentions)
+	return publishJSON(root, filepath.Join(dir, blobRetentionsName), retentions)
 }
 
-func (s *FilesystemStagedBlobStore) Release(_ context.Context, owner app.BlobOwner, retentionID string) error {
+// Release drops one retention. A session with nothing staged has nothing to
+// release, so this creates no directory — an empty staging area would be
+// scaffolding that never held anything.
+func (s *FilesystemStagedBlobStore) Release(_ context.Context, ref app.SessionRef, retentionID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	root, ownerDir, err := s.resolveOwner(owner)
+	root, dir, err := s.resolve(ref)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 	defer func() { _ = root.Close() }()
-	retentions, err := readRetentions(root, ownerDir)
+	retentions, err := readRetentions(root, dir)
 	if err != nil {
 		return err
 	}
+	if _, held := retentions[retentionID]; !held {
+		return nil
+	}
 	delete(retentions, retentionID)
-	return publishJSON(root, filepath.Join(ownerDir, blobRetentionsName), retentions)
+	return publishJSON(root, filepath.Join(dir, blobRetentionsName), retentions)
 }
 
-// Owners enumerates every staged-blob owner across all locations. The owner is
-// recorded in the directory rather than derived from its name, which is a hash
-// of the owner and so cannot be reversed.
-func (s *FilesystemStagedBlobStore) Owners(_ context.Context) ([]app.BlobOwner, error) {
+// StagedSessions enumerates every staging area across all locations, read
+// straight from the paths.
+func (s *FilesystemStagedBlobStore) StagedSessions(_ context.Context) ([]app.SessionRef, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var owners []app.BlobOwner
-	seen := make(map[app.BlobOwner]struct{})
+	var refs []app.SessionRef
+	seen := make(map[app.SessionRef]struct{})
 	for _, location := range s.locations {
 		root, err := openStoreRoot(location.StagedBlobs, false)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -190,36 +204,42 @@ func (s *FilesystemStagedBlobStore) Owners(_ context.Context) ([]app.BlobOwner, 
 		if err != nil {
 			return nil, err
 		}
-		entries, readErr := fs.ReadDir(root.FS(), ".")
+		subjects, readErr := fs.ReadDir(root.FS(), ".")
 		if readErr != nil {
 			return nil, errors.Join(readErr, root.Close())
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
+		for _, subject := range subjects {
+			if !subject.IsDir() || strings.HasPrefix(subject.Name(), ".") {
 				continue
 			}
-			owner, ok := readOwnerRecord(root, entry.Name())
-			if !ok {
-				continue
+			sessions, err := fs.ReadDir(root.FS(), subject.Name())
+			if err != nil {
+				return nil, errors.Join(err, root.Close())
 			}
-			if _, duplicate := seen[owner]; duplicate {
-				continue
+			for _, session := range sessions {
+				if !session.IsDir() || strings.HasPrefix(session.Name(), ".") {
+					continue
+				}
+				ref := app.SessionRef{Subject: subject.Name(), Session: app.SessionID(session.Name())}
+				if _, duplicate := seen[ref]; duplicate {
+					continue
+				}
+				seen[ref] = struct{}{}
+				refs = append(refs, ref)
 			}
-			seen[owner] = struct{}{}
-			owners = append(owners, owner)
 		}
 		if err := root.Close(); err != nil {
 			return nil, err
 		}
 	}
-	return owners, nil
+	return refs, nil
 }
 
-// DeleteOwner removes an owner's blobs and retentions together. An owner that
-// is already gone is success, so a sweep is safe to repeat and safe to run
-// concurrently with another.
-func (s *FilesystemStagedBlobStore) DeleteOwner(_ context.Context, owner app.BlobOwner) error {
-	ownerDir, err := ownerDirName(owner)
+// DeleteStaged removes a session's staged blobs and retentions together. An
+// area that is already gone is success, so a sweep is safe to repeat and safe to
+// run concurrently with another.
+func (s *FilesystemStagedBlobStore) DeleteStaged(_ context.Context, ref app.SessionRef) error {
+	dir, err := stagingDir(ref)
 	if err != nil {
 		return err
 	}
@@ -234,7 +254,7 @@ func (s *FilesystemStagedBlobStore) DeleteOwner(_ context.Context, owner app.Blo
 		if err != nil {
 			return err
 		}
-		removeErr := removeOwnerDir(root, ownerDir)
+		removeErr := removeStagingDir(root, dir)
 		if err := errors.Join(removeErr, root.Close()); err != nil {
 			return err
 		}
@@ -242,59 +262,11 @@ func (s *FilesystemStagedBlobStore) DeleteOwner(_ context.Context, owner app.Blo
 	return nil
 }
 
-// readOwnerRecord recovers the owner a directory belongs to, preferring the
-// record written at staging and falling back to any blob's metadata for a
-// directory staged before that record existed.
-func readOwnerRecord(root *os.Root, ownerDir string) (app.BlobOwner, bool) {
-	var owner app.BlobOwner
-	if err := readJSON(root, filepath.Join(ownerDir, blobOwnerRecordName), &owner); err == nil &&
-		owner.Subject != "" && owner.Session != "" {
-		return owner, true
-	}
-	entries, err := fs.ReadDir(root.FS(), ownerDir)
-	if err != nil {
-		return app.BlobOwner{}, false
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, blobMetadataSuffix) || name == blobRetentionsName {
-			continue
-		}
-		var blob app.StagedBlob
-		if err := readJSON(root, filepath.Join(ownerDir, name), &blob); err != nil {
-			continue
-		}
-		if blob.Owner.Subject != "" && blob.Owner.Session != "" {
-			return blob.Owner, true
-		}
-	}
-	return app.BlobOwner{}, false
-}
-
-func removeOwnerDir(root *os.Root, ownerDir string) error {
-	entries, err := fs.ReadDir(root.FS(), ownerDir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if err := root.Remove(filepath.Join(ownerDir, entry.Name())); err != nil &&
-			!errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-	}
-	if err := root.Remove(ownerDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	return syncRootDir(root, ".")
-}
-
-// resolveOwner opens the location holding this owner's directory. The caller
-// owns closing the returned root.
-func (s *FilesystemStagedBlobStore) resolveOwner(owner app.BlobOwner) (*os.Root, string, error) {
-	ownerDir, err := ownerDirName(owner)
+// resolve opens the location holding this session's staging area, falling back
+// to the first location so a caller reading nothing staged gets the ordinary
+// not-exist error. The caller owns closing the returned root.
+func (s *FilesystemStagedBlobStore) resolve(ref app.SessionRef) (*os.Root, string, error) {
+	dir, err := stagingDir(ref)
 	if err != nil {
 		return nil, "", err
 	}
@@ -306,9 +278,9 @@ func (s *FilesystemStagedBlobStore) resolveOwner(owner app.BlobOwner) (*os.Root,
 		if err != nil {
 			return nil, "", err
 		}
-		info, statErr := root.Stat(ownerDir)
+		info, statErr := root.Stat(dir)
 		if statErr == nil && info.IsDir() {
-			return root, ownerDir, nil
+			return root, dir, nil
 		}
 		if closeErr := root.Close(); closeErr != nil {
 			return nil, "", closeErr
@@ -317,39 +289,55 @@ func (s *FilesystemStagedBlobStore) resolveOwner(owner app.BlobOwner) (*os.Root,
 			return nil, "", statErr
 		}
 	}
-	// Nothing staged yet: the first location is where staging would land, so
-	// reads there produce the ordinary not-exist errors callers expect.
-	root, err := openStoreRoot(s.locations[0].StagedBlobs, true)
-	if err != nil {
-		return nil, "", err
-	}
-	return root, ownerDir, nil
+	root, err := openStoreRoot(s.locations[0].StagedBlobs, false)
+	return root, dir, err
 }
 
-func readBlobMetadata(root *os.Root, ownerDir string, owner app.BlobOwner, id string) (app.StagedBlob, error) {
+func readBlobMetadata(root *os.Root, dir string, ref app.SessionRef, id string) (app.StagedBlob, error) {
 	if err := validBlobID(id); err != nil {
 		return app.StagedBlob{}, err
 	}
 	var blob app.StagedBlob
-	if err := readJSON(root, filepath.Join(ownerDir, id+blobMetadataSuffix), &blob); err != nil {
+	if err := readJSON(root, filepath.Join(dir, id+blobMetadataSuffix), &blob); err != nil {
 		return app.StagedBlob{}, err
 	}
-	if blob.Owner != owner || blob.ID != id {
-		return app.StagedBlob{}, fmt.Errorf("sdd: staged blob ownership mismatch")
+	if blob.Session != ref || blob.ID != id {
+		return app.StagedBlob{}, fmt.Errorf("sdd: staged blob does not belong to session %s", ref.Session)
 	}
 	return blob, nil
 }
 
-func readRetentions(root *os.Root, ownerDir string) (map[string][]string, error) {
-	if err := root.MkdirAll(ownerDir, 0o700); err != nil {
-		return nil, err
-	}
+// readRetentions reads a staging area's retentions. It creates nothing: a
+// missing file surfaces as fs.ErrNotExist for the caller to interpret.
+func readRetentions(root *os.Root, dir string) (map[string][]string, error) {
 	retentions := map[string][]string{}
-	err := readJSON(root, filepath.Join(ownerDir, blobRetentionsName), &retentions)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := readJSON(root, filepath.Join(dir, blobRetentionsName), &retentions); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return retentions, nil
+		}
 		return nil, err
 	}
 	return retentions, nil
+}
+
+func removeStagingDir(root *os.Root, dir string) error {
+	entries, err := fs.ReadDir(root.FS(), dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := root.Remove(filepath.Join(dir, entry.Name())); err != nil &&
+			!errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	if err := root.Remove(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return syncRootDir(root, filepath.Dir(dir))
 }
 
 func readJSON(root *os.Root, name string, destination any) error {
@@ -364,12 +352,23 @@ func readJSON(root *os.Root, name string, destination any) error {
 	return json.Unmarshal(raw, destination)
 }
 
-func ownerDirName(owner app.BlobOwner) (string, error) {
-	if owner.Subject == "" || owner.Session == "" {
-		return "", fmt.Errorf("sdd: blob owner subject and session are required")
+// stagingDir is the readable path a session's staged blobs live under.
+func stagingDir(ref app.SessionRef) (string, error) {
+	if err := plainSegment("subject", ref.Subject); err != nil {
+		return "", err
 	}
-	sum := sha256.Sum256([]byte(owner.Subject + "\x00" + string(owner.Session)))
-	return hex.EncodeToString(sum[:]), nil
+	if err := plainSegment("session", string(ref.Session)); err != nil {
+		return "", err
+	}
+	return filepath.Join(ref.Subject, string(ref.Session)), nil
+}
+
+func plainSegment(what, value string) error {
+	if value == "" || value == "." || value == ".." ||
+		strings.ContainsAny(value, `/\`) || filepath.Base(value) != value {
+		return fmt.Errorf("sdd: blob %s must be a plain path segment, got %q", what, value)
+	}
+	return nil
 }
 
 func randomBlobID() (string, error) {

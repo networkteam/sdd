@@ -627,7 +627,7 @@ func (w *WorkflowSession) Park(ctx context.Context, identity RequestIdentity, in
 
 func (w *WorkflowSession) StageAttachment(ctx context.Context, identity RequestIdentity, filename string, content []byte) (string, error) {
 	w.setOperation(ctx, identity)
-	blob, err := w.app.StageBlob(ctx, identity, w.project, BlobOwner{Subject: w.binding.Subject, Session: w.binding.SessionID}, filename, content)
+	blob, err := w.app.StageBlob(ctx, identity, w.project, SessionRef{Subject: w.binding.Subject, Session: w.binding.SessionID}, filename, content)
 	if err != nil {
 		return "", err
 	}

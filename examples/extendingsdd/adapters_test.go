@@ -40,17 +40,17 @@ func (sessionStore) Append(context.Context, sdd.SessionID, uint64, sdd.SessionAp
 
 type blobStore struct{}
 
-func (blobStore) Stage(context.Context, sdd.BlobOwner, string, io.Reader) (sdd.StagedBlob, error) {
+func (blobStore) Stage(context.Context, sdd.SessionRef, string, io.Reader) (sdd.StagedBlob, error) {
 	return sdd.StagedBlob{}, nil
 }
-func (blobStore) Stat(context.Context, sdd.BlobOwner, string) (sdd.StagedBlob, error) {
+func (blobStore) Stat(context.Context, sdd.SessionRef, string) (sdd.StagedBlob, error) {
 	return sdd.StagedBlob{}, nil
 }
-func (blobStore) Open(context.Context, sdd.BlobOwner, string) (io.ReadCloser, error) {
+func (blobStore) Open(context.Context, sdd.SessionRef, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
-func (blobStore) Retain(context.Context, sdd.BlobOwner, string, []string) error { return nil }
-func (blobStore) Release(context.Context, sdd.BlobOwner, string) error          { return nil }
+func (blobStore) Retain(context.Context, sdd.SessionRef, string, []string) error { return nil }
+func (blobStore) Release(context.Context, sdd.SessionRef, string) error          { return nil }
 
 type embeddingExecutor struct{}
 

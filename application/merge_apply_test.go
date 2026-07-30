@@ -203,7 +203,7 @@ func preparedWIP(t *testing.T, graph sdd.GraphStore, binding sdd.SessionBinding,
 	return sdd.PreparedTransition{
 		Version: sdd.PreparedTransitionVersion, Target: sdd.MutationTarget{Project: "example", Branch: "main"},
 		ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
-		BlobOwner: sdd.BlobOwner{Subject: binding.Subject, Session: binding.SessionID},
+		Staged: sdd.SessionRef{Subject: binding.Subject, Session: binding.SessionID},
 	}
 }
 

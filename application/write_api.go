@@ -111,15 +111,15 @@ func (a *Application) CurrentSnapshot(ctx context.Context, identity RequestIdent
 // StageBlob resolves current read access before placing immutable bytes in
 // session-scoped scratch. Canonical write access is checked later at the
 // mutation gate, so read-only principals can still conduct dialogue.
-func (a *Application) StageBlob(ctx context.Context, identity RequestIdentity, project ProjectID, owner BlobOwner, filename string, content []byte) (StagedBlob, error) {
+func (a *Application) StageBlob(ctx context.Context, identity RequestIdentity, project ProjectID, ref SessionRef, filename string, content []byte) (StagedBlob, error) {
 	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return StagedBlob{}, err
 	}
-	if owner.Subject != principal.Subject {
-		return StagedBlob{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "staged blob owner does not match current principal"}
+	if ref.Subject != principal.Subject {
+		return StagedBlob{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "staged blobs belong to another principal"}
 	}
-	return runtime.options.StagedBlobs.Stage(ctx, owner, filename, bytes.NewReader(content))
+	return runtime.options.StagedBlobs.Stage(ctx, ref, filename, bytes.NewReader(content))
 }
 
 // CreateEntry runs SDD-owned validation and pre-flight, prepares canonical
@@ -243,7 +243,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		ID: "entry-" + id, Changes: []DocumentChange{{LogicalPath: filepath.ToSlash(logicalPath), Document: &document, CanonicalBytes: canonical}},
 		Message: fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72)),
 	}
-	owner := BlobOwner{Subject: principal.Subject, Session: binding.SessionID}
+	owner := SessionRef{Subject: principal.Subject, Session: binding.SessionID}
 	for _, handle := range draft.AttachmentHandles {
 		blob, err := runtime.options.StagedBlobs.Stat(ctx, owner, handle)
 		if err != nil {
@@ -264,7 +264,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	}
 	transition, err := a.ApplyPrepared(ctx, identity, runtime.options.Project.ID, binding, PreparedTransition{
 		Version: PreparedTransitionVersion, Target: target, ExpectedGraphRevision: targetSnapshot.Revision(), Batch: batch,
-		BlobOwner: owner, BlobIDs: append([]string(nil), draft.AttachmentHandles...),
+		Staged: owner, BlobIDs: append([]string(nil), draft.AttachmentHandles...),
 	})
 	result.Binding = transition.Binding
 	if err != nil {
@@ -355,7 +355,7 @@ func (a *Application) applyDocumentMutation(ctx context.Context, identity Reques
 	}
 	transition, err := a.ApplyPrepared(ctx, identity, runtime.options.Project.ID, binding, PreparedTransition{
 		Version: PreparedTransitionVersion, Target: target, ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
-		BlobOwner: BlobOwner{Subject: binding.Subject, Session: binding.SessionID},
+		Staged: SessionRef{Subject: binding.Subject, Session: binding.SessionID},
 	})
 	return MutationResult{Project: runtime.options.Project, Binding: transition.Binding}, err
 }

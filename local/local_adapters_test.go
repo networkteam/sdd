@@ -90,7 +90,7 @@ func TestFilesystemStagedBlobStoreConformance(t *testing.T) {
 			t.Fatal(err)
 		}
 		return sddtest.StagedBlobStoreFixture{
-			Store: store, Owner: sdd.BlobOwner{Subject: "christopher", Session: "session-1"},
+			Store: store, Session: sdd.SessionRef{Subject: "christopher", Session: "session-1"},
 			Filename: "evidence.md", Content: []byte("evidence"),
 		}
 	})

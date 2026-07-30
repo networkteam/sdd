@@ -99,7 +99,7 @@ func (f collectFixture) writeSession(t *testing.T, id sdd.SessionID, ended time.
 
 func (f collectFixture) stage(t *testing.T, id sdd.SessionID) {
 	t.Helper()
-	owner := sdd.BlobOwner{Subject: collectSubject, Session: id}
+	owner := sdd.SessionRef{Subject: collectSubject, Session: id}
 	if _, err := f.blobs.Stage(t.Context(), owner, "evidence.md", strings.NewReader("evidence")); err != nil {
 		t.Fatalf("Stage(%s): %v", id, err)
 	}
@@ -160,10 +160,10 @@ func TestCollectRemovesOnlyEndedSessionsPastRetention(t *testing.T) {
 	}
 
 	// The removed session's blobs go with it; the survivors keep theirs.
-	if _, err := f.blobs.Stat(t.Context(), sdd.BlobOwner{Subject: collectSubject, Session: "s_old"}, ""); err == nil {
+	if _, err := f.blobs.Stat(t.Context(), sdd.SessionRef{Subject: collectSubject, Session: "s_old"}, ""); err == nil {
 		t.Fatal("expected the removed session's staged blobs to be gone")
 	}
-	owners, err := f.blobs.Owners(t.Context())
+	owners, err := f.blobs.StagedSessions(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,13 +189,13 @@ func TestCollectRemovesOrphanedStagedBlobs(t *testing.T) {
 	result := f.collect(t, time.Hour)
 
 	var removed []string
-	for _, owner := range result.RemovedOwners {
+	for _, owner := range result.RemovedStaged {
 		removed = append(removed, string(owner.Session))
 	}
 	if !slices.Equal(removed, []string{"s_vanished"}) {
 		t.Fatalf("removed owners = %v, want only the orphan", removed)
 	}
-	owners, err := f.blobs.Owners(t.Context())
+	owners, err := f.blobs.StagedSessions(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestCollectIsIdempotentAndConcurrencySafe(t *testing.T) {
 		t.Fatalf("first pass removed %d, want 1", len(first.RemovedSessions))
 	}
 	second := f.collect(t, time.Hour)
-	if len(second.RemovedSessions) != 0 || len(second.RemovedOwners) != 0 {
+	if len(second.RemovedSessions) != 0 || len(second.RemovedStaged) != 0 {
 		t.Fatalf("second pass removed %+v, want nothing left to do", second)
 	}
 }
