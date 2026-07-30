@@ -43,6 +43,8 @@ func (noBlobStore) Open(context.Context, sdd.BlobOwner, string) (io.ReadCloser, 
 }
 func (noBlobStore) Retain(context.Context, sdd.BlobOwner, string, []string) error { return nil }
 func (noBlobStore) Release(context.Context, sdd.BlobOwner, string) error          { return nil }
+func (noBlobStore) Owners(context.Context) ([]sdd.BlobOwner, error)               { return nil, nil }
+func (noBlobStore) DeleteOwner(context.Context, sdd.BlobOwner) error              { return nil }
 
 type noSessionStore struct{}
 
@@ -58,6 +60,7 @@ func (noSessionStore) List(context.Context, sdd.SessionFilter) ([]sdd.StoredSess
 func (noSessionStore) Append(context.Context, sdd.SessionID, uint64, sdd.SessionAppend) (uint64, error) {
 	return 0, nil
 }
+func (noSessionStore) Delete(context.Context, sdd.SessionID) error { return nil }
 
 type multiAccessResolver struct {
 	base       *sdd.ProjectRuntime

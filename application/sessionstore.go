@@ -85,9 +85,15 @@ type SessionAppend struct {
 
 // SessionStore persists structured metadata plus ordered opaque events. Append
 // is the sole mutation primitive and must compare ExpectedVersion atomically.
+//
+// List is also the enumeration collection sweeps over, and Delete is what makes
+// them possible against any implementation rather than only the local one.
+// Delete must be idempotent: removing a session that is already gone is
+// success, since two sweeps may derive the same target set.
 type SessionStore interface {
 	Create(context.Context, SessionMetadata) (StoredSession, error)
 	Load(context.Context, SessionID) (StoredSession, error)
 	List(context.Context, SessionFilter) ([]StoredSession, error)
 	Append(context.Context, SessionID, uint64, SessionAppend) (uint64, error)
+	Delete(context.Context, SessionID) error
 }

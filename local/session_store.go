@@ -213,6 +213,38 @@ func (s *FilesystemSessionStore) Append(
 	return next, nil
 }
 
+// Delete removes a session's log wherever it lies. A session that is already
+// gone is success: a collection sweep recomputes its target set from scratch
+// every run, so two processes may derive and remove the same one.
+func (s *FilesystemSessionStore) Delete(_ context.Context, id app.SessionID) error {
+	name, err := sessionLogName(id)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	located, err := s.locate(name)
+	if errors.Is(err, app.ErrSessionNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	root, err := openStoreRoot(located.Sessions, false)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := root.Remove(name + ".lock"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return syncRootDir(root, ".")
+}
+
 // locate returns the location holding this session. Reads and appends both go
 // to whatever answers, which is why nothing has to be relocated first.
 func (s *FilesystemSessionStore) locate(name string) (StoreLocation, error) {

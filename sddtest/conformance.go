@@ -160,6 +160,27 @@ func RunSessionStoreTests(t *testing.T, factory func(*testing.T) SessionStoreFix
 	if len(listed) == 0 {
 		t.Fatal("List did not return the created session")
 	}
+
+	// Collection reaches deletion through this contract, so an implementation
+	// must delete and must treat an already-absent session as success.
+	if err := fixture.Store.Delete(t.Context(), fixture.Metadata.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := fixture.Store.Load(t.Context(), fixture.Metadata.ID); err == nil {
+		t.Fatal("Load after Delete succeeded, want the session gone")
+	}
+	if err := fixture.Store.Delete(t.Context(), fixture.Metadata.ID); err != nil {
+		t.Fatalf("second Delete = %v, want idempotent success", err)
+	}
+	remaining, err := fixture.Store.List(t.Context(), sdd.SessionFilter{Project: fixture.Metadata.Project})
+	if err != nil {
+		t.Fatalf("List after Delete: %v", err)
+	}
+	for _, item := range remaining {
+		if item.Metadata.ID == fixture.Metadata.ID {
+			t.Fatal("List still returns the deleted session")
+		}
+	}
 }
 
 type StagedBlobStoreFixture struct {
@@ -195,6 +216,36 @@ func RunStagedBlobStoreTests(t *testing.T, factory func(*testing.T) StagedBlobSt
 	if err := fixture.Store.Retain(t.Context(), fixture.Owner, "mutation-1", []string{blob.ID}); err != nil {
 		t.Fatalf("Retain: %v", err)
 	}
+
+	// Collection enumerates owners and deletes them through this contract, so
+	// an implementation must surface the owner it staged for and must delete a
+	// retained blob rather than refusing while a retention holds it — the
+	// sweep's own rules decide what is safe to remove, not the store's.
+	owners, err := fixture.Store.Owners(t.Context())
+	if err != nil {
+		t.Fatalf("Owners: %v", err)
+	}
+	if !slices.Contains(owners, fixture.Owner) {
+		t.Fatalf("Owners = %+v, want it to contain %+v", owners, fixture.Owner)
+	}
+	if err := fixture.Store.DeleteOwner(t.Context(), fixture.Owner); err != nil {
+		t.Fatalf("DeleteOwner: %v", err)
+	}
+	if _, err := fixture.Store.Stat(t.Context(), fixture.Owner, blob.ID); err == nil {
+		t.Fatal("Stat after DeleteOwner succeeded, want the blob gone")
+	}
+	if err := fixture.Store.DeleteOwner(t.Context(), fixture.Owner); err != nil {
+		t.Fatalf("second DeleteOwner = %v, want idempotent success", err)
+	}
+	after, err := fixture.Store.Owners(t.Context())
+	if err != nil {
+		t.Fatalf("Owners after DeleteOwner: %v", err)
+	}
+	if slices.Contains(after, fixture.Owner) {
+		t.Fatal("Owners still returns the deleted owner")
+	}
+
+	// Release on a gone owner must not resurrect it.
 	if err := fixture.Store.Release(t.Context(), fixture.Owner, "mutation-1"); err != nil {
 		t.Fatalf("Release: %v", err)
 	}

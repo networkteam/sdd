@@ -173,6 +173,124 @@ func (s *FilesystemStagedBlobStore) Release(_ context.Context, owner app.BlobOwn
 	return publishJSON(root, filepath.Join(ownerDir, blobRetentionsName), retentions)
 }
 
+// Owners enumerates every staged-blob owner across all locations. The owner is
+// recorded in the directory rather than derived from its name, which is a hash
+// of the owner and so cannot be reversed.
+func (s *FilesystemStagedBlobStore) Owners(_ context.Context) ([]app.BlobOwner, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var owners []app.BlobOwner
+	seen := make(map[app.BlobOwner]struct{})
+	for _, location := range s.locations {
+		root, err := openStoreRoot(location.StagedBlobs, false)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		entries, readErr := fs.ReadDir(root.FS(), ".")
+		if readErr != nil {
+			return nil, errors.Join(readErr, root.Close())
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			owner, ok := readOwnerRecord(root, entry.Name())
+			if !ok {
+				continue
+			}
+			if _, duplicate := seen[owner]; duplicate {
+				continue
+			}
+			seen[owner] = struct{}{}
+			owners = append(owners, owner)
+		}
+		if err := root.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return owners, nil
+}
+
+// DeleteOwner removes an owner's blobs and retentions together. An owner that
+// is already gone is success, so a sweep is safe to repeat and safe to run
+// concurrently with another.
+func (s *FilesystemStagedBlobStore) DeleteOwner(_ context.Context, owner app.BlobOwner) error {
+	ownerDir, err := ownerDirName(owner)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, location := range s.locations {
+		root, err := openStoreRoot(location.StagedBlobs, false)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		removeErr := removeOwnerDir(root, ownerDir)
+		if err := errors.Join(removeErr, root.Close()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// readOwnerRecord recovers the owner a directory belongs to, preferring the
+// record written at staging and falling back to any blob's metadata for a
+// directory staged before that record existed.
+func readOwnerRecord(root *os.Root, ownerDir string) (app.BlobOwner, bool) {
+	var owner app.BlobOwner
+	if err := readJSON(root, filepath.Join(ownerDir, blobOwnerRecordName), &owner); err == nil &&
+		owner.Subject != "" && owner.Session != "" {
+		return owner, true
+	}
+	entries, err := fs.ReadDir(root.FS(), ownerDir)
+	if err != nil {
+		return app.BlobOwner{}, false
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, blobMetadataSuffix) || name == blobRetentionsName {
+			continue
+		}
+		var blob app.StagedBlob
+		if err := readJSON(root, filepath.Join(ownerDir, name), &blob); err != nil {
+			continue
+		}
+		if blob.Owner.Subject != "" && blob.Owner.Session != "" {
+			return blob.Owner, true
+		}
+	}
+	return app.BlobOwner{}, false
+}
+
+func removeOwnerDir(root *os.Root, ownerDir string) error {
+	entries, err := fs.ReadDir(root.FS(), ownerDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := root.Remove(filepath.Join(ownerDir, entry.Name())); err != nil &&
+			!errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	if err := root.Remove(ownerDir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return syncRootDir(root, ".")
+}
+
 // resolveOwner opens the location holding this owner's directory. The caller
 // owns closing the returned root.
 func (s *FilesystemStagedBlobStore) resolveOwner(owner app.BlobOwner) (*os.Root, string, error) {
