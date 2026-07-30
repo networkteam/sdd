@@ -90,7 +90,7 @@ func (s *FilesystemGraphStore) Current(ctx context.Context) (*app.Snapshot, erro
 	if err != nil {
 		return nil, err
 	}
-	defer unlockFile(lock)
+	defer unlock(lock)
 	if err := s.recoverPendingTransactionsLocked(); err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (s *FilesystemGraphStore) Apply(ctx context.Context, expectedRevision strin
 	if err != nil {
 		return app.ApplyResult{State: app.MutationNotApplied}, err
 	}
-	defer unlockFile(lock)
+	defer unlock(lock)
 	if err := s.recoverPendingTransactionsLocked(); err != nil {
 		return app.ApplyResult{State: app.MutationUnknown}, err
 	}
@@ -389,7 +389,7 @@ func (s *FilesystemGraphStore) Reconcile(_ context.Context, mutationID, batchDig
 	if err != nil {
 		return app.ApplyResult{State: app.MutationUnknown}, err
 	}
-	defer unlockFile(lock)
+	defer unlock(lock)
 	record, ok, err := s.loadApplyRecord(mutationID)
 	if err != nil {
 		return app.ApplyResult{State: app.MutationUnknown}, err
@@ -413,7 +413,7 @@ func (s *FilesystemGraphStore) ReadAttachmentPage(_ context.Context, entryID, fi
 	if err != nil {
 		return app.AttachmentPage{}, err
 	}
-	defer unlockFile(lock)
+	defer unlock(lock)
 	if err := s.recoverPendingTransactionsLocked(); err != nil {
 		return app.AttachmentPage{}, err
 	}

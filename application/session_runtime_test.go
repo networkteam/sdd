@@ -399,11 +399,11 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 		t.Fatal(err)
 	}
 	targets := &activityTargetAcquirer{graph: graph}
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -749,12 +749,12 @@ func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseSessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	baseSessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessions := &toggleAppendSessionStore{SessionStore: baseSessions}
-	baseBlobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	baseBlobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,11 +810,11 @@ func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.Gra
 	if wrap != nil {
 		graph = wrap(graph)
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseBlobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	baseBlobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -845,11 +845,11 @@ func newDurableApplicationWithTargets(t *testing.T, graph sdd.GraphStore, target
 
 func newDurableApplicationWithHomeAndTargets(t *testing.T, home sdd.GraphStore, targets sdd.TargetAcquirer) (*sdd.Application, *localadapter.FilesystemSessionStore, *trackingBlobStore, graphFixture) {
 	t.Helper()
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseBlobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	baseBlobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -78,12 +78,12 @@ func newStampWorkflowApp(t *testing.T, graphDir, sessionsDir string, now func() 
 	if err != nil {
 		t.Fatal(err)
 	}
-	fsSessions, err := localadapter.NewFilesystemSessionStore(sessionsDir)
+	fsSessions, err := localadapter.NewFilesystemSessionStoreAt(sessionsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessions := &countingSessionStore{SessionStore: fsSessions}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

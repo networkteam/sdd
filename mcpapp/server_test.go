@@ -313,11 +313,11 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(sessionsDir)
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(sessionsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(filepath.Dir(sessionsDir), "staged-blobs"))
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(filepath.Join(filepath.Dir(sessionsDir), "staged-blobs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +801,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "fb220018e04c56ef0a5a196e4e29db08c892883bffb775f2901b59dab89eaaf5"
+	const want = "e484f739234681aee541f086325bbcc1fdfc84b76076a7344a8e1e685136a092"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -3221,7 +3221,7 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 // readSessionLog reads a session's JSONL event log from the sessions dir.
 func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	t.Helper()
-	store, err := localadapter.NewFilesystemSessionStore(dir)
+	store, err := localadapter.NewFilesystemSessionStoreAt(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -3243,47 +3243,6 @@ func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	return events, nil
 }
 
-func TestStandingNoticeIsServedAtSessionDoorsAndDiscovery(t *testing.T) {
-	const notice = "Session relocation required: run `sdd init`."
-	current := notice
-	env := newTestServer(t, nil, "", "", func(opts *mcpserver.Options) {
-		opts.StandingNotice = func() string { return current }
-	})
-	cs := connect(t, env.srv)
-	started := openSession(t, cs)
-	if !strings.Contains(started.Framing, notice) {
-		t.Fatalf("start_session framing lacks standing notice: %q", started.Framing)
-	}
-
-	var resumed mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &resumed)
-	if !strings.Contains(resumed.Framing, notice) {
-		t.Fatalf("resume_session framing lacks standing notice: %q", resumed.Framing)
-	}
-
-	var listed mcpserver.ListSessionsResult
-	call(t, cs, "list_sessions", map[string]any{}, &listed)
-	if listed.Notice != notice {
-		t.Fatalf("list_sessions notice = %q", listed.Notice)
-	}
-
-	var info mcpserver.InfoResult
-	call(t, cs, "info", map[string]any{}, &info)
-	if info.Notice != notice {
-		t.Fatalf("info notice = %q", info.Notice)
-	}
-
-	current = "Session relocation required: old server recreated state."
-	call(t, cs, "info", map[string]any{}, &info)
-	if info.Notice != current {
-		t.Fatalf("dynamic info notice = %q, want %q", info.Notice, current)
-	}
-}
-
-// TestResumeConsentDecisionTable pins the four-row consent table (d-cpt-9of I5,
-// register decision, Slice 4 AC6): a foreign attach needs the user's verbatim
-// ask; a recent attachment additionally needs takeover; refusal and success name
-// the current attachment; the claim history records the consenting words.
 func TestResumeConsentDecisionTable(t *testing.T) {
 	t.Run("foreign attach without userWords is rejected (mwd)", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")

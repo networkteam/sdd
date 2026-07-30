@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/networkteam/slogutils"
 	"github.com/urfave/cli/v3"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
@@ -63,23 +63,6 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			locations, err := repos.DefaultLocations()
-			if err != nil {
-				return err
-			}
-			standingNotice := func() string {
-				notice, noticeErr := currentSessionRelocationNotice(sddDir, locations)
-				if noticeErr != nil {
-					return fmt.Sprintf("Session relocation check failed for %s. Run `sdd init --migrate-sessions` after stopping servers and restarting agent sessions: %v", sddDir, noticeErr)
-				}
-				return notice
-			}
-			notice, noticeErr := currentSessionRelocationNotice(sddDir, locations)
-			if noticeErr != nil {
-				slogutils.FromContext(ctx).Warn("could not inspect in-tree session store", "err", noticeErr)
-			} else if notice != "" {
-				slogutils.FromContext(ctx).Warn("in-tree session state needs offline relocation", "directory", sddDir, "action", "stop servers, restart agent sessions, then run sdd init --migrate-sessions")
-			}
 			reg, _, err := defaultRepos()
 			if err != nil {
 				return err
@@ -102,8 +85,7 @@ func serveCmd() *cli.Command {
 					}
 					return filepath.Abs(filepath.Join(dir, attachDir, filename))
 				},
-				Version:        version,
-				StandingNotice: standingNotice,
+				Version: version,
 			})
 			if err != nil {
 				return err
@@ -242,20 +224,24 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	storePaths, err := resolveLocalStorePaths(sddDir, cfg, locations)
+	stableRepoRoot, err := git.StableRepoRoot(filepath.Dir(sddDir))
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	project := routedSessionProject(cfg, storePaths)
+	storeLocations, err := resolveSessionLocations(sddDir, cfg, locations)
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
+	project := sessionStoreProject(cfg)
 	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: graphDir})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	sessions, err := localadapter.NewFilesystemSessionStoreAtStateRoot(locations.StateRoot, storePaths.Sessions)
+	sessions, err := localadapter.NewFilesystemSessionStore(storeLocations...)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStoreAtStateRoot(locations.StateRoot, storePaths.StagedBlobs)
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(storeLocations...)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
@@ -292,17 +278,13 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	// time, so a lazy embedder that reveals its dimensionality only on first
 	// use still routes correctly. No process-local memory store in production.
 	cacheRoot := registry.CacheRoot()
-	baseRepoKey := persistentIndexRepoKey(storePaths)
+	baseRepoKey := persistentIndexRepoKey(cfg, stableRepoRoot)
 	baseIndex := localadapter.NewPersistentSearchIndexStore(project, cacheRoot, baseRepoKey)
 	var embeddings sdd.EmbeddingExecutor
 	if localEmbedder != nil {
 		embeddings = publicEmbeddingExecutor(localEmbedder)
 	}
-	var heldRepoID sdd.ProjectID
-	if storePaths.PendingIdentity && cfg != nil {
-		heldRepoID = sdd.ProjectID(cfg.RepoID)
-	}
-	targets, err := newLocalMutationTargets(project, filepath.Dir(sddDir), heldRepoID)
+	targets, err := newLocalMutationTargets(project, filepath.Dir(sddDir))
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
@@ -360,7 +342,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	return application, project, identity, nil
 }
 
-func newLocalMutationTargets(project sdd.ProjectID, serverCheckout string, heldRepoID sdd.ProjectID) (*localadapter.GitWorktreeAcquirer, error) {
+func newLocalMutationTargets(project sdd.ProjectID, serverCheckout string) (*localadapter.GitWorktreeAcquirer, error) {
 	return localadapter.NewGitWorktreeAcquirer(localadapter.GitWorktreeAcquirerOptions{
 		Project: project, ServerCheckout: serverCheckout,
 		Factory: func(_ context.Context, checkout string, target sdd.MutationTarget) (sdd.GraphStore, []sdd.MutationFinalizer, func() error, error) {
@@ -373,9 +355,6 @@ func newLocalMutationTargets(project sdd.ProjectID, serverCheckout string, heldR
 			}
 			targetProject := sdd.ProjectID(targetCfg.RepoID)
 			if targetProject == "" {
-				targetProject = "local"
-			}
-			if project == "local" && heldRepoID != "" && targetProject == heldRepoID {
 				targetProject = "local"
 			}
 			if targetProject != project {

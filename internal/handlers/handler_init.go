@@ -38,19 +38,6 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("invalid command: %w", err)
 	}
-	if cmd.RelocateSessionStore {
-		switch {
-		case !cmd.MigrateLegacySessions:
-			return fmt.Errorf("session-store relocation requires legacy session migration")
-		case !h.preRelocationRecoveryConfigured:
-			return fmt.Errorf("pre-relocation legacy recovery is not configured")
-		case h.relocator == nil:
-			return fmt.Errorf("session-store relocation is not configured")
-		case h.relocatedSessions == nil:
-			return fmt.Errorf("relocated legacy session migration is not configured")
-		}
-	}
-
 	graphDir := cmd.GraphDir
 	if graphDir == "" {
 		graphDir = model.DefaultGraphDir
@@ -290,31 +277,6 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	if err := h.migrateLegacyIndexes(cmd, sddDir, configPath); err != nil {
 		return err
 	}
-	if cmd.HoldSessionStoreRouting && !cmd.RelocateSessionStore {
-		if h.relocator == nil {
-			return fmt.Errorf("session-store routing hold is not configured")
-		}
-		if err := h.relocator.EnsurePending(ctx); err != nil {
-			return fmt.Errorf("persisting session-store routing hold: %w", err)
-		}
-	}
-	if cmd.RelocateSessionStore {
-		// Recover legacy transaction controls in the currently routed store
-		// before relocation. The controls themselves remain application-owned
-		// and excluded from relocation payload.
-		for _, sessions := range h.preRelocationSessions {
-			if err := h.migrateLegacySessionsWith(ctx, cmd, sessions); err != nil {
-				return err
-			}
-		}
-		if err := h.relocator.Relocate(ctx, cmd.OnSessionStoreRelocated, cmd.OnSessionStoreCollision); err != nil {
-			return fmt.Errorf("relocating session store: %w", err)
-		}
-		if err := h.migrateLegacySessionsWith(ctx, cmd, h.relocatedSessions); err != nil {
-			return err
-		}
-	}
-
 	// Scaffold the AGENTS.md / CLAUDE.md instruction bridge when a non-Claude
 	// agent is in play and the files are absent. AGENTS.md is the cross-tool
 	// canonical instruction file; CLAUDE.md imports it via @AGENTS.md. Existing
@@ -460,44 +422,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 	}
 
-	if cmd.RelocateSessionStore {
-		return nil
-	}
-	return h.migrateLegacySessions(ctx, cmd)
-}
-
-func (h *Handler) migrateLegacySessions(ctx context.Context, cmd *command.InitCmd) error {
-	return h.migrateLegacySessionsWith(ctx, cmd, h.sessions)
-}
-
-func (h *Handler) migrateLegacySessionsWith(
-	ctx context.Context,
-	cmd *command.InitCmd,
-	sessions LegacySessionMigrator,
-) error {
-	if !cmd.MigrateLegacySessions {
-		return nil
-	}
-	if sessions == nil {
-		return fmt.Errorf("legacy session migration is not configured")
-	}
-	paths, err := sessions.ListLegacySessions(ctx)
-	if err != nil {
-		return fmt.Errorf("listing legacy sessions: %w", err)
-	}
-	log := slogutils.FromContext(ctx)
-	var failures []error
-	for _, path := range paths {
-		if err := sessions.MigrateLegacySession(ctx, path); err != nil {
-			log.Error("legacy session migration failed", "path", path, "err", err)
-			failures = append(failures, fmt.Errorf("migrating legacy session %s: %w", path, err))
-			continue
-		}
-		if cmd.OnSessionMigrated != nil {
-			cmd.OnSessionMigrated(path)
-		}
-	}
-	return errors.Join(failures...)
+	return nil
 }
 
 // resolveSkillScope picks the scope `sdd init` should install under and

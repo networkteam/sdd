@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/networkteam/slogutils"
+
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
 )
@@ -881,13 +883,19 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 	}
 	now := runtime.options.Now().UTC()
 	result := make([]WorkflowSessionSummary, 0, len(stored))
+	log := slogutils.FromContext(ctx)
 	for _, item := range stored {
+		// A session this binary cannot read may have been written by a newer
+		// one. Skipping it keeps every other session listed and resumable
+		// rather than making one log take the whole listing down.
 		if err := validateStoredSession(item); err != nil {
-			return nil, err
+			log.Warn("skipping unreadable session", "session", item.Metadata.ID, "err", err)
+			continue
 		}
 		events, err := decodeWorkflowEvents(item.Events)
 		if err != nil {
-			return nil, err
+			log.Warn("skipping unreadable session", "session", item.Metadata.ID, "err", err)
+			continue
 		}
 		summary := deriveWorkflowSummary(item.Metadata.ID, events)
 		summary.Label = item.Metadata.Label
