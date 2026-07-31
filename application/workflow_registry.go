@@ -77,7 +77,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 			if strings.TrimSpace(layout) == "" {
 				return nil, fmt.Errorf("viewLayout needs arg layout")
 			}
-			target, fromBinding := w.readTarget(ctx.Store)
+			target, fromBinding := w.effectiveTarget(ctx.Store)
 			result, err := w.app.View(w.ctx, w.identity, w.project, ViewRequest{Layout: layout, Branch: target.Branch})
 			if err != nil {
 				return nil, w.withSessionBindingTargetError(err, fromBinding)
@@ -101,7 +101,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 			if len(ids) == 0 {
 				return nil, fmt.Errorf("entryChains: neither anchor nor targets is set in the store")
 			}
-			target, fromBinding := w.readTarget(ctx.Store)
+			target, fromBinding := w.effectiveTarget(ctx.Store)
 			result, err := w.app.Show(w.ctx, w.identity, w.project, ShowRequest{
 				IDs: ids, UpDepth: workflowIntArg(args, "up", query.DefaultUpDepth), DownDepth: workflowIntArg(args, "down", query.DefaultDownDepth),
 				Branch: target.Branch,
@@ -168,7 +168,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 			if !ok {
 				return fmt.Errorf("replaceSummary: correctedSummary is not set")
 			}
-			target, fromBinding := w.captureMutationTarget(ctx.Store)
+			target, fromBinding := w.effectiveTarget(ctx.Store)
 			result, err := w.app.ReplaceSummary(w.ctx, w.identity, w.project, w.binding, target, id, text)
 			err = w.withSessionBindingTargetError(err, fromBinding)
 			if err == nil {
@@ -255,7 +255,7 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	if !ok {
 		return fmt.Errorf("newEntry: body is not set")
 	}
-	target, fromBinding, resolvedDefault, err := w.concreteCaptureMutationTarget(ctx.Store)
+	target, fromBinding, resolvedDefault, err := w.concreteEffectiveTarget(ctx.Store)
 	if err != nil {
 		return err
 	}
@@ -371,17 +371,25 @@ func (w *WorkflowSession) mutationTarget(store *engine.Store, branchField string
 	return MutationTarget{Project: w.project, Branch: branch}
 }
 
-// captureMutationTarget is the sole ordinary-capture precedence rule:
-// an explicit per-procedure captureBranch wins, then an authority already
-// resolved at the write gate, then the durable session binding, then a zero
-// target lets the application resolve configured default_branch. No cwd or
-// other ambient state participates.
-func (w *WorkflowSession) captureMutationTarget(store *engine.Store) (MutationTarget, bool) {
-	if target := w.mutationTarget(store, "captureBranch"); target != (MutationTarget{}) {
-		return target, false
-	}
-	if target := w.mutationTarget(store, "resolvedCaptureBranch"); target != (MutationTarget{}) {
-		return target, false
+// workflowBranchFields is the application-owned registry of procedure state
+// fields carrying branch authority, in precedence order: capture state names
+// captureBranch, the write gate pins resolvedCaptureBranch, implementation
+// state names workBranch. A procedure that introduces another branch-bearing
+// field must register it here, or its reads and writes silently fall back to
+// the session binding.
+var workflowBranchFields = [...]string{"captureBranch", "resolvedCaptureBranch", "workBranch"}
+
+// effectiveTarget is the sole branch precedence rule, shared by graph reads and
+// graph writes (20260722-112853-d-tac-ln1): an explicit procedure-state branch
+// wins, then the durable session binding — reported by the second result — then
+// a zero target lets the application resolve configured default_branch. No cwd
+// or other ambient state participates, and the engine stays unaware of what
+// these fields mean.
+func (w *WorkflowSession) effectiveTarget(store *engine.Store) (MutationTarget, bool) {
+	for _, field := range workflowBranchFields {
+		if target := w.mutationTarget(store, field); target != (MutationTarget{}) {
+			return target, false
+		}
 	}
 	if w.branch != "" {
 		return MutationTarget{Project: w.project, Branch: w.branch}, true
@@ -389,12 +397,12 @@ func (w *WorkflowSession) captureMutationTarget(store *engine.Store) (MutationTa
 	return MutationTarget{}, false
 }
 
-// concreteCaptureMutationTarget resolves the configured default without
-// mutating procedure state. The write gate records that default as an
-// engine-owned resolvedCaptureBranch only after CreateEntry reports that an
-// artifact was actually written.
-func (w *WorkflowSession) concreteCaptureMutationTarget(store *engine.Store) (MutationTarget, bool, bool, error) {
-	if target, fromBinding := w.captureMutationTarget(store); target != (MutationTarget{}) {
+// concreteEffectiveTarget resolves the configured default without mutating
+// procedure state. The write gate records that default as an engine-owned
+// resolvedCaptureBranch only after CreateEntry reports that an artifact was
+// actually written.
+func (w *WorkflowSession) concreteEffectiveTarget(store *engine.Store) (MutationTarget, bool, bool, error) {
+	if target, fromBinding := w.effectiveTarget(store); target != (MutationTarget{}) {
 		return target, fromBinding, false, nil
 	}
 	_, runtime, err := w.app.resolve(w.ctx, w.identity, w.project, AccessRead)

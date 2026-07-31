@@ -169,6 +169,9 @@ Branch-targeted workflow reads need to follow the written artifact.
 	if captureServe.Step != "playback" {
 		t.Fatalf("capture step = %q, want playback", captureServe.Step)
 	}
+	if statement := playbackTargetStatement(t, captureServe); !strings.Contains(statement, "explicit") || !strings.Contains(statement, "captureBranch") {
+		t.Fatalf("playback target statement = %q, want the explicitly seeded work branch", statement)
+	}
 	captureServe = advanceWorkflow(t, workflow, identity, capture, map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "confirm",
 	})
@@ -350,7 +353,7 @@ This reference exists only on the bound work branch.
 	}
 	// The ref is branch-exclusive: both the engine predicate and application
 	// pre-flight must validate against the bound work snapshot.
-	boundID := runRoutingCapture(t, bound, identity, workOnlyID, "The bound ordinary capture is written to the work branch.", "Corrected bound summary.", true)
+	boundID := runRoutingCapture(t, bound, identity, workOnlyID, "The bound ordinary capture is written to the work branch.", "Corrected bound summary.", true, "work")
 	assertWorkflowEntryLocation(t, boundID, workDir, true)
 	assertWorkflowEntryLocation(t, boundID, mainDir, false)
 	boundPath, err := model.IDToRelPath(boundID)
@@ -369,7 +372,7 @@ This reference exists only on the bound work branch.
 	if err != nil {
 		t.Fatal(err)
 	}
-	unboundID := runRoutingCapture(t, unbound, identity, anchorID, "The unbound ordinary capture is written to the configured default branch.", "", false)
+	unboundID := runRoutingCapture(t, unbound, identity, anchorID, "The unbound ordinary capture is written to the configured default branch.", "", false, "")
 	assertWorkflowEntryLocation(t, unboundID, mainDir, true)
 	assertWorkflowEntryLocation(t, unboundID, workDir, false)
 	assertWorkflowEntryLocation(t, unboundID, currentDir, false)
@@ -422,7 +425,21 @@ This reference exists only on the bound work branch.
 	assertWorkflowEntryLocation(t, retryID, currentDir, false)
 }
 
-func runRoutingCapture(t *testing.T, workflow *sdd.WorkflowSession, identity sdd.RequestIdentity, anchorID, body, correctedSummary string, drifted bool) string {
+// playbackTargetStatement returns the one playback line stating the branch the
+// write will land on — the served half of the acceptance criterion that the
+// stated target and the written artifact never diverge.
+func playbackTargetStatement(t *testing.T, serve *sdd.WorkflowServe) string {
+	t.Helper()
+	for _, line := range strings.Split(serve.Instructions, "\n") {
+		if strings.HasPrefix(line, "- target branch:") {
+			return line
+		}
+	}
+	t.Fatalf("playback stated no target branch:\n%s", serve.Instructions)
+	return ""
+}
+
+func runRoutingCapture(t *testing.T, workflow *sdd.WorkflowSession, identity sdd.RequestIdentity, anchorID, body, correctedSummary string, drifted bool, wantTargetBranch string) string {
 	t.Helper()
 	if err := workflow.LogRead(t.Context(), identity, "show", []string{anchorID}, nil); err != nil {
 		t.Fatal(err)
@@ -439,6 +456,16 @@ func runRoutingCapture(t *testing.T, workflow *sdd.WorkflowSession, identity sdd
 	})
 	if serve.Step != "playback" {
 		t.Fatalf("capture assemble step = %q, want playback", serve.Step)
+	}
+	statement := playbackTargetStatement(t, serve)
+	if wantTargetBranch == "" && !strings.Contains(statement, "configured default branch") {
+		t.Fatalf("unbound playback target statement = %q", statement)
+	}
+	if wantTargetBranch != "" && !strings.Contains(statement, "session branch binding") {
+		t.Fatalf("bound playback target statement = %q", statement)
+	}
+	if serve.Branch != wantTargetBranch {
+		t.Fatalf("playback served framing branch = %q, want %q", serve.Branch, wantTargetBranch)
 	}
 	serve = advanceWorkflow(t, workflow, identity, serve.Instance, map[string]any{
 		"chooser": "playback", "choice": "confirm", "userWords": "write it",

@@ -1147,11 +1147,8 @@ func (g *workflowGraphs) Current() (*model.Graph, error) {
 }
 
 // CurrentFor resolves the graph authority carried by a procedure instance.
-// Capture state names captureBranch; implementation state names workBranch.
-// The application owns those meanings while the engine remains unaware of
-// branch semantics.
 func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
-	target, fromBinding := g.workflow.readTarget(store)
+	target, fromBinding := g.workflow.effectiveTarget(store)
 	if target == (MutationTarget{}) {
 		return g.Current()
 	}
@@ -1192,24 +1189,6 @@ func (g *workflowGraphs) currentTarget(target MutationTarget, fromBinding bool) 
 func (g *workflowGraphs) Invalidate() {
 	g.snapshot = nil
 	g.targets = nil
-}
-
-// workflowReadTargetFields is the application-owned registry of procedure
-// state fields that carry branch authority for graph reads. A procedure that
-// introduces another branch-bearing field must register it here so reads do
-// not silently fall back to the session graph.
-var workflowReadTargetFields = [...]string{"captureBranch", "resolvedCaptureBranch", "workBranch"}
-
-func (w *WorkflowSession) readTarget(store *engine.Store) (MutationTarget, bool) {
-	for _, field := range workflowReadTargetFields {
-		if target := w.mutationTarget(store, field); target != (MutationTarget{}) {
-			return target, false
-		}
-	}
-	if w.branch != "" {
-		return MutationTarget{Project: w.project, Branch: w.branch}, true
-	}
-	return MutationTarget{}, false
 }
 
 type workflowSink struct{ workflow *WorkflowSession }
