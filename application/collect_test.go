@@ -69,8 +69,8 @@ func newCollectFixture(t *testing.T) collectFixture {
 }
 
 // writeSession creates a session and, when ended is non-zero, closes it out with
-// a terminal attachment record at that time.
-func (f collectFixture) writeSession(t *testing.T, id sdd.SessionID, ended time.Time, cause sdd.AttachmentCause) {
+// a terminal record of that act at that time.
+func (f collectFixture) writeSession(t *testing.T, id sdd.SessionID, ended time.Time, act sdd.SessionEndAct) {
 	t.Helper()
 	attachment := sdd.Attachment{
 		Subject: collectSubject, ClientName: "test", MCPSessionID: "c-" + string(id),
@@ -89,9 +89,7 @@ func (f collectFixture) writeSession(t *testing.T, id sdd.SessionID, ended time.
 	}
 	ending := metadata
 	ending.Attachment = nil
-	ending.AttachmentHistory = []sdd.AttachmentRecord{{
-		Attachment: attachment, EndedAt: ended, Cause: cause,
-	}}
+	ending.Ended = &sdd.SessionEnd{Act: act, EndedAt: ended}
 	if _, err := f.sessions.Append(t.Context(), id, created.Version, sdd.SessionAppend{Metadata: &ending}); err != nil {
 		t.Fatalf("ending %s: %v", id, err)
 	}
@@ -137,10 +135,10 @@ func TestCollectRemovesOnlyEndedSessionsPastRetention(t *testing.T) {
 	f := newCollectFixture(t)
 	retention := 14 * 24 * time.Hour
 
-	f.writeSession(t, "s_old", f.now.Add(-30*24*time.Hour), sdd.CauseConclude)
+	f.writeSession(t, "s_old", f.now.Add(-30*24*time.Hour), sdd.SessionConcluded)
 	f.stage(t, "s_old")
-	f.writeSession(t, "s_abandoned", f.now.Add(-30*24*time.Hour), sdd.CauseAbandon)
-	f.writeSession(t, "s_recent", f.now.Add(-1*time.Hour), sdd.CauseConclude)
+	f.writeSession(t, "s_abandoned", f.now.Add(-30*24*time.Hour), sdd.SessionAbandoned)
+	f.writeSession(t, "s_recent", f.now.Add(-1*time.Hour), sdd.SessionConcluded)
 	f.stage(t, "s_recent")
 	f.writeSession(t, "s_open", time.Time{}, "")
 	f.stage(t, "s_open")
@@ -209,7 +207,7 @@ func TestCollectRemovesOrphanedStagedBlobs(t *testing.T) {
 // to do and never errors on work already done.
 func TestCollectIsIdempotentAndConcurrencySafe(t *testing.T) {
 	f := newCollectFixture(t)
-	f.writeSession(t, "s_old", f.now.Add(-30*24*time.Hour), sdd.CauseConclude)
+	f.writeSession(t, "s_old", f.now.Add(-30*24*time.Hour), sdd.SessionConcluded)
 	f.stage(t, "s_old")
 
 	first := f.collect(t, time.Hour)
@@ -226,7 +224,7 @@ func TestCollectIsIdempotentAndConcurrencySafe(t *testing.T) {
 // log is never treated as garbage: it may belong to a newer binary.
 func TestCollectLeavesUnreadableSessionsAlone(t *testing.T) {
 	f := newCollectFixture(t)
-	f.writeSession(t, "s_old", f.now.Add(-30*24*time.Hour), sdd.CauseConclude)
+	f.writeSession(t, "s_old", f.now.Add(-30*24*time.Hour), sdd.SessionConcluded)
 
 	const corrupt = "{not json at all\n"
 	unreadable := filepath.Join(f.sessionsDir, "s_unreadable.jsonl")

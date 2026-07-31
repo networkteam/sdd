@@ -83,8 +83,8 @@ func collectRuntime(
 		if claimed {
 			continue
 		}
-		endedAt, ended := sessionEndedAt(session.Metadata)
-		if !ended || now.Sub(endedAt) <= cmd.Retention {
+		end := session.Metadata.Ended
+		if end == nil || now.Sub(end.EndedAt.UTC()) <= cmd.Retention {
 			continue
 		}
 		if err := sessions.Delete(ctx, id); err != nil {
@@ -130,25 +130,6 @@ func collectOrphanStaging(
 		removed = append(removed, ref)
 	}
 	return removed, nil
-}
-
-// sessionEndedAt reports when a session ended, by being concluded or explicitly
-// abandoned. A terminal record as the most recent one is what ends a session,
-// matching how a displaced writer is told its dialogue is over; a later
-// attachment means something reopened it, so it is not ended.
-func sessionEndedAt(metadata SessionMetadata) (time.Time, bool) {
-	n := len(metadata.AttachmentHistory)
-	if n == 0 {
-		return time.Time{}, false
-	}
-	last := metadata.AttachmentHistory[n-1]
-	if last.Cause != CauseConclude && last.Cause != CauseAbandon {
-		return time.Time{}, false
-	}
-	if metadata.Attachment != nil && metadata.Attachment.LastActivity.After(last.EndedAt) {
-		return time.Time{}, false
-	}
-	return last.EndedAt.UTC(), true
 }
 
 // discardUnroutable retires one declaration from before the convergence rule.

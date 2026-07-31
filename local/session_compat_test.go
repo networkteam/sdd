@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	localadapter "github.com/networkteam/sdd/local"
@@ -210,6 +211,79 @@ func TestUnreadableSessionIsSkippedNotFatal(t *testing.T) {
 	after, err := os.ReadFile(corruptPath)
 	if err != nil || string(after) != corrupt {
 		t.Fatalf("unreadable log was modified or removed: %q, %v", after, err)
+	}
+}
+
+// TestLegacyEndedIsDerivedFromAttachmentHistory pins how a log written before
+// the transport causes were dropped (d-cpt-rw7) still reads as ended: the
+// terminal act is recovered from its attachment history, while the connection
+// events those logs also recorded end nothing — so a previously concluded
+// session stays collectable and a merely disconnected one stays live.
+func TestLegacyEndedIsDerivedFromAttachmentHistory(t *testing.T) {
+	stamp := `{"Subject":"local","ClientName":"claude","MCPSessionID":"c-1","LastActivity":"2026-07-20T09:00:00Z"}`
+	record := func(cause, at string) string {
+		return `{"Attachment":` + stamp + `,"EndedAt":"` + at + `","Cause":"` + cause + `"}`
+	}
+	for _, tc := range []struct {
+		name    string
+		history []string
+		wantAct sdd.SessionEndAct
+		wantAt  string
+	}{
+		{name: "trailing disconnect ends nothing", history: []string{record("disconnect", "2026-07-20T10:00:00Z")}},
+		{name: "trailing claim ends nothing", history: []string{record("claim", "2026-07-20T10:00:00Z")}},
+		{
+			name:    "conclude ends the session",
+			history: []string{record("disconnect", "2026-07-20T09:30:00Z"), record("conclude", "2026-07-20T10:00:00Z")},
+			wantAct: sdd.SessionConcluded, wantAt: "2026-07-20T10:00:00Z",
+		},
+		{
+			name:    "conclude followed by a dropped socket still ends the session",
+			history: []string{record("conclude", "2026-07-20T10:00:00Z"), record("shutdown", "2026-07-20T11:00:00Z")},
+			wantAct: sdd.SessionConcluded, wantAt: "2026-07-20T10:00:00Z",
+		},
+		{
+			name:    "abandon ends the session",
+			history: []string{record("abandon", "2026-07-20T10:00:00Z")},
+			wantAct: sdd.SessionAbandoned, wantAt: "2026-07-20T10:00:00Z",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			locations := compatLocations(t)
+			primary := locations[0]
+			if err := os.MkdirAll(primary.Sessions, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			log := `{"version":1,"metadata":{"CodecVersion":1,"ID":"s_legacy","Subject":"local","Project":"` +
+				string(primary.Project) + `","Participant":"Christopher","Attachment":null,"AttachmentHistory":[` +
+				strings.Join(tc.history, ",") + `],"UpdatedAt":"2026-07-20T11:00:00Z"}}` + "\n"
+			if err := os.WriteFile(filepath.Join(primary.Sessions, "s_legacy.jsonl"), []byte(log), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			store, err := localadapter.NewFilesystemSessionStore(locations...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := store.Load(t.Context(), "s_legacy")
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if tc.wantAct == "" {
+				if stored.Metadata.Ended != nil {
+					t.Fatalf("Ended = %+v, want the session still live", stored.Metadata.Ended)
+				}
+				return
+			}
+			if stored.Metadata.Ended == nil {
+				t.Fatal("Ended = nil, want the terminal act recovered from the legacy history")
+			}
+			if got := stored.Metadata.Ended.Act; got != tc.wantAct {
+				t.Fatalf("Ended.Act = %q, want %q", got, tc.wantAct)
+			}
+			if got := stored.Metadata.Ended.EndedAt.Format(time.RFC3339); got != tc.wantAt {
+				t.Fatalf("Ended.EndedAt = %s, want %s", got, tc.wantAt)
+			}
+		})
 	}
 }
 

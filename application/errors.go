@@ -36,11 +36,11 @@ type ApplicationError struct {
 	Revision   string
 	Version    uint32
 	Cause      error
-	// Attachment and AttachmentCause carry the interpreted conflict on an
-	// ErrorSessionDisplaced: who now holds the session (or the record that ended
-	// it) and how it ended, so the displaced writer can be told who/when/why.
-	Attachment      *Attachment
-	AttachmentCause AttachmentCause
+	// Attachment and Ended carry the interpreted conflict on an
+	// ErrorSessionDisplaced or ErrorConsentRequired: who holds the session now,
+	// or the act that ended it, so the caller can be told who/when/why.
+	Attachment *Attachment
+	Ended      *SessionEnd
 }
 
 func (e *ApplicationError) Error() string {

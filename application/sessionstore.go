@@ -19,17 +19,18 @@ type SessionMetadata struct {
 	Label        string
 	// Branch is the session's explicit branch binding. Empty means unbound;
 	// compositions without a branch concept leave it empty.
-	Branch            string `json:"branch,omitempty"`
-	Attachment        *Attachment
-	AttachmentHistory []AttachmentRecord
-	UpdatedAt         time.Time
+	Branch     string `json:"branch,omitempty"`
+	Attachment *Attachment
+	// Ended is the session's single terminal record. Its presence is what makes
+	// a session ended; nothing else about a session ends it (d-cpt-rw7).
+	Ended     *SessionEnd `json:",omitempty"`
+	UpdatedAt time.Time
 }
 
-// Attachment is the informational stamp of the client currently driving the
+// Attachment is the ephemeral stamp of the client currently driving the
 // session: integrity comes from CAS on append, and status is derived from
 // LastActivity recency. UserWords records the user's verbatim ask that
-// authorized this attachment — the live stamp carries its own consent, and any
-// history record embedding it preserves the words automatically.
+// authorized this attachment.
 type Attachment struct {
 	Subject       string
 	ClientName    string
@@ -39,27 +40,71 @@ type Attachment struct {
 	UserWords     string `json:",omitempty"`
 }
 
-// AttachmentRecord closes out a past attachment with the specific cause it
-// ended. The embedded Attachment carries the words that authorized it; Reason
-// records the abandon note, so a displaced writer's next call can be told why.
-type AttachmentRecord struct {
-	Attachment Attachment
-	EndedAt    time.Time
-	Cause      AttachmentCause
-	Reason     string `json:",omitempty"`
+// SessionEnd records the participant act that ended a session, written once and
+// never revised. Reason records the abandon note, so a displaced writer's next
+// call can be told why. Who ended it is the session's own participant; the
+// ending client's stamp is transport and does not enter the durable record.
+type SessionEnd struct {
+	Act     SessionEndAct
+	EndedAt time.Time
+	Reason  string `json:",omitempty"`
 }
 
-// AttachmentCause is the closed set of reasons an attachment ends.
-type AttachmentCause string
+// SessionEndAct is the closed set of participant acts that end a dialogue.
+type SessionEndAct string
 
 const (
-	CauseDisconnect AttachmentCause = "disconnect"
-	CauseSwitch     AttachmentCause = "switch"
-	CauseShutdown   AttachmentCause = "shutdown"
-	CauseClaim      AttachmentCause = "claim"
-	CauseConclude   AttachmentCause = "conclude"
-	CauseAbandon    AttachmentCause = "abandon"
+	SessionConcluded SessionEndAct = "concluded"
+	SessionAbandoned SessionEndAct = "abandoned"
 )
+
+// UnmarshalJSON decodes stored metadata, recovering the terminal record from the
+// attachment history superseded shapes carried it in. Decoding stays lenient
+// about every other field in both directions (d-cpt-i2x).
+func (m *SessionMetadata) UnmarshalJSON(data []byte) error {
+	type metadata SessionMetadata
+	var decoded struct {
+		metadata
+		AttachmentHistory []legacyAttachmentRecord
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*m = SessionMetadata(decoded.metadata)
+	if m.Ended == nil {
+		m.Ended = endFromLegacyHistory(decoded.AttachmentHistory)
+	}
+	return nil
+}
+
+// legacyAttachmentRecord is one entry of the attachment history superseded
+// shapes appended to, decoded only far enough to recover a terminal act.
+type legacyAttachmentRecord struct {
+	EndedAt time.Time
+	Cause   string
+	Reason  string
+}
+
+// endFromLegacyHistory reads a superseded history backwards for the act that
+// ended the dialogue, skipping the connection events those logs also recorded —
+// a dropped socket ends nothing. A takeover, or a cause this binary does not
+// know, stops the scan: something came after the act, so the session is not
+// ended.
+func endFromLegacyHistory(history []legacyAttachmentRecord) *SessionEnd {
+	for i := len(history) - 1; i >= 0; i-- {
+		record := history[i]
+		switch record.Cause {
+		case "disconnect", "shutdown", "switch":
+			continue
+		case "conclude":
+			return &SessionEnd{Act: SessionConcluded, EndedAt: record.EndedAt, Reason: record.Reason}
+		case "abandon":
+			return &SessionEnd{Act: SessionAbandoned, EndedAt: record.EndedAt, Reason: record.Reason}
+		}
+		return nil
+	}
+	return nil
+}
 
 type StoredEvent struct {
 	CodecVersion uint32

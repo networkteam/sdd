@@ -355,10 +355,8 @@ func TestAbandonMidTeardownLeavesVictimAttachmentIntact(t *testing.T) {
 	if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.MCPSessionID != "mcp-a" {
 		t.Fatalf("a failed teardown must leave the victim's attachment intact, got %+v", stored.Metadata.Attachment)
 	}
-	for _, rec := range stored.Metadata.AttachmentHistory {
-		if rec.Cause == sdd.CauseAbandon {
-			t.Fatalf("a failed teardown must record no abandon, history: %+v", stored.Metadata.AttachmentHistory)
-		}
+	if stored.Metadata.Ended != nil {
+		t.Fatalf("a failed teardown must record no abandon, got %+v", stored.Metadata.Ended)
 	}
 }
 

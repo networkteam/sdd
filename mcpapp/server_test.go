@@ -3036,22 +3036,21 @@ func TestShellConcludeWalksOpenThreads(t *testing.T) {
 	}
 }
 
-// TestLeaveCauseFidelityAcrossPaths pins register decision 6/I7: each leave
-// path records the specific trigger cause in the attachment history, driven
-// through the real call sites (not a bare ReleaseSession) so the Leave layer's
-// cause handling is exercised — including that a quiescent switch records
-// switch, never conclude.
-func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
-	lastCause := func(t *testing.T, env testEnv, session string) sdd.AttachmentCause {
+// TestLeavePathsRecordNothingAcrossPaths pins d-cpt-rw7 at the real call sites:
+// every way a connection steps away — switching, shutting down, dropping the
+// socket — clears the live stamp and ends nothing, while the one participant act
+// among them, a teardown by handle, records the terminal abandon.
+func TestLeavePathsRecordNothingAcrossPaths(t *testing.T) {
+	end := func(t *testing.T, env testEnv, session string) *sdd.SessionEnd {
 		t.Helper()
 		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(session))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(stored.Metadata.AttachmentHistory) == 0 {
-			t.Fatalf("session %s recorded no attachment history", session)
+		if stored.Metadata.Attachment != nil {
+			t.Fatalf("session %s still reads held: %+v", session, stored.Metadata.Attachment)
 		}
-		return stored.Metadata.AttachmentHistory[len(stored.Metadata.AttachmentHistory)-1].Cause
+		return stored.Metadata.Ended
 	}
 	startMove := func(t *testing.T, cs *mcp.ClientSession, session string) {
 		t.Helper()
@@ -3059,7 +3058,7 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "work"}, &serve)
 	}
 
-	t.Run("switch away from a session with an open move records switch", func(t *testing.T) {
+	t.Run("switch away from a session with an open move ends nothing", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		other := connect(t, env.srv)
 		b := openSession(t, other).Session // a second session to attach away to
@@ -3069,12 +3068,12 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		var resumed mcpserver.ResumeSessionResult
 		// b was just opened on this server, so it reads active: the switch takes it over.
 		call(t, cs, "resume_session", map[string]any{"session": b, "userWords": "move to the other dialogue", "takeover": true}, &resumed) // switch away from a
-		if c := lastCause(t, env, a); c != sdd.CauseSwitch {
-			t.Fatalf("switch away (open move) cause = %q, want switch", c)
+		if got := end(t, env, a); got != nil {
+			t.Fatalf("switch away (open move) ended the session: %+v", got)
 		}
 	})
 
-	t.Run("switch away from a quiescent session records switch not conclude", func(t *testing.T) {
+	t.Run("switch away from a quiescent session ends nothing", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		other := connect(t, env.srv)
 		b := openSession(t, other).Session
@@ -3082,12 +3081,12 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		a := openSession(t, cs).Session // no move — quiescent
 		var resumed mcpserver.ResumeSessionResult
 		call(t, cs, "resume_session", map[string]any{"session": b, "userWords": "move to the other dialogue", "takeover": true}, &resumed) // switch away; shell auto-concludes
-		if c := lastCause(t, env, a); c != sdd.CauseSwitch {
-			t.Fatalf("switch away (quiescent) cause = %q, want switch (not conclude)", c)
+		if got := end(t, env, a); got != nil {
+			t.Fatalf("switch away (quiescent) ended the session: %+v", got)
 		}
 	})
 
-	t.Run("abandon by handle records abandon", func(t *testing.T) {
+	t.Run("abandon by handle records the terminal abandon", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		csA := connect(t, env.srv)
 		a := openSession(t, csA).Session
@@ -3098,12 +3097,13 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		csB := connect(t, env2.srv)
 		var torn mcpserver.AbandonResult
 		call(t, csB, "abandon", map[string]any{"session": a}, &torn)
-		if c := lastCause(t, env, a); c != sdd.CauseAbandon {
-			t.Fatalf("abandon cause = %q, want abandon", c)
+		got := end(t, env, a)
+		if got == nil || got.Act != sdd.SessionAbandoned {
+			t.Fatalf("teardown by handle = %+v, want a terminal abandon", got)
 		}
 	})
 
-	t.Run("shutdown records shutdown", func(t *testing.T) {
+	t.Run("shutdown ends nothing", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		cs := connect(t, env.srv)
 		a := openSession(t, cs).Session
@@ -3111,12 +3111,12 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		if err := env.srv.Shutdown(t.Context()); err != nil {
 			t.Fatalf("shutdown: %v", err)
 		}
-		if c := lastCause(t, env, a); c != sdd.CauseShutdown {
-			t.Fatalf("shutdown cause = %q, want shutdown", c)
+		if got := end(t, env, a); got != nil {
+			t.Fatalf("shutdown ended the session: %+v", got)
 		}
 	})
 
-	t.Run("disconnect records disconnect", func(t *testing.T) {
+	t.Run("disconnect ends nothing", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		cs, ss := connectPair(t, env.srv)
 		a := openSession(t, cs).Session
@@ -3124,8 +3124,8 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		if err := env.srv.Disconnect(t.Context(), ss); err != nil {
 			t.Fatalf("disconnect: %v", err)
 		}
-		if c := lastCause(t, env, a); c != sdd.CauseDisconnect {
-			t.Fatalf("disconnect cause = %q, want disconnect", c)
+		if got := end(t, env, a); got != nil {
+			t.Fatalf("disconnect ended the session: %+v", got)
 		}
 	})
 }

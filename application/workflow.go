@@ -297,9 +297,9 @@ func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdenti
 	return w, result, err
 }
 
-// claimAttachment performs a foreign attach: enforce consent, end any prior
-// attachment as a claim, and stamp this connection as the current attachment,
-// carrying the consenting words on the live stamp. A lost race on the append
+// claimAttachment performs a foreign attach: enforce consent and stamp this
+// connection as the current attachment, carrying the consenting words on the
+// live stamp and reporting whoever it displaced. A lost race on the append
 // never surfaces as a raw version conflict to a consenting user — it reloads,
 // re-checks consent against the fresh state (a competitor that just attached
 // now blocks with the typed consent error), and retries once; a second conflict
@@ -310,7 +310,6 @@ func (a *Application) claimAttachment(ctx context.Context, runtime *ProjectRunti
 		var displaced *Attachment
 		var tookOver bool
 		if cur := st.Metadata.Attachment; cur != nil {
-			md.AttachmentHistory = append(md.AttachmentHistory, endAttachment(*cur, now, CauseClaim))
 			copied := *cur
 			displaced = &copied
 			tookOver = attachmentActive(cur, now)
@@ -370,7 +369,7 @@ func consentToAttach(request WorkflowResumeRequest, current *Attachment, now tim
 			request.SessionID)}
 	}
 	if attachmentActive(current, now) && !request.Takeover {
-		return &ApplicationError{Code: ErrorConsentRequired, Attachment: current, AttachmentCause: CauseClaim, Message: fmt.Sprintf(
+		return &ApplicationError{Code: ErrorConsentRequired, Attachment: current, Message: fmt.Sprintf(
 			"%s is currently held by %s (last active %s) and may be actively driven — to take it over pass takeover:true with the user's explicit ask. %s",
 			request.SessionID, ClientLabel(current.ClientName), current.LastActivity.Format(attachmentTimeFormat), RecordedStateOnlyNote)}
 	}
@@ -851,16 +850,10 @@ func (w *WorkflowSession) framingLanes() ([]string, error) {
 	return lanes, nil
 }
 
-func (w *WorkflowSession) Release(ctx context.Context, identity RequestIdentity, cause AttachmentCause, reason string) error {
-	w.setOperation(ctx, identity)
-	return w.app.ReleaseSession(ctx, identity, w.project, w.binding, cause, reason)
-}
-
-// Leave ends the connection's attachment with the trigger cause its caller
-// passed (switch, disconnect, shutdown, …). A quiescent session — shell only,
-// no open moves — auto-concludes its shell so it does not linger as an empty
-// parked dialogue, but the attachment still records the trigger, not conclude.
-func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity, cause AttachmentCause) error {
+// Leave clears the connection's attachment stamp when it steps away. A
+// quiescent session — shell only, no open moves — auto-concludes its shell so it
+// does not linger as an empty parked dialogue.
+func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity) error {
 	w.setOperation(ctx, identity)
 	if len(w.OpenInstances()) == 0 && w.shell != "" {
 		if inst, ok := w.session.Instance(w.shell); ok && inst.Status == engine.StatusRunning {
@@ -869,7 +862,7 @@ func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity, c
 			}
 		}
 	}
-	return w.Release(ctx, identity, cause, "")
+	return w.app.ReleaseSession(ctx, identity, w.project, w.binding)
 }
 
 func (a *Application) ListWorkflowSessions(ctx context.Context, identity RequestIdentity, project ProjectID) ([]WorkflowSessionSummary, error) {
@@ -923,12 +916,11 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 
 // AbandonWorkflowSession tears down a session by handle without ever becoming
 // its attachment: it replays into a buffering sink (no claim, no stamp, no
-// displacement), abandons the instances, then ends the CURRENT attachment —
-// whoever holds it — with cause abandon, actor, and reason in one final append.
-// A mid-teardown failure returns before that append, so the victim's attachment
-// stays intact — honest state, no phantom hold. A session another client is
-// actively driving is refused: destruction must not be cheaper than attachment
-// (I5).
+// displacement), abandons the instances, then records the terminal abandon and
+// drops whatever stamp was held in one final append. A mid-teardown failure
+// returns before that append, so the victim's attachment stays intact — honest
+// state, no phantom hold. A session another client is actively driving is
+// refused: destruction must not be cheaper than attachment (I5).
 func (a *Application) AbandonWorkflowSession(ctx context.Context, identity RequestIdentity, project ProjectID, request WorkflowResumeRequest, reason string) (WorkflowAbandonResult, error) {
 	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
@@ -950,7 +942,7 @@ func (a *Application) AbandonWorkflowSession(ctx context.Context, identity Reque
 	now := runtime.options.Now().UTC().Round(0)
 	current := stored.Metadata.Attachment
 	if attachmentActive(current, now) {
-		return WorkflowAbandonResult{}, &ApplicationError{Code: ErrorConsentRequired, Attachment: current, AttachmentCause: CauseAbandon, Message: fmt.Sprintf(
+		return WorkflowAbandonResult{}, &ApplicationError{Code: ErrorConsentRequired, Attachment: current, Message: fmt.Sprintf(
 			"%s is currently held by %s (last active %s) and may be actively driven — conclude it there, take it over first (resume_session with the user's ask), or wait.",
 			request.SessionID, ClientLabel(current.ClientName), current.LastActivity.Format(attachmentTimeFormat))}
 	}
@@ -985,12 +977,8 @@ func (a *Application) AbandonWorkflowSession(ctx context.Context, identity Reque
 	}
 	metadata := stored.Metadata
 	metadata.UpdatedAt = now
-	if current != nil {
-		record := endAttachment(*current, now, CauseAbandon)
-		record.Reason = strings.TrimSpace(reason)
-		metadata.AttachmentHistory = append(metadata.AttachmentHistory, record)
-		metadata.Attachment = nil
-	}
+	metadata.Ended = &SessionEnd{Act: SessionAbandoned, EndedAt: now, Reason: strings.TrimSpace(reason)}
+	metadata.Attachment = nil
 	appendData := SessionAppend{Metadata: &metadata}
 	for _, event := range sink.events {
 		payload, marshalErr := json.Marshal(event)

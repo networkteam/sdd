@@ -218,25 +218,26 @@ func TestIncumbentContinuityHoldsWithoutExpiry(t *testing.T) {
 	}
 }
 
-// TestReleaseRecordsSpecificCauseAndClearsAttachment covers I7: every
-// lifecycle change records its specific cause, and the attachment is cleared
-// so status derives from the store alone.
-func TestReleaseRecordsSpecificCauseAndClearsAttachment(t *testing.T) {
+// TestReleaseClearsTheStampWithoutEndingTheSession covers d-cpt-rw7: stepping
+// away clears the live stamp — so status derives from the store alone — and
+// records nothing, because a connection going away is not an act on the
+// dialogue.
+func TestReleaseClearsTheStampWithoutEndingTheSession(t *testing.T) {
 	application, sessions, _, _ := newDurableApplication(t, time.Now, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	binding := openBinding(t, sessions, identity.Subject, "release-cause")
-	if err := application.ReleaseSession(t.Context(), identity, "example", binding, sdd.CauseDisconnect, ""); err != nil {
+	binding := openBinding(t, sessions, identity.Subject, "release-stamp")
+	if err := application.ReleaseSession(t.Context(), identity, "example", binding); err != nil {
 		t.Fatal(err)
 	}
-	stored, err := sessions.Load(t.Context(), "release-cause")
+	stored, err := sessions.Load(t.Context(), "release-stamp")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.Metadata.Attachment != nil {
 		t.Fatalf("attachment not cleared: %+v", stored.Metadata.Attachment)
 	}
-	if len(stored.Metadata.AttachmentHistory) != 1 || stored.Metadata.AttachmentHistory[0].Cause != sdd.CauseDisconnect {
-		t.Fatalf("attachment history = %+v", stored.Metadata.AttachmentHistory)
+	if stored.Metadata.Ended != nil {
+		t.Fatalf("release ended the session: %+v", stored.Metadata.Ended)
 	}
 }
 
