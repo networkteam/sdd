@@ -15,6 +15,12 @@ type Graph struct {
 	RefsTo       map[string][]string // reverse index: entry ID -> IDs that reference it
 	ClosedBy     map[string][]string // reverse index: entry ID -> IDs that close it
 	SupersededBy map[string][]string // reverse index: entry ID -> IDs that supersede it
+	// InboundRefs is RefsTo resolved through supersession: keyed by the live
+	// head of each ref target's chain, carrying the hop distance the reference
+	// travelled. Ranking reads this index; every other consumer (annotation
+	// topic derivation, downstream neighbours, the show tree) wants the literal
+	// keying of RefsTo (d-cpt-x6z).
+	InboundRefs map[string][]InboundRef
 	// LoadIssues records entries the I/O loader could not parse. Reading the
 	// graph never stops on a malformed entry: everything parseable still
 	// loads, and each failure is kept here so read surfaces (lint, the
@@ -79,6 +85,7 @@ func NewGraphWithLoadIssues(entries []*Entry, issues []LoadIssue) *Graph {
 		RefsTo:       make(map[string][]string),
 		ClosedBy:     make(map[string][]string),
 		SupersededBy: make(map[string][]string),
+		InboundRefs:  make(map[string][]InboundRef),
 		LoadIssues:   issues,
 	}
 
@@ -107,6 +114,18 @@ func NewGraphWithLoadIssues(entries []*Entry, issues []LoadIssue) *Graph {
 				continue
 			}
 			g.SupersededBy[s] = append(g.SupersededBy[s], e.ID)
+		}
+	}
+
+	// Second pass: SupersededBy must be complete before any chain can be walked.
+	for _, e := range entries {
+		for _, ref := range e.Refs {
+			if IsCrossRepoID(ref.ID) {
+				continue
+			}
+			r := g.ResolveRef(ref.ID)
+			head := r.Head()
+			g.InboundRefs[head] = append(g.InboundRefs[head], InboundRef{Source: e.ID, Hops: r.Hops()})
 		}
 	}
 

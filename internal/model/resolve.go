@@ -36,6 +36,23 @@ func (r ResolvedRef) IsStale() bool {
 	return len(r.path) > 1
 }
 
+// Hops returns the number of supersede steps between origin and head — zero
+// when the reference already points at a live entry.
+func (r ResolvedRef) Hops() int {
+	if len(r.path) == 0 {
+		return 0
+	}
+	return len(r.path) - 1
+}
+
+// InboundRef is one incoming reference after supersede resolution: the entry
+// that made the reference, and how many supersede steps separated the literal
+// target it named from the live head this reference now lands on.
+type InboundRef struct {
+	Source string
+	Hops   int
+}
+
 // Path returns the ordered supersession trail from origin to head (origin
 // first, head last). Rendering-only — reasoning consumers want Head(). The
 // returned slice is a copy; mutating it does not affect the resolution.
