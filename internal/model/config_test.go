@@ -256,6 +256,44 @@ func TestMergeConfig_RetryOverlay(t *testing.T) {
 	}
 }
 
+func TestResolveSessionRetention(t *testing.T) {
+	retention := func(raw string) *PerRepoConfig {
+		return &PerRepoConfig{BaseConfig: BaseConfig{Sessions: SessionsConfig{Retention: raw}}}
+	}
+	cases := []struct {
+		name    string
+		cfg     *PerRepoConfig
+		want    time.Duration
+		wantErr bool
+	}{
+		{"nil config uses default", nil, 14 * 24 * time.Hour, false},
+		{"empty value uses default", &PerRepoConfig{}, 14 * 24 * time.Hour, false},
+		{"days", retention("1d"), 24 * time.Hour, false},
+		{"go duration", retention("336h"), 336 * time.Hour, false},
+		{"garbage is a config error", retention("not-a-duration"), 0, true},
+		{"fractional days are a config error", retention("1.5d"), 0, true},
+		{"zero is a config error", retention("0d"), 0, true},
+		{"negative is a config error", retention("-1d"), 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ResolveSessionRetention(tc.cfg)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want error, got %v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveSyncCooldown(t *testing.T) {
 	cases := []struct {
 		name   string

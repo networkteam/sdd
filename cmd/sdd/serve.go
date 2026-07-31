@@ -73,7 +73,11 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			collectSessions(ctx, application, project, identity, cfg)
+			retention, err := model.ResolveSessionRetention(cfg)
+			if err != nil {
+				return err
+			}
+			collectSessions(ctx, application, project, identity, retention)
 
 			transport := cmd.String("transport")
 			srv, err := mcpserver.New(mcpserver.Options{
@@ -359,10 +363,10 @@ func collectSessions(
 	application *sdd.Application,
 	project sdd.ProjectID,
 	identity sdd.RequestIdentity,
-	cfg *model.PerRepoConfig,
+	retention time.Duration,
 ) {
 	result, err := application.CollectSessions(ctx, identity, project, sdd.CollectSessionsCmd{
-		Retention: model.ResolveSessionRetention(cfg),
+		Retention: retention,
 	})
 	if err != nil {
 		slogutils.FromContext(ctx).Warn("session collection did not complete", "err", err)

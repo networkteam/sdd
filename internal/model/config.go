@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,7 +58,7 @@ const (
 	// kept before collection removes it. Sessions are scaffolding, but a
 	// dialogue that has just ended is exactly the one worth reading when
 	// something went wrong inside it, so the window buys inspectability.
-	DefaultSessionRetention = "336h"
+	DefaultSessionRetention = "14d"
 )
 
 // BaseConfig holds the shared user/machine settings every config location
@@ -148,7 +149,7 @@ type SyncConfig struct {
 // SessionsConfig holds settings for engine session lifetime.
 type SessionsConfig struct {
 	// Retention is how long an ended session is kept before collection
-	// removes it. Go duration string (e.g. "336h" for 14 days). Empty means
+	// removes it. Days ("14d") or a Go duration ("336h"). Empty means
 	// DefaultSessionRetention.
 	Retention string `yaml:"retention,omitempty"`
 }
@@ -571,14 +572,36 @@ func FormatConfig(cfg PerRepoConfig) string {
 		"#   cooldown: " + DefaultSyncCooldown + "\n"
 }
 
-// ResolveSessionRetention returns the effective session retention from cfg,
-// falling back to DefaultSessionRetention on empty or unparseable values.
-func ResolveSessionRetention(cfg *PerRepoConfig) time.Duration {
+// ResolveSessionRetention returns the effective session retention from cfg.
+// Retention is expressed in days ("14d") or as a Go duration; empty means
+// DefaultSessionRetention. A value that does not parse is a config error the
+// caller must surface, never a silent default.
+func ResolveSessionRetention(cfg *PerRepoConfig) (time.Duration, error) {
 	raw := ""
 	if cfg != nil {
-		raw = cfg.Sessions.Retention
+		raw = strings.TrimSpace(cfg.Sessions.Retention)
 	}
-	return parsePositiveDuration(raw, DefaultSessionRetention)
+	if raw == "" {
+		raw = DefaultSessionRetention
+	}
+	d, err := parseDaysOrDuration(raw)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("sessions.retention: %q is not a positive duration — use days (%q) or a Go duration (%q)", raw, "14d", "336h")
+	}
+	return d, nil
+}
+
+// parseDaysOrDuration reads a duration that may use a whole-day suffix,
+// which time.ParseDuration does not know.
+func parseDaysOrDuration(raw string) (time.Duration, error) {
+	if days, ok := strings.CutSuffix(raw, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil {
+			return 0, fmt.Errorf("invalid day count %q", raw)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(raw)
 }
 
 // ResolveSyncCooldown returns the effective cooldown duration from cfg,
