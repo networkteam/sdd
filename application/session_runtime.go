@@ -20,6 +20,13 @@ const RecordedStateOnlyNote = "Only recorded session state resumes — step posi
 // surfaced-conflict messages.
 const reorientSuffix = "reorient with resume_session or start fresh"
 
+// NewSessionNote is the single statement of the way on from a dialogue that has
+// ended: concluding is terminal, so continuing means a new session under a new
+// handle rather than a revival of the spent one (d-tac-k4q). It is composed into
+// the conclude serve and into every refusal an ended session answers with, so
+// each surface names the same one path that works.
+const NewSessionNote = "This session is finished — continuing means opening a new session with start_session, which returns a new handle to carry in place of this one. Its log stays readable for inspection until its retention window expires."
+
 const SessionCodecVersion uint32 = 1
 
 // FirstSessionCodecVersion is the oldest persisted session codec this binary
@@ -173,13 +180,19 @@ func displacedError(stored StoredSession) error {
 func endedMessage(m SessionMetadata, end SessionEnd) string {
 	when := end.EndedAt.Format(attachmentTimeFormat)
 	if end.Act == SessionConcluded {
-		return fmt.Sprintf("this session was concluded at %s — start fresh", when)
+		return fmt.Sprintf("this session was concluded at %s. %s", when, NewSessionNote)
 	}
 	msg := fmt.Sprintf("abandoned by %s at %s", actorLabel(m), when)
 	if end.Reason != "" {
 		msg += ", reason: " + end.Reason
 	}
-	return msg + " — this session is torn down; start fresh"
+	return fmt.Sprintf("%s — this session is torn down. %s", msg, NewSessionNote)
+}
+
+// endedSessionError refuses an operation that would carry on a dialogue already
+// over, naming how it ended and the one path that works instead.
+func endedSessionError(m SessionMetadata, end SessionEnd) error {
+	return &ApplicationError{Code: ErrorSessionEnded, Ended: &end, Message: endedMessage(m, end)}
 }
 
 // ClientLabel names a client for a conflict or consent message, falling back

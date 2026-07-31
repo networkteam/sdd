@@ -386,10 +386,19 @@ func TestAbandonedWhileAttachedNamesActorTimeReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A fresh connection reopens the torn-down handle (item 5): even with this
-	// newer attachment present, the victim's write must still hear the abandon —
-	// its world was destroyed, not merely taken over.
-	if _, _, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-c", UserWords: "reopen the torn-down handle"}); err != nil {
+	// Attaching to a torn-down handle is refused: an ended dialogue is kept to be
+	// read, never resumed.
+	_, _, reopenErr := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-c", UserWords: "reopen the torn-down handle"})
+	var reopenAppErr *sdd.ApplicationError
+	if !errors.As(reopenErr, &reopenAppErr) || reopenAppErr.Code != sdd.ErrorSessionEnded {
+		t.Fatalf("reopening a torn-down handle = %v, want typed ErrorSessionEnded", reopenErr)
+	}
+	// The terminal record wins over a newer stamp (item 5): the victim's write must
+	// hear the abandon, not "taken over". No served path can stamp an ended session
+	// any more, so the precondition is written directly.
+	newer := stored.Metadata
+	newer.Attachment = &sdd.Attachment{Subject: newer.Subject, MCPSessionID: "mcp-c", LastActivity: now}
+	if _, err := sessions.Append(t.Context(), w.ID(), stored.Version, sdd.SessionAppend{Metadata: &newer}); err != nil {
 		t.Fatal(err)
 	}
 	_, advErr := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}})

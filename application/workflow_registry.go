@@ -37,7 +37,7 @@ func (w *WorkflowSession) registerWorkflowPredicates(registry *engine.Registry) 
 			}
 			return true, nil
 		},
-		FailMessage: "open threads remain — settle each with the user (finish it, abandon it, or park the session)",
+		FailMessage: "the session still has open move instances",
 	})
 }
 

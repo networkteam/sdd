@@ -254,6 +254,11 @@ func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdenti
 	if stored.Metadata.Subject != principal.Subject || stored.Metadata.Project != runtime.options.Project.ID {
 		return nil, WorkflowResumeResult{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
 	}
+	// An ended dialogue is kept to be read, never carried on: attaching would
+	// replay it and auto-start a fresh shell, which is the revival slice 4 refuses.
+	if end := stored.Metadata.Ended; end != nil {
+		return nil, WorkflowResumeResult{}, endedSessionError(stored.Metadata, *end)
+	}
 	// Own = this connection's MCP session is the current attachment (opened it,
 	// or already attached with consent). A same-client re-attach (the compaction
 	// reorientation) is own, needs no consent, and changes nothing in the store —
@@ -453,6 +458,20 @@ func (w *WorkflowSession) OpenInstances() []WorkflowInstanceSummary {
 
 func (w *WorkflowSession) IsShell(instance string) bool { return instance != "" && instance == w.shell }
 
+// Finished reports whether this dialogue is over: the shell has left running,
+// which is the act that wrote the terminal record. A finished session is spent —
+// the door opens a new one rather than re-serving it, and no move may carry it on.
+func (w *WorkflowSession) Finished() bool {
+	inst, ok := w.session.Instance(w.shell)
+	return ok && inst.Status != engine.StatusRunning
+}
+
+// finishedError refuses a move against a spent dialogue, carrying the way on
+// instead of reviving the session (d-tac-k4q).
+func (w *WorkflowSession) finishedError() error {
+	return &ApplicationError{Code: ErrorSessionEnded, Message: fmt.Sprintf("session %s has ended. %s", w.ID(), NewSessionNote)}
+}
+
 func (w *WorkflowSession) Reopen(ctx context.Context, identity RequestIdentity, label string) (*WorkflowServe, error) {
 	w.setOperation(ctx, identity)
 	if err := w.setLabel(label); err != nil {
@@ -471,6 +490,9 @@ func (w *WorkflowSession) Reopen(ctx context.Context, identity RequestIdentity, 
 func (w *WorkflowSession) Start(ctx context.Context, identity RequestIdentity, request WorkflowStartRequest) (*WorkflowServe, error) {
 	if strings.TrimSpace(request.Canonical) == "" {
 		return nil, fmt.Errorf("canonical is required")
+	}
+	if w.Finished() {
+		return nil, w.finishedError()
 	}
 	w.setOperation(ctx, identity)
 	w.graphs.Invalidate()
@@ -502,6 +524,9 @@ func (w *WorkflowSession) Advance(ctx context.Context, identity RequestIdentity,
 	if request.Instance == "" || len(request.Report) == 0 {
 		return nil, fmt.Errorf("instance and report are required")
 	}
+	if w.Finished() {
+		return nil, w.finishedError()
+	}
 	w.setOperation(ctx, identity)
 	w.graphs.Invalidate()
 	if err := w.setLabel(request.Label); err != nil {
@@ -530,7 +555,14 @@ func (w *WorkflowSession) Advance(ctx context.Context, identity RequestIdentity,
 		return nil, err
 	}
 	result := w.publicServe(serve)
-	if serve.Status != engine.StatusRunning && serve.Instance != w.shell {
+	if serve.Status != engine.StatusRunning {
+		// The shell ending is the dialogue ending: its serve carries the way on
+		// rather than a spent position with nothing to do. Any other instance
+		// ending lands the dialogue back on the shell.
+		if serve.Instance == w.shell {
+			result.Instructions = NewSessionNote
+			return result, nil
+		}
 		result.Base, err = w.ServeShell(ctx, identity)
 		if err != nil {
 			return result, fmt.Errorf("serving session shell after advancing %s: %w", request.Instance, err)
@@ -898,6 +930,13 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 		if summary.Label == "" {
 			summary.Label = workflowBodyLabel(events)
 		}
+		// An ended dialogue holds no open work however its instances were left
+		// standing: conclude drops its threads and no served path resumes them, so
+		// listing them would offer work that cannot be reached (d-tac-k4q). The log
+		// stays readable until retention expires; it just stops being open work.
+		if item.Metadata.Ended != nil {
+			summary.Open = nil
+		}
 		summary.Participant = item.Metadata.Participant
 		summary.Branch = item.Metadata.Branch
 		if item.Metadata.UpdatedAt.After(summary.LastActivity) {
@@ -1258,8 +1297,17 @@ func (w *WorkflowSession) appendStoredEventOnce(code string, payload json.RawMes
 		if err := json.Unmarshal(payload, &event); err != nil {
 			return err
 		}
-		if event.Event == engine.EventLabeled {
+		switch event.Event {
+		case engine.EventLabeled:
 			metadata.Label, _ = event.Data["label"].(string)
+		case engine.EventCompleted, engine.EventAbandoned:
+			// The shell leaving running is the participant act that ends the
+			// dialogue — whether the user answered conclude or a quiescent session
+			// auto-concluded on leave — so the terminal record lands in the same
+			// append as the act it records (d-cpt-rw7). Written once, never revised.
+			if event.Instance == w.shell && metadata.Ended == nil {
+				metadata.Ended = &SessionEnd{Act: SessionConcluded, EndedAt: now}
+			}
 		}
 	}
 	if metadata.Subject != principal.Subject {

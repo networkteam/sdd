@@ -280,7 +280,8 @@ func (s *Server) registerTools() {
 			"(user-dialogue by default) and returns its opening serve: your orientation, the available " +
 			"moves, and the returned session handle. That handle is the dialogue's identity — retain it " +
 			"across context compaction and pass it to every work tool. Call it again to re-serve the " +
-			"orientation in full.",
+			"orientation in full — and on a connection whose session has ended, it opens a new dialogue " +
+			"under a new handle, since a finished session is never re-served.",
 	}, s.startSession)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -469,7 +470,10 @@ func mcpClientVersion(session *mcp.ServerSession) string {
 // unbound — the door binds it after the shell procedure started.
 func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, args StartSessionArgs) (*mcp.CallToolResult, ServeResult, error) {
 	identity := s.requestIdentity(req)
-	if current := s.sessions.bound(req.Session); current != nil {
+	// A finished session is spent: the door mints a new dialogue under a new handle
+	// rather than re-serving the concluded one, which is the connection standing in
+	// as the dialogue's identity (s-tac-3be).
+	if current := s.sessions.bound(req.Session); current != nil && !current.root.Finished() {
 		serve, err := current.root.Reopen(ctx, identity, args.Label)
 		if err != nil {
 			return nil, ServeResult{}, err
@@ -1259,6 +1263,11 @@ func (s *Server) openThreadsRoot(req *mcp.CallToolRequest, ss *shellSession) str
 	}
 	if len(lines) == 0 {
 		return ""
+	}
+	// The one serve that reports dropped work states it in full — never stubbed by
+	// served-once dedup, and never framed as continuations it no longer offers.
+	if ss.root.Finished() {
+		return concludedThreadsIntro + "\n" + strings.Join(lines, "\n")
 	}
 	header := openThreadsReminder
 	if !s.servedBefore(req.Session, openThreadsIntro) {
