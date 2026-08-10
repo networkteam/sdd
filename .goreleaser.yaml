@@ -27,6 +27,9 @@ archives:
 
 homebrew_casks:
   - name: sdd
+    # A prerelease tag (v1.2.3-alpha.1) must not reach the tap — brew users
+    # track stable, and a cask bump would serve them the soak build.
+    skip_upload: "auto"
     repository:
       owner: networkteam
       name: homebrew-tap
