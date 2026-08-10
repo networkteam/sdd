@@ -62,6 +62,8 @@ Show the user the proposed version, the reasoning, and the full draft. **Wait fo
 gh release create vX.Y.Z --title vX.Y.Z --notes-file .sdd/tmp/vX.Y.Z-notes.md --target main
 ```
 
+For a prerelease tag (`vX.Y.Z-alpha.N`, `-rc.N`), add `--prerelease`.
+
 This single call creates the tag, pushes it, publishes the release with the curated body, and triggers the workflow. GoReleaser sees the existing release at the tag and attaches assets without overwriting the body — `release.mode` defaults to `keep-existing`.
 
 **Do not pass `--draft`.** GoReleaser does not honor a third-party draft; it creates a competing published release at the same tag, leaving the draft orphaned. (Learned via the v0.5.1 mishap.)
@@ -77,6 +79,16 @@ gh release view vX.Y.Z          # body intact, assets attached
 ```
 
 The workflow run typically completes in ~2 minutes. Sanity-check that the release body still shows the curated notes (not auto-generated) and that the assets list includes binaries, checksums, and `install.sh`.
+
+For a prerelease, check the two things a prerelease is for — that stable consumers were left alone:
+
+```bash
+gh release view vX.Y.Z --json isPrerelease --jq .isPrerelease   # true
+gh api repos/networkteam/sdd/releases/latest --jq .tag_name     # still the previous stable
+gh api repos/networkteam/homebrew-tap/contents/Casks/sdd.rb --jq .content | base64 -d | grep version
+```
+
+`install.sh` resolves through `releases/latest`, which excludes prereleases, and `skip_upload: "auto"` keeps the cask off a prerelease tag — so both should be unmoved. Verify rather than assume: on v0.17.0-alpha.1 GoReleaser overwrote the prerelease flag that `gh release create --prerelease` had set, because `release.prerelease` then defaulted to `false`. It is now `auto` in `.goreleaser.yaml`, but the flag is worth reading back. If it is wrong, `gh release edit vX.Y.Z --prerelease` fixes it in place — never re-tag.
 
 ## Recovery
 
