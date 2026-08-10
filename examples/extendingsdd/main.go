@@ -48,9 +48,9 @@ func main() {
 	root := env("SDD_EXAMPLE_DATA", ".example-sdd")
 	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: filepath.Join(root, "graph")})
 	check(err)
-	sessions, err := localadapter.NewFilesystemSessionStore(filepath.Join(root, "sessions"))
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(filepath.Join(root, "sessions"))
 	check(err)
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(root, "staged-blobs"))
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(filepath.Join(root, "staged-blobs"))
 	check(err)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example", DisplayName: "External example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs,

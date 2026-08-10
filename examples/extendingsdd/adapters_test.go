@@ -37,6 +37,7 @@ func (sessionStore) List(context.Context, sdd.SessionFilter) ([]sdd.StoredSessio
 func (sessionStore) Append(context.Context, sdd.SessionID, uint64, sdd.SessionAppend) (uint64, error) {
 	return 1, nil
 }
+func (sessionStore) Delete(context.Context, sdd.SessionID) error { return nil }
 
 type blobStore struct{}
 
@@ -51,6 +52,8 @@ func (blobStore) Open(context.Context, sdd.SessionRef, string) (io.ReadCloser, e
 }
 func (blobStore) Retain(context.Context, sdd.SessionRef, string, []string) error { return nil }
 func (blobStore) Release(context.Context, sdd.SessionRef, string) error          { return nil }
+func (blobStore) StagedSessions(context.Context) ([]sdd.SessionRef, error)       { return nil, nil }
+func (blobStore) DeleteStaged(context.Context, sdd.SessionRef) error             { return nil }
 
 type embeddingExecutor struct{}
 
