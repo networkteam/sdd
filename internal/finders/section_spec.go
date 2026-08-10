@@ -170,6 +170,8 @@ func (s *sectionSpec) validateMutualExclusion() error {
 		return fmt.Errorf("as-counts is mutually exclusive with brief; topic-count rows carry no summary to shorten")
 	case s.render == "as-counts" && s.pageN >= 0:
 		return fmt.Errorf("as-counts is mutually exclusive with n; n truncates entries before aggregation, producing wrong counts — narrow the entry set with filters instead")
+	case s.render == "as-bodies" && s.brief:
+		return fmt.Errorf("as-bodies is mutually exclusive with brief; a body render serves each entry's full body, not a shortened entry line")
 	case s.groupField != "" && s.rank != nil:
 		return fmt.Errorf("group is mutually exclusive with rank in slice 5; per-group ranking is reserved for a future slice")
 	case s.groupField != "" && s.pageN >= 0:

@@ -97,6 +97,7 @@ func layoutHasWipSource(layout model.Layout) bool {
 // result, as-list over a grouped result) is the AC 16 render-shape error
 // the executor emits before the presenter sees the data.
 var renderFunctions = map[string]model.RenderShape{
+	"as-bodies":             model.ShapeBodies,
 	"as-list":               model.ShapeFlatList,
 	"as-grouped":            model.ShapeGrouped,
 	"as-counts":             model.ShapeCounts,
@@ -107,7 +108,7 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "indexed", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list"}
+var knownFunctions = []string{"source", "active", "indexed", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list", "as-bodies"}
 
 // ViewFunctionNames returns the function names accepted by the layout
 // executor. Reference surfaces use this instead of maintaining their own
@@ -317,6 +318,17 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 			Name:   spec.sectionName(),
 			Data:   block,
 			Brief:  spec.brief,
+		}, nil
+	}
+
+	// as-bodies serves the entries themselves, so the pipeline hands over the
+	// ranked and paged set unchanged — the render composes each body into the
+	// surrounding document's heading hierarchy.
+	if spec.render == "as-bodies" {
+		return query.SectionResult{
+			Render: spec.render,
+			Name:   spec.sectionName(),
+			Data:   model.Bodies{Entries: entries},
 		}, nil
 	}
 
