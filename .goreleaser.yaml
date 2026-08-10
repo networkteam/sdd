@@ -55,5 +55,7 @@ release:
   github:
     owner: networkteam
     name: sdd
+  # Without this the default (false) overwrites a prerelease flag already set on the release.
+  prerelease: auto
   extra_files:
     - glob: install.sh
