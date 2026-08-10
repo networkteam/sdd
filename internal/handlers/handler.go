@@ -70,58 +70,33 @@ type Puller interface {
 	MergePull(ctx context.Context) (string, error)
 }
 
-// LegacySessionMigrator is the local maintenance seam used by init. Runtime
-// session reads never call it: conversion requires an explicit user gate.
-type LegacySessionMigrator interface {
-	ListLegacySessions(context.Context) ([]string, error)
-	MigrateLegacySession(context.Context, string) error
-}
-
-// SessionStoreRelocator moves in-tree session state into the machine-global
-// per-project store during init. Callbacks make every move and collision
-// visible without coupling the handler to a filesystem-specific result type.
-type SessionStoreRelocator interface {
-	EnsurePending(context.Context) error
-	Relocate(context.Context, func(source, destination string), func(source, destination string)) error
-}
-
 // Handler holds injected dependencies shared across command methods.
 // Each public method corresponds to one command and lives in its own file
 // (handler_new_entry.go, etc.).
 type Handler struct {
-	graphDir                        string
-	sddDir                          string // path to .sdd/ directory; required for commands that write tmp files
-	reader                          Reader
-	llmRunner                       llm.Runner
-	committer                       Committer
-	brancher                        Brancher
-	mover                           Mover
-	puller                          Puller
-	sessions                        LegacySessionMigrator
-	preRelocationSessions           []LegacySessionMigrator
-	preRelocationRecoveryConfigured bool
-	relocatedSessions               LegacySessionMigrator
-	relocator                       SessionStoreRelocator
-	repos                           *repos.Manager
-	stderr                          io.Writer
-	now                             func() time.Time
+	graphDir  string
+	sddDir    string // path to .sdd/ directory; required for commands that write tmp files
+	reader    Reader
+	llmRunner llm.Runner
+	committer Committer
+	brancher  Brancher
+	mover     Mover
+	puller    Puller
+	repos     *repos.Manager
+	stderr    io.Writer
+	now       func() time.Time
 }
 
 // Options configures a new Handler. Zero-valued fields get sensible defaults.
 type Options struct {
-	GraphDir                        string
-	SDDDir                          string // path to .sdd/ directory; required for commands that write tmp files
-	Reader                          Reader
-	LLMRunner                       llm.Runner
-	Committer                       Committer
-	Brancher                        Brancher
-	Mover                           Mover
-	Puller                          Puller
-	Sessions                        LegacySessionMigrator
-	PreRelocationSessions           []LegacySessionMigrator
-	PreRelocationRecoveryConfigured bool
-	RelocatedSessions               LegacySessionMigrator
-	Relocator                       SessionStoreRelocator
+	GraphDir  string
+	SDDDir    string // path to .sdd/ directory; required for commands that write tmp files
+	Reader    Reader
+	LLMRunner llm.Runner
+	Committer Committer
+	Brancher  Brancher
+	Mover     Mover
+	Puller    Puller
 	// Repos owns the connected-repos side effects (clone, pull, config
 	// writes). Nil means no connected-repos support — repo commands fail
 	// loud, and cross-repo cache freshening is skipped.
@@ -133,22 +108,17 @@ type Options struct {
 // New constructs a Handler with the given options.
 func New(opts Options) *Handler {
 	h := &Handler{
-		graphDir:                        opts.GraphDir,
-		sddDir:                          opts.SDDDir,
-		reader:                          opts.Reader,
-		llmRunner:                       opts.LLMRunner,
-		committer:                       opts.Committer,
-		brancher:                        opts.Brancher,
-		mover:                           opts.Mover,
-		puller:                          opts.Puller,
-		sessions:                        opts.Sessions,
-		preRelocationSessions:           append([]LegacySessionMigrator(nil), opts.PreRelocationSessions...),
-		preRelocationRecoveryConfigured: opts.PreRelocationRecoveryConfigured,
-		relocatedSessions:               opts.RelocatedSessions,
-		relocator:                       opts.Relocator,
-		repos:                           opts.Repos,
-		stderr:                          opts.Stderr,
-		now:                             opts.Now,
+		graphDir:  opts.GraphDir,
+		sddDir:    opts.SDDDir,
+		reader:    opts.Reader,
+		llmRunner: opts.LLMRunner,
+		committer: opts.Committer,
+		brancher:  opts.Brancher,
+		mover:     opts.Mover,
+		puller:    opts.Puller,
+		repos:     opts.Repos,
+		stderr:    opts.Stderr,
+		now:       opts.Now,
 	}
 	if h.stderr == nil {
 		h.stderr = os.Stderr

@@ -11,12 +11,11 @@ import (
 // Per-procedure table tests for the embedded user-dialogue shell entry,
 // driving the shipped base entry through the production loader. The shell
 // names session-scoped functions the MCP shell registers in production;
-// the harness stubs them with a toggle for quiescence.
+// the harness stubs them.
 
 type shellEnv struct {
-	spec      *Spec
-	session   *Session
-	quiescent bool
+	spec    *Spec
+	session *Session
 }
 
 func newShellEnv(t *testing.T) *shellEnv {
@@ -25,7 +24,7 @@ func newShellEnv(t *testing.T) *shellEnv {
 
 func newShellEnvWithFacts(t *testing.T, facts []model.FactIndexRow) *shellEnv {
 	t.Helper()
-	env := &shellEnv{quiescent: true}
+	env := &shellEnv{}
 
 	reg := NewRegistry()
 	mustRegisterQuery(reg, Query{
@@ -60,14 +59,6 @@ func newShellEnvWithFacts(t *testing.T, facts []model.FactIndexRow) *shellEnv {
 			return "view: " + layout, nil
 		},
 	})
-	mustRegisterPredicate(reg, Predicate{
-		Doc: FuncDoc{Name: "sessionQuiescent", Doc: "fake quiescence"},
-		Fn: func(_ *Context) (bool, error) {
-			return env.quiescent, nil
-		},
-		FailMessage: "open threads remain",
-	})
-
 	spec, err := LoadSpec(baseEntry(t, "user-dialogue"), reg)
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +101,7 @@ func TestUserDialogueOpeningOmitsEmptyFactIndex(t *testing.T) {
 	}
 }
 
-func TestUserDialogue_OpeningServeAndQuietConclude(t *testing.T) {
+func TestUserDialogue_OpeningServeAndConclude(t *testing.T) {
 	env := newShellEnv(t)
 
 	if env.spec.Class != model.ProcedureClassShell {
@@ -136,57 +127,40 @@ func TestUserDialogue_OpeningServeAndQuietConclude(t *testing.T) {
 		}
 	}
 
-	// Conclude on a quiescent session cascades through wrap to completion.
+	// Conclude cascades through wrap to completion in the user's one answer.
 	sv, err = env.session.Answer(sv.Instance, "junction", "conclude", nil, "we're done")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sv.Status != StatusCompleted {
-		t.Fatalf("conclude on a quiescent session should complete, got %s at %q", sv.Status, sv.Step)
+		t.Fatalf("conclude should complete the shell, got %s at %q", sv.Status, sv.Step)
 	}
 }
 
-func TestUserDialogue_ConcludeWalksThreadsThenParks(t *testing.T) {
+// TestUserDialogue_ConcludeCarriesNoDischargeGate pins the un-gated conclude: no
+// step stands between the junction's answer and the end, so a session is
+// closable without first discharging what it raised — which loose ends deserve
+// carrying is the user's judgment, not the engine's (d-tac-k4q).
+func TestUserDialogue_ConcludeCarriesNoDischargeGate(t *testing.T) {
 	env := newShellEnv(t)
-	env.quiescent = false
-
-	sv, err := env.session.Start(env.spec, nil, "")
-	if err != nil {
-		t.Fatal(err)
+	if env.spec.StepByID["threads"] != nil {
+		t.Fatal("the shell must carry no thread-settling step between conclude and the end")
 	}
-
-	// Open threads hold the wrap gate: conclude routes to the threads step.
-	sv, err = env.session.Answer(sv.Instance, "junction", "conclude", nil, "wrap it up")
-	if err != nil {
-		t.Fatal(err)
+	wrap := env.spec.StepByID["wrap"]
+	if wrap == nil {
+		t.Fatal("the shell should reach its end through wrap")
 	}
-	if sv.Step != "threads" || sv.Chooser == nil || sv.Chooser.Kind != ChooserUser {
-		t.Fatalf("conclude with open threads should reach the threads chooser, got %s at %q", sv.Status, sv.Step)
+	if len(wrap.Transitions) != 1 {
+		t.Fatalf("wrap must hold exactly one transition, got %+v", wrap.Transitions)
 	}
-	if !strings.Contains(sv.Instructions, "settle each") {
-		t.Fatalf("threads unit should guide per-thread decisions, got %q", sv.Instructions)
+	if to := wrap.Transitions[0]; !to.Otherwise || !IsEndTarget(to.To) {
+		t.Fatalf("wrap must end unconditionally, got %+v", to)
 	}
-
-	// Park returns to the resident junction, which re-serves.
-	sv, err = env.session.Answer(sv.Instance, "threads", "park", nil, "keep it for later")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sv.Step != "junction" || sv.Status != StatusRunning {
-		t.Fatalf("park should return to the junction, got %s at %q", sv.Status, sv.Step)
-	}
-
-	// Settled with the threads actually closed completes through wrap.
-	sv, err = env.session.Answer(sv.Instance, "junction", "conclude", nil, "trying again")
-	if err != nil {
-		t.Fatal(err)
-	}
-	env.quiescent = true
-	sv, err = env.session.Answer(sv.Instance, "threads", "settled", nil, "all closed out")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sv.Status != StatusCompleted {
-		t.Fatalf("settled threads should complete the shell, got %s at %q", sv.Status, sv.Step)
+	// The teaching half of leaving threads behind: the agent names what is open
+	// before the offer, since the answer is final.
+	for _, want := range []string{"name each of those threads", "left behind", "stays listed and resumable"} {
+		if !strings.Contains(env.spec.Units["open"], want) {
+			t.Errorf("the opening unit should teach ending the session; missing %q", want)
+		}
 	}
 }

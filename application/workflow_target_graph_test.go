@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -150,6 +151,110 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	}
 	if explicitGraph.ByID[explicitID] == nil || explicitGraph.ByID[entryID] != nil {
 		t.Fatalf("explicit captureBranch did not override binding: explicit=%v work=%v", explicitGraph.ByID[explicitID], explicitGraph.ByID[entryID])
+	}
+}
+
+// Branch precedence is one rule for reads and writes: for every combination of
+// session binding, explicit branch field, and configured default, both sides
+// resolve the same target — an unbound read with no explicit field being the one
+// deliberate difference, staying on the runtime graph while the write resolves
+// the configured default (20260722-112853-d-tac-ln1).
+func TestWorkflowEffectiveTargetPrecedenceIsSharedByReadsAndWrites(t *testing.T) {
+	const (
+		currentID  = "20260722-120000-s-tac-cur"
+		mainID     = "20260722-120001-s-tac-mai"
+		workID     = "20260722-120002-s-tac-wrk"
+		explicitID = "20260722-120003-s-tac-exp"
+	)
+	branches := map[string]*Snapshot{
+		"main":     workflowTargetSnapshot(t, "main-r1", []EntryDocument{workflowBranchMarker("2026/07/22-120001-s-tac-mai.md")}),
+		"work":     workflowTargetSnapshot(t, "work-r1", []EntryDocument{workflowBranchMarker("2026/07/22-120002-s-tac-wrk.md")}),
+		"explicit": workflowTargetSnapshot(t, "explicit-r1", []EntryDocument{workflowBranchMarker("2026/07/22-120003-s-tac-exp.md")}),
+	}
+	graphStores := make(map[string]GraphStore, len(branches))
+	for branch, snapshot := range branches {
+		graphStores[branch] = workflowTargetGraphStore{snapshot: snapshot}
+	}
+	current := workflowTargetSnapshot(t, "current-r1", []EntryDocument{workflowBranchMarker("2026/07/22-120000-s-tac-cur.md")})
+	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
+		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
+		Graph: workflowTargetGraphStore{snapshot: current}, Targets: &workflowTargetAcquirer{graphs: graphStores},
+	}}
+	app := &Application{access: workflowTargetAccess{runtime: runtime}}
+
+	tests := []struct {
+		binding   string
+		field     string
+		wantRead  string
+		wantWrite string
+		wantEntry string
+	}{
+		{wantWrite: "main", wantEntry: currentID},
+		{field: "captureBranch", wantRead: "explicit", wantWrite: "explicit", wantEntry: explicitID},
+		{field: "resolvedCaptureBranch", wantRead: "explicit", wantWrite: "explicit", wantEntry: explicitID},
+		{field: "workBranch", wantRead: "explicit", wantWrite: "explicit", wantEntry: explicitID},
+		{binding: "work", wantRead: "work", wantWrite: "work", wantEntry: workID},
+		{binding: "work", field: "captureBranch", wantRead: "explicit", wantWrite: "explicit", wantEntry: explicitID},
+		{binding: "work", field: "resolvedCaptureBranch", wantRead: "explicit", wantWrite: "explicit", wantEntry: explicitID},
+		{binding: "work", field: "workBranch", wantRead: "explicit", wantWrite: "explicit", wantEntry: explicitID},
+	}
+	for _, tt := range tests {
+		name := fmt.Sprintf("binding=%q field=%q", tt.binding, tt.field)
+		t.Run(name, func(t *testing.T) {
+			workflow := &WorkflowSession{
+				app: app, project: "example", identity: RequestIdentity{Subject: "christopher"}, ctx: t.Context(),
+				branch: tt.binding,
+			}
+			graphs := &workflowGraphs{workflow: workflow}
+			workflow.graphs = graphs
+			store := workflowTargetStore(t, nil)
+			switch tt.field {
+			case "":
+			case "resolvedCaptureBranch":
+				if err := store.WriteEngine(tt.field, "explicit"); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if _, err := store.WriteState(map[string]any{tt.field: "explicit"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			read, fromBinding := workflow.effectiveTarget(store)
+			wantRead := MutationTarget{}
+			if tt.wantRead != "" {
+				wantRead = MutationTarget{Project: "example", Branch: tt.wantRead}
+			}
+			if read != wantRead {
+				t.Fatalf("read target = %+v, want %+v", read, wantRead)
+			}
+			write, writeFromBinding, resolvedDefault, err := workflow.concreteEffectiveTarget(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if write.Branch != tt.wantWrite || write.Project != "example" {
+				t.Fatalf("write target = %+v, want branch %q", write, tt.wantWrite)
+			}
+			if writeFromBinding != fromBinding {
+				t.Fatalf("binding provenance differs: read=%v write=%v", fromBinding, writeFromBinding)
+			}
+			if resolvedDefault != (read == MutationTarget{}) {
+				t.Fatalf("resolvedDefault = %v for read target %+v", resolvedDefault, read)
+			}
+			if read != (MutationTarget{}) && read != write {
+				t.Fatalf("read target %+v and write target %+v disagree", read, write)
+			}
+			graph, err := graphs.CurrentFor(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if graph.ByID[tt.wantEntry] == nil {
+				t.Fatalf("read graph does not carry %s", tt.wantEntry)
+			}
+			if tt.wantEntry != mainID && graph.ByID[mainID] != nil {
+				t.Fatal("read graph fell through to the configured default branch")
+			}
+		})
 	}
 }
 
@@ -382,6 +487,16 @@ func workflowTargetSnapshot(t *testing.T, revision string, entries []EntryDocume
 		t.Fatal(err)
 	}
 	return snapshot
+}
+
+func workflowBranchMarker(logicalPath string) EntryDocument {
+	return EntryDocument{
+		LogicalPath: logicalPath,
+		Frontmatter: map[string]any{
+			"type": "signal", "kind": "gap", "layer": "tactical", "summary": "Branch-exclusive routing marker.",
+		},
+		Body: "This marker exists only on " + logicalPath + "'s branch.",
+	}
 }
 
 func workflowTargetStore(t *testing.T, values map[string]any) *engine.Store {

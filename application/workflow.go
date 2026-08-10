@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/networkteam/slogutils"
+
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
 )
@@ -252,6 +254,11 @@ func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdenti
 	if stored.Metadata.Subject != principal.Subject || stored.Metadata.Project != runtime.options.Project.ID {
 		return nil, WorkflowResumeResult{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
 	}
+	// An ended dialogue is kept to be read, never carried on: attaching would
+	// replay it and auto-start a fresh shell, which is the revival slice 4 refuses.
+	if end := stored.Metadata.Ended; end != nil {
+		return nil, WorkflowResumeResult{}, endedSessionError(stored.Metadata, *end)
+	}
 	// Own = this connection's MCP session is the current attachment (opened it,
 	// or already attached with consent). A same-client re-attach (the compaction
 	// reorientation) is own, needs no consent, and changes nothing in the store —
@@ -295,9 +302,9 @@ func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdenti
 	return w, result, err
 }
 
-// claimAttachment performs a foreign attach: enforce consent, end any prior
-// attachment as a claim, and stamp this connection as the current attachment,
-// carrying the consenting words on the live stamp. A lost race on the append
+// claimAttachment performs a foreign attach: enforce consent and stamp this
+// connection as the current attachment, carrying the consenting words on the
+// live stamp and reporting whoever it displaced. A lost race on the append
 // never surfaces as a raw version conflict to a consenting user — it reloads,
 // re-checks consent against the fresh state (a competitor that just attached
 // now blocks with the typed consent error), and retries once; a second conflict
@@ -308,7 +315,6 @@ func (a *Application) claimAttachment(ctx context.Context, runtime *ProjectRunti
 		var displaced *Attachment
 		var tookOver bool
 		if cur := st.Metadata.Attachment; cur != nil {
-			md.AttachmentHistory = append(md.AttachmentHistory, endAttachment(*cur, now, CauseClaim))
 			copied := *cur
 			displaced = &copied
 			tookOver = attachmentActive(cur, now)
@@ -368,7 +374,7 @@ func consentToAttach(request WorkflowResumeRequest, current *Attachment, now tim
 			request.SessionID)}
 	}
 	if attachmentActive(current, now) && !request.Takeover {
-		return &ApplicationError{Code: ErrorConsentRequired, Attachment: current, AttachmentCause: CauseClaim, Message: fmt.Sprintf(
+		return &ApplicationError{Code: ErrorConsentRequired, Attachment: current, Message: fmt.Sprintf(
 			"%s is currently held by %s (last active %s) and may be actively driven — to take it over pass takeover:true with the user's explicit ask. %s",
 			request.SessionID, ClientLabel(current.ClientName), current.LastActivity.Format(attachmentTimeFormat), RecordedStateOnlyNote)}
 	}
@@ -452,6 +458,20 @@ func (w *WorkflowSession) OpenInstances() []WorkflowInstanceSummary {
 
 func (w *WorkflowSession) IsShell(instance string) bool { return instance != "" && instance == w.shell }
 
+// Finished reports whether this dialogue is over: the shell has left running,
+// which is the act that wrote the terminal record. A finished session is spent —
+// the door opens a new one rather than re-serving it, and no move may carry it on.
+func (w *WorkflowSession) Finished() bool {
+	inst, ok := w.session.Instance(w.shell)
+	return ok && inst.Status != engine.StatusRunning
+}
+
+// finishedError refuses a move against a spent dialogue, carrying the way on
+// instead of reviving the session (d-tac-k4q).
+func (w *WorkflowSession) finishedError() error {
+	return &ApplicationError{Code: ErrorSessionEnded, Message: fmt.Sprintf("session %s has ended. %s", w.ID(), NewSessionNote)}
+}
+
 func (w *WorkflowSession) Reopen(ctx context.Context, identity RequestIdentity, label string) (*WorkflowServe, error) {
 	w.setOperation(ctx, identity)
 	if err := w.setLabel(label); err != nil {
@@ -470,6 +490,9 @@ func (w *WorkflowSession) Reopen(ctx context.Context, identity RequestIdentity, 
 func (w *WorkflowSession) Start(ctx context.Context, identity RequestIdentity, request WorkflowStartRequest) (*WorkflowServe, error) {
 	if strings.TrimSpace(request.Canonical) == "" {
 		return nil, fmt.Errorf("canonical is required")
+	}
+	if w.Finished() {
+		return nil, w.finishedError()
 	}
 	w.setOperation(ctx, identity)
 	w.graphs.Invalidate()
@@ -501,6 +524,9 @@ func (w *WorkflowSession) Advance(ctx context.Context, identity RequestIdentity,
 	if request.Instance == "" || len(request.Report) == 0 {
 		return nil, fmt.Errorf("instance and report are required")
 	}
+	if w.Finished() {
+		return nil, w.finishedError()
+	}
 	w.setOperation(ctx, identity)
 	w.graphs.Invalidate()
 	if err := w.setLabel(request.Label); err != nil {
@@ -529,7 +555,14 @@ func (w *WorkflowSession) Advance(ctx context.Context, identity RequestIdentity,
 		return nil, err
 	}
 	result := w.publicServe(serve)
-	if serve.Status != engine.StatusRunning && serve.Instance != w.shell {
+	if serve.Status != engine.StatusRunning {
+		// The shell ending is the dialogue ending: its serve carries the way on
+		// rather than a spent position with nothing to do. Any other instance
+		// ending lands the dialogue back on the shell.
+		if serve.Instance == w.shell {
+			result.Instructions = NewSessionNote
+			return result, nil
+		}
 		result.Base, err = w.ServeShell(ctx, identity)
 		if err != nil {
 			return result, fmt.Errorf("serving session shell after advancing %s: %w", request.Instance, err)
@@ -625,7 +658,7 @@ func (w *WorkflowSession) Park(ctx context.Context, identity RequestIdentity, in
 
 func (w *WorkflowSession) StageAttachment(ctx context.Context, identity RequestIdentity, filename string, content []byte) (string, error) {
 	w.setOperation(ctx, identity)
-	blob, err := w.app.StageBlob(ctx, identity, w.project, BlobOwner{Subject: w.binding.Subject, Session: w.binding.SessionID}, filename, content)
+	blob, err := w.app.StageBlob(ctx, identity, w.project, SessionRef{Subject: w.binding.Subject, Session: w.binding.SessionID}, filename, content)
 	if err != nil {
 		return "", err
 	}
@@ -849,16 +882,10 @@ func (w *WorkflowSession) framingLanes() ([]string, error) {
 	return lanes, nil
 }
 
-func (w *WorkflowSession) Release(ctx context.Context, identity RequestIdentity, cause AttachmentCause, reason string) error {
-	w.setOperation(ctx, identity)
-	return w.app.ReleaseSession(ctx, identity, w.project, w.binding, cause, reason)
-}
-
-// Leave ends the connection's attachment with the trigger cause its caller
-// passed (switch, disconnect, shutdown, …). A quiescent session — shell only,
-// no open moves — auto-concludes its shell so it does not linger as an empty
-// parked dialogue, but the attachment still records the trigger, not conclude.
-func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity, cause AttachmentCause) error {
+// Leave clears the connection's attachment stamp when it steps away. A
+// quiescent session — shell only, no open moves — auto-concludes its shell so it
+// does not linger as an empty parked dialogue.
+func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity) error {
 	w.setOperation(ctx, identity)
 	if len(w.OpenInstances()) == 0 && w.shell != "" {
 		if inst, ok := w.session.Instance(w.shell); ok && inst.Status == engine.StatusRunning {
@@ -867,7 +894,7 @@ func (w *WorkflowSession) Leave(ctx context.Context, identity RequestIdentity, c
 			}
 		}
 	}
-	return w.Release(ctx, identity, cause, "")
+	return w.app.ReleaseSession(ctx, identity, w.project, w.binding)
 }
 
 func (a *Application) ListWorkflowSessions(ctx context.Context, identity RequestIdentity, project ProjectID) ([]WorkflowSessionSummary, error) {
@@ -881,13 +908,19 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 	}
 	now := runtime.options.Now().UTC()
 	result := make([]WorkflowSessionSummary, 0, len(stored))
+	log := slogutils.FromContext(ctx)
 	for _, item := range stored {
+		// A session this binary cannot read may have been written by a newer
+		// one. Skipping it keeps every other session listed and resumable
+		// rather than making one log take the whole listing down.
 		if err := validateStoredSession(item); err != nil {
-			return nil, err
+			log.Warn("skipping unreadable session", "session", item.Metadata.ID, "err", err)
+			continue
 		}
 		events, err := decodeWorkflowEvents(item.Events)
 		if err != nil {
-			return nil, err
+			log.Warn("skipping unreadable session", "session", item.Metadata.ID, "err", err)
+			continue
 		}
 		summary := deriveWorkflowSummary(item.Metadata.ID, events)
 		summary.Label = item.Metadata.Label
@@ -896,6 +929,13 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 		}
 		if summary.Label == "" {
 			summary.Label = workflowBodyLabel(events)
+		}
+		// An ended dialogue holds no open work however its instances were left
+		// standing: conclude drops its threads and no served path resumes them, so
+		// listing them would offer work that cannot be reached (d-tac-k4q). The log
+		// stays readable until retention expires; it just stops being open work.
+		if item.Metadata.Ended != nil {
+			summary.Open = nil
 		}
 		summary.Participant = item.Metadata.Participant
 		summary.Branch = item.Metadata.Branch
@@ -915,12 +955,11 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 
 // AbandonWorkflowSession tears down a session by handle without ever becoming
 // its attachment: it replays into a buffering sink (no claim, no stamp, no
-// displacement), abandons the instances, then ends the CURRENT attachment —
-// whoever holds it — with cause abandon, actor, and reason in one final append.
-// A mid-teardown failure returns before that append, so the victim's attachment
-// stays intact — honest state, no phantom hold. A session another client is
-// actively driving is refused: destruction must not be cheaper than attachment
-// (I5).
+// displacement), abandons the instances, then records the terminal abandon and
+// drops whatever stamp was held in one final append. A mid-teardown failure
+// returns before that append, so the victim's attachment stays intact — honest
+// state, no phantom hold. A session another client is actively driving is
+// refused: destruction must not be cheaper than attachment (I5).
 func (a *Application) AbandonWorkflowSession(ctx context.Context, identity RequestIdentity, project ProjectID, request WorkflowResumeRequest, reason string) (WorkflowAbandonResult, error) {
 	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
@@ -942,7 +981,7 @@ func (a *Application) AbandonWorkflowSession(ctx context.Context, identity Reque
 	now := runtime.options.Now().UTC().Round(0)
 	current := stored.Metadata.Attachment
 	if attachmentActive(current, now) {
-		return WorkflowAbandonResult{}, &ApplicationError{Code: ErrorConsentRequired, Attachment: current, AttachmentCause: CauseAbandon, Message: fmt.Sprintf(
+		return WorkflowAbandonResult{}, &ApplicationError{Code: ErrorConsentRequired, Attachment: current, Message: fmt.Sprintf(
 			"%s is currently held by %s (last active %s) and may be actively driven — conclude it there, take it over first (resume_session with the user's ask), or wait.",
 			request.SessionID, ClientLabel(current.ClientName), current.LastActivity.Format(attachmentTimeFormat))}
 	}
@@ -977,12 +1016,8 @@ func (a *Application) AbandonWorkflowSession(ctx context.Context, identity Reque
 	}
 	metadata := stored.Metadata
 	metadata.UpdatedAt = now
-	if current != nil {
-		record := endAttachment(*current, now, CauseAbandon)
-		record.Reason = strings.TrimSpace(reason)
-		metadata.AttachmentHistory = append(metadata.AttachmentHistory, record)
-		metadata.Attachment = nil
-	}
+	metadata.Ended = &SessionEnd{Act: SessionAbandoned, EndedAt: now, Reason: strings.TrimSpace(reason)}
+	metadata.Attachment = nil
 	appendData := SessionAppend{Metadata: &metadata}
 	for _, event := range sink.events {
 		payload, marshalErr := json.Marshal(event)
@@ -1112,11 +1147,8 @@ func (g *workflowGraphs) Current() (*model.Graph, error) {
 }
 
 // CurrentFor resolves the graph authority carried by a procedure instance.
-// Capture state names captureBranch; implementation state names workBranch.
-// The application owns those meanings while the engine remains unaware of
-// branch semantics.
 func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
-	target, fromBinding := g.workflow.readTarget(store)
+	target, fromBinding := g.workflow.effectiveTarget(store)
 	if target == (MutationTarget{}) {
 		return g.Current()
 	}
@@ -1157,24 +1189,6 @@ func (g *workflowGraphs) currentTarget(target MutationTarget, fromBinding bool) 
 func (g *workflowGraphs) Invalidate() {
 	g.snapshot = nil
 	g.targets = nil
-}
-
-// workflowReadTargetFields is the application-owned registry of procedure
-// state fields that carry branch authority for graph reads. A procedure that
-// introduces another branch-bearing field must register it here so reads do
-// not silently fall back to the session graph.
-var workflowReadTargetFields = [...]string{"captureBranch", "resolvedCaptureBranch", "workBranch"}
-
-func (w *WorkflowSession) readTarget(store *engine.Store) (MutationTarget, bool) {
-	for _, field := range workflowReadTargetFields {
-		if target := w.mutationTarget(store, field); target != (MutationTarget{}) {
-			return target, false
-		}
-	}
-	if w.branch != "" {
-		return MutationTarget{Project: w.project, Branch: w.branch}, true
-	}
-	return MutationTarget{}, false
 }
 
 type workflowSink struct{ workflow *WorkflowSession }
@@ -1262,8 +1276,17 @@ func (w *WorkflowSession) appendStoredEventOnce(code string, payload json.RawMes
 		if err := json.Unmarshal(payload, &event); err != nil {
 			return err
 		}
-		if event.Event == engine.EventLabeled {
+		switch event.Event {
+		case engine.EventLabeled:
 			metadata.Label, _ = event.Data["label"].(string)
+		case engine.EventCompleted, engine.EventAbandoned:
+			// The shell leaving running is the participant act that ends the
+			// dialogue — whether the user answered conclude or a quiescent session
+			// auto-concluded on leave — so the terminal record lands in the same
+			// append as the act it records (d-cpt-rw7). Written once, never revised.
+			if event.Instance == w.shell && metadata.Ended == nil {
+				metadata.Ended = &SessionEnd{Act: SessionConcluded, EndedAt: now}
+			}
 		}
 	}
 	if metadata.Subject != principal.Subject {

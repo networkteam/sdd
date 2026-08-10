@@ -128,11 +128,11 @@ func newShellFailureApplication(t *testing.T) (*sdd.Application, *failAtPrincipa
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

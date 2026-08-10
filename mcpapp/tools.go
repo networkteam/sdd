@@ -138,7 +138,6 @@ type ListSessionsArgs struct{}
 
 type ListSessionsResult struct {
 	Sessions []sessionDescriptor `json:"sessions"`
-	Notice   string              `json:"notice,omitempty" jsonschema:"standing operational notice that remains until the host condition is resolved"`
 }
 
 type ResumeSessionArgs struct {
@@ -255,7 +254,6 @@ type InfoResult struct {
 	Recovery    string `json:"recovery,omitempty" jsonschema:"host-neutral actionable recovery notices; empty when no write awaits explicit recovery"`
 	Version     string `json:"version,omitempty"`
 	Hint        string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
-	Notice      string `json:"notice,omitempty" jsonschema:"standing operational notice that remains until the host condition is resolved"`
 }
 
 type RegistryArgs struct {
@@ -282,7 +280,8 @@ func (s *Server) registerTools() {
 			"(user-dialogue by default) and returns its opening serve: your orientation, the available " +
 			"moves, and the returned session handle. That handle is the dialogue's identity — retain it " +
 			"across context compaction and pass it to every work tool. Call it again to re-serve the " +
-			"orientation in full.",
+			"orientation in full — and on a connection whose session has ended, it opens a new dialogue " +
+			"under a new handle, since a finished session is never re-served.",
 	}, s.startSession)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -471,7 +470,10 @@ func mcpClientVersion(session *mcp.ServerSession) string {
 // unbound — the door binds it after the shell procedure started.
 func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, args StartSessionArgs) (*mcp.CallToolResult, ServeResult, error) {
 	identity := s.requestIdentity(req)
-	if current := s.sessions.bound(req.Session); current != nil {
+	// A finished session is spent: the door mints a new dialogue under a new handle
+	// rather than re-serving the concluded one, which is the connection standing in
+	// as the dialogue's identity (s-tac-3be).
+	if current := s.sessions.bound(req.Session); current != nil && !current.root.Finished() {
 		serve, err := current.root.Reopen(ctx, identity, args.Label)
 		if err != nil {
 			return nil, ServeResult{}, err
@@ -499,7 +501,7 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 	if err := s.watchDisconnect(req.Session); err != nil {
 		return nil, ServeResult{}, err
 	}
-	if err := s.leaveSession(ctx, prev, sdd.CauseSwitch); err != nil {
+	if err := s.leaveSession(ctx, prev); err != nil {
 		return nil, ServeResult{}, err
 	}
 	result, err := s.toRootServeResult(ctx, req, ss, serve)
@@ -664,7 +666,7 @@ func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ L
 	if err != nil {
 		return nil, ListSessionsResult{}, err
 	}
-	result := ListSessionsResult{Notice: s.currentStandingNotice()}
+	result := ListSessionsResult{}
 	for _, item := range items {
 		if len(item.Open) == 0 {
 			continue
@@ -730,7 +732,7 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 		}
 		ss := &shellSession{id: string(workflow.ID()), root: workflow, rootIdentity: identity}
 		prev := s.sessions.bind(req.Session, ss)
-		if err := s.leaveSession(ctx, prev, sdd.CauseSwitch); err != nil {
+		if err := s.leaveSession(ctx, prev); err != nil {
 			return nil, ResumeSessionResult{}, err
 		}
 		mapped, err := s.mapRootResume(ctx, req, ss, result)
@@ -1114,7 +1116,6 @@ func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, _ InfoArgs)
 	return nil, InfoResult{
 		Participant: info.Participant, Language: info.Language, Search: info.Search,
 		Recovery: info.Recovery, Version: s.version, Hint: s.readHint(req.Session),
-		Notice: s.currentStandingNotice(),
 	}, nil
 
 }
@@ -1156,24 +1157,6 @@ func (s *Server) composeFraming(ms *mcp.ServerSession, blocks []string) string {
 	return strings.Join(served, "\n\n")
 }
 
-func (s *Server) withStandingNotice(framing string) string {
-	notice := s.currentStandingNotice()
-	if notice == "" {
-		return framing
-	}
-	if framing == "" {
-		return notice
-	}
-	return notice + "\n\n" + framing
-}
-
-func (s *Server) currentStandingNotice() string {
-	if s.standingNotice == nil {
-		return ""
-	}
-	return s.standingNotice()
-}
-
 // toRootServeResult converts an engine serve into the tool response. The shell's
 // open-work block lists this dialogue's own threads only; other dialogues never
 // appear here (the door's one-line count is composed at the start_session call
@@ -1199,7 +1182,7 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 	if err != nil {
 		return ServeResult{}, err
 	}
-	res.Framing = s.withStandingNotice(s.composeFraming(req.Session, framing))
+	res.Framing = s.composeFraming(req.Session, framing)
 	if ss.root.IsShell(serve.Instance) {
 		res.OpenThreads = s.openThreadsRoot(req, ss)
 	}
@@ -1256,7 +1239,7 @@ func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss
 	if err != nil {
 		return ResumeSessionResult{}, err
 	}
-	result.Framing = s.withStandingNotice(s.composeFraming(req.Session, framing))
+	result.Framing = s.composeFraming(req.Session, framing)
 	for i := range source.Open {
 		mapped, err := s.toRootServeResult(ctx, req, ss, &source.Open[i])
 		if err != nil {
@@ -1280,6 +1263,11 @@ func (s *Server) openThreadsRoot(req *mcp.CallToolRequest, ss *shellSession) str
 	}
 	if len(lines) == 0 {
 		return ""
+	}
+	// The one serve that reports dropped work states it in full — never stubbed by
+	// served-once dedup, and never framed as continuations it no longer offers.
+	if ss.root.Finished() {
+		return concludedThreadsIntro + "\n" + strings.Join(lines, "\n")
 	}
 	header := openThreadsReminder
 	if !s.servedBefore(req.Session, openThreadsIntro) {

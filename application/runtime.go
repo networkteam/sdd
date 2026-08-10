@@ -48,6 +48,7 @@ func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
 	if options.Sessions == nil {
 		return nil, fmt.Errorf("sdd: SessionStore is required")
 	}
+	options.Sessions = legacyEndStore{options.Sessions}
 	if options.StagedBlobs == nil {
 		return nil, fmt.Errorf("sdd: StagedBlobStore is required")
 	}

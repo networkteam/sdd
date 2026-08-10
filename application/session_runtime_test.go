@@ -24,14 +24,14 @@ type trackingBlobStore struct {
 	releaseErr error
 }
 
-func (s *trackingBlobStore) Retain(ctx context.Context, owner sdd.BlobOwner, id string, blobs []string) error {
+func (s *trackingBlobStore) Retain(ctx context.Context, owner sdd.SessionRef, id string, blobs []string) error {
 	s.mu.Lock()
 	s.retained++
 	s.mu.Unlock()
 	return s.StagedBlobStore.Retain(ctx, owner, id, blobs)
 }
 
-func (s *trackingBlobStore) Release(ctx context.Context, owner sdd.BlobOwner, id string) error {
+func (s *trackingBlobStore) Release(ctx context.Context, owner sdd.SessionRef, id string) error {
 	s.mu.Lock()
 	s.released++
 	err := s.releaseErr
@@ -218,25 +218,26 @@ func TestIncumbentContinuityHoldsWithoutExpiry(t *testing.T) {
 	}
 }
 
-// TestReleaseRecordsSpecificCauseAndClearsAttachment covers I7: every
-// lifecycle change records its specific cause, and the attachment is cleared
-// so status derives from the store alone.
-func TestReleaseRecordsSpecificCauseAndClearsAttachment(t *testing.T) {
+// TestReleaseClearsTheStampWithoutEndingTheSession covers d-cpt-rw7: stepping
+// away clears the live stamp — so status derives from the store alone — and
+// records nothing, because a connection going away is not an act on the
+// dialogue.
+func TestReleaseClearsTheStampWithoutEndingTheSession(t *testing.T) {
 	application, sessions, _, _ := newDurableApplication(t, time.Now, nil, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	binding := openBinding(t, sessions, identity.Subject, "release-cause")
-	if err := application.ReleaseSession(t.Context(), identity, "example", binding, sdd.CauseDisconnect, ""); err != nil {
+	binding := openBinding(t, sessions, identity.Subject, "release-stamp")
+	if err := application.ReleaseSession(t.Context(), identity, "example", binding); err != nil {
 		t.Fatal(err)
 	}
-	stored, err := sessions.Load(t.Context(), "release-cause")
+	stored, err := sessions.Load(t.Context(), "release-stamp")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.Metadata.Attachment != nil {
 		t.Fatalf("attachment not cleared: %+v", stored.Metadata.Attachment)
 	}
-	if len(stored.Metadata.AttachmentHistory) != 1 || stored.Metadata.AttachmentHistory[0].Cause != sdd.CauseDisconnect {
-		t.Fatalf("attachment history = %+v", stored.Metadata.AttachmentHistory)
+	if stored.Metadata.Ended != nil {
+		t.Fatalf("release ended the session: %+v", stored.Metadata.Ended)
 	}
 }
 
@@ -399,11 +400,11 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 		t.Fatal(err)
 	}
 	targets := &activityTargetAcquirer{graph: graph}
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +500,7 @@ func TestPreparedAttachmentCrossesHomeStagingIntoTargetGraph(t *testing.T) {
 	application, sessions, blobs, _ := newDurableApplicationWithHomeAndTargets(t, home, targets)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
 	binding := openBinding(t, sessions, identity.Subject, "cross-target-attachment")
-	owner := sdd.BlobOwner{Subject: binding.Subject, Session: binding.SessionID}
+	owner := sdd.SessionRef{Subject: binding.Subject, Session: binding.SessionID}
 	want := []byte("evidence from the home session\n")
 	blob, err := application.StageBlob(t.Context(), identity, "example", owner, "evidence.txt", want)
 	if err != nil {
@@ -749,12 +750,12 @@ func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseSessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	baseSessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessions := &toggleAppendSessionStore{SessionStore: baseSessions}
-	baseBlobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	baseBlobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,11 +811,11 @@ func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.Gra
 	if wrap != nil {
 		graph = wrap(graph)
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseBlobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	baseBlobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -845,11 +846,11 @@ func newDurableApplicationWithTargets(t *testing.T, graph sdd.GraphStore, target
 
 func newDurableApplicationWithHomeAndTargets(t *testing.T, home sdd.GraphStore, targets sdd.TargetAcquirer) (*sdd.Application, *localadapter.FilesystemSessionStore, *trackingBlobStore, graphFixture) {
 	t.Helper()
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseBlobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	baseBlobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -897,7 +898,7 @@ func preparedEntry(t *testing.T, graph sdd.GraphStore, binding sdd.SessionBindin
 	batch.Digest = digest
 	return sdd.PreparedTransition{
 		Version: sdd.PreparedTransitionVersion, Target: sdd.MutationTarget{Project: "example", Branch: "main"}, ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
-		BlobOwner: sdd.BlobOwner{Subject: binding.Subject, Session: binding.SessionID},
+		Staged: sdd.SessionRef{Subject: binding.Subject, Session: binding.SessionID},
 	}
 }
 

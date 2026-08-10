@@ -128,28 +128,24 @@ func buildLocalRecoveryApplication(ctx context.Context, cmd *cli.Command) (*sdd.
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	storePaths, err := resolveLocalStorePaths(sddDir, cfg, locations)
+	storeLocations, err := resolveSessionLocations(sddDir, cfg, locations)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	project := routedSessionProject(cfg, storePaths)
+	project := sessionStoreProject(cfg)
 	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: graphDir})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	sessions, err := localadapter.NewFilesystemSessionStoreAtStateRoot(locations.StateRoot, storePaths.Sessions)
+	sessions, err := localadapter.NewFilesystemSessionStore(storeLocations...)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStoreAtStateRoot(locations.StateRoot, storePaths.StagedBlobs)
+	blobs, err := localadapter.NewFilesystemStagedBlobStore(storeLocations...)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	var heldRepoID sdd.ProjectID
-	if storePaths.PendingIdentity {
-		heldRepoID = sdd.ProjectID(cfg.RepoID)
-	}
-	targets, err := newLocalMutationTargets(project, filepath.Dir(sddDir), heldRepoID)
+	targets, err := newLocalMutationTargets(project, filepath.Dir(sddDir))
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}

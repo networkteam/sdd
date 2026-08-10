@@ -32,10 +32,6 @@ type Options struct {
 	// read_attachment results. Canonical attachment reads remain path-free.
 	LocalAttachmentPath func(entryID, filename string) (string, error)
 	Version             string
-	// StandingNotice resolves a local operational condition on each served
-	// response, so leftovers recreated by an older process become visible
-	// without restarting this server.
-	StandingNotice func() string
 }
 
 // Server wires the MCP protocol surface to the engine and the SDD read and
@@ -48,7 +44,6 @@ type Server struct {
 	local               bool
 	localAttachmentPath func(string, string) (string, error)
 	version             string
-	standingNotice      func() string
 	sessions            *sessionStore
 
 	// servedBlocks is the served-once memory: per connection, the content
@@ -85,7 +80,6 @@ func New(opts Options) (*Server, error) {
 		local:               opts.LocalClient,
 		localAttachmentPath: opts.LocalAttachmentPath,
 		version:             opts.Version,
-		standingNotice:      opts.StandingNotice,
 		sessions:            newSessionStore(),
 		servedBlocks:        map[*mcp.ServerSession]map[[sha256.Size]byte]bool{},
 	}
@@ -149,11 +143,7 @@ func (s *Server) watchDisconnect(ms *mcp.ServerSession) error {
 // may both fire.
 func (s *Server) handleDisconnect(ms *mcp.ServerSession, ctx context.Context) error {
 	s.forgetConnection(ms)
-	cause := sdd.CauseDisconnect
-	if s.isClosing() {
-		cause = sdd.CauseShutdown
-	}
-	return s.leaveSession(ctx, s.sessions.unbind(ms), cause)
+	return s.leaveSession(ctx, s.sessions.unbind(ms))
 }
 
 // servedBefore reports whether these exact block bytes were already served
@@ -191,17 +181,17 @@ func (s *Server) forgetConnection(ms *mcp.ServerSession) {
 }
 
 // leaveSession applies the leave rule to a session a connection stepped away
-// from, recording the specific cause: still bound elsewhere → untouched; open
-// moves → parked, resumable; quiescent (shell only) → auto-concluded, since
-// un-logged free dialogue leaves nothing to resume.
-func (s *Server) leaveSession(ctx context.Context, ss *shellSession, cause sdd.AttachmentCause) error {
+// from: still bound elsewhere → untouched; open moves → parked, resumable;
+// quiescent (shell only) → auto-concluded, since un-logged free dialogue leaves
+// nothing to resume.
+func (s *Server) leaveSession(ctx context.Context, ss *shellSession) error {
 	if ss == nil {
 		return nil
 	}
 	if s.sessions.liveIDs()[ss.id] {
 		return nil
 	}
-	return ss.root.Leave(ctx, ss.rootIdentity, cause)
+	return ss.root.Leave(ctx, ss.rootIdentity)
 }
 
 // Handler returns the shared Streamable HTTP application without choosing an
@@ -246,7 +236,7 @@ func (s *Server) Connect(ctx context.Context, t mcp.Transport) (*mcp.ServerSessi
 // prefer it over relying on the asynchronous transport watcher.
 func (s *Server) Disconnect(ctx context.Context, session *mcp.ServerSession) error {
 	s.forgetConnection(session)
-	return errors.Join(s.leaveSession(ctx, s.sessions.unbind(session), sdd.CauseDisconnect), session.Close())
+	return errors.Join(s.leaveSession(ctx, s.sessions.unbind(session)), session.Close())
 }
 
 // Shutdown stops admitting sessions, closes every tracked MCP connection in

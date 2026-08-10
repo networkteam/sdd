@@ -99,11 +99,11 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(filepath.Join(root, "sessions"))
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(filepath.Join(root, "sessions"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(root, "blobs"))
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(filepath.Join(root, "blobs"))
 	if err != nil {
 		t.Fatal(err)
 	}

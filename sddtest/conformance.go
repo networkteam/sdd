@@ -160,11 +160,32 @@ func RunSessionStoreTests(t *testing.T, factory func(*testing.T) SessionStoreFix
 	if len(listed) == 0 {
 		t.Fatal("List did not return the created session")
 	}
+
+	// Collection reaches deletion through this contract, so an implementation
+	// must delete and must treat an already-absent session as success.
+	if err := fixture.Store.Delete(t.Context(), fixture.Metadata.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := fixture.Store.Load(t.Context(), fixture.Metadata.ID); err == nil {
+		t.Fatal("Load after Delete succeeded, want the session gone")
+	}
+	if err := fixture.Store.Delete(t.Context(), fixture.Metadata.ID); err != nil {
+		t.Fatalf("second Delete = %v, want idempotent success", err)
+	}
+	remaining, err := fixture.Store.List(t.Context(), sdd.SessionFilter{Project: fixture.Metadata.Project})
+	if err != nil {
+		t.Fatalf("List after Delete: %v", err)
+	}
+	for _, item := range remaining {
+		if item.Metadata.ID == fixture.Metadata.ID {
+			t.Fatal("List still returns the deleted session")
+		}
+	}
 }
 
 type StagedBlobStoreFixture struct {
 	Store    sdd.StagedBlobStore
-	Owner    sdd.BlobOwner
+	Session  sdd.SessionRef
 	Filename string
 	Content  []byte
 }
@@ -172,18 +193,18 @@ type StagedBlobStoreFixture struct {
 func RunStagedBlobStoreTests(t *testing.T, factory func(*testing.T) StagedBlobStoreFixture) {
 	t.Helper()
 	fixture := factory(t)
-	blob, err := fixture.Store.Stage(t.Context(), fixture.Owner, fixture.Filename, bytes.NewReader(fixture.Content))
+	blob, err := fixture.Store.Stage(t.Context(), fixture.Session, fixture.Filename, bytes.NewReader(fixture.Content))
 	if err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
-	if blob.Owner != fixture.Owner || blob.Filename != fixture.Filename || blob.Size != int64(len(fixture.Content)) {
+	if blob.Session != fixture.Session || blob.Filename != fixture.Filename || blob.Size != int64(len(fixture.Content)) {
 		t.Fatalf("Stage = %+v", blob)
 	}
-	stat, err := fixture.Store.Stat(t.Context(), fixture.Owner, blob.ID)
+	stat, err := fixture.Store.Stat(t.Context(), fixture.Session, blob.ID)
 	if err != nil || stat != blob {
 		t.Fatalf("Stat = %+v, %v; want %+v", stat, err, blob)
 	}
-	reader, err := fixture.Store.Open(t.Context(), fixture.Owner, blob.ID)
+	reader, err := fixture.Store.Open(t.Context(), fixture.Session, blob.ID)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -192,10 +213,40 @@ func RunStagedBlobStoreTests(t *testing.T, factory func(*testing.T) StagedBlobSt
 	if readErr != nil || closeErr != nil || !bytes.Equal(got, fixture.Content) {
 		t.Fatalf("Open content = %q, read %v, close %v", got, readErr, closeErr)
 	}
-	if err := fixture.Store.Retain(t.Context(), fixture.Owner, "mutation-1", []string{blob.ID}); err != nil {
+	if err := fixture.Store.Retain(t.Context(), fixture.Session, "mutation-1", []string{blob.ID}); err != nil {
 		t.Fatalf("Retain: %v", err)
 	}
-	if err := fixture.Store.Release(t.Context(), fixture.Owner, "mutation-1"); err != nil {
+
+	// Collection enumerates staging areas and deletes them through this
+	// contract, so an implementation must surface the session it staged for and
+	// must delete a retained blob rather than refusing while a retention holds
+	// it — the sweep's rules decide what is safe to remove, not the store's.
+	refs, err := fixture.Store.StagedSessions(t.Context())
+	if err != nil {
+		t.Fatalf("StagedSessions: %v", err)
+	}
+	if !slices.Contains(refs, fixture.Session) {
+		t.Fatalf("StagedSessions = %+v, want it to contain %+v", refs, fixture.Session)
+	}
+	if err := fixture.Store.DeleteStaged(t.Context(), fixture.Session); err != nil {
+		t.Fatalf("DeleteStaged: %v", err)
+	}
+	if _, err := fixture.Store.Stat(t.Context(), fixture.Session, blob.ID); err == nil {
+		t.Fatal("Stat after DeleteStaged succeeded, want the blob gone")
+	}
+	if err := fixture.Store.DeleteStaged(t.Context(), fixture.Session); err != nil {
+		t.Fatalf("second DeleteStaged = %v, want idempotent success", err)
+	}
+	afterRefs, err := fixture.Store.StagedSessions(t.Context())
+	if err != nil {
+		t.Fatalf("StagedSessions after DeleteStaged: %v", err)
+	}
+	if slices.Contains(afterRefs, fixture.Session) {
+		t.Fatal("StagedSessions still returns the deleted session")
+	}
+
+	// Release on a gone staging area must not resurrect it.
+	if err := fixture.Store.Release(t.Context(), fixture.Session, "mutation-1"); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
 }

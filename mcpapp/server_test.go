@@ -313,11 +313,11 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(sessionsDir)
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(sessionsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(filepath.Join(filepath.Dir(sessionsDir), "staged-blobs"))
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(filepath.Join(filepath.Dir(sessionsDir), "staged-blobs"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +801,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "fb220018e04c56ef0a5a196e4e29db08c892883bffb775f2901b59dab89eaaf5"
+	const want = "19b559d7a588da504c928f77fe866b32aa5f6b5e87f4de22c11406d96436ba85"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -2992,66 +2992,151 @@ func TestDoorGatingAndShellLifecycle(t *testing.T) {
 	}
 }
 
-// TestShellConcludeWalksOpenThreads pins the wrap path: conclude with open
-// moves routes to the threads step for per-thread decisions, park returns to
-// the junction, and conclude completes once the threads are settled.
-func TestShellConcludeWalksOpenThreads(t *testing.T) {
+// TestShellConcludeLeavesOpenThreadsBehind pins the un-gated conclude end to end
+// (d-tac-k4q): a session with an open move ends on the user's one answer, the
+// response names that thread specifically as left behind, the session stops being
+// open work — so nothing offers a thread no served path reaches — and its log
+// stays readable for inspection.
+func TestShellConcludeLeavesOpenThreadsBehind(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	shell := openSession(t, cs)
 	session := shell.Session
 
 	var capture mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &capture)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "half-done capture"}, &capture)
 
-	// Conclude with an open capture: the quiescence gate holds and routes to
-	// the threads step, whose serve carries the open work.
 	var serve mcpserver.ServeResult
 	call(t, cs, "next", map[string]any{"session": session, "instance": shell.Instance, "report": map[string]any{
-		"chooser": "junction", "choice": "conclude", "userWords": "wrap it up",
-	}}, &serve)
-	if serve.Step != "threads" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
-		t.Fatalf("conclude with open moves should reach the threads chooser, got %s at %q", serve.Status, serve.Step)
-	}
-	if !strings.Contains(serve.OpenThreads, capture.Instance) {
-		t.Fatalf("the threads serve should list the open capture, got %q", serve.OpenThreads)
-	}
-
-	// Park keeps everything and returns to the resident junction.
-	call(t, cs, "next", map[string]any{"session": session, "instance": shell.Instance, "report": map[string]any{
-		"chooser": "threads", "choice": "park", "userWords": "keep it for later",
-	}}, &serve)
-	if serve.Step != "junction" || serve.Status != "running" {
-		t.Fatalf("park should return to the junction, got %s at %q", serve.Status, serve.Step)
-	}
-
-	// Settle the thread (abandon it), then conclude for real.
-	var ab mcpserver.AbandonResult
-	call(t, cs, "abandon", map[string]any{"session": session, "instance": capture.Instance, "reason": "not needed"}, &ab)
-	call(t, cs, "next", map[string]any{"session": session, "instance": shell.Instance, "report": map[string]any{
-		"chooser": "junction", "choice": "conclude", "userWords": "done now",
+		"chooser": "junction", "choice": "conclude", "userWords": "wrap it up, leave the rest",
 	}}, &serve)
 	if serve.Status != "completed" {
-		t.Fatalf("conclude after settling threads should complete the shell, got %s at %q", serve.Status, serve.Step)
+		t.Fatalf("conclude with an open move should end the session, got %s at %q", serve.Status, serve.Step)
+	}
+
+	// The listing stays per-thread and specific — never a count — and is framed as
+	// what is being dropped rather than as continuations on offer.
+	for _, want := range []string{capture.Instance, "capture at ", "leaves behind"} {
+		if !strings.Contains(serve.OpenThreads, want) {
+			t.Fatalf("the conclude response should name the abandoned thread specifically; %q missing %q", serve.OpenThreads, want)
+		}
+	}
+	if !strings.Contains(serve.Instructions, "start_session") {
+		t.Fatalf("the conclude response should state the way on, got %q", serve.Instructions)
+	}
+
+	// The terminal record is durable, so collection can reclaim it after retention.
+	stored, err := env.sessions.Load(t.Context(), sdd.SessionID(session))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata.Ended == nil || stored.Metadata.Ended.Act != sdd.SessionConcluded {
+		t.Fatalf("conclude should record a terminal conclude, got %+v", stored.Metadata.Ended)
+	}
+
+	// Ended-ness is the authority: the dropped thread is still a running instance
+	// in the log, yet the session is no longer open work anywhere.
+	var listed mcpserver.ListSessionsResult
+	call(t, cs, "list_sessions", map[string]any{}, &listed)
+	if len(listed.Sessions) != 0 {
+		t.Fatalf("a concluded session must not list as open work, got %+v", listed.Sessions)
+	}
+	msg := callExpectError(t, cs, "start_procedure", map[string]any{"canonical": "capture"})
+	if strings.Contains(msg, session) {
+		t.Fatalf("the no-handle rejection must not offer a concluded session, got %q", msg)
+	}
+
+	// The log itself stays readable for inspection until retention expires.
+	events, err := readSessionLog(t, env.sessionsDir, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 {
+		t.Fatal("a concluded session's log should stay readable")
 	}
 }
 
-// TestLeaveCauseFidelityAcrossPaths pins register decision 6/I7: each leave
-// path records the specific trigger cause in the attachment history, driven
-// through the real call sites (not a bare ReleaseSession) so the Leave layer's
-// cause handling is exercised — including that a quiescent switch records
-// switch, never conclude.
-func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
-	lastCause := func(t *testing.T, env testEnv, session string) sdd.AttachmentCause {
+// TestDoorAfterConcludeOpensFresh is the s-tac-3be regression over MCP: the door
+// called on a connection whose session just concluded mints a NEW handle instead
+// of re-serving the spent one, a move against the concluded handle is refused
+// naming that path, and the fix stays bounded by d-cpt-0tm — the new session,
+// still running, resumes by handle at its pending step with the schema to
+// continue it.
+func TestDoorAfterConcludeOpensFresh(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	shell := openSession(t, cs)
+	spent := shell.Session
+
+	var serve mcpserver.ServeResult
+	call(t, cs, "next", map[string]any{"session": spent, "instance": shell.Instance, "report": map[string]any{
+		"chooser": "junction", "choice": "conclude", "userWords": "that's it for today",
+	}}, &serve)
+	if serve.Status != "completed" {
+		t.Fatalf("conclude should complete the shell, got %s at %q", serve.Status, serve.Step)
+	}
+	for _, want := range []string{"finished", "start_session", "new handle"} {
+		if !strings.Contains(serve.Instructions, want) {
+			t.Fatalf("the conclude response %q is missing %q (finished / the way on)", serve.Instructions, want)
+		}
+	}
+
+	// A move against the concluded handle is refused with that same way on,
+	// rather than silently reviving the completed session.
+	msg := callExpectError(t, cs, "start_procedure", map[string]any{"session": spent, "canonical": "capture"})
+	if !strings.Contains(msg, "start_session") || !strings.Contains(msg, "ended") {
+		t.Fatalf("a move against a concluded session should refuse naming the new-session path, got %q", msg)
+	}
+
+	// The door opens fresh: a new handle, a running shell at its junction.
+	fresh := openSession(t, cs)
+	if fresh.Session == spent {
+		t.Fatalf("the door re-served the concluded session %s — it must mint a new handle", spent)
+	}
+	if fresh.Status != "running" || fresh.Step != "junction" {
+		t.Fatalf("the fresh door serve should be a running junction, got %s at %q", fresh.Status, fresh.Step)
+	}
+
+	// d-cpt-0tm's bound: door-opens-fresh never widens into re-initializing a
+	// running session. The new session's move resumes by handle where it stands.
+	var move mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": fresh.Session, "canonical": "capture"}, &move)
+	call(t, cs, "next", map[string]any{"session": fresh.Session, "instance": move.Instance, "report": assembleReport()}, &move)
+	if move.Step != "playback" {
+		t.Fatalf("the move should stand at playback before the resume, got %q", move.Step)
+	}
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{"session": fresh.Session, "userWords": "carry on with the capture", "takeover": true}, &resumed)
+	var projected *mcpserver.ServeResult
+	for i := range resumed.Open {
+		if resumed.Open[i].Instance == move.Instance {
+			projected = &resumed.Open[i]
+		}
+	}
+	if projected == nil {
+		t.Fatalf("resuming a running session must project its open move, got %+v", resumed.Open)
+	}
+	if projected.Step != "playback" || projected.Status != "running" || len(projected.ReportSchema) == 0 {
+		t.Fatalf("the projected move should come back running at playback with a report schema, got %s at %q (schema %v)", projected.Status, projected.Step, projected.ReportSchema)
+	}
+}
+
+// TestLeavePathsRecordNothingAcrossPaths pins d-cpt-rw7 at the real call sites:
+// every way a connection steps away from work in progress — switching, shutting
+// down, dropping the socket — clears the live stamp and ends nothing. The two
+// participant acts among them do record: a teardown by handle abandons, and the
+// auto-conclude of a shell-only session concludes it.
+func TestLeavePathsRecordNothingAcrossPaths(t *testing.T) {
+	end := func(t *testing.T, env testEnv, session string) *sdd.SessionEnd {
 		t.Helper()
 		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(session))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(stored.Metadata.AttachmentHistory) == 0 {
-			t.Fatalf("session %s recorded no attachment history", session)
+		if stored.Metadata.Attachment != nil {
+			t.Fatalf("session %s still reads held: %+v", session, stored.Metadata.Attachment)
 		}
-		return stored.Metadata.AttachmentHistory[len(stored.Metadata.AttachmentHistory)-1].Cause
+		return stored.Metadata.Ended
 	}
 	startMove := func(t *testing.T, cs *mcp.ClientSession, session string) {
 		t.Helper()
@@ -3059,7 +3144,7 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "work"}, &serve)
 	}
 
-	t.Run("switch away from a session with an open move records switch", func(t *testing.T) {
+	t.Run("switch away from a session with an open move ends nothing", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		other := connect(t, env.srv)
 		b := openSession(t, other).Session // a second session to attach away to
@@ -3069,12 +3154,12 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		var resumed mcpserver.ResumeSessionResult
 		// b was just opened on this server, so it reads active: the switch takes it over.
 		call(t, cs, "resume_session", map[string]any{"session": b, "userWords": "move to the other dialogue", "takeover": true}, &resumed) // switch away from a
-		if c := lastCause(t, env, a); c != sdd.CauseSwitch {
-			t.Fatalf("switch away (open move) cause = %q, want switch", c)
+		if got := end(t, env, a); got != nil {
+			t.Fatalf("switch away (open move) ended the session: %+v", got)
 		}
 	})
 
-	t.Run("switch away from a quiescent session records switch not conclude", func(t *testing.T) {
+	t.Run("switch away from a quiescent session concludes it", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		other := connect(t, env.srv)
 		b := openSession(t, other).Session
@@ -3082,12 +3167,13 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		a := openSession(t, cs).Session // no move — quiescent
 		var resumed mcpserver.ResumeSessionResult
 		call(t, cs, "resume_session", map[string]any{"session": b, "userWords": "move to the other dialogue", "takeover": true}, &resumed) // switch away; shell auto-concludes
-		if c := lastCause(t, env, a); c != sdd.CauseSwitch {
-			t.Fatalf("switch away (quiescent) cause = %q, want switch (not conclude)", c)
+		got := end(t, env, a)
+		if got == nil || got.Act != sdd.SessionConcluded {
+			t.Fatalf("switch away (quiescent) = %+v, want a terminal conclude — an auto-concluded session is genuinely ended", got)
 		}
 	})
 
-	t.Run("abandon by handle records abandon", func(t *testing.T) {
+	t.Run("abandon by handle records the terminal abandon", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		csA := connect(t, env.srv)
 		a := openSession(t, csA).Session
@@ -3098,12 +3184,13 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		csB := connect(t, env2.srv)
 		var torn mcpserver.AbandonResult
 		call(t, csB, "abandon", map[string]any{"session": a}, &torn)
-		if c := lastCause(t, env, a); c != sdd.CauseAbandon {
-			t.Fatalf("abandon cause = %q, want abandon", c)
+		got := end(t, env, a)
+		if got == nil || got.Act != sdd.SessionAbandoned {
+			t.Fatalf("teardown by handle = %+v, want a terminal abandon", got)
 		}
 	})
 
-	t.Run("shutdown records shutdown", func(t *testing.T) {
+	t.Run("shutdown ends nothing", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		cs := connect(t, env.srv)
 		a := openSession(t, cs).Session
@@ -3111,12 +3198,12 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		if err := env.srv.Shutdown(t.Context()); err != nil {
 			t.Fatalf("shutdown: %v", err)
 		}
-		if c := lastCause(t, env, a); c != sdd.CauseShutdown {
-			t.Fatalf("shutdown cause = %q, want shutdown", c)
+		if got := end(t, env, a); got != nil {
+			t.Fatalf("shutdown ended the session: %+v", got)
 		}
 	})
 
-	t.Run("disconnect records disconnect", func(t *testing.T) {
+	t.Run("disconnect ends nothing", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		cs, ss := connectPair(t, env.srv)
 		a := openSession(t, cs).Session
@@ -3124,8 +3211,8 @@ func TestLeaveCauseFidelityAcrossPaths(t *testing.T) {
 		if err := env.srv.Disconnect(t.Context(), ss); err != nil {
 			t.Fatalf("disconnect: %v", err)
 		}
-		if c := lastCause(t, env, a); c != sdd.CauseDisconnect {
-			t.Fatalf("disconnect cause = %q, want disconnect", c)
+		if got := end(t, env, a); got != nil {
+			t.Fatalf("disconnect ended the session: %+v", got)
 		}
 	})
 }
@@ -3221,7 +3308,7 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 // readSessionLog reads a session's JSONL event log from the sessions dir.
 func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	t.Helper()
-	store, err := localadapter.NewFilesystemSessionStore(dir)
+	store, err := localadapter.NewFilesystemSessionStoreAt(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -3243,47 +3330,6 @@ func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	return events, nil
 }
 
-func TestStandingNoticeIsServedAtSessionDoorsAndDiscovery(t *testing.T) {
-	const notice = "Session relocation required: run `sdd init`."
-	current := notice
-	env := newTestServer(t, nil, "", "", func(opts *mcpserver.Options) {
-		opts.StandingNotice = func() string { return current }
-	})
-	cs := connect(t, env.srv)
-	started := openSession(t, cs)
-	if !strings.Contains(started.Framing, notice) {
-		t.Fatalf("start_session framing lacks standing notice: %q", started.Framing)
-	}
-
-	var resumed mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &resumed)
-	if !strings.Contains(resumed.Framing, notice) {
-		t.Fatalf("resume_session framing lacks standing notice: %q", resumed.Framing)
-	}
-
-	var listed mcpserver.ListSessionsResult
-	call(t, cs, "list_sessions", map[string]any{}, &listed)
-	if listed.Notice != notice {
-		t.Fatalf("list_sessions notice = %q", listed.Notice)
-	}
-
-	var info mcpserver.InfoResult
-	call(t, cs, "info", map[string]any{}, &info)
-	if info.Notice != notice {
-		t.Fatalf("info notice = %q", info.Notice)
-	}
-
-	current = "Session relocation required: old server recreated state."
-	call(t, cs, "info", map[string]any{}, &info)
-	if info.Notice != current {
-		t.Fatalf("dynamic info notice = %q, want %q", info.Notice, current)
-	}
-}
-
-// TestResumeConsentDecisionTable pins the four-row consent table (d-cpt-9of I5,
-// register decision, Slice 4 AC6): a foreign attach needs the user's verbatim
-// ask; a recent attachment additionally needs takeover; refusal and success name
-// the current attachment; the claim history records the consenting words.
 func TestResumeConsentDecisionTable(t *testing.T) {
 	t.Run("foreign attach without userWords is rejected (mwd)", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
@@ -3364,6 +3410,9 @@ func TestResumeConsentDecisionTable(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		cs, ss := connectPair(t, env.srv)
 		a := openSession(t, cs).Session
+		// Open work is what makes leaving a park rather than an auto-conclude.
+		var move mcpserver.ServeResult
+		call(t, cs, "start_procedure", map[string]any{"session": a, "canonical": "capture"}, &move)
 		// The holder disconnects: a's attachment is released to none — a parked
 		// session with no current attachment, the most common attach target.
 		if err := env.srv.Disconnect(t.Context(), ss); err != nil {

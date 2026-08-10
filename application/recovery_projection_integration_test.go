@@ -56,11 +56,11 @@ func newRecoveryFixtureApplication(t *testing.T, sessionsDir string) *sdd.Applic
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(sessionsDir)
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(sessionsDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

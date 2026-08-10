@@ -124,11 +124,11 @@ func newCounterApp(t *testing.T, graphDir, cacheRoot string, embeddings sdd.Embe
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,11 +374,11 @@ func TestBranchVectorAndHybridSearchUseSelectedAttachmentAuthorityAndRelease(t *
 
 func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAcquirer, cacheRoot string, embeddings sdd.EmbeddingExecutor) *sdd.Application {
 	t.Helper()
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,6 +20,13 @@ const RecordedStateOnlyNote = "Only recorded session state resumes — step posi
 // surfaced-conflict messages.
 const reorientSuffix = "reorient with resume_session or start fresh"
 
+// NewSessionNote is the single statement of the way on from a dialogue that has
+// ended: concluding is terminal, so continuing means a new session under a new
+// handle rather than a revival of the spent one (d-tac-k4q). It is composed into
+// the conclude serve and into every refusal an ended session answers with, so
+// each surface names the same one path that works.
+const NewSessionNote = "This session is finished — continuing means opening a new session with start_session, which returns a new handle to carry in place of this one. Its log stays readable for inspection until its retention window expires."
+
 const SessionCodecVersion uint32 = 1
 
 // FirstSessionCodecVersion is the oldest persisted session codec this binary
@@ -33,35 +40,6 @@ const FirstSessionCodecVersion uint32 = 1
 // binary predates is a migration error.
 func SupportedSessionCodecVersion(version uint32) bool {
 	return version >= FirstSessionCodecVersion && version <= SessionCodecVersion
-}
-
-// retiredSessionMetadataFields records, per codec version, the top-level
-// SessionMetadata fields that version wrote and the model no longer defines.
-// Codec 1 carried a holder lease until attachment stamps replaced it, so logs
-// written before that still hold the pair — a strict decode has to skip them
-// rather than reject the very files it exists to read.
-//
-// Dropping a top-level field from SessionMetadata means registering it here and
-// bumping SessionCodecVersion. A removal that skips both steps is invisible
-// until some strict reader meets an older log, which is exactly how the
-// relocation outage this table answers came about.
-//
-// The reach is deliberately top-level only: a field retired from a nested type
-// (an AttachmentRecord member, say) cannot be expressed here and would need the
-// decode to walk into that value. Nothing in the store requires that today, and
-// inventing the traversal for a case that has not happened would be machinery
-// nobody asked for — but a nested removal does not get to assume this table
-// covers it.
-var retiredSessionMetadataFields = map[uint32][]string{
-	1: {"Holder", "HolderHistory"},
-}
-
-// RetiredSessionMetadataFields returns the metadata field names a persisted
-// codec version wrote that the current model no longer defines. Decoders skip
-// these; every other unknown field stays an error, so the strictness keeps
-// working as a drift alarm.
-func RetiredSessionMetadataFields(version uint32) []string {
-	return retiredSessionMetadataFields[version]
 }
 
 // SessionRecencyWindow is the single threshold separating an active attachment
@@ -83,11 +61,12 @@ type SessionBinding struct {
 	Version      uint64
 }
 
-// ReleaseSession ends this connection's own attachment, recording it in history
-// with the given cause. Releasing means "end MY attachment", so when the current
-// attachment is absent or belongs to another MCP session — already displaced,
-// concluded, or taken over — it is a no-op: there is nothing of mine to end.
-func (a *Application) ReleaseSession(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, cause AttachmentCause, reason string) error {
+// ReleaseSession clears this connection's own live attachment stamp so the
+// session stops reading held. Nothing is recorded: stepping away is transport,
+// not an act on the dialogue (d-cpt-rw7). Releasing means "clear MY stamp", so
+// when the current attachment is absent or belongs to another MCP session —
+// already displaced, ended, or taken over — it is a no-op.
+func (a *Application) ReleaseSession(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding) error {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return err
@@ -103,21 +82,11 @@ func (a *Application) ReleaseSession(ctx context.Context, identity RequestIdenti
 	if current == nil || current.MCPSessionID != binding.MCPSessionID {
 		return nil
 	}
-	now := runtime.options.Now().UTC().Round(0)
 	metadata := stored.Metadata
-	record := endAttachment(*current, now, cause)
-	record.Reason = strings.TrimSpace(reason)
-	metadata.AttachmentHistory = append(metadata.AttachmentHistory, record)
 	metadata.Attachment = nil
-	metadata.UpdatedAt = now
+	metadata.UpdatedAt = runtime.options.Now().UTC().Round(0)
 	_, err = runtime.options.Sessions.Append(ctx, binding.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
 	return err
-}
-
-// endAttachment closes out a past attachment with the cause it ended for the
-// history log.
-func endAttachment(att Attachment, endedAt time.Time, cause AttachmentCause) AttachmentRecord {
-	return AttachmentRecord{Attachment: att, EndedAt: endedAt, Cause: cause}
 }
 
 // attachmentActive reports whether an attachment counts as active: present and
@@ -186,43 +155,44 @@ func verifyAttachment(stored StoredSession, binding SessionBinding) error {
 }
 
 // displacedError interprets a lost attachment for the writer that lost it: how
-// its world ended (abandoned, concluded) or who holds it now (a takeover). A
-// terminal end as the most recent record wins even if a newer attachment
-// exists, so a writer whose dialogue was destroyed hears that, not "taken over"
-// by whoever reopened afterward. The message names who/when/why; the attachment
-// and cause ride the typed error.
+// its world ended (abandoned, concluded) or who holds it now (a takeover). The
+// terminal record wins even when a newer attachment exists, so a writer whose
+// dialogue was destroyed hears that, not "taken over" by whoever reopened
+// afterward.
 func displacedError(stored StoredSession) error {
 	m := stored.Metadata
-	if n := len(m.AttachmentHistory); n > 0 {
-		rec := m.AttachmentHistory[n-1]
-		when := rec.EndedAt.Format(attachmentTimeFormat)
-		switch rec.Cause {
-		case CauseAbandon:
-			msg := fmt.Sprintf("abandoned by %s at %s", actorLabel(m, rec), when)
-			if rec.Reason != "" {
-				msg += ", reason: " + rec.Reason
-			}
-			msg += " — this session is torn down; start fresh"
-			return &ApplicationError{Code: ErrorSessionDisplaced, Attachment: &rec.Attachment, AttachmentCause: rec.Cause, Message: msg}
-		case CauseConclude:
-			return &ApplicationError{Code: ErrorSessionDisplaced, Attachment: &rec.Attachment, AttachmentCause: rec.Cause,
-				Message: fmt.Sprintf("this session was concluded at %s — start fresh", when)}
-		}
+	if end := m.Ended; end != nil {
+		return &ApplicationError{Code: ErrorSessionDisplaced, Ended: end, Message: endedMessage(m, *end)}
 	}
 	if att := m.Attachment; att != nil {
 		return &ApplicationError{
-			Code: ErrorSessionDisplaced, Attachment: att, AttachmentCause: CauseClaim,
-			Message: fmt.Sprintf("taken over by %s at %s (claim); your position may be stale — %s",
+			Code: ErrorSessionDisplaced, Attachment: att,
+			Message: fmt.Sprintf("taken over by %s at %s; your position may be stale — %s",
 				ClientLabel(att.ClientName), att.LastActivity.Format(attachmentTimeFormat), reorientSuffix),
 		}
 	}
-	if n := len(m.AttachmentHistory); n > 0 {
-		rec := m.AttachmentHistory[n-1]
-		return &ApplicationError{Code: ErrorSessionDisplaced, Attachment: &rec.Attachment, AttachmentCause: rec.Cause,
-			Message: fmt.Sprintf("this session's attachment ended (%s) at %s — %s", rec.Cause, rec.EndedAt.Format(attachmentTimeFormat), reorientSuffix)}
-	}
 	return &ApplicationError{Code: ErrorSessionDisplaced,
 		Message: fmt.Sprintf("this session's attachment was displaced — %s", reorientSuffix)}
+}
+
+// endedMessage tells a writer whose dialogue is over how it ended, naming
+// who/when/why for a teardown.
+func endedMessage(m SessionMetadata, end SessionEnd) string {
+	when := end.EndedAt.Format(attachmentTimeFormat)
+	if end.Act == SessionConcluded {
+		return fmt.Sprintf("this session was concluded at %s. %s", when, NewSessionNote)
+	}
+	msg := fmt.Sprintf("abandoned by %s at %s", actorLabel(m), when)
+	if end.Reason != "" {
+		msg += ", reason: " + end.Reason
+	}
+	return fmt.Sprintf("%s — this session is torn down. %s", msg, NewSessionNote)
+}
+
+// endedSessionError refuses an operation that would carry on a dialogue already
+// over, naming how it ended and the one path that works instead.
+func endedSessionError(m SessionMetadata, end SessionEnd) error {
+	return &ApplicationError{Code: ErrorSessionEnded, Ended: &end, Message: endedMessage(m, end)}
 }
 
 // ClientLabel names a client for a conflict or consent message, falling back
@@ -234,11 +204,11 @@ func ClientLabel(name string) string {
 	return name
 }
 
-// actorLabel names who acted on the session for an abandon message: the
-// session's participant, else the client that recorded the record.
-func actorLabel(m SessionMetadata, rec AttachmentRecord) string {
+// actorLabel names who acted on the session for an abandon message. A log with
+// no metadata line of its own may name no participant.
+func actorLabel(m SessionMetadata) string {
 	if p := strings.TrimSpace(m.Participant); p != "" {
 		return p
 	}
-	return ClientLabel(rec.Attachment.ClientName)
+	return "another participant"
 }

@@ -474,7 +474,7 @@ func validatePreparedForRecovery(prepared PreparedTransition, metadata SessionMe
 	if err := prepared.Target.Validate(metadata.Project); err != nil {
 		return err
 	}
-	if prepared.BlobOwner.Subject != metadata.Subject || prepared.BlobOwner.Session != metadata.ID {
+	if prepared.Staged.Subject != metadata.Subject || prepared.Staged.Session != metadata.ID {
 		return &ApplicationError{Code: ErrorSessionOwnership, Message: "prepared transition provenance mismatch"}
 	}
 	digest, err := MutationBatchDigest(prepared.Batch)
@@ -513,7 +513,7 @@ func appendRecoveryTerminal(ctx context.Context, sessions SessionStore, binding 
 // advanced binding version. Used by operator recovery decisions and the
 // engine's own contention discard alike.
 func releaseAndRecordTerminal(ctx context.Context, runtime *ProjectRuntime, binding SessionBinding, prepared PreparedTransition, event recoveryTerminalEvent) (uint64, error) {
-	if err := runtime.options.StagedBlobs.Release(ctx, prepared.BlobOwner, prepared.Batch.ID); err != nil {
+	if err := runtime.options.StagedBlobs.Release(ctx, prepared.Staged, prepared.Batch.ID); err != nil {
 		return binding.Version, &ApplicationError{Code: ErrorRecoveryRequired, Message: "recovery could not release retained blobs", Cause: err}
 	}
 	return appendRecoveryTerminal(ctx, runtime.options.Sessions, binding, event)

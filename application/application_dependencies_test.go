@@ -32,17 +32,19 @@ func (s staticGraphStore) ReadAttachmentPage(_ context.Context, _ string, filena
 
 type noBlobStore struct{}
 
-func (noBlobStore) Stage(context.Context, sdd.BlobOwner, string, io.Reader) (sdd.StagedBlob, error) {
+func (noBlobStore) Stage(context.Context, sdd.SessionRef, string, io.Reader) (sdd.StagedBlob, error) {
 	return sdd.StagedBlob{}, nil
 }
-func (noBlobStore) Stat(context.Context, sdd.BlobOwner, string) (sdd.StagedBlob, error) {
+func (noBlobStore) Stat(context.Context, sdd.SessionRef, string) (sdd.StagedBlob, error) {
 	return sdd.StagedBlob{}, nil
 }
-func (noBlobStore) Open(context.Context, sdd.BlobOwner, string) (io.ReadCloser, error) {
+func (noBlobStore) Open(context.Context, sdd.SessionRef, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
-func (noBlobStore) Retain(context.Context, sdd.BlobOwner, string, []string) error { return nil }
-func (noBlobStore) Release(context.Context, sdd.BlobOwner, string) error          { return nil }
+func (noBlobStore) Retain(context.Context, sdd.SessionRef, string, []string) error { return nil }
+func (noBlobStore) Release(context.Context, sdd.SessionRef, string) error          { return nil }
+func (noBlobStore) StagedSessions(context.Context) ([]sdd.SessionRef, error)       { return nil, nil }
+func (noBlobStore) DeleteStaged(context.Context, sdd.SessionRef) error             { return nil }
 
 type noSessionStore struct{}
 
@@ -58,6 +60,7 @@ func (noSessionStore) List(context.Context, sdd.SessionFilter) ([]sdd.StoredSess
 func (noSessionStore) Append(context.Context, sdd.SessionID, uint64, sdd.SessionAppend) (uint64, error) {
 	return 0, nil
 }
+func (noSessionStore) Delete(context.Context, sdd.SessionID) error { return nil }
 
 type multiAccessResolver struct {
 	base       *sdd.ProjectRuntime

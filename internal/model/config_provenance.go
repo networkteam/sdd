@@ -36,6 +36,8 @@ var configDefaults = map[string]string{
 	"llm.model":       DefaultLLMModel,
 	"llm.concurrency": strconv.Itoa(DefaultLLMConcurrency),
 	"sync.cooldown":   DefaultSyncCooldown,
+
+	"sessions.retention": DefaultSessionRetention,
 }
 
 // EffectiveConfigValues computes the effective config overlay with per-key

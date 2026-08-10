@@ -203,7 +203,7 @@ func preparedWIP(t *testing.T, graph sdd.GraphStore, binding sdd.SessionBinding,
 	return sdd.PreparedTransition{
 		Version: sdd.PreparedTransitionVersion, Target: sdd.MutationTarget{Project: "example", Branch: "main"},
 		ExpectedGraphRevision: snapshot.Revision(), Batch: batch,
-		BlobOwner: sdd.BlobOwner{Subject: binding.Subject, Session: binding.SessionID},
+		Staged: sdd.SessionRef{Subject: binding.Subject, Session: binding.SessionID},
 	}
 }
 
@@ -212,11 +212,11 @@ func TestInterleavedCapturesBothLandWithoutRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := localadapter.NewFilesystemSessionStore(t.TempDir())
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	blobs, err := localadapter.NewFilesystemStagedBlobStore(t.TempDir())
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
