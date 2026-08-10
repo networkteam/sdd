@@ -45,9 +45,8 @@ func (r ResolvedRef) Hops() int {
 	return len(r.path) - 1
 }
 
-// InboundRef is one incoming reference after supersede resolution: the entry
-// that made the reference, and how many supersede steps separated the literal
-// target it named from the live head this reference now lands on.
+// InboundRef is one incoming reference after supersede resolution: who made it,
+// and how far the target it named sits from the live head.
 type InboundRef struct {
 	Source string
 	Hops   int

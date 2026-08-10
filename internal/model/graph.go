@@ -15,11 +15,9 @@ type Graph struct {
 	RefsTo       map[string][]string // reverse index: entry ID -> IDs that reference it
 	ClosedBy     map[string][]string // reverse index: entry ID -> IDs that close it
 	SupersededBy map[string][]string // reverse index: entry ID -> IDs that supersede it
-	// InboundRefs is RefsTo resolved through supersession: keyed by the live
-	// head of each ref target's chain, carrying the hop distance the reference
-	// travelled. Ranking reads this index; every other consumer (annotation
-	// topic derivation, downstream neighbours, the show tree) wants the literal
-	// keying of RefsTo (d-cpt-x6z).
+	// InboundRefs is RefsTo resolved through supersession, keyed by live head
+	// with hop distance. Ranking-only: every other consumer needs RefsTo's
+	// literal keying (d-cpt-x6z).
 	InboundRefs map[string][]InboundRef
 	// LoadIssues records entries the I/O loader could not parse. Reading the
 	// graph never stops on a malformed entry: everything parseable still
