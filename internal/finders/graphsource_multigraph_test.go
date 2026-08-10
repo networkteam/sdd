@@ -7,6 +7,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
+	"github.com/networkteam/sdd/internal/repos/repostest"
 )
 
 // TestCurrentGraphResolvesConnectedRepo exercises the full seam: a local
@@ -54,9 +55,7 @@ func TestCurrentGraphResolvesConnectedRepo(t *testing.T) {
 	if err := cfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "https://" + repoID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.SaveConfigTo(loc.ConfigPath, cfg); err != nil {
-		t.Fatal(err)
-	}
+	repostest.WriteConfig(t, loc.ConfigPath, cfg)
 
 	f := New(Options{Repos: reg})
 	g, err := f.CurrentGraph(localDir)

@@ -3,66 +3,50 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
+	"reflect"
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
 )
 
-// ConfigSet writes one key to the chosen config layer with a
-// comment-preserving upsert. The patched document is validated against the
-// layer's schema before anything lands on disk, so a key that does not
-// belong in that file fails loud and leaves the file untouched. The global
-// file is created (with its parent directory) on first write.
+// ConfigSet writes one key to the chosen config layer, rejecting a key that
+// does not belong in that file before anything lands on disk.
 func (h *Handler) ConfigSet(ctx context.Context, cmd *command.ConfigSetCmd) error {
-	var path string
+	var (
+		file  configFile
+		probe any
+		typ   reflect.Type
+		layer string
+		err   error
+	)
 	switch cmd.Target {
 	case "global":
-		if h.repos == nil {
-			return fmt.Errorf("no global config support configured")
-		}
-		path = h.repos.Registry().ConfigPath()
+		file, err = h.globalConfigFile()
+		probe, typ, layer = &repos.GlobalConfig{}, reflect.TypeFor[repos.GlobalConfig](), "global"
 	case "local":
-		if h.sddDir == "" {
-			return fmt.Errorf("not inside an sdd repo — `--local` needs .sdd/ (run `sdd init` first)")
-		}
-		path = filepath.Join(h.sddDir, "config.local.yaml")
+		file, err = h.localConfigFile()
+		probe, typ, layer = &model.PerRepoConfig{}, reflect.TypeFor[model.PerRepoConfig](), "per-repo"
 	default:
 		return fmt.Errorf("unknown config target %q (use global or local)", cmd.Target)
 	}
-
-	existing, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("reading %s: %w", path, err)
-	}
-
-	patched, err := model.SetYAMLField(existing, cmd.Key, model.ParseConfigScalar(cmd.Value))
 	if err != nil {
-		return fmt.Errorf("setting %s: %w", cmd.Key, err)
+		return err
 	}
 
-	// Validate the patched document against the layer's schema before
-	// writing — the strict decoder rejects keys foreign to this file.
-	switch cmd.Target {
-	case "global":
-		var probe repos.GlobalConfig
-		if err := model.StrictUnmarshalYAML(patched, &probe); err != nil {
-			return fmt.Errorf("%q is not a valid global config key: %w", cmd.Key, err)
+	return file.patch(func(existing []byte) ([]byte, error) {
+		patched, err := model.SetYAMLField(existing, cmd.Key, model.ParseConfigScalar(cmd.Value))
+		if err != nil {
+			return nil, fmt.Errorf("setting %s: %w", cmd.Key, err)
 		}
-	case "local":
-		if _, err := model.ParseConfig(patched); err != nil {
-			return fmt.Errorf("%q is not a valid per-repo config key: %w", cmd.Key, err)
+		// Judged per key rather than over the document, so a key some other
+		// version wrote does not make this file unwritable.
+		if !model.KnownYAMLKey(cmd.Key, typ) {
+			return nil, fmt.Errorf("%q is not a valid %s config key", cmd.Key, layer)
 		}
-	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("creating config dir: %w", err)
-	}
-	// 0600 like repos.SaveConfigTo — either layer may carry API keys.
-	if err := os.WriteFile(path, patched, 0o600); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	return nil
+		if err := model.UnmarshalYAML(patched, probe); err != nil {
+			return nil, fmt.Errorf("%s = %s is not valid for the %s config: %w", cmd.Key, cmd.Value, layer, err)
+		}
+		return patched, nil
+	})
 }

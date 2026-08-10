@@ -98,8 +98,72 @@ func TestConfigSet_RejectsForeignKeys(t *testing.T) {
 	}
 }
 
+// A file holding a key a newer sdd wrote must stay writable, and keep that
+// key — a whole-document rewrite would drop it, a whole-document probe would
+// refuse the write (20260810-144515-s-tac-8ae).
+func TestConfigSet_PreservesKeysFromAnotherVersion(t *testing.T) {
+	h, globalPath, _ := newConfigTestHandler(t)
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existing := "# keep me\nparticipant: Christopher\ntelemetry:\n  endpoint: https://example.invalid\n"
+	if err := os.WriteFile(globalPath, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.ConfigSet(context.Background(), &command.ConfigSetCmd{Target: "global", Key: "llm.model", Value: "sonnet"}); err != nil {
+		t.Fatalf("a foreign key must not make the file unwritable: %v", err)
+	}
+
+	data, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# keep me", "telemetry:", "endpoint: https://example.invalid", "model: sonnet"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("write lost %q:\n%s", want, data)
+		}
+	}
+}
+
+// Registering a connection patches the `repos` list rather than rewriting the
+// document.
+func TestConnectRepo_PatchesRatherThanRewrites(t *testing.T) {
+	h, globalPath, _ := newConfigTestHandler(t)
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existing := "# my settings\nparticipant: Christopher\ntelemetry:\n  endpoint: https://example.invalid\n"
+	if err := os.WriteFile(globalPath, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := repos.ConnectedRepo{RepoID: "github.com/networkteam/other", CloneURL: "git@github.com:networkteam/other.git"}
+	if err := h.connectRepo(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# my settings", "telemetry:", "endpoint: https://example.invalid", "github.com/networkteam/other"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("connect lost %q:\n%s", want, data)
+		}
+	}
+
+	cfg, err := repos.LoadConfigFrom(globalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cfg.Connected(repo.RepoID); !ok {
+		t.Errorf("connection did not round-trip: %+v", cfg.Repos)
+	}
+}
+
 // Numeric values land as YAML numbers, not strings — a string in an int
-// field would fail the strict schema probe.
+// field would fail the schema probe.
 func TestConfigSet_TypedScalars(t *testing.T) {
 	h, globalPath, _ := newConfigTestHandler(t)
 	if err := h.ConfigSet(context.Background(), &command.ConfigSetCmd{Target: "global", Key: "llm.concurrency", Value: "8"}); err != nil {

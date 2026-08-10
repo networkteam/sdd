@@ -97,7 +97,38 @@ func runEffectiveConfig(cmd *cli.Command, key string) error {
 	for _, e := range result.Entries {
 		fmt.Fprintf(w, "%s\t%s\t(%s)\n", e.Key, e.Value, e.Source)
 	}
-	return w.Flush()
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	// The effective table answers "what will happen", and a setting that does
+	// nothing is part of that answer.
+	if key == "" {
+		return printUnknownConfigKeys()
+	}
+	return nil
+}
+
+func printUnknownConfigKeys() error {
+	f, err := newReadFinder()
+	if err != nil {
+		return err
+	}
+	sddDir, err := resolveSDDDir()
+	if err != nil {
+		sddDir = ""
+	}
+	result, err := f.UnknownConfigKeys(query.UnknownConfigKeysQuery{SDDDir: sddDir})
+	if err != nil {
+		return err
+	}
+	if len(result.Keys) == 0 {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "\nignored — this sdd does not know these keys:\n")
+	for _, k := range result.Keys {
+		fmt.Fprintf(os.Stderr, "  %s  (%s)\n", k.Key, k.File)
+	}
+	return nil
 }
 
 func runConfigGet(key string) error {

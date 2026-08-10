@@ -1,7 +1,8 @@
 package model
 
 import (
-	"strings"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -164,32 +165,35 @@ func TestParseConfig_EmptyInput(t *testing.T) {
 	}
 }
 
-// Unknown keys fail loud — top-level and nested alike — naming the key, so a
-// misplaced setting surfaces instead of being silently dropped.
-func TestParseConfig_UnknownKeyFails(t *testing.T) {
+// A key this binary does not know is read past rather than rejected, and
+// reported by name — top-level and nested alike.
+func TestParseConfig_TolerantAndReportsUnknownKeys(t *testing.T) {
 	cases := []struct {
 		name string
 		yaml string
 		key  string
 	}{
 		{"top-level unknown", "participant: x\nbogus_key: 1\n", "bogus_key"},
-		{"nested unknown", "llm:\n  provider: ollama\n  bogus_nested: 1\n", "bogus_nested"},
+		{"nested unknown", "llm:\n  provider: ollama\n  bogus_nested: 1\n", "llm.bogus_nested"},
 		{"global-only key misplaced", "repos:\n  - repo_id: a/b\n", "repos"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseConfig([]byte(tc.yaml))
-			if err == nil {
-				t.Fatalf("unknown key %q should fail", tc.key)
+			if _, err := ParseConfig([]byte(tc.yaml)); err != nil {
+				t.Fatalf("unknown key %q must not fail the load: %v", tc.key, err)
 			}
-			if !strings.Contains(err.Error(), tc.key) {
-				t.Errorf("error should name the key %q, got: %v", tc.key, err)
+			unknown, err := UnknownYAMLKeys([]byte(tc.yaml), reflect.TypeFor[PerRepoConfig]())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(unknown, tc.key) {
+				t.Errorf("unknown keys %v should name %q", unknown, tc.key)
 			}
 		})
 	}
 }
 
-// API-key maps keep accepting arbitrary provider names under strict decoding.
+// API-key maps keep accepting arbitrary provider names.
 func TestParseConfig_MapKeysStayOpen(t *testing.T) {
 	cfg, err := ParseConfig([]byte("llm:\n  api_keys:\n    anthropic: k1\n    custom-proxy: k2\n"))
 	if err != nil {

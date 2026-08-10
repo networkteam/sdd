@@ -41,11 +41,6 @@ func (m *Manager) Registry() *Registry {
 	return m.reg
 }
 
-// Save writes the user-global config to the registry's config path.
-func (m *Manager) Save(cfg *GlobalConfig) error {
-	return SaveConfigTo(m.reg.loc.ConfigPath, cfg)
-}
-
 // EnsureCloned clones repo.CloneURL into dir when no clone is present yet.
 // Reports whether a clone ran (false: the cache already existed).
 func (m *Manager) EnsureCloned(ctx context.Context, repo ConnectedRepo, dir string) (bool, error) {

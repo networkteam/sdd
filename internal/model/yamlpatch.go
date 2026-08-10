@@ -29,38 +29,35 @@ import (
 // settings are flat config, so the simpler dotted-path form covers the
 // need without the extra dependency.
 func SetYAMLField(existing []byte, path string, value any) ([]byte, error) {
-	segments, err := splitYAMLPath(path)
-	if err != nil {
-		return nil, err
-	}
+	return patchYAML(existing, path, func(target *yaml.Node) error {
+		if target.Kind != yaml.ScalarNode {
+			return fmt.Errorf("target at %q is a %s, not a scalar", path, kindName(target.Kind))
+		}
+		var encoded yaml.Node
+		if err := encoded.Encode(value); err != nil {
+			return fmt.Errorf("encoding value: %w", err)
+		}
+		if encoded.Kind != yaml.ScalarNode {
+			return fmt.Errorf("value for %q is not scalar", path)
+		}
+		replaceNodeValue(target, &encoded)
+		return nil
+	})
+}
 
-	root, err := parseYAMLRoot(existing)
-	if err != nil {
-		return nil, err
-	}
-
-	target, err := descendToLeaf(root.Content[0], segments)
-	if err != nil {
-		return nil, err
-	}
-	if target.Kind != yaml.ScalarNode {
-		return nil, fmt.Errorf("target at %q is a %s, not a scalar", path, kindName(target.Kind))
-	}
-
-	valueNode := &yaml.Node{Kind: yaml.ScalarNode}
-	if err := valueNode.Encode(value); err != nil {
-		return nil, fmt.Errorf("encoding value: %w", err)
-	}
-	if valueNode.Kind != yaml.ScalarNode {
-		return nil, fmt.Errorf("value for %q is not scalar", path)
-	}
-
-	target.Kind = yaml.ScalarNode
-	target.Tag = valueNode.Tag
-	target.Value = valueNode.Value
-	target.Style = valueNode.Style
-
-	return encodeYAML(root)
+// SetYAMLValue sets the value at dotted path to anything yaml.Node.Encode
+// accepts — including a sequence of mappings, the shape the global config's
+// `repos` list needs. The general form SetYAMLField and SetYAMLSequence
+// constrain; it preserves the same way they do.
+func SetYAMLValue(existing []byte, path string, value any) ([]byte, error) {
+	return patchYAML(existing, path, func(target *yaml.Node) error {
+		var encoded yaml.Node
+		if err := encoded.Encode(value); err != nil {
+			return fmt.Errorf("encoding value: %w", err)
+		}
+		replaceNodeValue(target, &encoded)
+		return nil
+	})
 }
 
 // SetYAMLSequence sets the value at dotted path to a flow-style sequence of
@@ -73,33 +70,47 @@ func SetYAMLField(existing []byte, path string, value any) ([]byte, error) {
 // Flow style matches how FormatConfig renders the same field on a fresh init,
 // so a sequence upsert and a fresh write produce the same on-disk shape.
 func SetYAMLSequence(existing []byte, path string, values []string) ([]byte, error) {
+	return patchYAML(existing, path, func(target *yaml.Node) error {
+		items := make([]*yaml.Node, 0, len(values))
+		for _, v := range values {
+			items = append(items, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v})
+		}
+		replaceNodeValue(target, &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle, Content: items})
+		return nil
+	})
+}
+
+// patchYAML is the single splice every setter runs through, and the reason
+// they all preserve: only the one node mutate is handed gets rewritten.
+func patchYAML(existing []byte, path string, mutate func(target *yaml.Node) error) ([]byte, error) {
 	segments, err := splitYAMLPath(path)
 	if err != nil {
 		return nil, err
 	}
-
 	root, err := parseYAMLRoot(existing)
 	if err != nil {
 		return nil, err
 	}
-
 	target, err := descendToLeaf(root.Content[0], segments)
 	if err != nil {
 		return nil, err
 	}
-
-	items := make([]*yaml.Node, 0, len(values))
-	for _, v := range values {
-		items = append(items, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v})
+	if err := mutate(target); err != nil {
+		return nil, err
 	}
-
-	target.Kind = yaml.SequenceNode
-	target.Tag = ""
-	target.Value = ""
-	target.Style = yaml.FlowStyle
-	target.Content = items
-
 	return encodeYAML(root)
+}
+
+// replaceNodeValue copies field by field rather than assigning the node, so
+// the comments attached to target survive.
+func replaceNodeValue(target, src *yaml.Node) {
+	target.Kind = src.Kind
+	target.Tag = src.Tag
+	target.Value = src.Value
+	target.Style = src.Style
+	target.Content = src.Content
+	target.Anchor = ""
+	target.Alias = nil
 }
 
 // splitYAMLPath validates a dotted path and returns its segments. Empty paths

@@ -13,6 +13,7 @@ import (
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
+	"github.com/networkteam/sdd/internal/repos/repostest"
 )
 
 // countingCommitter is the internal-package committer fake for the repo
@@ -43,9 +44,7 @@ func newRepoTestHandler(t *testing.T, repoConfig string) (*Handler, string) {
 	if err := gcfg.AddRepo(repos.ConnectedRepo{RepoID: "github.com/networkteam/other", CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.SaveConfigTo(loc.ConfigPath, gcfg); err != nil {
-		t.Fatal(err)
-	}
+	repostest.WriteConfig(t, loc.ConfigPath, gcfg)
 	sddDir := filepath.Join(dir, "repo", ".sdd")
 	if err := os.MkdirAll(sddDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -115,9 +114,7 @@ func TestEnsureReposFresh_ReportsPhaseNotIndexing(t *testing.T) {
 		if err := gcfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := repos.SaveConfigTo(loc.ConfigPath, gcfg); err != nil {
-			t.Fatal(err)
-		}
+		repostest.WriteConfig(t, loc.ConfigPath, gcfg)
 		reg := repos.NewRegistry(loc)
 		cacheDir, err := reg.CacheDir(repoID)
 		if err != nil {
@@ -166,9 +163,7 @@ func TestRepoAdd_ClonePathReportsConnectingThenCloning(t *testing.T) {
 		ConfigPath: filepath.Join(dir, "xdg", "sdd", "config.yaml"),
 		CacheRoot:  filepath.Join(dir, "cache"),
 	}
-	if err := repos.SaveConfigTo(loc.ConfigPath, &repos.GlobalConfig{}); err != nil {
-		t.Fatal(err)
-	}
+	repostest.WriteConfig(t, loc.ConfigPath, &repos.GlobalConfig{})
 	h := New(Options{Repos: repos.NewManager(repos.NewRegistry(loc), &fakeGit{})})
 
 	// The fake clone leaves no config to read, so RepoAdd errors after cloning;
@@ -201,9 +196,7 @@ func TestBuildConnectedIndexes_FreshensAndFills(t *testing.T) {
 	if err := gcfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.SaveConfigTo(loc.ConfigPath, gcfg); err != nil {
-		t.Fatal(err)
-	}
+	repostest.WriteConfig(t, loc.ConfigPath, gcfg)
 
 	reg := repos.NewRegistry(loc)
 	cacheDir, err := reg.CacheDir(repoID)
@@ -281,9 +274,7 @@ func TestBuildConnectedIndexes_ForceRebuildsMembers(t *testing.T) {
 	if err := gcfg.AddRepo(repos.ConnectedRepo{RepoID: repoID, CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.SaveConfigTo(loc.ConfigPath, gcfg); err != nil {
-		t.Fatal(err)
-	}
+	repostest.WriteConfig(t, loc.ConfigPath, gcfg)
 	reg := repos.NewRegistry(loc)
 	cacheDir, err := reg.CacheDir(repoID)
 	if err != nil {

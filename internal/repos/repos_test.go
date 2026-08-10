@@ -5,7 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -13,8 +14,9 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-func TestGlobalConfigRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
+func TestLoadConfigFrom_DecodesAFileOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
 
 	cfg, err := LoadConfigFrom(path)
 	if err != nil {
@@ -24,18 +26,14 @@ func TestGlobalConfigRoundTrip(t *testing.T) {
 		t.Fatalf("empty config has repos: %+v", cfg.Repos)
 	}
 
-	if err := cfg.AddRepo(ConnectedRepo{RepoID: "github.com/networkteam/other", CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := cfg.AddRepo(ConnectedRepo{RepoID: "github.com/networkteam/other", CloneURL: "x"}); err == nil {
-		t.Error("duplicate repo_id must be rejected")
-	}
-	if err := cfg.AddRepo(ConnectedRepo{RepoID: "nohost", CloneURL: "x"}); err == nil {
-		t.Error("invalid repo_id must be rejected")
-	}
-	cfg.Embedding = model.EmbeddingConfig{Provider: "ollama", Model: "nomic-embed-text"}
-
-	if err := SaveConfigTo(path, cfg); err != nil {
+	const doc = `embedding:
+  provider: ollama
+  model: nomic-embed-text
+repos:
+  - repo_id: github.com/networkteam/other
+    clone_url: git@github.com:networkteam/other.git
+`
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := LoadConfigFrom(path)
@@ -44,17 +42,23 @@ func TestGlobalConfigRoundTrip(t *testing.T) {
 	}
 	repo, ok := loaded.Connected("github.com/networkteam/other")
 	if !ok || repo.CloneURL != "git@github.com:networkteam/other.git" {
-		t.Errorf("round-trip lost connection: %+v", loaded.Repos)
+		t.Errorf("connection not decoded: %+v", loaded.Repos)
 	}
 	if loaded.Embedding.Provider != "ollama" {
-		t.Errorf("round-trip lost embedding config: %+v", loaded.Embedding)
+		t.Errorf("embedding config not decoded: %+v", loaded.Embedding)
 	}
+}
 
-	if !loaded.RemoveRepo("github.com/networkteam/other") {
-		t.Error("RemoveRepo must report existing connection")
+func TestAddRepo_RejectsDuplicateAndMalformedIDs(t *testing.T) {
+	cfg := &GlobalConfig{}
+	if err := cfg.AddRepo(ConnectedRepo{RepoID: "github.com/networkteam/other", CloneURL: "git@github.com:networkteam/other.git"}); err != nil {
+		t.Fatal(err)
 	}
-	if loaded.RemoveRepo("github.com/networkteam/other") {
-		t.Error("RemoveRepo must report missing connection")
+	if err := cfg.AddRepo(ConnectedRepo{RepoID: "github.com/networkteam/other", CloneURL: "x"}); err == nil {
+		t.Error("duplicate repo_id must be rejected")
+	}
+	if err := cfg.AddRepo(ConnectedRepo{RepoID: "nohost", CloneURL: "x"}); err == nil {
+		t.Error("invalid repo_id must be rejected")
 	}
 }
 
@@ -219,9 +223,7 @@ func TestCacheLifecycle(t *testing.T) {
 }
 
 // The user-global config carries the shared BaseConfig settings inline —
-// participant, llm, embedding, sync — next to its own repos list, and
-// rejects keys that belong to a per-repo file (fail-loud, never a silent
-// drop: the exact failure the cross-repo outer validation surfaced).
+// participant, llm, embedding, sync — next to its own repos list.
 func TestGlobalConfigBaseSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	yaml := "participant: Christopher\nllm:\n  provider: ollama\n  model: llama3.1:70b\nembedding:\n  provider: ollama\nrepos:\n  - repo_id: github.com/networkteam/other\n    clone_url: git@github.com:networkteam/other.git\n"
@@ -246,7 +248,10 @@ func TestGlobalConfigBaseSettings(t *testing.T) {
 	}
 }
 
-func TestGlobalConfigRejectsUnknownAndPerRepoKeys(t *testing.T) {
+// The global layer loads past keys it does not declare — a per-repo-only
+// setting misplaced here, or anything a newer binary wrote — and names them
+// instead (20260810-144515-s-tac-8ae).
+func TestGlobalConfigToleratesAndReportsForeignKeys(t *testing.T) {
 	cases := []struct {
 		name string
 		yaml string
@@ -255,7 +260,8 @@ func TestGlobalConfigRejectsUnknownAndPerRepoKeys(t *testing.T) {
 		{"per-repo-only key", "repo_id: github.com/org/repo\n", "repo_id"},
 		{"per-repo graph_dir", "graph_dir: .sdd/graph\n", "graph_dir"},
 		{"arbitrary unknown", "bogus: 1\n", "bogus"},
-		{"nested unknown", "llm:\n  bogus_nested: 1\n", "bogus_nested"},
+		{"nested unknown", "llm:\n  bogus_nested: 1\n", "llm.bogus_nested"},
+		{"block from a newer binary", "sessions:\n  retention: 14d\ntelemetry:\n  endpoint: https://x\n", "telemetry"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -263,15 +269,15 @@ func TestGlobalConfigRejectsUnknownAndPerRepoKeys(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.yaml), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := LoadConfigFrom(path)
-			if err == nil {
-				t.Fatalf("key %q must be rejected", tc.key)
+			if _, err := LoadConfigFrom(path); err != nil {
+				t.Fatalf("key %q must not stop the load: %v", tc.key, err)
 			}
-			if !strings.Contains(err.Error(), tc.key) {
-				t.Errorf("error should name key %q, got: %v", tc.key, err)
+			unknown, err := model.UnknownYAMLKeys([]byte(tc.yaml), reflect.TypeFor[GlobalConfig]())
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !strings.Contains(err.Error(), path) {
-				t.Errorf("error should name the file, got: %v", err)
+			if !slices.Contains(unknown, tc.key) {
+				t.Errorf("unknown keys %v should name %q", unknown, tc.key)
 			}
 		})
 	}

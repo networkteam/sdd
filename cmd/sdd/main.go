@@ -171,6 +171,28 @@ func loadConfig() (*model.PerRepoConfig, error) {
 	return meta.ResolveConfig(global.BaseConfig, sddDir)
 }
 
+// warnUnknownConfigKeys names every config key sdd read past — tolerated is
+// not silent. A finder that will not build is left to the command itself,
+// which resolves the same config and reports the failure properly.
+func warnUnknownConfigKeys(ctx context.Context) {
+	f, err := newReadFinder()
+	if err != nil {
+		return
+	}
+	sddDir, err := resolveSDDDir()
+	if err != nil {
+		sddDir = ""
+	}
+	result, err := f.UnknownConfigKeys(query.UnknownConfigKeysQuery{SDDDir: sddDir})
+	if err != nil {
+		return
+	}
+	log := slogutils.FromContext(ctx)
+	for _, k := range result.Keys {
+		log.Warn("ignoring unknown config key", "key", k.Key, "file", k.File)
+	}
+}
+
 // resolveConfigAt mirrors loadConfig for an explicit .sdd dir — `sdd init`
 // may target a root other than the cwd, and its readiness checks must see
 // the same overlay every other command resolves (a participant set globally
@@ -255,6 +277,8 @@ func main() {
 			}))
 			slog.SetDefault(logger)
 			ctx = slogutils.WithLogger(ctx, logger)
+
+			warnUnknownConfigKeys(ctx)
 
 			// Attach a stats sink so LLM calls (pre-flight, summarize) record
 			// token + prompt-cache metrics to .sdd/stats/llm.jsonl. Best-effort:

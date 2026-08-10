@@ -5,8 +5,9 @@
 // config, cache, and state roots arrive as an explicit Locations value,
 // resolved once at the composition root (repos.DefaultLocations for the XDG
 // convention). Pure reads live on Registry; the side-effectful cache
-// lifecycle (clone, pull, config save) lives on Manager, orchestrated by
-// handlers that invalidate the read side's GraphSource on completion.
+// lifecycle (clone, pull) lives on Manager, orchestrated by handlers that
+// invalidate the read side's GraphSource on completion. Config writes are not
+// here at all — they are field-level patches owned by the handlers.
 package repos
 
 import (
@@ -14,8 +15,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/networkteam/sdd/internal/model"
 )
@@ -78,8 +77,7 @@ func DefaultLocations() (Locations, error) {
 // index is built with — one vector space so cosine scores are comparable
 // across repos (a repo indexed under a different fingerprint is excluded
 // from cross-graph search and flagged by lint). Hand-editable YAML
-// underneath; per-repo-only fields (repo_id above all) do not exist on this
-// schema, so a misplaced one is a parse error.
+// underneath.
 type GlobalConfig struct {
 	model.BaseConfig `yaml:",inline"`
 
@@ -99,9 +97,7 @@ type ConnectedRepo struct {
 }
 
 // LoadConfigFrom reads a user-global config from an explicit path. A missing
-// file is not an error — it yields an empty config (no connections). Unknown
-// keys are an error: a setting placed in the wrong file must surface at load
-// time, never be silently dropped (d-cpt-6cq's fail-loud rule).
+// file is not an error — it yields an empty config (no connections).
 func LoadConfigFrom(path string) (*GlobalConfig, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -110,27 +106,21 @@ func LoadConfigFrom(path string) (*GlobalConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading global config %s: %w", path, err)
 	}
-	var cfg GlobalConfig
-	if err := model.StrictUnmarshalYAML(data, &cfg); err != nil {
+	cfg, err := ParseGlobalConfig(data)
+	if err != nil {
 		return nil, fmt.Errorf("parsing global config %s: %w", path, err)
 	}
-	return &cfg, nil
+	return cfg, nil
 }
 
-// SaveConfigTo writes a user-global config to an explicit path, creating
-// parent directories as needed. 0600 — the embedding block may carry API keys.
-func SaveConfigTo(path string, cfg *GlobalConfig) error {
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return fmt.Errorf("marshaling global config: %w", err)
+// ParseGlobalConfig decodes user-global config bytes. Empty input is valid and
+// yields an empty config.
+func ParseGlobalConfig(data []byte) (*GlobalConfig, error) {
+	var cfg GlobalConfig
+	if err := model.UnmarshalYAML(data, &cfg); err != nil {
+		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("creating config dir: %w", err)
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("writing global config %s: %w", path, err)
-	}
-	return nil
+	return &cfg, nil
 }
 
 // Connected returns the connection for repoID, if present.
@@ -171,17 +161,6 @@ func (c *GlobalConfig) AddRepo(repo ConnectedRepo) error {
 	}
 	c.Repos = append(c.Repos, repo)
 	return nil
-}
-
-// RemoveRepo drops the connection for repoID, reporting whether it existed.
-func (c *GlobalConfig) RemoveRepo(repoID string) bool {
-	for i, r := range c.Repos {
-		if r.RepoID == repoID {
-			c.Repos = append(c.Repos[:i], c.Repos[i+1:]...)
-			return true
-		}
-	}
-	return false
 }
 
 // UnconnectedDependencies returns the declared dependencies (committed

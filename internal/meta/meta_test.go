@@ -110,20 +110,33 @@ func TestResolveConfig_GlobalOnlyAndEmpty(t *testing.T) {
 }
 
 // A parse failure names the offending file — the error carries the path of
-// the exact layer that broke, plus the key from the strict decoder.
-func TestReadConfig_ErrorNamesFileAndKey(t *testing.T) {
+// the exact layer that broke.
+func TestReadConfig_ErrorNamesFile(t *testing.T) {
 	sddDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sddDir, "config.local.yaml"), []byte("repos:\n  - repo_id: a/b\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sddDir, "config.local.yaml"), []byte("llm:\n  concurrency: not-a-number\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := ReadConfig(sddDir)
 	if err == nil {
-		t.Fatal("global-only key in a per-repo file must fail")
+		t.Fatal("an undecodable value must fail")
 	}
 	if !strings.Contains(err.Error(), "config.local.yaml") {
 		t.Errorf("error should name the file, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "repos") {
-		t.Errorf("error should name the key, got: %v", err)
+}
+
+// A key this layer does not declare is read past, and the keys it does know
+// still decode.
+func TestReadConfig_ToleratesForeignKey(t *testing.T) {
+	sddDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sddDir, "config.local.yaml"), []byte("participant: Christopher\nrepos:\n  - repo_id: a/b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ReadConfig(sddDir)
+	if err != nil {
+		t.Fatalf("a foreign key must not stop the load: %v", err)
+	}
+	if cfg == nil || cfg.Participant != "Christopher" {
+		t.Errorf("the keys it does know must still decode: %+v", cfg)
 	}
 }

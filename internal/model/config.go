@@ -303,24 +303,21 @@ func (rc RetryConfig) Resolved() (maxAttempts int, baseDelay, maxDelay time.Dura
 }
 
 // ParseConfig unmarshals YAML bytes into a PerRepoConfig. Empty input is
-// valid and yields a zero-valued config. Unknown keys are an error, never a
-// silent drop — a misplaced setting must surface at load time (d-cpt-6cq's
-// fail-loud rule), and the strict decoder covers nested blocks too.
+// valid and yields a zero-valued config.
 func ParseConfig(data []byte) (*PerRepoConfig, error) {
 	var cfg PerRepoConfig
-	if err := StrictUnmarshalYAML(data, &cfg); err != nil {
+	if err := UnmarshalYAML(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 	return &cfg, nil
 }
 
-// StrictUnmarshalYAML decodes YAML with unknown-key rejection (recursing
-// into nested structs; map-typed fields keep accepting arbitrary keys).
-// Empty input decodes to the zero value. Exported so every config location —
-// per-repo and user-global — shares one definition of strictness.
-func StrictUnmarshalYAML(data []byte, out any) error {
+// UnmarshalYAML decodes YAML tolerantly: a key this binary does not know is
+// carried past rather than rejected, because a config file is shared between
+// sdd versions and one must not be bricked by a key a newer one wrote
+// (20260810-144515-s-tac-8ae).
+func UnmarshalYAML(data []byte, out any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
 	if err := dec.Decode(out); err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil
