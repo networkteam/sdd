@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/networkteam/sdd/internal/engine"
+	"github.com/networkteam/sdd/internal/model"
 )
 
 type SessionID string
@@ -104,6 +107,83 @@ func endFromLegacyHistory(history []legacyAttachmentRecord) *SessionEnd {
 		return nil
 	}
 	return nil
+}
+
+// legacyEndStore is the single authority for the ending a log never recorded in
+// its metadata, so collection, listings and resume never disagree about which
+// sessions are over. Reads derive; writes pass through — a derived ending stays
+// read-side and is never recorded back into the log.
+type legacyEndStore struct{ SessionStore }
+
+func (s legacyEndStore) Load(ctx context.Context, id SessionID) (StoredSession, error) {
+	stored, err := s.SessionStore.Load(ctx, id)
+	if err != nil {
+		return stored, err
+	}
+	deriveLegacyEnd(&stored)
+	return stored, nil
+}
+
+func (s legacyEndStore) List(ctx context.Context, filter SessionFilter) ([]StoredSession, error) {
+	stored, err := s.SessionStore.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	for i := range stored {
+		deriveLegacyEnd(&stored[i])
+	}
+	return stored, nil
+}
+
+// deriveLegacyEnd recovers the terminal record from what the log states about
+// itself. A record in metadata — written there, or recovered at decode from a
+// superseded shape — always wins.
+func deriveLegacyEnd(stored *StoredSession) {
+	if stored.Metadata.Ended != nil {
+		return
+	}
+	stored.Metadata.Ended = endFromShellEvents(stored.Events)
+}
+
+// endFromShellEvents reads the shell instances for the act that ended the
+// dialogue: logs written before the terminal record existed left the
+// participant's conclude as nothing but the shell's own engine event. A shell no
+// longer running is the dialogue over, since carrying it on would mean starting
+// a fresh one — the revival an ended session refuses (d-tac-k4q). Both ways a
+// shell leaves running map to the same act the write site records. Events this
+// binary cannot decode derive nothing; the consumer reports the unreadable log.
+func endFromShellEvents(events []StoredEvent) *SessionEnd {
+	decoded, err := decodeWorkflowEvents(events)
+	if err != nil {
+		return nil
+	}
+	shells := map[string]bool{}
+	var endedAt time.Time
+	for _, event := range decoded {
+		switch event.Event {
+		case engine.EventStarted:
+			if class, _ := event.Data["class"].(string); class == string(model.ProcedureClassShell) {
+				shells[event.Instance] = false
+			}
+		case engine.EventCompleted, engine.EventAbandoned:
+			if _, ok := shells[event.Instance]; !ok {
+				continue
+			}
+			shells[event.Instance] = true
+			if event.TS.After(endedAt) {
+				endedAt = event.TS
+			}
+		}
+	}
+	if len(shells) == 0 {
+		return nil
+	}
+	for _, ended := range shells {
+		if !ended {
+			return nil
+		}
+	}
+	return &SessionEnd{Act: SessionConcluded, EndedAt: endedAt}
 }
 
 type StoredEvent struct {
