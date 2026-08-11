@@ -185,7 +185,7 @@ func TestWorkflowCaptureFocusPersistsThroughRealNewEntry(t *testing.T) {
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
 			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
-				if request.Purpose == "preflight" {
+				if request.Purpose == "preflight" || request.Purpose == "writing-guide" {
 					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
 				}
 				return sdd.LLMResult{Output: []byte("A focus advancing the target directive this cycle.")}, nil

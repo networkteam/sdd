@@ -1,6 +1,8 @@
 package application
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -156,6 +158,15 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 	}); err != nil {
 		return err
 	}
+	if err := registry.RegisterCommand(engine.Command{
+		Doc: engine.FuncDoc{
+			Name: "writingGuide", Doc: "Runs the writing guide against the draft in isolation (d-cpt-20r); findings are drafting input, never a gate. Skips the LLM call when the guide-relevant draft fields are unchanged since the last run.",
+			Reads: []string{"body", "entryKind", "layer", "refs", "intent"}, Writes: []string{"guideFindings", "guideDraftDigest"},
+		},
+		Fn: w.runWorkflowWritingGuide,
+	}); err != nil {
+		return err
+	}
 	return registry.RegisterCommand(engine.Command{
 		Doc:          engine.FuncDoc{Name: "replaceSummary", Doc: "Writes the user-supplied corrected summary onto the entry named by entryId.", Reads: []string{"entryId", "correctedSummary"}},
 		MutatesGraph: true,
@@ -240,6 +251,73 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 			return err
 		},
 	})
+}
+
+// runWorkflowWritingGuide runs the writing guide op between assemble and
+// playback. The digest skip keeps adjust loops cheap: only a change to a
+// field the guide actually reads re-runs the LLM; anything else keeps the
+// stored findings. An LLM infrastructure failure returns loudly — the op
+// re-runs on the next report rather than degrading to a silent pass.
+func (w *WorkflowSession) runWorkflowWritingGuide(ctx *engine.Context) error {
+	body, ok := workflowStoreString(ctx.Store, "body")
+	if !ok {
+		return fmt.Errorf("writingGuide: body is not set")
+	}
+	entryKind, ok := workflowStoreString(ctx.Store, "entryKind")
+	if !ok {
+		return fmt.Errorf("writingGuide: entryKind is not set")
+	}
+	layer, ok := workflowStoreString(ctx.Store, "layer")
+	if !ok {
+		return fmt.Errorf("writingGuide: layer is not set")
+	}
+	draft := EntryDraft{Kind: entryKind, Layer: layer, Body: body}
+	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
+	for _, ref := range workflowStoreDocuments(ctx.Store, "refs") {
+		id, _ := ref["id"].(string)
+		kind, _ := ref["kind"].(string)
+		desc, _ := ref["desc"].(string)
+		draft.Refs = append(draft.Refs, EntryRef{ID: id, Kind: kind, Desc: desc})
+	}
+	digest := writingGuideDigest(draft)
+	if prev, ok := workflowStoreString(ctx.Store, "guideDraftDigest"); ok && prev == digest {
+		if _, ok := ctx.Store.Get("guideFindings"); ok {
+			return nil
+		}
+	}
+	findings, err := w.app.WritingGuideCheck(w.ctx, w.identity, w.project, draft)
+	if err != nil {
+		return fmt.Errorf("writingGuide: %w", err)
+	}
+	guideFindings := make([]query.GuideFinding, 0, len(findings))
+	for _, f := range findings {
+		guideFindings = append(guideFindings, query.GuideFinding{Reasoning: f.Reasoning, Axis: f.Axis, Quote: f.Quote, Repair: f.Repair, Severity: query.GuideSeverity(f.Severity)})
+	}
+	if err := ctx.Store.WriteEngine("guideFindings", guideFindings); err != nil {
+		return fmt.Errorf("writingGuide: %w", err)
+	}
+	if err := ctx.Store.WriteEngine("guideDraftDigest", digest); err != nil {
+		return fmt.Errorf("writingGuide: %w", err)
+	}
+	return nil
+}
+
+// writingGuideDigest fingerprints exactly the draft fields the guide prompt
+// renders, so the skip test and the prompt can never disagree about what
+// "unchanged" means.
+func writingGuideDigest(draft EntryDraft) string {
+	h := sha256.New()
+	for _, part := range []string{draft.Kind, draft.Layer, draft.Intent, draft.Body} {
+		h.Write([]byte(part))
+		h.Write([]byte{0})
+	}
+	for _, ref := range draft.Refs {
+		for _, part := range []string{ref.ID, ref.Kind, ref.Desc} {
+			h.Write([]byte(part))
+			h.Write([]byte{0})
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {

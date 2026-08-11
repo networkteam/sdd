@@ -579,16 +579,17 @@ func parsePreflightResult(output string) (*PreflightResult, error) {
 // extractJSONObject returns the first balanced {...} in the input, skipping
 // any surrounding prose or code fences. Returns an error if no object is
 // found or braces are unbalanced. String-escape aware so braces inside
-// JSON strings don't confuse the balance counter.
+// JSON strings don't confuse the balance counter. Shared by every JSON-shaped
+// LLM check (pre-flight, writing guide).
 func extractJSONObject(output string) (string, error) {
 	output = strings.TrimSpace(output)
 	if output == "" {
-		return "", fmt.Errorf("empty pre-flight response")
+		return "", fmt.Errorf("empty LLM response")
 	}
 
 	start := strings.Index(output, "{")
 	if start < 0 {
-		return "", fmt.Errorf("no JSON object found in pre-flight response: %q", output)
+		return "", fmt.Errorf("no JSON object found in LLM response: %q", output)
 	}
 
 	depth := 0
@@ -621,7 +622,7 @@ func extractJSONObject(output string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("unbalanced JSON braces in pre-flight response: %q", output)
+	return "", fmt.Errorf("unbalanced JSON braces in LLM response: %q", output)
 }
 
 func parseSeverity(s string) (Severity, error) {

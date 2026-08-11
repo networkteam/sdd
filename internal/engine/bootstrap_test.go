@@ -356,6 +356,15 @@ func newBootstrapCaptureEnv(t *testing.T) *bootstrapCaptureEnv {
 		Doc: FuncDoc{Name: "replaceSummary", Doc: "fake", Reads: []string{"entryId", "correctedSummary"}},
 		Fn:  func(*Context) error { return nil },
 	})
+	mustRegisterCommand(reg, Command{
+		Doc: FuncDoc{Name: "writingGuide", Doc: "fake clean-pass writing guide", Reads: []string{"body", "entryKind", "layer", "refs", "intent"}, Writes: []string{"guideFindings", "guideDraftDigest"}},
+		Fn: func(ctx *Context) error {
+			if err := ctx.Store.WriteEngine("guideFindings", []query.GuideFinding{}); err != nil {
+				return err
+			}
+			return ctx.Store.WriteEngine("guideDraftDigest", "digest")
+		},
+	})
 
 	var err error
 	if env.bootstrap, err = LoadSpec(baseEntry(t, "bootstrap"), reg); err != nil {

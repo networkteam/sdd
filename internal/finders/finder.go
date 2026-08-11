@@ -16,19 +16,21 @@ import (
 // is available (fresh repo, read-only commands, tests); finder methods
 // degrade gracefully.
 type Finder struct {
-	preflightRunner llm.Runner
-	cfg             *model.PerRepoConfig
-	gitSyncer       GitSyncer
-	repos           *repos.Registry
+	preflightRunner    llm.Runner
+	writingGuideRunner llm.Runner
+	cfg                *model.PerRepoConfig
+	gitSyncer          GitSyncer
+	repos              *repos.Registry
 }
 
 // Options configures a new Finder. Zero-valued fields mean "not available"
 // — methods that need a dependency fall back to empty/nil behaviour rather
 // than failing.
 type Options struct {
-	PreflightRunner llm.Runner
-	Config          *model.PerRepoConfig
-	GitSyncer       GitSyncer
+	PreflightRunner    llm.Runner
+	WritingGuideRunner llm.Runner
+	Config             *model.PerRepoConfig
+	GitSyncer          GitSyncer
 	// Repos is the pure read surface over the connected repos — the only
 	// cross-repo capability a finder holds (no clone, no pull). Nil means no
 	// connected-repos support: cross-repo refs stay unresolved.
@@ -38,10 +40,11 @@ type Options struct {
 // New constructs a Finder with the given options.
 func New(opts Options) *Finder {
 	return &Finder{
-		preflightRunner: opts.PreflightRunner,
-		cfg:             opts.Config,
-		gitSyncer:       opts.GitSyncer,
-		repos:           opts.Repos,
+		preflightRunner:    opts.PreflightRunner,
+		writingGuideRunner: opts.WritingGuideRunner,
+		cfg:                opts.Config,
+		gitSyncer:          opts.GitSyncer,
+		repos:              opts.Repos,
 	}
 }
 

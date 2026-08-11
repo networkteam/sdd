@@ -81,6 +81,10 @@ type fixtureEnv struct {
 	// the preflight override is recorded.
 	highFindingsUnlessOverride bool
 	replaceCalls               int
+	guideCalls                 int
+	// guideFindings is what the fake writingGuide op returns; nil means a
+	// clean pass (empty findings, straight to playback).
+	guideFindings []query.GuideFinding
 }
 
 type memorySink struct {
@@ -145,6 +149,20 @@ func newFixtureEnv(t *testing.T) *fixtureEnv {
 		Fn: func(_ *Context) error {
 			env.replaceCalls++
 			return nil
+		},
+	})
+	mustRegisterCommand(reg, Command{
+		Doc: FuncDoc{Name: "writingGuide", Doc: "fake writing guide", Reads: []string{"body", "entryKind", "layer", "refs", "intent"}, Writes: []string{"guideFindings", "guideDraftDigest"}},
+		Fn: func(ctx *Context) error {
+			env.guideCalls++
+			findings := env.guideFindings
+			if findings == nil {
+				findings = []query.GuideFinding{}
+			}
+			if err := ctx.Store.WriteEngine("guideFindings", findings); err != nil {
+				return err
+			}
+			return ctx.Store.WriteEngine("guideDraftDigest", fmt.Sprintf("digest-%d", env.guideCalls))
 		},
 	})
 
@@ -244,6 +262,83 @@ func TestCapture_OneShotHappyPath(t *testing.T) {
 	}
 	if sv.Produced["entryId"] != "20260702-130001-s-tac-new" {
 		t.Errorf("produced = %v, want the created entry ID", sv.Produced)
+	}
+}
+
+func TestCapture_WritingGuideFindingsServeReviewThenProceed(t *testing.T) {
+	env := newFixtureEnv(t)
+	env.guideFindings = []query.GuideFinding{{
+		Reasoning: "the body leans on 'the earlier approach' without naming or pointing at it, so a reader outside the dialogue cannot act",
+		Axis:      "stranding", Quote: "the earlier approach", Repair: "write-in", Severity: query.GuideSubstantive,
+	}}
+
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, fullDraft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "guideReview" {
+		t.Fatalf("after full draft with findings step = %s, want guideReview", sv.Step)
+	}
+	if sv.Chooser == nil || sv.Chooser.Kind != ChooserAgent {
+		t.Fatalf("guideReview must serve an agent chooser, got %+v", sv.Chooser)
+	}
+	for _, want := range []string{"stranding", "the earlier approach", "write-in", "substantive", "drafting input"} {
+		if !strings.Contains(sv.Instructions, want) {
+			t.Errorf("guideReview unit missing %q:\n%s", want, sv.Instructions)
+		}
+	}
+	if env.guideCalls != 1 {
+		t.Fatalf("writingGuide ran %d times, want 1", env.guideCalls)
+	}
+
+	sv, err = env.session.Answer(sv.Instance, "guideReview", "proceed", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "playback" {
+		t.Fatalf("after proceed step = %s, want playback", sv.Step)
+	}
+}
+
+func TestCapture_WritingGuideReviseReturnsToAssembleAndReruns(t *testing.T) {
+	env := newFixtureEnv(t)
+	env.guideFindings = []query.GuideFinding{{
+		Reasoning: "removing the second sentence loses nothing", Axis: "dilution",
+		Quote: "the fixture observes something", Repair: "cut", Severity: query.GuideMinor,
+	}}
+
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, fullDraft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "guideReview" {
+		t.Fatalf("step = %s, want guideReview", sv.Step)
+	}
+
+	// Revise carries the changed body back to assemble; the still-complete
+	// draft cascades through the guide again — now clean — to playback.
+	env.guideFindings = nil
+	sv, err = env.session.Answer(sv.Instance, "guideReview", "revise",
+		map[string]any{"body": "A tactical gap: the fixture observes one thing."}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "playback" {
+		t.Fatalf("after clean revise step = %s, want playback", sv.Step)
+	}
+	if env.guideCalls != 2 {
+		t.Fatalf("writingGuide ran %d times, want 2 (re-run after revise)", env.guideCalls)
+	}
+	if !strings.Contains(sv.Instructions, "observes one thing") {
+		t.Errorf("playback should render the revised body, got %q", sv.Instructions)
 	}
 }
 

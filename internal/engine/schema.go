@@ -221,6 +221,20 @@ func schemaForType(t VarType, desc string) map[string]any {
 				},
 			},
 		}
+	case TypeGuideFindings:
+		schema = map[string]any{
+			"type": "array",
+			"items": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"reasoning": map[string]any{"type": "string"},
+					"axis":      map[string]any{"type": "string", "enum": []any{"stranding", "dilution", "conflation", "pointing", "form"}},
+					"quote":     map[string]any{"type": "string"},
+					"repair":    map[string]any{"type": "string", "enum": []any{"cut", "write-in", "split", "point", "reword"}},
+					"severity":  map[string]any{"type": "string", "enum": []any{"substantive", "minor"}},
+				},
+			},
+		}
 	default:
 		// text, label, participant, attachment-handle
 		schema = map[string]any{"type": "string"}

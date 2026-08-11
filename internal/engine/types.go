@@ -38,6 +38,7 @@ const (
 	TypeAttachmentHandle  BaseType = "attachment-handle"
 	TypeFactIndex         BaseType = "fact-index"
 	TypePreflightFindings BaseType = "preflight-findings"
+	TypeGuideFindings     BaseType = "guide-findings"
 	TypeInvolvement       BaseType = "involvement"
 	TypeInvolvementWhen   BaseType = "involvement-when"
 )
@@ -56,6 +57,7 @@ var baseTypes = map[BaseType]bool{
 	TypeAttachmentHandle:  true,
 	TypeFactIndex:         true,
 	TypePreflightFindings: true,
+	TypeGuideFindings:     true,
 	TypeInvolvement:       true,
 	TypeInvolvementWhen:   true,
 }
@@ -294,6 +296,43 @@ func validateBaseValue(base BaseType, v any) (any, error) {
 			return findings, nil
 		default:
 			return nil, fmt.Errorf("expected preflight findings list")
+		}
+
+	case TypeGuideFindings:
+		// Engine-written by the writing-guide op; accept the typed form and
+		// the replay/JSON form. Validation is shape-only — the axis, repair,
+		// and severity vocabularies are owned by the query package.
+		switch fv := v.(type) {
+		case []query.GuideFinding:
+			return fv, nil
+		case []any:
+			findings := make([]query.GuideFinding, 0, len(fv))
+			for i, item := range fv {
+				m, ok := item.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("finding %d: expected object", i)
+				}
+				f := query.GuideFinding{}
+				if s, ok := findingField(m, "reasoning"); ok {
+					f.Reasoning = s
+				}
+				if s, ok := findingField(m, "axis"); ok {
+					f.Axis = s
+				}
+				if s, ok := findingField(m, "quote"); ok {
+					f.Quote = s
+				}
+				if s, ok := findingField(m, "repair"); ok {
+					f.Repair = s
+				}
+				if s, ok := findingField(m, "severity"); ok {
+					f.Severity = query.GuideSeverity(s)
+				}
+				findings = append(findings, f)
+			}
+			return findings, nil
+		default:
+			return nil, fmt.Errorf("expected writing-guide findings list")
 		}
 
 	default:

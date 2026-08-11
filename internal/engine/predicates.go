@@ -23,6 +23,10 @@ const (
 	// Written by the write command's contract (newEntry, wired by the
 	// shell); read here by noHighFindings.
 	fieldFindings = "findings"
+	// fieldGuideFindings holds the last writing-guide findings
+	// ([]query.GuideFinding). Written by the guide op's contract
+	// (writingGuide, wired by the shell); read here by noGuideFindings.
+	fieldGuideFindings = "guideFindings"
 )
 
 // playbackConfirmation is the value of fieldPlaybackConfirmation.
@@ -274,6 +278,16 @@ func registerBuiltinPredicates(r *Registry) {
 		},
 		Fn:          noHighFindings,
 		FailMessage: "the last gate run produced high-severity findings",
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "noGuideFindings",
+			Doc:   "The writing guide ran for the current draft and returned no findings.",
+			Reads: []string{fieldGuideFindings},
+		},
+		Fn:          noGuideFindings,
+		FailMessage: "the writing guide returned findings",
 	})
 }
 
@@ -583,6 +597,21 @@ func noHighFindings(ctx *Context) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// noGuideFindings passes only when the writing guide has run and returned an
+// empty findings list. Absence fails: the guide op's contract always writes
+// guideFindings, so a missing field means the op has not run for this draft.
+func noGuideFindings(ctx *Context) (bool, error) {
+	v, ok := ctx.Store.Get(fieldGuideFindings)
+	if !ok {
+		return false, nil
+	}
+	normalized, err := VarType{Base: TypeGuideFindings}.ValidateValue(v)
+	if err != nil {
+		return false, fmt.Errorf("guideFindings field has unexpected shape: %w", err)
+	}
+	return len(normalized.([]query.GuideFinding)) == 0, nil
 }
 
 // asRefs normalizes a refs store value: a validated list holds engine.Ref

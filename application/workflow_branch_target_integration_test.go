@@ -102,7 +102,7 @@ Branch-targeted workflow reads need to follow the written artifact.
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
 			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
 				switch request.Purpose {
-				case "preflight":
+				case "preflight", "writing-guide":
 					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
 				case "summary":
 					return sdd.LLMResult{Output: []byte("Work branch done summary.")}, nil
@@ -309,6 +309,8 @@ This reference exists only on the bound work branch.
 						rejectNextPreflight = false
 						return sdd.LLMResult{Output: []byte(`{"findings":[{"severity":"high","category":"retry-route","observation":"reject this first attempt"}]}`)}, nil
 					}
+					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
+				case "writing-guide":
 					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
 				case "summary":
 					return sdd.LLMResult{Output: []byte("Generated routing summary.")}, nil
