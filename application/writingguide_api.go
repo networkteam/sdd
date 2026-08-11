@@ -20,10 +20,13 @@ type GuideFinding struct {
 }
 
 // WritingGuideCheck runs the writing guide against a draft in isolation — the
-// pre-playback half of the capture-guide architecture (d-cpt-20r). Only the
-// draft's own fields feed the prompt; refs stay unresolved and no graph
-// context is assembled, because the guide's scope is the entry as a stranger
-// reads it. Findings are drafting input for the dialogue, never a gate.
+// pre-playback half of the capture-guide architecture (d-cpt-20r). The draft's
+// own fields feed the prompt and refs stay unresolved, because the guide's
+// scope is the entry as a stranger reads it. The single exception is the
+// draft's closure edges, described one summary sentence deep: which act an
+// entry performs is not inferable from the body alone, and a guide that cannot
+// see it misreads correct entries (s-tac-fu8). Findings are drafting input for
+// the dialogue, never a gate.
 func (a *Application) WritingGuideCheck(ctx context.Context, identity RequestIdentity, project ProjectID, draft EntryDraft) ([]GuideFinding, error) {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
@@ -46,11 +49,30 @@ func (a *Application) WritingGuideCheck(ctx context.Context, identity RequestIde
 	for _, ref := range draft.Refs {
 		entry.Refs = append(entry.Refs, model.Ref{ID: ref.ID, Kind: model.RefKind(ref.Kind), Desc: ref.Desc})
 	}
+	entry.Closes = append([]string(nil), draft.Closes...)
+	entry.Supersedes = append([]string(nil), draft.Supersedes...)
+
+	var closureTargets []model.ClosureTarget
+	if len(entry.Closes) > 0 || len(entry.Supersedes) > 0 {
+		snapshot, err := a.snapshotWithDependencies(ctx, identity, runtime)
+		if err != nil {
+			return nil, err
+		}
+		// An ID with no entry behind it passes through resolution unchanged and
+		// is described by ID alone; only a genuinely ambiguous ID errors here.
+		if entry.Closes, err = snapshot.graph.ResolveIDs(entry.Closes); err != nil {
+			return nil, fmt.Errorf("resolving closes: %w", err)
+		}
+		if entry.Supersedes, err = snapshot.graph.ResolveIDs(entry.Supersedes); err != nil {
+			return nil, fmt.Errorf("resolving supersedes: %w", err)
+		}
+		closureTargets = snapshot.graph.ClosureTargets(entry)
+	}
 
 	finder := finders.New(finders.Options{WritingGuideRunner: runtimeLLMRunner{executor: runtime.options.LLM, purpose: "writing-guide"}})
 	guideCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	result, err := finder.WritingGuide(guideCtx, query.WritingGuideQuery{Entry: entry})
+	result, err := finder.WritingGuide(guideCtx, query.WritingGuideQuery{Entry: entry, ClosureTargets: closureTargets})
 	if err != nil {
 		return nil, fmt.Errorf("writing guide: %w", err)
 	}

@@ -64,11 +64,13 @@ func TestRenderWritingGuidePrompt_SystemByteStableAcrossDrafts(t *testing.T) {
 	b := &model.Entry{Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerProcess, Intent: model.IntentGuiding, Content: "A different body entirely.",
 		Refs: []model.Ref{{ID: "20260601-120000-d-tac-ref", Kind: model.RefKind("refines"), Desc: "target"}}}
 
-	reqA, err := renderWritingGuidePrompt(a)
+	reqA, err := renderWritingGuidePrompt(a, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reqB, err := renderWritingGuidePrompt(b)
+	reqB, err := renderWritingGuidePrompt(b, []model.ClosureTarget{
+		{Relation: "closes", ID: "20260601-120000-d-tac-old", Type: model.TypeDecision, Kind: model.KindDirective, Summary: "The commitment this draft retires."},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,5 +92,15 @@ func TestRenderWritingGuidePrompt_SystemByteStableAcrossDrafts(t *testing.T) {
 		if !strings.Contains(reqB.UserPrompt, want) {
 			t.Errorf("user prompt missing %q:\n%s", want, reqB.UserPrompt)
 		}
+	}
+	// The closure edge and its one summary sentence reach the draft: without
+	// them the guide cannot tell which act the entry performs (s-tac-fu8).
+	for _, want := range []string{"closes 20260601-120000-d-tac-old (directive decision)", "The commitment this draft retires."} {
+		if !strings.Contains(reqB.UserPrompt, want) {
+			t.Errorf("user prompt missing closure edge %q:\n%s", want, reqB.UserPrompt)
+		}
+	}
+	if strings.Contains(reqA.UserPrompt, "Closure edges") {
+		t.Error("a draft with no closure edges must not carry the section")
 	}
 }

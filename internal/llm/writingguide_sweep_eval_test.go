@@ -49,6 +49,9 @@ func TestWritingGuideSweep_DoneKind(t *testing.T) {
 		runs    int
 		expect  string
 		nonFind string
+		// closure describes what the specimen closes or supersedes, as the
+		// production path derives it from the graph (model.Graph.ClosureTargets).
+		closure []model.ClosureTarget
 	}{
 		{
 			name:    "sux_dense_multi_commit_delivery",
@@ -56,13 +59,23 @@ func TestWritingGuideSweep_DoneKind(t *testing.T) {
 			runs:    3,
 			expect:  "one conflation on the a08266b4 overturned-diagnosis paragraph (own lifecycle); form at most minor",
 			nonFind: "the five-commit batching itself; the commit hashes; the per-commit delivery descriptions",
+			closure: []model.ClosureTarget{{
+				Relation: "closes", ID: "20260731-081528-d-cpt-rw7",
+				Type: model.TypeDecision, Kind: model.KindDirective,
+				Summary: "Transport-level connection events are permanently excluded from the durable session log, which records only participant acts on the dialogue — conclude or abandon — with displacement derived live from the attachment stamp rather than read from a cause record.",
+			}},
 		},
 		{
 			name:    "wts_thin_retirement",
 			path:    ".sdd/graph/2026/06/14-134025-s-tac-wts.md",
 			runs:    3,
 			expect:  "clean, or at most one minor on the close-vs-settled sentence",
-			nonFind: "stranding for absent commit hashes (provenance follows the act: a retirement done points at the delivery done)",
+			nonFind: "stranding for absent commit hashes (provenance follows the act: a retirement done points at the delivery done); stranding on the retired directive, which the closure edge now anchors",
+			closure: []model.ClosureTarget{{
+				Relation: "closes", ID: "20260608-001411-d-tac-w30",
+				Type: model.TypeDecision, Kind: model.KindDirective,
+				Summary: "This directive commits to a dedicated `sdd stats` command as the analytics surface for both graph activity and LLM/embedding usage, kept explicitly separate from `sdd view`, which continues to serve live graph entry surfacing.",
+			}},
 		},
 	}
 
@@ -72,7 +85,7 @@ func TestWritingGuideSweep_DoneKind(t *testing.T) {
 			t.Logf("GROUND TRUTH expects: %s", sp.expect)
 			t.Logf("GROUND TRUTH non-findings: %s", sp.nonFind)
 			for i := 1; i <= sp.runs; i++ {
-				result, raw, err := runGuideEvalOnce(t, entry)
+				result, raw, err := runGuideEvalOnce(t, entry, sp.closure...)
 				if err != nil {
 					t.Logf("run %d/%d infrastructure error: %v\nRaw:\n%s", i, sp.runs, err, raw)
 					continue

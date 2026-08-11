@@ -28,12 +28,12 @@ import (
 
 // runGuideEvalOnce runs the real writing-guide pipeline once; infrastructure
 // errors are returned, not fatal, so pass-rate cases count them as failed runs.
-func runGuideEvalOnce(t *testing.T, draft *model.Entry) (*llm.WritingGuideResult, string, error) {
+func runGuideEvalOnce(t *testing.T, draft *model.Entry, closure ...model.ClosureTarget) (*llm.WritingGuideResult, string, error) {
 	t.Helper()
 	runner := evalRunner(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
-	result, err := llm.WritingGuide(ctx, runner, draft)
+	result, err := llm.WritingGuide(ctx, runner, draft, closure)
 	return result, runner.lastText, err
 }
 

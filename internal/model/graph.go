@@ -562,6 +562,42 @@ func (g *Graph) ResolveRefIDs(refs []Ref) ([]Ref, error) {
 	return out, nil
 }
 
+// ClosureTarget describes an entry a draft closes or supersedes, at the depth
+// a reader needs to tell which act the draft performs — which entry, of what
+// kind, and its leading summary sentence — without the target's body.
+type ClosureTarget struct {
+	Relation string // closes | supersedes
+	ID       string
+	Type     EntryType
+	Kind     Kind
+	Summary  string
+}
+
+// ClosureTargets describes an entry's closure edges. An ID with no entry
+// behind it is carried by ID alone rather than dropped: a reader must still
+// see that the edge was declared, and an unresolvable edge is the write
+// gate's business (d-cpt-uh0), not a reason to hide it here.
+func (g *Graph) ClosureTargets(e *Entry) []ClosureTarget {
+	if e == nil || (len(e.Closes) == 0 && len(e.Supersedes) == 0) {
+		return nil
+	}
+	groups := []struct {
+		relation string
+		ids      []string
+	}{{"closes", e.Closes}, {"supersedes", e.Supersedes}}
+	targets := make([]ClosureTarget, 0, len(e.Closes)+len(e.Supersedes))
+	for _, group := range groups {
+		for _, id := range group.ids {
+			t := ClosureTarget{Relation: group.relation, ID: id}
+			if target := g.ByID[id]; target != nil {
+				t.Type, t.Kind, t.Summary = target.Type, target.Kind, target.FirstSummarySentence()
+			}
+			targets = append(targets, t)
+		}
+	}
+	return targets
+}
+
 // ResolveUnionID resolves a bare ID (short {type}-{layer}-{suffix} or
 // unprefixed full form) against the flat union of the local graph and its
 // declared dependencies, with no local-first precedence. Exactly one distinct

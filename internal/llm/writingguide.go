@@ -68,8 +68,8 @@ type WritingGuideResult struct {
 // else — no dialogue, no graph context. That absence is the instrument
 // (d-cpt-20r): only a reader outside the dialogue can run the stands-alone
 // test. Returns an error only for infrastructure failures.
-func WritingGuide(ctx context.Context, runner Runner, entry *model.Entry) (*WritingGuideResult, error) {
-	req, err := renderWritingGuidePrompt(entry)
+func WritingGuide(ctx context.Context, runner Runner, entry *model.Entry, closureTargets []model.ClosureTarget) (*WritingGuideResult, error) {
+	req, err := renderWritingGuidePrompt(entry, closureTargets)
 	if err != nil {
 		return nil, fmt.Errorf("rendering writing-guide prompt: %w", err)
 	}
@@ -103,13 +103,13 @@ func parsedWritingGuideTemplates() (*template.Template, error) {
 // the byte-stable guide text (cacheable prefix across sequential captures,
 // same invariant as pre-flight's universal preamble), the user block carries
 // only the formatted draft.
-func renderWritingGuidePrompt(entry *model.Entry) (Request, error) {
+func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.ClosureTarget) (Request, error) {
 	tmpl, err := parsedWritingGuideTemplates()
 	if err != nil {
 		return Request{}, fmt.Errorf("parsing writing-guide templates: %w", err)
 	}
 
-	data := struct{ Draft string }{Draft: formatDraftForWritingGuide(entry)}
+	data := struct{ Draft string }{Draft: formatDraftForWritingGuide(entry, closureTargets)}
 
 	var sysB, userB strings.Builder
 	if err := tmpl.ExecuteTemplate(&sysB, "writing_guide_system", nil); err != nil {
@@ -126,13 +126,18 @@ func renderWritingGuidePrompt(entry *model.Entry) (Request, error) {
 }
 
 // formatDraftForWritingGuide renders the draft for the isolation-scoped
-// prompt. Deliberately narrower than FormatEntryForPrompt: no ID (drafts have
-// none yet), no closes/supersedes — those are graph-facing concerns outside
-// the guide's scope. Refs stay in (the pointing axis judges whether each
-// ref's relationship reaches the body's narrative), and attachments appear as
+// prompt. Deliberately narrower than FormatEntryForPrompt: no ID, since drafts
+// have none yet. Refs stay in (the pointing axis judges whether each ref's
+// relationship reaches the body's narrative), and attachments appear as
 // filename pointers only, so a body mentioning its attachment is not
 // misjudged as a dangling reference.
-func formatDraftForWritingGuide(e *model.Entry) string {
+//
+// Closure edges carry one summary sentence per target, not the target's body.
+// Without them the guide cannot tell which act the draft performs and read a
+// correctly-pointing retirement done as stranded (s-tac-fu8); with the bodies
+// it would be judging the neighborhood, which is the graph-fit guide's scope
+// (d-cpt-20r).
+func formatDraftForWritingGuide(e *model.Entry, closureTargets []model.ClosureTarget) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Type: %s\n", e.Type)
 	fmt.Fprintf(&b, "Layer: %s\n", e.Layer)
@@ -150,6 +155,19 @@ func formatDraftForWritingGuide(e *model.Entry) string {
 				fmt.Fprintf(&b, ": %s", r.Desc)
 			}
 			b.WriteByte('\n')
+		}
+	}
+	if len(closureTargets) > 0 {
+		b.WriteString("Closure edges:\n")
+		for _, t := range closureTargets {
+			fmt.Fprintf(&b, "  - %s %s", t.Relation, t.ID)
+			if t.Kind != "" {
+				fmt.Fprintf(&b, " (%s %s)", t.Kind, t.Type)
+			}
+			b.WriteByte('\n')
+			if t.Summary != "" {
+				fmt.Fprintf(&b, "    %s\n", t.Summary)
+			}
 		}
 	}
 	if len(e.Attachments) > 0 {

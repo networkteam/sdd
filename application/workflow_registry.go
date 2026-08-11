@@ -159,7 +159,7 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 	if err := registry.RegisterCommand(engine.Command{
 		Doc: engine.FuncDoc{
 			Name: "writingGuide", Doc: "Runs the writing guide against the draft in isolation (d-cpt-20r); findings are drafting input, never a gate. Runs once per capture — a recorded run is never repeated implicitly; requestGuideRecheck clears it for an explicit re-run.",
-			Reads: []string{"body", "entryKind", "layer", "refs", "intent", "attachments"}, Writes: []string{"guideFindings"},
+			Reads: []string{"body", "entryKind", "layer", "refs", "intent", "attachments", "closes", "supersedes"}, Writes: []string{"guideFindings"},
 		},
 		Fn: w.runWorkflowWritingGuide,
 	}); err != nil {
@@ -278,6 +278,8 @@ func (w *WorkflowSession) runWorkflowWritingGuide(ctx *engine.Context) error {
 	draft := EntryDraft{Kind: entryKind, Layer: layer, Body: body}
 	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
 	draft.AttachmentHandles = workflowStoreStrings(ctx.Store, "attachments")
+	draft.Closes = workflowStoreStrings(ctx.Store, "closes")
+	draft.Supersedes = workflowStoreStrings(ctx.Store, "supersedes")
 	for _, ref := range workflowStoreDocuments(ctx.Store, "refs") {
 		id, _ := ref["id"].(string)
 		kind, _ := ref["kind"].(string)

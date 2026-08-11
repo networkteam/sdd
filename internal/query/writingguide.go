@@ -9,6 +9,11 @@ import "github.com/networkteam/sdd/internal/model"
 // graph or dialogue context.
 type WritingGuideQuery struct {
 	Entry *model.Entry
+	// ClosureTargets describes what the draft closes or supersedes, one
+	// summary sentence per target. It is what lets the guide tell which act
+	// the entry performs; the targets' bodies stay out, since judging the
+	// draft against its neighborhood is the graph-fit guide's scope.
+	ClosureTargets []model.ClosureTarget
 }
 
 // GuideSeverity weighs a writing-guide finding. Nothing gates on it — the

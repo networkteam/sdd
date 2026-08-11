@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1570,5 +1571,34 @@ func TestGraph_AllParticipants_DedupedAndSorted(t *testing.T) {
 	want := []string{"Alice", "Christopher", "Claude"}
 	if !slices.Equal(got, want) {
 		t.Errorf("AllParticipants = %v, want %v", got, want)
+	}
+}
+
+func TestClosureTargets(t *testing.T) {
+	g := NewGraph([]*Entry{
+		{ID: "20260101-000000-d-tac-old", Type: TypeDecision, Kind: KindDirective, Layer: LayerTactical,
+			Summary: "The retired commitment. A second sentence that must not travel."},
+		{ID: "20260102-000000-d-cpt-sup", Type: TypeDecision, Kind: KindContract, Layer: LayerConceptual,
+			Content: "Body stands in when no summary is stored. More body."},
+		{ID: "20260103-000000-s-tac-done", Type: TypeSignal, Kind: KindDone, Layer: LayerTactical,
+			Closes:     []string{"20260101-000000-d-tac-old", "20260104-000000-d-tac-absent"},
+			Supersedes: []string{"20260102-000000-d-cpt-sup"}},
+	})
+
+	got := g.ClosureTargets(g.ByID["20260103-000000-s-tac-done"])
+	want := []ClosureTarget{
+		{Relation: "closes", ID: "20260101-000000-d-tac-old", Type: TypeDecision, Kind: KindDirective, Summary: "The retired commitment."},
+		{Relation: "closes", ID: "20260104-000000-d-tac-absent"},
+		{Relation: "supersedes", ID: "20260102-000000-d-cpt-sup", Type: TypeDecision, Kind: KindContract, Summary: "Body stands in when no summary is stored."},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ClosureTargets:\ngot  %+v\nwant %+v", got, want)
+	}
+
+	if targets := g.ClosureTargets(g.ByID["20260101-000000-d-tac-old"]); targets != nil {
+		t.Errorf("an entry with no closure edges must yield nil, got %+v", targets)
+	}
+	if targets := g.ClosureTargets(nil); targets != nil {
+		t.Errorf("nil entry must yield nil, got %+v", targets)
 	}
 }
