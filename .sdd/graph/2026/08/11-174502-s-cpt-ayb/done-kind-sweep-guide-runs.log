@@ -1,0 +1,60 @@
+=== RUN   TestWritingGuideSweep_DoneKind
+=== RUN   TestWritingGuideSweep_DoneKind/sux_dense_multi_commit_delivery
+    writingguide_sweep_eval_test.go:72: GROUND TRUTH expects: one conflation on the a08266b4 overturned-diagnosis paragraph (own lifecycle); form at most minor
+    writingguide_sweep_eval_test.go:73: GROUND TRUTH non-findings: the five-commit batching itself; the commit hashes; the per-commit delivery descriptions
+    writingguide_sweep_eval_test.go:84: run 1/3: 5 finding(s)
+    writingguide_sweep_eval_test.go:86:   [1] axis=form severity=substantive repair=reword
+              quote: Slice 4 of the session-subsystem rebuild (20260730-093011-d-tac-k4q), the transport-vocabulary directive it implements against, the branch-precedence consolidation, and a read-side recovery of lost session endings are delivered in commits `2e961f00`, `7b4fee69`, `1fb24286`, `627ed373` and `a08266b4`
+              reasoning: The opening sentence names four things delivered — slice 4, the transport-vocabulary directive, the branch-precedence consolidation, and the read-side recovery — across five commits, but never says what commit `7b4fee69` delivers; the retention day-parsing fix only surfaces three paragraphs later. A reader who stops at the first sentence, which should stand alone as the entry's summary, would not know this entry also fixes a fail-loud violation in retention parsing.
+    writingguide_sweep_eval_test.go:86:   [2] axis=conflation severity=substantive repair=split
+              quote: the one wg5 item independent of relocation
+              reasoning: The branch-precedence consolidation is described in its own paragraph as 'the one wg5 item independent of relocation' — the draft's own words mark it as unrelated to the slice-4 session-ending work this signal otherwise reports. A future situation investigating effective-branch precedence would need to pull that paragraph alone, not the whole session-ending redesign signal, so this reads as a second coherent thing riding along inside one entry.
+    writingguide_sweep_eval_test.go:86:   [3] axis=conflation severity=minor repair=split
+              quote: Commit `7b4fee69` fixes a defect the smoke test exposed
+              reasoning: Commit `7b4fee69`'s retention-parsing fix is a config fail-loud defect uncovered by a smoke test, with no conceptual tie to the session-ending redesign that is this entry's main subject; a future situation debugging retention-duration parsing would have to pull this whole slice-4 signal to find the one paragraph about it. It's a smaller addition than the branch-precedence item, but still a separately-pullable concern bundled in.
+    writingguide_sweep_eval_test.go:86:   [4] axis=stranding severity=substantive repair=write-in
+              quote: Commit `2e961f00` realizes 20260731-081528-d-cpt-rw7 in full, which is why this signal closes it.
+              reasoning: The body states plainly that commit `2e961f00` is why this signal closes decision d-cpt-rw7, but the Refs list only carries addresses/builds-on/surfaces entries — there is no closes ref to d-cpt-rw7. A reader who works from the graph's ref structure rather than reading the full body would never learn this decision is closed here.
+    writingguide_sweep_eval_test.go:86:   [5] axis=stranding severity=minor repair=write-in
+              quote: the one wg5 item independent of relocation
+              reasoning: 'wg5' and 'relocation' are used to explain why the branch-precedence consolidation is unusual, but neither term is defined in the body nor anchored by a ref; a reader outside the dialogue has no way to know what work-grouping 'wg5' names or what 'relocation' refers to, so the claim of independence can't actually be checked.
+    writingguide_sweep_eval_test.go:84: run 2/3: 4 finding(s)
+    writingguide_sweep_eval_test.go:86:   [1] axis=conflation severity=substantive repair=split
+              quote: the one wg5 item independent of relocation
+              reasoning: The entry's own words mark 627ed373 as "the one wg5 item independent of relocation" — an explicit admission that this branch-precedence consolidation has no conceptual tie to the slice-4 conclude/session-ending work that dominates the rest of the entry. A future reader chasing branch-precedence resolution behavior would have to wade through an unrelated session-ending narrative to find it, and a reader chasing session-ending semantics gains nothing from the branch-precedence detail; this is a second coherent thing bundled in because it landed in the same worktree, not because it shares a concept.
+    writingguide_sweep_eval_test.go:86:   [2] axis=stranding severity=substantive repair=write-in
+              quote: the one wg5 item independent of relocation
+              reasoning: "wg5" and "relocation" are dropped in as if already known, with no definition and no ref anchoring either term. A reader outside the dialogue cannot tell what work-group or effort "wg5" designates, nor what "relocation" work this item is being declared independent of — the qualifier reads as insider shorthand rather than something the entry equips the reader to resolve.
+    writingguide_sweep_eval_test.go:86:   [3] axis=conflation severity=minor repair=split
+              quote: the plan expresses retention in days, but `sessions.retention` accepted only Go durations and silently fell back to the 14-day default on anything else
+              reasoning: The retention-days-parsing fix is a self-contained config-parsing correctness bug with its own lifecycle (a fail-loud violation, found incidentally, now fixed with a named startup error) that has no conceptual link to slice 4's conclude/session-ending semantics. A future reader investigating retention-config behavior would want only this fix, not the surrounding session-ending story, so bundling it here serves batching convenience rather than a shared pull.
+    writingguide_sweep_eval_test.go:86:   [4] axis=stranding severity=minor repair=write-in
+              quote: fixes a defect the smoke test exposed
+              reasoning: "the smoke test" is introduced with a definite article as though already established, but nothing earlier in the entry names a smoke test, and no ref points to it. A reader outside the dialogue can't tell whether this was an automated CI step, a manual check, or part of this run's later verification pass, and has nowhere to look it up.
+    writingguide_sweep_eval_test.go:84: run 3/3: 2 finding(s)
+    writingguide_sweep_eval_test.go:86:   [1] axis=pointing severity=substantive repair=point
+              quote: which is why this signal closes it
+              reasoning: The body states plainly that this signal closes decision d-cpt-rw7 ('Commit 2e961f00 realizes 20260731-081528-d-cpt-rw7 in full, which is why this signal closes it'), but d-cpt-rw7 never appears as a ref target — the Refs list only holds addresses/builds-on/surfaces edges to d-tac-k4q, s-tac-jkw, and s-tac-8ae, and d-cpt-rw7 is mentioned only inside the addresses ref's description of d-tac-k4q. A reader or tool rebuilding decision status by walking Refs edges (the mechanism the entry itself relies on elsewhere, e.g. 'without closing it' for d-tac-k4q) would have no way to discover that d-cpt-rw7 is closed by this signal — the claimed relationship exists only in prose, not in the graph structure meant to carry it.
+    writingguide_sweep_eval_test.go:86:   [2] axis=stranding severity=minor repair=write-in
+              quote: the one wg5 item independent of relocation
+              reasoning: The branch-precedence paragraph calls 627ed373 'the one wg5 item independent of relocation' without ever saying what a wg5 item is or pointing to where that grouping is defined; a reader outside the dialogue can still follow the sentence's plain claim (precedence was inconsistent, now unified) but is left unable to place this fix within whatever larger 'wg5' set the plan uses, which is the kind of dangling label the stranding check exists to catch.
+=== RUN   TestWritingGuideSweep_DoneKind/wts_thin_retirement
+    writingguide_sweep_eval_test.go:72: GROUND TRUTH expects: clean, or at most one minor on the close-vs-settled sentence
+    writingguide_sweep_eval_test.go:73: GROUND TRUTH non-findings: stranding for absent commit hashes (provenance follows the act: a retirement done points at the delivery done)
+    writingguide_sweep_eval_test.go:84: run 1/3: 1 finding(s)
+    writingguide_sweep_eval_test.go:86:   [1] axis=stranding severity=substantive repair=point
+              quote: committed by directive d-tac-w30
+              reasoning: The entry's entire point is to retire directive d-tac-w30 — the body says the command was 'committed by directive d-tac-w30' and this done signal is 'fulfilling the directive's commitment and retiring it' — yet the Refs list contains only a grounded-in edge to the evidence signal (s-tac-4wp), with no ref at all to d-tac-w30 itself. Since status is derived purely from the graph and entries are immutable, a reader (or the derivation logic) has no edge connecting this closing signal to the decision it claims to close; 'd-tac-w30' is a dangling mention exactly like the framework's own example of stranding. This needs a ref (e.g. kind closes) to d-tac-w30 added.
+    writingguide_sweep_eval_test.go:84: run 2/3: 1 finding(s)
+    writingguide_sweep_eval_test.go:86:   [1] axis=stranding severity=substantive repair=point
+              quote: committed by directive d-tac-w30
+              reasoning: The entry's entire point is retiring directive d-tac-w30, and the body names it three times ('committed by directive d-tac-w30', 'fulfilling the directive's commitment and retiring it', 'the directive was a one-shot deliverable'), but Refs lists only s-tac-4wp (grounded-in evidence). A reader landing on this signal has no ref to follow to the directive actually being closed — they'd have to search the graph by the bare ID string. The thing this entry acts on is unanchored.
+    writingguide_sweep_eval_test.go:84: run 3/3: 1 finding(s)
+    writingguide_sweep_eval_test.go:86:   [1] axis=stranding severity=substantive repair=point
+              quote: committed by directive d-tac-w30
+              reasoning: The entry's central act is retiring directive d-tac-w30, and its claims about a fulfilled commitment and a 'stats-vs-view surface separation' that 'holds as built' both depend on knowing what that directive asserted — but d-tac-w30 never appears in Refs. The only ref (s-tac-4wp, grounded-in) anchors the v1 delivery evidence, not the directive being closed. A reader has no ref-based path to verify what was committed or what separation was asserted, leaving the entry's own retirement act unanchored.
+--- PASS: TestWritingGuideSweep_DoneKind (686.77s)
+    --- PASS: TestWritingGuideSweep_DoneKind/sux_dense_multi_commit_delivery (502.81s)
+    --- PASS: TestWritingGuideSweep_DoneKind/wts_thin_retirement (183.96s)
+PASS
+ok  	github.com/networkteam/sdd/internal/llm	686.987s
