@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
-	"strings"
 	"testing"
 
 	sdd "github.com/networkteam/sdd/application"
@@ -22,38 +20,6 @@ func (graphStore) Reconcile(context.Context, string, string) (sdd.ApplyResult, e
 func (graphStore) ReadAttachmentPage(context.Context, string, string, int64, int) (sdd.AttachmentPage, error) {
 	return sdd.AttachmentPage{}, nil
 }
-
-type sessionStore struct{}
-
-func (sessionStore) Create(context.Context, sdd.SessionMetadata) (sdd.StoredSession, error) {
-	return sdd.StoredSession{}, nil
-}
-func (sessionStore) Load(context.Context, sdd.SessionID) (sdd.StoredSession, error) {
-	return sdd.StoredSession{}, nil
-}
-func (sessionStore) List(context.Context, sdd.SessionFilter) ([]sdd.StoredSession, error) {
-	return nil, nil
-}
-func (sessionStore) Append(context.Context, sdd.SessionID, uint64, sdd.SessionAppend) (uint64, error) {
-	return 1, nil
-}
-func (sessionStore) Delete(context.Context, sdd.SessionID) error { return nil }
-
-type blobStore struct{}
-
-func (blobStore) Stage(context.Context, sdd.SessionRef, string, io.Reader) (sdd.StagedBlob, error) {
-	return sdd.StagedBlob{}, nil
-}
-func (blobStore) Stat(context.Context, sdd.SessionRef, string) (sdd.StagedBlob, error) {
-	return sdd.StagedBlob{}, nil
-}
-func (blobStore) Open(context.Context, sdd.SessionRef, string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
-}
-func (blobStore) Retain(context.Context, sdd.SessionRef, string, []string) error { return nil }
-func (blobStore) Release(context.Context, sdd.SessionRef, string) error          { return nil }
-func (blobStore) StagedSessions(context.Context) ([]sdd.SessionRef, error)       { return nil, nil }
-func (blobStore) DeleteStaged(context.Context, sdd.SessionRef) error             { return nil }
 
 type embeddingExecutor struct{}
 
@@ -105,8 +71,8 @@ func (finalizer) Finalize(context.Context, sdd.AppliedMutation) error { return n
 
 var (
 	_ sdd.GraphStore        = graphStore{}
-	_ sdd.SessionStore      = sessionStore{}
-	_ sdd.StagedBlobStore   = blobStore{}
+	_ sdd.SessionStore      = (*memorySessionStore)(nil)
+	_ sdd.StagedBlobStore   = (*memoryStagedBlobStore)(nil)
 	_ sdd.EmbeddingExecutor = embeddingExecutor{}
 	_ sdd.SearchIndexStore  = indexStore{}
 	_ sdd.LLMExecutor       = llmExecutor{}
@@ -118,8 +84,8 @@ func TestExternalCompositionCompilesAgainstPublicPorts(t *testing.T) {
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project:     sdd.ProjectRef{ID: "example", DisplayName: "Example"},
 		Graph:       graphStore{},
-		Sessions:    sessionStore{},
-		StagedBlobs: blobStore{},
+		Sessions:    newMemorySessionStore(),
+		StagedBlobs: newMemoryStagedBlobStore(nil),
 		Embeddings:  embeddingExecutor{},
 		SearchIndex: indexStore{},
 		LLM:         llmExecutor{},
