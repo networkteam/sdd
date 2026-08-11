@@ -52,6 +52,18 @@ Format follows v0.5.0 / v0.5.1:
 
 Highlights = paragraph-worthy items. Other changes = one-liners. Skip housekeeping commits. **Skip README and docs-only changes** — the notes describe what shipped in the CLI binary, not documentation edits to the repo. Save the draft to `.sdd/tmp/vX.Y.Z-notes.md` (gitignored).
 
+**Write plainly, and only as much as needed.** These notes are read by people outside this repo, so:
+
+- **No invented vocabulary.** Use the project's words or ordinary ones. If a term appears nowhere in the graph, the docs, or the code, do not introduce it here — "an untested build", not "a soak build".
+- **Say the thing once.** State what shipped and what a reader must do about it. Do not explain the mechanism behind a command, justify a choice, or add the caveat that occurred to you while writing — a reader who needs that will ask.
+- **Name the user-visible change, not the internal one.** Package and symbol names belong in notes only when a reader has to type them or implement against them.
+
+A prerelease additionally opens with a blockquote saying what it is and the exact command to install it, because every safeguard that keeps it away from stable users also keeps it out of reach of anyone who wants it. One line on what the release is for, one on the safeguard, then:
+
+    curl -sL https://github.com/networkteam/sdd/releases/latest/download/install.sh | sh -s -- vX.Y.Z-alpha.N
+
+The `latest` in that URL fetches the installer script, not the version — the tag argument decides what gets installed. Do not explain that in the notes.
+
 ### 4. Play back and gate on explicit confirmation
 
 Show the user the proposed version, the reasoning, and the full draft. **Wait for an explicit "yes / proceed / ship it"** before running anything. Edits accepted in dialogue ≠ consent — ask if unclear.
