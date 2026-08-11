@@ -152,17 +152,17 @@ func newFixtureEnv(t *testing.T) *fixtureEnv {
 		},
 	})
 	mustRegisterCommand(reg, Command{
-		Doc: FuncDoc{Name: "writingGuide", Doc: "fake writing guide", Reads: []string{"body", "entryKind", "layer", "refs", "intent"}, Writes: []string{"guideFindings", "guideDraftDigest"}},
+		Doc: FuncDoc{Name: "writingGuide", Doc: "fake writing guide (once-only, like the real op)", Reads: []string{"body", "entryKind", "layer", "refs", "intent"}, Writes: []string{"guideFindings"}},
 		Fn: func(ctx *Context) error {
+			if v, ok := ctx.Store.Get("guideFindings"); ok && v != nil {
+				return nil
+			}
 			env.guideCalls++
 			findings := env.guideFindings
 			if findings == nil {
 				findings = []query.GuideFinding{}
 			}
-			if err := ctx.Store.WriteEngine("guideFindings", findings); err != nil {
-				return err
-			}
-			return ctx.Store.WriteEngine("guideDraftDigest", fmt.Sprintf("digest-%d", env.guideCalls))
+			return ctx.Store.WriteEngine("guideFindings", findings)
 		},
 	})
 
@@ -304,7 +304,7 @@ func TestCapture_WritingGuideFindingsServeReviewThenProceed(t *testing.T) {
 	}
 }
 
-func TestCapture_WritingGuideReviseReturnsToAssembleAndReruns(t *testing.T) {
+func TestCapture_WritingGuideRunsOncePerCapture(t *testing.T) {
 	env := newFixtureEnv(t)
 	env.guideFindings = []query.GuideFinding{{
 		Reasoning: "removing the second sentence loses nothing", Axis: "dilution",
@@ -323,22 +323,70 @@ func TestCapture_WritingGuideReviseReturnsToAssembleAndReruns(t *testing.T) {
 		t.Fatalf("step = %s, want guideReview", sv.Step)
 	}
 
-	// Revise carries the changed body back to assemble; the still-complete
-	// draft cascades through the guide again — now clean — to playback.
-	env.guideFindings = nil
+	// Revise carries the changed body back through assemble, but the guide
+	// judged this capture already — no second run, no second review; the
+	// revised draft lands at playback.
 	sv, err = env.session.Answer(sv.Instance, "guideReview", "revise",
 		map[string]any{"body": "A tactical gap: the fixture observes one thing."}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sv.Step != "playback" {
-		t.Fatalf("after clean revise step = %s, want playback", sv.Step)
+		t.Fatalf("after revise step = %s, want playback", sv.Step)
 	}
-	if env.guideCalls != 2 {
-		t.Fatalf("writingGuide ran %d times, want 2 (re-run after revise)", env.guideCalls)
+	if env.guideCalls != 1 {
+		t.Fatalf("writingGuide ran %d times, want 1 (once per capture)", env.guideCalls)
 	}
 	if !strings.Contains(sv.Instructions, "observes one thing") {
 		t.Errorf("playback should render the revised body, got %q", sv.Instructions)
+	}
+
+	// A playback adjust passes through the guide step without another run.
+	sv, err = env.session.Answer(sv.Instance, "playback", "adjust",
+		map[string]any{"topics": []any{"cli/ux", "agent/ux"}}, "tweak topics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "playback" {
+		t.Fatalf("after adjust step = %s, want playback", sv.Step)
+	}
+	if env.guideCalls != 1 {
+		t.Fatalf("writingGuide ran %d times after adjust, want still 1", env.guideCalls)
+	}
+}
+
+func TestCapture_WritingGuideRecheckRunsFreshOnReworkedDraft(t *testing.T) {
+	env := newFixtureEnv(t)
+	env.guideFindings = []query.GuideFinding{{
+		Reasoning: "two commitments fused", Axis: "conflation",
+		Quote: "the fixture observes something", Repair: "split", Severity: query.GuideSubstantive,
+	}}
+
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, fullDraft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "guideReview" {
+		t.Fatalf("step = %s, want guideReview", sv.Step)
+	}
+
+	// Recheck discards the recorded run: the reworked draft goes back
+	// through assemble and the guide judges it fresh — clean this time.
+	env.guideFindings = nil
+	sv, err = env.session.Answer(sv.Instance, "guideReview", "recheck",
+		map[string]any{"body": "A tactical gap: a completely reworked observation."}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step != "playback" {
+		t.Fatalf("after recheck step = %s, want playback", sv.Step)
+	}
+	if env.guideCalls != 2 {
+		t.Fatalf("writingGuide ran %d times, want 2 (fresh run after recheck)", env.guideCalls)
 	}
 }
 

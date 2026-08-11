@@ -27,6 +27,12 @@ const (
 	// ([]query.GuideFinding). Written by the guide op's contract
 	// (writingGuide, wired by the shell); read here by noGuideFindings.
 	fieldGuideFindings = "guideFindings"
+	// fieldGuideReviewed marks that the agent has judged the current guide
+	// findings (recordGuideReview). The guide runs once per capture: with
+	// this set, the guide step passes through to playback instead of
+	// re-serving the review; requestGuideRecheck clears it together with the
+	// findings for an explicit re-run.
+	fieldGuideReviewed = "guideReviewed"
 )
 
 // playbackConfirmation is the value of fieldPlaybackConfirmation.
@@ -289,6 +295,23 @@ func registerBuiltinPredicates(r *Registry) {
 		Fn:          noGuideFindings,
 		FailMessage: "the writing guide returned findings",
 	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name:  "guideReviewed",
+			Doc:   "The agent has judged the current guide findings (recorded by recordGuideReview).",
+			Reads: []string{fieldGuideReviewed},
+		},
+		Fn: func(ctx *Context) (bool, error) {
+			v, ok := ctx.Store.Get(fieldGuideReviewed)
+			if !ok {
+				return false, nil
+			}
+			reviewed, _ := v.(bool)
+			return reviewed, nil
+		},
+		FailMessage: "the guide findings have not been reviewed",
+	})
 }
 
 // registerBuiltinCommands registers the dependency-free trust machinery.
@@ -318,6 +341,32 @@ func registerBuiltinCommands(r *Registry) {
 		},
 		Fn: func(ctx *Context) error {
 			return ctx.Store.WriteEngine(fieldPreflightOverride, true)
+		},
+	})
+
+	mustRegisterCommand(r, Command{
+		Doc: FuncDoc{
+			Name:   "recordGuideReview",
+			Doc:    "Records that the agent judged the current guide findings; the guide step then passes through instead of re-serving the review.",
+			Reads:  []string{fieldGuideFindings},
+			Writes: []string{fieldGuideReviewed},
+		},
+		Fn: func(ctx *Context) error {
+			return ctx.Store.WriteEngine(fieldGuideReviewed, true)
+		},
+	})
+
+	mustRegisterCommand(r, Command{
+		Doc: FuncDoc{
+			Name:   "requestGuideRecheck",
+			Doc:    "Clears the recorded guide run so the writing guide runs fresh on the next arrival — the explicit path for re-checking a substantially reworked draft.",
+			Writes: []string{fieldGuideFindings, fieldGuideReviewed},
+		},
+		Fn: func(ctx *Context) error {
+			if err := ctx.Store.WriteEngine(fieldGuideFindings, nil); err != nil {
+				return err
+			}
+			return ctx.Store.WriteEngine(fieldGuideReviewed, nil)
 		},
 	})
 }
@@ -604,7 +653,9 @@ func noHighFindings(ctx *Context) (bool, error) {
 // guideFindings, so a missing field means the op has not run for this draft.
 func noGuideFindings(ctx *Context) (bool, error) {
 	v, ok := ctx.Store.Get(fieldGuideFindings)
-	if !ok {
+	if !ok || v == nil {
+		// Absent or cleared (requestGuideRecheck) — the guide has not run
+		// for the current draft.
 		return false, nil
 	}
 	normalized, err := VarType{Base: TypeGuideFindings}.ValidateValue(v)

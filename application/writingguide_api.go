@@ -41,6 +41,7 @@ func (a *Application) WritingGuideCheck(ctx context.Context, identity RequestIde
 	entry := &model.Entry{
 		Type: entryType, Kind: kind, Layer: layer,
 		Intent: model.Intent(draft.Intent), Content: draft.Body,
+		Attachments: append([]string(nil), draft.AttachmentHandles...),
 	}
 	for _, ref := range draft.Refs {
 		entry.Refs = append(entry.Refs, model.Ref{ID: ref.ID, Kind: model.RefKind(ref.Kind), Desc: ref.Desc})

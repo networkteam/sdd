@@ -127,9 +127,11 @@ func renderWritingGuidePrompt(entry *model.Entry) (Request, error) {
 
 // formatDraftForWritingGuide renders the draft for the isolation-scoped
 // prompt. Deliberately narrower than FormatEntryForPrompt: no ID (drafts have
-// none yet), no closes/supersedes/attachments — those are graph-facing
-// concerns outside the guide's scope. Refs stay in: the pointing axis judges
-// whether each ref's relationship reaches the body's narrative.
+// none yet), no closes/supersedes — those are graph-facing concerns outside
+// the guide's scope. Refs stay in (the pointing axis judges whether each
+// ref's relationship reaches the body's narrative), and attachments appear as
+// filename pointers only, so a body mentioning its attachment is not
+// misjudged as a dangling reference.
 func formatDraftForWritingGuide(e *model.Entry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Type: %s\n", e.Type)
@@ -149,6 +151,9 @@ func formatDraftForWritingGuide(e *model.Entry) string {
 			}
 			b.WriteByte('\n')
 		}
+	}
+	if len(e.Attachments) > 0 {
+		fmt.Fprintf(&b, "Attachments: %s\n", strings.Join(e.Attachments, ", "))
 	}
 	fmt.Fprintf(&b, "\n%s", e.Content)
 	return b.String()

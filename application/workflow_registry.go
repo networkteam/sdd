@@ -1,8 +1,6 @@
 package application
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -160,8 +158,8 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 	}
 	if err := registry.RegisterCommand(engine.Command{
 		Doc: engine.FuncDoc{
-			Name: "writingGuide", Doc: "Runs the writing guide against the draft in isolation (d-cpt-20r); findings are drafting input, never a gate. Skips the LLM call when the guide-relevant draft fields are unchanged since the last run.",
-			Reads: []string{"body", "entryKind", "layer", "refs", "intent"}, Writes: []string{"guideFindings", "guideDraftDigest"},
+			Name: "writingGuide", Doc: "Runs the writing guide against the draft in isolation (d-cpt-20r); findings are drafting input, never a gate. Runs once per capture — a recorded run is never repeated implicitly; requestGuideRecheck clears it for an explicit re-run.",
+			Reads: []string{"body", "entryKind", "layer", "refs", "intent", "attachments"}, Writes: []string{"guideFindings"},
 		},
 		Fn: w.runWorkflowWritingGuide,
 	}); err != nil {
@@ -254,11 +252,17 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 }
 
 // runWorkflowWritingGuide runs the writing guide op between assemble and
-// playback. The digest skip keeps adjust loops cheap: only a change to a
-// field the guide actually reads re-runs the LLM; anything else keeps the
-// stored findings. An LLM infrastructure failure returns loudly — the op
-// re-runs on the next report rather than degrading to a silent pass.
+// playback — once per capture. A recorded run (guideFindings present) is
+// never repeated implicitly: revises and adjusts pass through, because a
+// second pass judges the repairs instead of the draft and drifts toward
+// find-something escalation; re-running is the agent's explicit choice
+// (requestGuideRecheck). An LLM infrastructure failure returns loudly — the
+// op re-runs on the next report rather than degrading to a silent pass.
 func (w *WorkflowSession) runWorkflowWritingGuide(ctx *engine.Context) error {
+	// A nil value is a cleared run (requestGuideRecheck), not a recorded one.
+	if v, ok := ctx.Store.Get("guideFindings"); ok && v != nil {
+		return nil
+	}
 	body, ok := workflowStoreString(ctx.Store, "body")
 	if !ok {
 		return fmt.Errorf("writingGuide: body is not set")
@@ -273,17 +277,12 @@ func (w *WorkflowSession) runWorkflowWritingGuide(ctx *engine.Context) error {
 	}
 	draft := EntryDraft{Kind: entryKind, Layer: layer, Body: body}
 	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
+	draft.AttachmentHandles = workflowStoreStrings(ctx.Store, "attachments")
 	for _, ref := range workflowStoreDocuments(ctx.Store, "refs") {
 		id, _ := ref["id"].(string)
 		kind, _ := ref["kind"].(string)
 		desc, _ := ref["desc"].(string)
 		draft.Refs = append(draft.Refs, EntryRef{ID: id, Kind: kind, Desc: desc})
-	}
-	digest := writingGuideDigest(draft)
-	if prev, ok := workflowStoreString(ctx.Store, "guideDraftDigest"); ok && prev == digest {
-		if _, ok := ctx.Store.Get("guideFindings"); ok {
-			return nil
-		}
 	}
 	findings, err := w.app.WritingGuideCheck(w.ctx, w.identity, w.project, draft)
 	if err != nil {
@@ -296,28 +295,7 @@ func (w *WorkflowSession) runWorkflowWritingGuide(ctx *engine.Context) error {
 	if err := ctx.Store.WriteEngine("guideFindings", guideFindings); err != nil {
 		return fmt.Errorf("writingGuide: %w", err)
 	}
-	if err := ctx.Store.WriteEngine("guideDraftDigest", digest); err != nil {
-		return fmt.Errorf("writingGuide: %w", err)
-	}
 	return nil
-}
-
-// writingGuideDigest fingerprints exactly the draft fields the guide prompt
-// renders, so the skip test and the prompt can never disagree about what
-// "unchanged" means.
-func writingGuideDigest(draft EntryDraft) string {
-	h := sha256.New()
-	for _, part := range []string{draft.Kind, draft.Layer, draft.Intent, draft.Body} {
-		h.Write([]byte(part))
-		h.Write([]byte{0})
-	}
-	for _, ref := range draft.Refs {
-		for _, part := range []string{ref.ID, ref.Kind, ref.Desc} {
-			h.Write([]byte(part))
-			h.Write([]byte{0})
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {

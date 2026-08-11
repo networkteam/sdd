@@ -357,12 +357,9 @@ func newBootstrapCaptureEnv(t *testing.T) *bootstrapCaptureEnv {
 		Fn:  func(*Context) error { return nil },
 	})
 	mustRegisterCommand(reg, Command{
-		Doc: FuncDoc{Name: "writingGuide", Doc: "fake clean-pass writing guide", Reads: []string{"body", "entryKind", "layer", "refs", "intent"}, Writes: []string{"guideFindings", "guideDraftDigest"}},
+		Doc: FuncDoc{Name: "writingGuide", Doc: "fake clean-pass writing guide", Reads: []string{"body", "entryKind", "layer", "refs", "intent"}, Writes: []string{"guideFindings"}},
 		Fn: func(ctx *Context) error {
-			if err := ctx.Store.WriteEngine("guideFindings", []query.GuideFinding{}); err != nil {
-				return err
-			}
-			return ctx.Store.WriteEngine("guideDraftDigest", "digest")
+			return ctx.Store.WriteEngine("guideFindings", []query.GuideFinding{})
 		},
 	})
 
