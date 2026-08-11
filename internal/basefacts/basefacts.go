@@ -33,6 +33,12 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	}
 	entries = append(entries, viewGrammar)
 
+	principles, err := build(PrinciplesFactID, principlesFrontmatter, principlesBody)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, principles)
+
 	return entries, nil
 }
 

@@ -3504,10 +3504,15 @@ func TestEmbeddedCatchupProcedure(t *testing.T) {
 	}
 	// The multi-section layout rendered for real: lane headers present, and
 	// the fixture gap surfaces in the open-and-warm lane by its summary.
-	for _, want := range []string{"Recent done", "Open and warm", "Pre-flight verdict oscillation"} {
+	for _, want := range []string{"Open loops", "Open and warm", "Pre-flight verdict oscillation"} {
 		if !strings.Contains(serve.Instructions, want) {
 			t.Fatalf("compose unit should carry %q from the injected lanes, got %q", want, serve.Instructions)
 		}
+	}
+	// A lane that matched nothing contributes nothing — the fixture has no done
+	// signals, so the recent-done lane is absent rather than a bare header.
+	if strings.Contains(serve.Instructions, "Recent done") {
+		t.Fatalf("an empty lane should not serve its header, got %q", serve.Instructions)
 	}
 
 	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": map[string]any{

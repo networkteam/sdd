@@ -60,6 +60,7 @@ var functionReference = map[string]referenceItem{
 }
 
 var renderReference = map[string]string{
+	"as-bodies":             "Full entry bodies with an identity header, demoted beneath the section heading; pair with narrow filters.",
 	"as-list":               "Flat entry list.",
 	"as-grouped":            "Grouped entries; requires group(by(...)).",
 	"as-counts":             "Per-topic count and heat rows over the filtered set.",
