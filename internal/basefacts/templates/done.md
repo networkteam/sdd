@@ -14,7 +14,7 @@ summary: >-
 
 # Recording completed work — the done kind
 
-A done records that an act of work happened: a meeting held, a message sent, a batch roasted and tasted, code shipped. The act lies in the past — a done never records intention or work still underway. Its reader arrives asking three things — what happened, can I trust it, where do I look further — and a good done is the shortest record that answers all three.
+A done records that an act of work happened: a meeting held, a message sent, a batch roasted and tasted, code shipped. It is a signal — something noticed, not something committed to: it observes that the world already changed, which is why the act lies in the past and a done never records intention or work still underway. Its reader arrives asking three things — what happened, can I trust it, where do I look further — and a good done is the shortest record that answers all three.
 
 **Say what happened, plainly.** Name the act in the words of the work itself — what was made, changed, or settled, concrete enough that a reader recognizes the delivered thing without opening anything else. No invented shorthand, no abstraction that summarizes the acts away. And stop where the evidence takes over: detail the cited trace already carries is not repeated — a commit already lists which files changed, an attached protocol already holds the readings. The body keeps to the act itself, stated in its own words; the detail lives with the trace.
 
