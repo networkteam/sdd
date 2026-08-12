@@ -1353,6 +1353,11 @@ func validateProcedureForks(g *Graph) {
 	}
 }
 
+// DoneAnchorRequirement is the done kind's structural rule, declared once so
+// the write-path validator and the rendered kind fact serve the same words —
+// the served rule cannot drift from what capture enforces.
+const DoneAnchorRequirement = "done signal must carry at least one closes or refs (target of the completion claim)"
+
 // validateDoneSignalRefs checks that a done-kind signal carries at least one
 // closes or refs entry. Required structurally because a done signal is a
 // fact-of-completion pointing at the commitment it fulfills — a target is the
@@ -1364,7 +1369,7 @@ func validateDoneSignalRefs(e *Entry) {
 	if len(e.Closes) == 0 && len(e.Refs) == 0 {
 		e.Warnings = append(e.Warnings, Warning{
 			Field:   "closes",
-			Message: "done signal must carry at least one closes or refs (target of the completion claim)",
+			Message: DoneAnchorRequirement,
 		})
 	}
 }

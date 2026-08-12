@@ -87,28 +87,33 @@ const (
 	KindProcedure  Kind = "procedure"
 )
 
-// signalKinds is the set of kinds valid on type: signal entries.
-var signalKinds = map[Kind]bool{
-	KindGap:        true,
-	KindFact:       true,
-	KindQuestion:   true,
-	KindInsight:    true,
-	KindDone:       true,
-	KindActor:      true,
-	KindAnnotation: true,
+// signalKindOrder is the canonical enumeration of kinds valid on type: signal
+// entries; signalKinds derives from it so set and order share one declaration.
+var signalKindOrder = []Kind{KindGap, KindFact, KindQuestion, KindInsight, KindDone, KindActor, KindAnnotation}
+
+// decisionKindOrder is the canonical enumeration of kinds valid on
+// type: decision entries.
+var decisionKindOrder = []Kind{KindDirective, KindActivity, KindPlan, KindContract, KindAspiration, KindRole, KindFocus, KindProcedure}
+
+var signalKinds = kindSet(signalKindOrder)
+var decisionKinds = kindSet(decisionKindOrder)
+
+func kindSet(order []Kind) map[Kind]bool {
+	set := make(map[Kind]bool, len(order))
+	for _, k := range order {
+		set[k] = true
+	}
+	return set
 }
 
-// decisionKinds is the set of kinds valid on type: decision entries.
-var decisionKinds = map[Kind]bool{
-	KindDirective:  true,
-	KindActivity:   true,
-	KindPlan:       true,
-	KindContract:   true,
-	KindAspiration: true,
-	KindRole:       true,
-	KindFocus:      true,
-	KindProcedure:  true,
-}
+// SignalKindValues lists the kinds valid on type: signal entries in canonical
+// order, for surfaces that render or generate from the enumeration instead of
+// restating it (mirrors RefKindValues).
+func SignalKindValues() []Kind { return append([]Kind(nil), signalKindOrder...) }
+
+// DecisionKindValues lists the kinds valid on type: decision entries in
+// canonical order.
+func DecisionKindValues() []Kind { return append([]Kind(nil), decisionKindOrder...) }
 
 // ParseTypeFilter resolves a user-supplied type filter — an abbreviation
 // ("s"/"d") or the full canonical name ("signal"/"decision") — to its

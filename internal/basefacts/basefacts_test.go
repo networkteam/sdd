@@ -115,6 +115,70 @@ func TestViewGrammarBodyIsGeneratedAndHostNeutral(t *testing.T) {
 	}
 }
 
+// TestEntriesShipDoneKindFact covers the done authoring fact: reached from the
+// capture lane rather than the pull-side index, so no index enrollment, and its
+// mechanics block renders from the model declarations that enforce the rules.
+func TestEntriesShipDoneKindFact(t *testing.T) {
+	fact := factByID(t, DoneFactID)
+	if fact.Index != nil {
+		t.Errorf("done fact carries index enrollment %+v, want none — authoring facts are teased from the capture lane", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("done fact has no summary; every reading surface needs one")
+	}
+	if !strings.Contains(fact.Content, "## Mechanics") {
+		t.Error("done fact body missing the rendered mechanics block")
+	}
+	if !strings.Contains(fact.Content, model.DoneAnchorRequirement) {
+		t.Error("done fact mechanics do not carry the declared anchor rule the validator enforces")
+	}
+	if strings.Contains(fact.Content, "{{") {
+		t.Error("done fact body contains an unrendered template placeholder")
+	}
+}
+
+// TestDoneFactBodyIsSelfContained holds the done fact to the same
+// framework-generic standard as the principles fact: it ships to projects that
+// hold none of this repository's source or graph.
+func TestDoneFactBodyIsSelfContained(t *testing.T) {
+	body := factByID(t, DoneFactID).Content
+
+	for _, want := range []string{"# Recording completed work", "Say what happened, plainly", "The doing is part of the record", "One act, one done", "names what it completes", "Evidence follows the act", "not what was chosen", "Cover the whole commitment", "The baseline goes without saying", "Status is terminal; the loop is not", "shape of the work"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("done fact body missing %q", want)
+		}
+	}
+	if loc := entryIDPattern.FindString(body); loc != "" {
+		t.Errorf("done fact cites project entry %q; a base fact carries no graph-local references", loc)
+	}
+	for _, host := range []string{"sdd ", "MCP", "CLI"} {
+		if strings.Contains(body, host) {
+			t.Errorf("done fact body contains host-specific reference %q", host)
+		}
+	}
+}
+
+// TestAllBaseFactsRenderAndValidate is the table test the composition layer is
+// held to: every shipped base fact must pass full entry validation, so a
+// template or frontmatter mistake fails the build here rather than surfacing
+// at a reader's graph load.
+func TestAllBaseFactsRenderAndValidate(t *testing.T) {
+	entries, err := Entries(testVocabulary())
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("no base facts shipped")
+	}
+	graph := model.NewGraph(nil)
+	for _, fact := range entries {
+		model.ValidateEntry(fact, graph)
+		for _, w := range fact.Warnings {
+			t.Errorf("base fact %s invalid: %s: %s", fact.ID, w.Field, w.Message)
+		}
+	}
+}
+
 func TestBuildRejectsNonFact(t *testing.T) {
 	_, err := build("20260101-000000-d-cpt-xxx", "type: decision\nlayer: conceptual\nkind: directive\nconfidence: low\nintent: guiding\n", "body")
 	if err == nil {

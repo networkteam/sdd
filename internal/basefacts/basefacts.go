@@ -39,6 +39,16 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	}
 	entries = append(entries, principles)
 
+	doneContent, err := doneFactContent()
+	if err != nil {
+		return nil, err
+	}
+	doneFact, err := buildContent(DoneFactID, doneContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, doneFact)
+
 	return entries, nil
 }
 
@@ -48,7 +58,12 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 // it. A base fact must be exactly a kind: fact signal — anything else is a
 // build mistake, caught here so it never reaches a graph.
 func build(id, frontmatter, body string) (*model.Entry, error) {
-	content := "---\n" + frontmatter + "---\n\n" + body
+	return buildContent(id, "---\n"+frontmatter+"---\n\n"+body)
+}
+
+// buildContent is build for facts authored as whole-entry templates, where
+// frontmatter and body arrive already rendered as one document.
+func buildContent(id, content string) (*model.Entry, error) {
 	entry, err := model.ParseEntry(id+".md", content)
 	if err != nil {
 		return nil, fmt.Errorf("parsing base fact %s: %w", id, err)
