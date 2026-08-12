@@ -2577,6 +2577,107 @@ func TestFramingLaneDedupAfterWrite(t *testing.T) {
 	}
 }
 
+// TestFramingSectionsDedupIndependently pins the declaration granularity the
+// per-lane dedup depends on: the shell declares its overview sections one lane
+// each, so a write that changes only the participants section re-serves that
+// section alone while the stable aspirations, guiding directives, and focus
+// sections stay stubbed. Joined into a single lane all four re-serve on any one
+// change, the reproduced regression.
+func TestFramingSectionsDedupIndependently(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	writeFramingFixture := func(name, frontmatter string) {
+		t.Helper()
+		path := filepath.Join(graphDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(frontmatter), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFramingFixture("2026/06/01-100000-d-stg-asp.md", `---
+type: decision
+layer: strategic
+kind: aspiration
+confidence: high
+summary: An aspiration the framing's aspirations lane ranks, stable across the write this test makes.
+---
+
+Body.
+`)
+	writeFramingFixture("2026/06/01-100100-d-cpt-gui.md", `---
+type: decision
+layer: conceptual
+kind: directive
+intent: guiding
+confidence: high
+summary: A guiding directive the framing's directives lane ranks, stable across the write this test makes.
+---
+
+Body.
+`)
+	writeFramingFixture("2026/06/01-100200-d-tac-foc.md", `---
+type: decision
+layer: tactical
+kind: focus
+confidence: high
+summary: A focus the framing's focus lane renders, stable across the write this test makes.
+---
+
+Body.
+`)
+	writeFramingFixture("2026/06/01-100300-s-prc-ada.md", `---
+type: signal
+layer: process
+kind: actor
+confidence: high
+canonical: Ada
+summary: An actor the framing's participants lane groups.
+---
+
+Body.
+`)
+
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+	door := openSession(t, cs)
+	stable := []string{"Aspirations", "Guiding directives", "## Focus", "## Participants"}
+	for _, want := range stable {
+		if !strings.Contains(door.Framing, want) {
+			t.Fatalf("precondition: the door must serve the %q section, got %q", want, door.Framing)
+		}
+	}
+	var converged mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{}, &converged)
+	if converged.Framing != "" {
+		t.Fatalf("with nothing changed, a reorient converges to empty framing, got %q", converged.Framing)
+	}
+
+	// A second actor changes the participants section and nothing else.
+	writeFramingFixture("2026/06/02-100000-s-prc-gra.md", `---
+type: signal
+layer: process
+kind: actor
+confidence: high
+canonical: Grace
+summary: A second actor, written after the door served, so only the participants section changes.
+---
+
+Body.
+`)
+
+	var afterWrite mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{}, &afterWrite)
+	if !strings.Contains(afterWrite.Framing, "Grace") {
+		t.Fatalf("the changed participants section must re-serve, got %q", afterWrite.Framing)
+	}
+	for _, unchanged := range []string{"Aspirations", "Guiding directives", "## Focus"} {
+		if strings.Contains(afterWrite.Framing, unchanged) {
+			t.Errorf("the unchanged %q section must stay stubbed — its lane is joined with participants, got %q", unchanged, afterWrite.Framing)
+		}
+	}
+}
+
 // TestReorientCarriesCompactionBreadcrumb pins the B4 self-trigger: a compacted
 // agent's reorient stubs blocks it already saw, and those stubs (both the resume
 // instructions and the per-step reminder) must name the fullReplay escape — a
