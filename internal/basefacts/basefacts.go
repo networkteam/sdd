@@ -49,6 +49,16 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	}
 	entries = append(entries, doneFact)
 
+	overviewContent, err := overviewFactContent()
+	if err != nil {
+		return nil, err
+	}
+	overviewFact, err := buildContent(OverviewFactID, overviewContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, overviewFact)
+
 	return entries, nil
 }
 

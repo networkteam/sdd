@@ -860,6 +860,23 @@ Project-local reference override.
 	if err := os.WriteFile(path, []byte(override), 0644); err != nil {
 		t.Fatal(err)
 	}
+	overviewPath := filepath.Join(graphDir, "2026/08/12-180000-s-prc-typ.md")
+	if err := os.MkdirAll(filepath.Dir(overviewPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const overviewOverride = `---
+type: signal
+layer: process
+kind: fact
+topics: [type-system/kinds]
+summary: Project override deliberately leaves the type-system overview out of session discovery.
+---
+
+Project-local reference override.
+`
+	if err := os.WriteFile(overviewPath, []byte(overviewOverride), 0644); err != nil {
+		t.Fatal(err)
+	}
 	env := newTestServer(t, nil, graphDir, "")
 	serve := openSession(t, connect(t, env.srv))
 	if strings.Contains(serve.Instructions, "Reference facts available") {
@@ -897,8 +914,8 @@ Unsafe project-local reference override.
 	if strings.Contains(serve.Instructions, "## Injected block") {
 		t.Fatalf("opening serve leaked injected content from a malformed fact index:\n%s", serve.Instructions)
 	}
-	if strings.Contains(serve.Instructions, "Reference facts available") {
-		t.Fatalf("opening serve rendered a malformed fact as an indexed pointer:\n%s", serve.Instructions)
+	if strings.Contains(serve.Instructions, "20260717-110000-s-prc-vwg") {
+		t.Fatalf("opening serve rendered the malformed fact as an indexed pointer:\n%s", serve.Instructions)
 	}
 }
 

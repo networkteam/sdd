@@ -20,13 +20,18 @@ func testVocabulary() viewlayout.Vocabulary {
 }
 
 // factByID returns the shipped base fact with the given ID, asserting the
-// contract every base fact shares: a kind: fact signal, embedded, carrying
-// neither participants nor project refs.
+// contract every base fact shares: a kind: fact signal, embedded, carrying no
+// participants and no project refs — a ref may only point at another base
+// fact, since project entries do not exist in the graphs a base fact ships to.
 func factByID(t *testing.T, id string) *model.Entry {
 	t.Helper()
 	entries, err := Entries(testVocabulary())
 	if err != nil {
 		t.Fatalf("Entries: %v", err)
+	}
+	baseIDs := make(map[string]bool, len(entries))
+	for _, fact := range entries {
+		baseIDs[fact.ID] = true
 	}
 	for _, fact := range entries {
 		if fact.ID != id {
@@ -41,8 +46,10 @@ func factByID(t *testing.T, id string) *model.Entry {
 		if len(fact.Participants) != 0 {
 			t.Errorf("base fact carries participants %v, want none", fact.Participants)
 		}
-		if len(fact.Refs) != 0 {
-			t.Errorf("base fact carries refs %v, want none", fact.Refs)
+		for _, ref := range fact.Refs {
+			if !baseIDs[ref.ID] {
+				t.Errorf("base fact refs %s, which is not a base fact — project refs never ship embedded", ref.ID)
+			}
 		}
 		return fact
 	}
@@ -161,7 +168,8 @@ func TestDoneFactBodyIsSelfContained(t *testing.T) {
 // TestAllBaseFactsRenderAndValidate is the table test the composition layer is
 // held to: every shipped base fact must pass full entry validation, so a
 // template or frontmatter mistake fails the build here rather than surfacing
-// at a reader's graph load.
+// at a reader's graph load. Validation runs against the base-fact set itself,
+// since fact-to-fact refs (overview → authoring facts) must resolve.
 func TestAllBaseFactsRenderAndValidate(t *testing.T) {
 	entries, err := Entries(testVocabulary())
 	if err != nil {
@@ -170,11 +178,63 @@ func TestAllBaseFactsRenderAndValidate(t *testing.T) {
 	if len(entries) == 0 {
 		t.Fatal("no base facts shipped")
 	}
-	graph := model.NewGraph(nil)
+	graph := model.NewGraph(entries)
 	for _, fact := range entries {
 		model.ValidateEntry(fact, graph)
 		for _, w := range fact.Warnings {
 			t.Errorf("base fact %s invalid: %s: %s", fact.ID, w.Field, w.Message)
+		}
+	}
+}
+
+// TestEntriesShipOverviewFact covers the type-system overview: the indexed
+// introduction whose kind lists render from the model enumeration and which
+// references every authoring fact.
+func TestEntriesShipOverviewFact(t *testing.T) {
+	fact := factByID(t, OverviewFactID)
+	if fact.Index == nil || fact.Index.Topic.String() != "type-system/kinds" {
+		t.Errorf("fact index = %+v, want enrollment under type-system/kinds", fact.Index)
+	}
+	if len(fact.Refs) == 0 || fact.Refs[0].ID != DoneFactID {
+		t.Errorf("overview refs = %v, want the done authoring fact", fact.Refs)
+	}
+	for _, kind := range append(model.SignalKindValues(), model.DecisionKindValues()...) {
+		if !strings.Contains(fact.Content, "`"+string(kind)+"`") {
+			t.Errorf("overview body missing kind %q in its generated lists", kind)
+		}
+	}
+	if strings.Contains(fact.Content, "{{") {
+		t.Error("overview body contains an unrendered template placeholder")
+	}
+}
+
+// TestEveryKindHasAQuestion pins the completeness rule: a kind declared in the
+// model without an authored question fails here, not at a reader's graph load.
+func TestEveryKindHasAQuestion(t *testing.T) {
+	for _, kind := range append(model.SignalKindValues(), model.DecisionKindValues()...) {
+		if q, ok := kindQuestions[kind]; !ok || q == "" {
+			t.Errorf("kind %q has no question in kindQuestions", kind)
+		}
+	}
+}
+
+// TestOverviewBodyIsSelfContained holds the overview to the framework-generic
+// standard, with the one sanctioned exception of base-fact IDs in frontmatter
+// refs (the body itself stays ID-free).
+func TestOverviewBodyIsSelfContained(t *testing.T) {
+	body := factByID(t, OverviewFactID).Content
+
+	for _, want := range []string{"# The type system", "Signal kinds", "Decision kinds", "force, not completion", "WHAT vs THAT", "Standing constraints are guiding directives", "outside vs here", "Retirement follows the same split", "layer", "This is the map, not the depth"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("overview body missing %q", want)
+		}
+	}
+	if loc := entryIDPattern.FindString(body); loc != "" {
+		t.Errorf("overview body cites entry %q; pointers to authoring facts live in refs, not prose", loc)
+	}
+	for _, host := range []string{"sdd ", "MCP", "CLI"} {
+		if strings.Contains(body, host) {
+			t.Errorf("overview body contains host-specific reference %q", host)
 		}
 	}
 }
