@@ -282,6 +282,26 @@ func (w *WorkflowSession) runWorkflowWritingGuide(ctx *engine.Context) error {
 	return nil
 }
 
+// reportFieldForEntryField maps an entry-model field name to the capture
+// store field the agent reports it under, so a served finding names the
+// field the agent can actually fix. Inverse of draftFromStore's naming;
+// fields absent here share their name on both sides.
+var reportFieldForEntryField = func() func(string) string {
+	names := map[string]string{
+		"content": "body",
+		"kind":    "entryKind",
+		"actor":   "roleActor",
+		"actors":  "focusActors",
+		"when":    "focusWhen",
+	}
+	return func(field string) string {
+		if mapped, ok := names[field]; ok {
+			return mapped
+		}
+		return field
+	}
+}()
+
 // draftFromStore reads the capture state fields into an EntryDraft — the one
 // store-to-draft mapping, shared by the write op, the writing-guide op, and
 // the draftValidates predicate so no surface restates the field set. Write-
@@ -366,7 +386,7 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		for _, warning := range validationErr.Warnings {
 			observation := warning.Message
 			if warning.Field != "" {
-				observation = fmt.Sprintf("%s (field: %s)", warning.Message, warning.Field)
+				observation = fmt.Sprintf("%s (field: %s)", warning.Message, reportFieldForEntryField(warning.Field))
 			}
 			findings = append(findings, query.Finding{
 				Severity:    query.SeverityHigh,
