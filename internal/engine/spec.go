@@ -227,6 +227,10 @@ func decodeStrict(node *yaml.Node, out any) error {
 // step wiring, guard syntax, collect declarations); function existence and
 // write-collision checks need the registry and run in Validate.
 func ParseSpec(entry *model.Entry) (*Spec, error) {
+	// Execution preconditions, not a restatement of the procedure kind's
+	// capture rules (those live in model.EntryConstruction): a spec must be a
+	// procedure with a canonical to register under, whatever the entry's
+	// capture-time validity.
 	if !entry.IsProcedure() {
 		return nil, fmt.Errorf("entry %s is not a kind: procedure decision", entry.ID)
 	}

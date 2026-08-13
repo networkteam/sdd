@@ -178,6 +178,31 @@ func registerBuiltinPredicates(r *Registry) {
 
 	mustRegisterPredicate(r, Predicate{
 		Doc: FuncDoc{
+			Name: "draftValidates",
+			Doc: "The drafted fields satisfy the construction boundary's structural rules for their kind " +
+				"(model.EntryConstruction, per the type-system contract) — so a gate never restates a " +
+				"per-kind required-field list. Graph-edge resolution stays with refsResolve.",
+			Reads: []string{"body", "entryKind", "layer", "refs", "topics", "index", "confidence", "intent", "participants", "supersedes", "closes", "canonical", "aliases", "roleActor", "involvement", "focusActors", "focusWhen"},
+		},
+		Fn: func(ctx *Context) (bool, error) {
+			return len(draftStructuralFindings(ctx)) == 0, nil
+		},
+		FailMessage: "the draft does not satisfy its kind's structural rules",
+		FailDetail: func(ctx *Context) string {
+			findings := draftStructuralFindings(ctx)
+			if len(findings) == 0 {
+				return ""
+			}
+			messages := make([]string, 0, len(findings))
+			for _, f := range findings {
+				messages = append(messages, f.Message)
+			}
+			return "the draft does not satisfy its kind's structural rules: " + strings.Join(messages, "; ")
+		},
+	})
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
 			Name:  "participantsCanonical",
 			Doc:   "All participants resolve to active actor canonicals (grace mode: passes when the graph has no active actors).",
 			Reads: []string{"participants"},
@@ -537,6 +562,129 @@ func involvementTargetsResolve(ctx *Context) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// draftStructuralFindings assembles the drafted capture fields as an entry
+// and runs the construction boundary's rule set: assembly shape problems,
+// stray-field projection findings, and the full per-kind validation including
+// capture-only rules. No rule reads ID or Time, so neither is set.
+func draftStructuralFindings(ctx *Context) []model.Finding {
+	entry, findings := draftEntryFromStore(ctx.Store)
+	if len(findings) > 0 {
+		return findings
+	}
+	construction, findings := model.ConstructFromEntry(entry)
+	return append(findings, construction.Validate(ctx.Graph)...)
+}
+
+// draftEntryFromStore reads the capture state fields into a model.Entry for
+// structural validation. It mirrors the write op's draft assembly
+// (application.entryFromDraft) — the binding-coverage directive
+// (20260812-160448-d-tac-ymk) is the committed answer to holding the two to
+// one declaration.
+func draftEntryFromStore(store *Store) (*model.Entry, []model.Finding) {
+	str := func(field string) string {
+		v, _ := store.Get(field)
+		s, _ := v.(string)
+		return s
+	}
+	strs := func(field string) []string {
+		v, ok := store.Get(field)
+		if !ok {
+			return nil
+		}
+		return asStrings(v)
+	}
+
+	kind := model.Kind(str("entryKind"))
+	var entryType model.EntryType
+	switch {
+	case kind == "":
+		return nil, []model.Finding{{Field: "kind", Message: "entry kind is required"}}
+	case model.IsValidKindForType(model.TypeSignal, kind):
+		entryType = model.TypeSignal
+	case model.IsValidKindForType(model.TypeDecision, kind):
+		entryType = model.TypeDecision
+	default:
+		return nil, []model.Finding{{Field: "kind", Value: string(kind), Message: fmt.Sprintf("unknown entry kind %q", kind)}}
+	}
+
+	var findings []model.Finding
+	layerValue := str("layer")
+	layer := model.Layer(layerValue)
+	if expanded, ok := model.LayerFromAbbrev[layerValue]; ok {
+		layer = expanded
+	}
+	entry := &model.Entry{
+		Type: entryType, Kind: kind, Layer: layer,
+		Content: str("body"), Confidence: str("confidence"),
+		Intent:    model.Intent(str("intent")),
+		Canonical: str("canonical"), Aliases: strs("aliases"), Actor: str("roleActor"),
+		Participants: strs("participants"), Closes: strs("closes"), Supersedes: strs("supersedes"),
+		FocusActors: strs("focusActors"),
+	}
+	if v, ok := store.Get("refs"); ok {
+		for _, r := range asRefs(v) {
+			entry.Refs = append(entry.Refs, model.Ref{ID: r.ID, Kind: model.RefKind(r.Kind), Desc: r.Desc})
+		}
+	}
+	for _, label := range strs("topics") {
+		topic, err := model.ParseTopicPath(label)
+		if err != nil {
+			findings = append(findings, model.Finding{Field: "topics", Value: label, Message: fmt.Sprintf("topic %q: %v", label, err)})
+			continue
+		}
+		entry.Topics = append(entry.Topics, topic)
+	}
+	if v, ok := store.Get("index"); ok {
+		if doc, ok := v.(map[string]any); ok {
+			title, _ := doc["title"].(string)
+			topic, _ := doc["topic"].(string)
+			index, err := model.NewFactIndex(title, topic)
+			if err != nil {
+				findings = append(findings, model.Finding{Field: "index", Message: err.Error()})
+			} else {
+				entry.Index = index
+			}
+		}
+	}
+	if v, ok := store.Get("focusWhen"); ok {
+		entry.FocusWhen = asFocusWhen(v)
+	}
+	if v, ok := store.Get("involvement"); ok {
+		for _, inv := range asInvolvements(v) {
+			entry.Involvement = append(entry.Involvement, model.Involvement{
+				Target: inv.Target, Actors: inv.Actors, ActorsSet: inv.ActorsSet,
+				When: whenToFocusWhen(inv.When),
+			})
+		}
+	}
+	return entry, findings
+}
+
+// asFocusWhen normalizes a store when value — typed in-memory or a JSON
+// document after replay — to the model shape. A present-but-empty mapping
+// yields an empty FocusWhen so the model's at-least-one-bound rule sees it.
+func asFocusWhen(v any) *model.FocusWhen {
+	switch w := v.(type) {
+	case When:
+		return &model.FocusWhen{From: w.From, To: w.To}
+	case *When:
+		return whenToFocusWhen(w)
+	case map[string]any:
+		from, _ := w["from"].(string)
+		to, _ := w["to"].(string)
+		return &model.FocusWhen{From: from, To: to}
+	default:
+		return nil
+	}
+}
+
+func whenToFocusWhen(w *When) *model.FocusWhen {
+	if w == nil {
+		return nil
+	}
+	return &model.FocusWhen{From: w.From, To: w.To}
 }
 
 func aliasesWellFormed(ctx *Context) (bool, error) {

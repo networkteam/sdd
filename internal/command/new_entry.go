@@ -114,9 +114,10 @@ type NewEntryCmd struct {
 	OnPreflight func(result *query.PreflightResult)
 }
 
-// Validate checks that required fields are populated and internally
-// consistent. Richer validation (refs exist in graph, type constraints on
-// closes, etc.) is the handler's job against a loaded graph.
+// Validate checks what must hold before an entry ID can even be generated:
+// type and layer. Everything per-kind — intent, class, index, kind validity —
+// is the construction boundary's job (model.EntryConstruction.ValidateForWrite),
+// which the handler runs against the loaded graph.
 func (c *NewEntryCmd) Validate() error {
 	if c.Type == "" {
 		return fmt.Errorf("type is required")
@@ -129,47 +130,6 @@ func (c *NewEntryCmd) Validate() error {
 	}
 	if _, ok := model.LayerAbbrev[c.Layer]; !ok {
 		return fmt.Errorf("invalid layer: %s", c.Layer)
-	}
-	if c.Kind != "" && !model.IsValidKindForType(c.Type, c.Kind) {
-		return fmt.Errorf("invalid kind %q for type %s", c.Kind, c.Type)
-	}
-
-	// Intent is directive-only, drawn from a closed value set, and required on
-	// every new directive capture — no default, because a default would
-	// fabricate the non-derivable posture the attribute exists to capture
-	// honestly. The effective kind accounts for the type default applied in
-	// BuildEntry (an empty kind on a decision becomes directive).
-	effectiveKind := c.Kind
-	if effectiveKind == "" {
-		effectiveKind = model.DefaultKindForType(c.Type)
-	}
-	switch {
-	case c.Intent != "" && !model.IsValidIntent(c.Intent):
-		return fmt.Errorf("invalid intent %q (expected pending, guiding, or settled)", c.Intent)
-	case c.Intent != "" && effectiveKind != model.KindDirective:
-		return fmt.Errorf("intent is only valid on directive decisions (got %s)", effectiveKind)
-	case c.Intent == "" && effectiveKind == model.KindDirective:
-		return fmt.Errorf("directives require an explicit --intent (pending, guiding, or settled)")
-	}
-
-	switch {
-	case c.Class != "" && effectiveKind != model.KindProcedure:
-		return fmt.Errorf("class is only valid on procedure decisions (got %s)", effectiveKind)
-	case c.Class != "" && c.Class != string(model.ProcedureClassMove) && c.Class != string(model.ProcedureClassShell):
-		return fmt.Errorf("invalid class %q (expected move or shell)", c.Class)
-	}
-	if c.Index != nil {
-		topics := make([]model.TopicPath, 0, len(c.TopicLabels))
-		for _, label := range c.TopicLabels {
-			topic, err := model.ParseTopicPath(label)
-			if err != nil {
-				return fmt.Errorf("topics: %w", err)
-			}
-			topics = append(topics, topic)
-		}
-		if err := c.Index.ValidateForEntry(effectiveKind, topics); err != nil {
-			return err
-		}
 	}
 	return nil
 }

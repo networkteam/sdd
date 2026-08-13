@@ -86,7 +86,10 @@ func build(id, frontmatter, body string) (*model.Entry, error) {
 }
 
 // buildContent is build for facts authored as whole-entry templates, where
-// frontmatter and body arrive already rendered as one document.
+// frontmatter and body arrive already rendered as one document. Structural
+// validity goes through the construction boundary like every other write
+// surface; base facts stand alone, so the graph-dependent edge rules are
+// out of reach here and covered by the package's table test instead.
 func buildContent(id, content string) (*model.Entry, error) {
 	entry, err := model.ParseEntry(id+".md", content)
 	if err != nil {
@@ -95,8 +98,10 @@ func buildContent(id, content string) (*model.Entry, error) {
 	if entry.Type != model.TypeSignal || entry.Kind != model.KindFact {
 		return nil, fmt.Errorf("base fact %s is %s %s — base facts ship as kind: fact signals", id, entry.Type, entry.Kind)
 	}
-	if err := entry.Index.ValidateForEntry(entry.Kind, entry.Topics); err != nil {
-		return nil, fmt.Errorf("base fact %s index: %w", id, err)
+	construction, findings := model.ConstructFromEntry(entry)
+	findings = append(findings, construction.Validate(nil)...)
+	if len(findings) > 0 {
+		return nil, fmt.Errorf("base fact %s: %s", id, findings[0].Message)
 	}
 	entry.Embedded = true
 	return entry, nil

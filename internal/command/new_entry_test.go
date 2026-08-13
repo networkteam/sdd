@@ -56,14 +56,37 @@ func TestBuildEntry_DefaultsKindForSignals(t *testing.T) {
 	}
 }
 
-func TestValidate_RejectsInvalidKindForType(t *testing.T) {
+// writeFindings runs a built entry through the construction boundary the way
+// the handler does — the per-kind rules moved there, so command tests assert
+// against the delegated path rather than a command-local copy.
+func writeFindings(t *testing.T, cmd *command.NewEntryCmd, id string) []model.Finding {
+	t.Helper()
+	entry, err := cmd.BuildEntry(id)
+	if err != nil {
+		t.Fatalf("BuildEntry: %v", err)
+	}
+	construction, findings := model.ConstructFromEntry(entry)
+	_, writeFindings := construction.ValidateForWrite(model.NewGraph(nil))
+	return append(findings, writeFindings...)
+}
+
+func hasFindingOn(findings []model.Finding, field string) bool {
+	for _, f := range findings {
+		if f.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
+func TestWritePath_RejectsInvalidKindForType(t *testing.T) {
 	cmd := &command.NewEntryCmd{
 		Type:  model.TypeSignal,
 		Layer: model.LayerTactical,
 		Kind:  model.KindContract, // decision kind on a signal
 	}
-	if err := cmd.Validate(); err == nil {
-		t.Error("Validate() = nil, want error for decision kind on signal")
+	if !hasFindingOn(writeFindings(t, cmd, "20260414-120000-s-tac-abc"), "kind") {
+		t.Error("want a kind finding for decision kind on signal")
 	}
 }
 
@@ -78,76 +101,82 @@ func TestValidate_AcceptsSignalKind(t *testing.T) {
 	}
 }
 
-func TestValidate_RequiresIntentForDirective(t *testing.T) {
+func TestWritePath_RequiresIntentForDirective(t *testing.T) {
 	cmd := &command.NewEntryCmd{
-		Type:  model.TypeDecision,
-		Layer: model.LayerTactical,
-		Kind:  model.KindDirective,
+		Type:        model.TypeDecision,
+		Layer:       model.LayerTactical,
+		Kind:        model.KindDirective,
+		Description: "a directive without intent",
 	}
-	if err := cmd.Validate(); err == nil {
-		t.Error("Validate() = nil, want error for directive without intent")
+	if !hasFindingOn(writeFindings(t, cmd, "20260414-120000-d-tac-abc"), "intent") {
+		t.Error("want an intent finding for directive without intent")
 	}
 }
 
-func TestValidate_RequiresIntentForDefaultedDirective(t *testing.T) {
+func TestWritePath_RequiresIntentForDefaultedDirective(t *testing.T) {
 	// A decision with no explicit kind defaults to directive, so it must still
 	// supply an intent — the requirement keys off the effective kind.
 	cmd := &command.NewEntryCmd{
-		Type:  model.TypeDecision,
-		Layer: model.LayerTactical,
+		Type:        model.TypeDecision,
+		Layer:       model.LayerTactical,
+		Description: "a defaulted directive without intent",
 	}
-	if err := cmd.Validate(); err == nil {
-		t.Error("Validate() = nil, want error for defaulted directive without intent")
+	if !hasFindingOn(writeFindings(t, cmd, "20260414-120000-d-tac-abc"), "intent") {
+		t.Error("want an intent finding for defaulted directive without intent")
 	}
 }
 
-func TestValidate_AcceptsValidIntentOnDirective(t *testing.T) {
+func TestWritePath_AcceptsValidIntentOnDirective(t *testing.T) {
 	for _, in := range []string{"pending", "guiding", "settled"} {
 		cmd := &command.NewEntryCmd{
-			Type:   model.TypeDecision,
-			Layer:  model.LayerTactical,
-			Kind:   model.KindDirective,
-			Intent: in,
+			Type:        model.TypeDecision,
+			Layer:       model.LayerTactical,
+			Kind:        model.KindDirective,
+			Intent:      in,
+			Description: "a directive with intent",
 		}
-		if err := cmd.Validate(); err != nil {
-			t.Errorf("Validate() with intent %q = %v, want nil", in, err)
+		if findings := writeFindings(t, cmd, "20260414-120000-d-tac-abc"); len(findings) > 0 {
+			t.Errorf("intent %q: findings = %+v, want none", in, findings)
 		}
 	}
 }
 
-func TestValidate_RejectsInvalidIntent(t *testing.T) {
+func TestWritePath_RejectsInvalidIntent(t *testing.T) {
 	cmd := &command.NewEntryCmd{
-		Type:   model.TypeDecision,
-		Layer:  model.LayerTactical,
-		Kind:   model.KindDirective,
-		Intent: "tentative",
+		Type:        model.TypeDecision,
+		Layer:       model.LayerTactical,
+		Kind:        model.KindDirective,
+		Intent:      "tentative",
+		Description: "a directive with a made-up intent",
 	}
-	if err := cmd.Validate(); err == nil {
-		t.Error("Validate() = nil, want error for invalid intent value")
+	if !hasFindingOn(writeFindings(t, cmd, "20260414-120000-d-tac-abc"), "intent") {
+		t.Error("want an intent finding for invalid intent value")
 	}
 }
 
-func TestValidate_RejectsIntentOnNonDirective(t *testing.T) {
+func TestWritePath_RejectsIntentOnNonDirective(t *testing.T) {
 	cmd := &command.NewEntryCmd{
-		Type:   model.TypeDecision,
-		Layer:  model.LayerTactical,
-		Kind:   model.KindPlan,
-		Intent: "guiding",
+		Type:        model.TypeDecision,
+		Layer:       model.LayerTactical,
+		Kind:        model.KindPlan,
+		Intent:      "guiding",
+		Description: "a plan\n\n## Acceptance criteria\n\n- [ ] one",
 	}
-	if err := cmd.Validate(); err == nil {
-		t.Error("Validate() = nil, want error for intent on a non-directive decision")
+	if !hasFindingOn(writeFindings(t, cmd, "20260414-120000-d-tac-abc"), "intent") {
+		t.Error("want an intent finding for intent on a non-directive decision")
 	}
 }
 
-func TestValidate_AllowsNoIntentOnNonDirective(t *testing.T) {
+func TestWritePath_AllowsNoIntentOnNonDirective(t *testing.T) {
 	// Only directives require intent; other decision kinds carry none.
 	cmd := &command.NewEntryCmd{
-		Type:  model.TypeDecision,
-		Layer: model.LayerTactical,
-		Kind:  model.KindContract,
+		Type:        model.TypeDecision,
+		Layer:       model.LayerTactical,
+		Kind:        model.KindContract,
+		Description: "a contract without intent",
 	}
-	if err := cmd.Validate(); err != nil {
-		t.Errorf("Validate() = %v, want nil for a contract without intent", err)
+	if findings := writeFindings(t, cmd, "20260414-120000-d-tac-abc"); len(findings) > 0 {
+		t.Errorf("findings = %+v, want none for a contract without intent", findings)
 	}
 }
 
@@ -176,9 +205,10 @@ func TestNewEntryCmdFactIndex(t *testing.T) {
 	cmd := &command.NewEntryCmd{
 		Type: model.TypeSignal, Layer: model.LayerTactical, Kind: model.KindFact,
 		TopicLabels: []string{"cli/view"}, Index: index,
+		Description: "a fact with an index",
 	}
-	if err := cmd.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
+	if findings := writeFindings(t, cmd, "20260719-120000-s-tac-idx"); len(findings) > 0 {
+		t.Fatalf("findings = %+v, want none for a valid indexed fact", findings)
 	}
 	entry, err := cmd.BuildEntry("20260719-120000-s-tac-idx")
 	if err != nil {
@@ -189,13 +219,13 @@ func TestNewEntryCmdFactIndex(t *testing.T) {
 	}
 
 	cmd.Kind = model.KindInsight
-	if err := cmd.Validate(); err == nil {
-		t.Fatal("Validate accepted index on non-fact")
+	if !hasFindingOn(writeFindings(t, cmd, "20260719-120000-s-tac-idx"), "index") {
+		t.Fatal("want an index finding for index on non-fact")
 	}
 	cmd.Kind = model.KindFact
 	cmd.TopicLabels = []string{"agent/ux"}
-	if err := cmd.Validate(); err == nil {
-		t.Fatal("Validate accepted index topic absent from topics")
+	if !hasFindingOn(writeFindings(t, cmd, "20260719-120000-s-tac-idx"), "index") {
+		t.Fatal("want an index finding for index topic absent from topics")
 	}
 }
 

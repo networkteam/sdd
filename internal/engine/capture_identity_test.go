@@ -122,8 +122,8 @@ func TestCapture_ActorMissingCanonicalStalls(t *testing.T) {
 	if sv.Step != "assemble" {
 		t.Fatalf("actor without canonical must hold assemble, got %q", sv.Step)
 	}
-	if !hasFailing(sv.Failing, "hasCanonical") {
-		t.Fatalf("failing = %+v, want hasCanonical", sv.Failing)
+	if !hasFailing(sv.Failing, "draftValidates") {
+		t.Fatalf("failing = %+v, want draftValidates (canonical is the actor kind's structural rule)", sv.Failing)
 	}
 }
 
@@ -140,8 +140,8 @@ func TestCapture_ActorMalformedAliasStalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sv.Step != "assemble" || !hasFailing(sv.Failing, "aliasesWellFormed") {
-		t.Fatalf("malformed alias must hold assemble on aliasesWellFormed, got step=%q failing=%+v", sv.Step, sv.Failing)
+	if sv.Step != "assemble" || !hasFailing(sv.Failing, "draftValidates") {
+		t.Fatalf("malformed alias must hold assemble on draftValidates, got step=%q failing=%+v", sv.Step, sv.Failing)
 	}
 }
 
@@ -207,16 +207,16 @@ func TestCapture_RecognitionModeSoftensPlayback(t *testing.T) {
 	}
 }
 
-func TestCapture_OrdinaryKindStillDemandsRefsAndTopics(t *testing.T) {
+func TestCapture_OrdinaryKindStrayCanonicalBlocks(t *testing.T) {
 	env := newIdentityEnv(t)
 	sv, err := env.session.Start(env.spec, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A gap with a canonical but no refs/topics must not slip through the
-	// actor branch — the "other" branch guards on not-actor-and-not-role.
+	// A canonical on a gap is a stray per-kind field — the boundary's
+	// projection reports it instead of a kind branch silently ignoring it.
 	sv, err = env.session.Report(sv.Instance, map[string]any{
-		"body":        "A tactical gap with no refs or topics.",
+		"body":        "A tactical gap carrying a stray canonical.",
 		"entryKind":   "gap",
 		"layer":       "tac",
 		"canonical":   "Christopher",
@@ -227,10 +227,35 @@ func TestCapture_OrdinaryKindStillDemandsRefsAndTopics(t *testing.T) {
 		t.Fatal(err)
 	}
 	if sv.Step != "assemble" {
-		t.Fatalf("a gap without refs/topics must hold assemble even with a canonical set, got %q", sv.Step)
+		t.Fatalf("a gap with a stray canonical must hold assemble, got %q", sv.Step)
 	}
-	if !hasFailing(sv.Failing, "hasRefs") && !hasFailing(sv.Failing, "hasTopics") {
-		t.Fatalf("ordinary-kind gate must still demand refs/topics, failing=%+v", sv.Failing)
+	if !hasFailing(sv.Failing, "draftValidates") {
+		t.Fatalf("failing = %+v, want draftValidates (stray canonical)", sv.Failing)
+	}
+}
+
+// TestCapture_RootEntryPassesWithoutRefsOrTopics pins the boundary-delegated
+// gate: refs and topics are not per-kind requirements the type-system
+// contract backs, so a genuinely root entry is not forced to invent a
+// reference and a topic-less draft passes to the guide.
+func TestCapture_RootEntryPassesWithoutRefsOrTopics(t *testing.T) {
+	env := newIdentityEnv(t)
+	sv, err := env.session.Start(env.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err = env.session.Report(sv.Instance, map[string]any{
+		"body":        "A genuinely root observation with nothing upstream to point at.",
+		"entryKind":   "gap",
+		"layer":       "tac",
+		"confidence":  "medium",
+		"widenReport": "searched for prior art from several angles; nothing bears on this",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.Step == "assemble" {
+		t.Fatalf("a root entry must pass assemble without refs or topics, failing=%+v", sv.Failing)
 	}
 }
 

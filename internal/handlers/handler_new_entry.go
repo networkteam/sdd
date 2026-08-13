@@ -97,13 +97,19 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		return fmt.Errorf("resolving supersedes: %w", err)
 	}
 
-	model.ValidateEntry(entry, graph)
-	if len(entry.Warnings) > 0 {
-		for _, w := range entry.Warnings {
-			fmt.Fprintf(h.stderr, "error: %s\n", w.Message)
+	// The construction boundary is the write gate: stray per-kind fields
+	// surface as projection findings, and ValidateForWrite runs the full rule
+	// set including the capture-only rules the read path waives.
+	construction, findings := model.ConstructFromEntry(entry)
+	validated, writeFindings := construction.ValidateForWrite(graph)
+	findings = append(findings, writeFindings...)
+	if len(findings) > 0 {
+		for _, f := range findings {
+			fmt.Fprintf(h.stderr, "error: %s\n", f.Message)
 		}
-		return fmt.Errorf("validation failed: %d issue(s)", len(entry.Warnings))
+		return fmt.Errorf("validation failed: %d issue(s)", len(findings))
 	}
+	entry = validated
 
 	// Pre-flight and summary are independent LLM calls. Run them
 	// concurrently via errgroup to save 30-60s of wall time per entry.

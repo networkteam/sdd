@@ -263,30 +263,12 @@ func (w *WorkflowSession) runWorkflowWritingGuide(ctx *engine.Context) error {
 	if v, ok := ctx.Store.Get("guideFindings"); ok && v != nil {
 		return nil
 	}
-	body, ok := workflowStoreString(ctx.Store, "body")
-	if !ok {
-		return fmt.Errorf("writingGuide: body is not set")
+	for _, field := range []string{"body", "entryKind", "layer"} {
+		if _, ok := workflowStoreString(ctx.Store, field); !ok {
+			return fmt.Errorf("writingGuide: %s is not set", field)
+		}
 	}
-	entryKind, ok := workflowStoreString(ctx.Store, "entryKind")
-	if !ok {
-		return fmt.Errorf("writingGuide: entryKind is not set")
-	}
-	layer, ok := workflowStoreString(ctx.Store, "layer")
-	if !ok {
-		return fmt.Errorf("writingGuide: layer is not set")
-	}
-	draft := EntryDraft{Kind: entryKind, Layer: layer, Body: body}
-	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
-	draft.AttachmentHandles = workflowStoreStrings(ctx.Store, "attachments")
-	draft.Closes = workflowStoreStrings(ctx.Store, "closes")
-	draft.Supersedes = workflowStoreStrings(ctx.Store, "supersedes")
-	for _, ref := range workflowStoreDocuments(ctx.Store, "refs") {
-		id, _ := ref["id"].(string)
-		kind, _ := ref["kind"].(string)
-		desc, _ := ref["desc"].(string)
-		draft.Refs = append(draft.Refs, EntryRef{ID: id, Kind: kind, Desc: desc})
-	}
-	findings, err := w.app.WritingGuideCheck(w.ctx, w.identity, w.project, draft)
+	findings, err := w.app.WritingGuideCheck(w.ctx, w.identity, w.project, w.draftFromStore(ctx.Store))
 	if err != nil {
 		return fmt.Errorf("writingGuide: %w", err)
 	}
@@ -300,52 +282,38 @@ func (w *WorkflowSession) runWorkflowWritingGuide(ctx *engine.Context) error {
 	return nil
 }
 
-func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
-	entryKind, ok := workflowStoreString(ctx.Store, "entryKind")
-	if !ok {
-		return fmt.Errorf("newEntry: entryKind is not set")
-	}
-	layer, ok := workflowStoreString(ctx.Store, "layer")
-	if !ok {
-		return fmt.Errorf("newEntry: layer is not set")
-	}
-	body, ok := workflowStoreString(ctx.Store, "body")
-	if !ok {
-		return fmt.Errorf("newEntry: body is not set")
-	}
-	target, fromBinding, resolvedDefault, err := w.concreteEffectiveTarget(ctx.Store)
-	if err != nil {
-		return err
-	}
+// draftFromStore reads the capture state fields into an EntryDraft — the one
+// store-to-draft mapping, shared by the write op, the writing-guide op, and
+// the draftValidates predicate so no surface restates the field set. Write-
+// specific concerns (mutation target, staged-handle remap, pre-flight
+// override) stay with the write op.
+func (w *WorkflowSession) draftFromStore(store *engine.Store) EntryDraft {
 	draft := EntryDraft{
-		Target: target,
-		Kind:   entryKind, Layer: layer, Body: body, Topics: workflowStoreStrings(ctx.Store, "topics"),
-		Closes: workflowStoreStrings(ctx.Store, "closes"), Supersedes: workflowStoreStrings(ctx.Store, "supersedes"),
-		AttachmentHandles: workflowStoreStrings(ctx.Store, "attachments"), Participants: workflowStoreStrings(ctx.Store, "participants"),
+		Topics: workflowStoreStrings(store, "topics"),
+		Closes: workflowStoreStrings(store, "closes"), Supersedes: workflowStoreStrings(store, "supersedes"),
+		AttachmentHandles: workflowStoreStrings(store, "attachments"), Participants: workflowStoreStrings(store, "participants"),
 	}
-	for index, handle := range draft.AttachmentHandles {
-		if blobID, ok := w.staged[handle]; ok {
-			draft.AttachmentHandles[index] = blobID
-		}
-	}
-	draft.Confidence, _ = workflowStoreString(ctx.Store, "confidence")
-	draft.Intent, _ = workflowStoreString(ctx.Store, "intent")
-	if index, ok := workflowStoreDocument(ctx.Store, "index"); ok {
+	draft.Kind, _ = workflowStoreString(store, "entryKind")
+	draft.Layer, _ = workflowStoreString(store, "layer")
+	draft.Body, _ = workflowStoreString(store, "body")
+	draft.Confidence, _ = workflowStoreString(store, "confidence")
+	draft.Intent, _ = workflowStoreString(store, "intent")
+	if index, ok := workflowStoreDocument(store, "index"); ok {
 		title, _ := index["title"].(string)
 		topic, _ := index["topic"].(string)
 		draft.Index = &FactIndex{Title: title, Topic: topic}
 	}
-	draft.Canonical, _ = workflowStoreString(ctx.Store, "canonical")
-	draft.Actor, _ = workflowStoreString(ctx.Store, "roleActor")
-	draft.Aliases = workflowStoreStrings(ctx.Store, "aliases")
-	draft.FocusActors = workflowStoreStrings(ctx.Store, "focusActors")
+	draft.Canonical, _ = workflowStoreString(store, "canonical")
+	draft.Actor, _ = workflowStoreString(store, "roleActor")
+	draft.Aliases = workflowStoreStrings(store, "aliases")
+	draft.FocusActors = workflowStoreStrings(store, "focusActors")
 	// Store values are normalized JSON documents, so focusWhen comes back as a
 	// map keyed by its JSON field names and involvement as a list of such maps —
 	// not as typed engine.When / engine.Involvement values.
-	if when, ok := workflowStoreDocument(ctx.Store, "focusWhen"); ok {
+	if when, ok := workflowStoreDocument(store, "focusWhen"); ok {
 		draft.FocusWhen = focusWhenFromDocument(when)
 	}
-	for _, inv := range workflowStoreDocuments(ctx.Store, "involvement") {
+	for _, inv := range workflowStoreDocuments(store, "involvement") {
 		target, _ := inv["target"].(string)
 		involvement := model.Involvement{Target: target, When: focusWhenFromDocument(inv["when"])}
 		// "actors" is present in the normalized document only when it was set
@@ -357,14 +325,34 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 		}
 		draft.Involvement = append(draft.Involvement, involvement)
 	}
-	if override, ok := ctx.Store.Get("preflightOverride"); ok {
-		draft.SkipPreflight, _ = override.(bool)
-	}
-	for _, ref := range workflowStoreDocuments(ctx.Store, "refs") {
+	for _, ref := range workflowStoreDocuments(store, "refs") {
 		id, _ := ref["id"].(string)
 		kind, _ := ref["kind"].(string)
 		desc, _ := ref["desc"].(string)
 		draft.Refs = append(draft.Refs, EntryRef{ID: id, Kind: kind, Desc: desc})
+	}
+	return draft
+}
+
+func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
+	for _, field := range []string{"entryKind", "layer", "body"} {
+		if _, ok := workflowStoreString(ctx.Store, field); !ok {
+			return fmt.Errorf("newEntry: %s is not set", field)
+		}
+	}
+	target, fromBinding, resolvedDefault, err := w.concreteEffectiveTarget(ctx.Store)
+	if err != nil {
+		return err
+	}
+	draft := w.draftFromStore(ctx.Store)
+	draft.Target = target
+	for index, handle := range draft.AttachmentHandles {
+		if blobID, ok := w.staged[handle]; ok {
+			draft.AttachmentHandles[index] = blobID
+		}
+	}
+	if override, ok := ctx.Store.Get("preflightOverride"); ok {
+		draft.SkipPreflight, _ = override.(bool)
 	}
 	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
 	err = w.withSessionBindingTargetError(err, fromBinding)

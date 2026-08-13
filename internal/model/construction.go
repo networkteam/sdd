@@ -211,6 +211,10 @@ func ConstructFromEntry(e *Entry) (*EntryConstruction, []Finding) {
 
 	if e.IsAnnotation() {
 		c.Annotation = &AnnotationFields{Topics: e.AnnotationTopics}
+		if len(e.Topics) > 0 {
+			c.Topics = nil
+			stray("topics", "", "inline topics are not valid on kind: annotation signals (topics carry the annotation's assignments)")
+		}
 	} else if len(e.AnnotationTopics) > 0 {
 		stray("topics", "", "annotation topic assignments are only meaningful on kind: annotation signals")
 	}
@@ -325,6 +329,20 @@ func (c *EntryConstruction) Validate(g *Graph) []Finding {
 		}
 		if c.Layer != LayerProcess {
 			add("layer", string(c.Layer), fmt.Sprintf("actor signal should live at process layer (got %s)", c.Layer))
+		}
+		if c.Actor != nil {
+			seen := make(map[string]bool, len(c.Actor.Aliases))
+			for i, alias := range c.Actor.Aliases {
+				switch {
+				case strings.TrimSpace(alias) == "":
+					add("aliases", fmt.Sprintf("aliases[%d]", i), fmt.Sprintf("aliases[%d]: empty alias", i))
+				case alias == c.Actor.Canonical:
+					add("aliases", alias, fmt.Sprintf("alias %q duplicates the canonical", alias))
+				case seen[alias]:
+					add("aliases", alias, fmt.Sprintf("duplicate alias %q", alias))
+				}
+				seen[alias] = true
+			}
 		}
 	}
 

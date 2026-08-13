@@ -49,12 +49,14 @@ type EntryDraft struct {
 	Index             *FactIndex
 	AttachmentHandles []string
 	// Canonical and Aliases carry a kind: actor signal's identity; Actor carries
-	// a kind: role decision's bound actor canonical. Mirrors the CLI-side
-	// NewEntryCmd fields — ignored on other kinds, written onto the entry so the
-	// model-layer validator sees the required frontmatter.
+	// a kind: role decision's bound actor canonical; Class carries a
+	// kind: procedure decision's execution role. Mirrors the CLI-side
+	// NewEntryCmd fields — a value on the wrong kind is a blocking finding at
+	// the construction boundary.
 	Canonical string
 	Aliases   []string
 	Actor     string
+	Class     string
 	// FocusActors, FocusWhen, and Involvement carry a kind: focus decision's
 	// advances list and its focus-level defaults. Mirrors the CLI-side
 	// NewEntryCmd fields — ignored on other kinds, written onto the entry so
@@ -146,48 +148,25 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	if err != nil {
 		return CreateEntryResult{}, err
 	}
-	layer := model.Layer(draft.Layer)
-	if expanded, ok := model.LayerFromAbbrev[draft.Layer]; ok {
-		layer = expanded
-	}
+	layer := draftLayer(draft.Layer)
 	suffix, err := model.RandomSuffix(3)
 	if err != nil {
 		return CreateEntryResult{}, err
 	}
 	id := model.GenerateIDAt(entryType, layer, suffix, runtime.options.Now())
-	topics := make([]model.TopicPath, 0, len(draft.Topics))
-	for _, label := range draft.Topics {
-		topic, err := model.ParseTopicPath(label)
-		if err != nil {
-			return CreateEntryResult{}, fmt.Errorf("topic %q: %w", label, err)
+	entry, assemblyFindings := entryFromDraft(draft, id, runtime.options.Now())
+	if len(assemblyFindings) > 0 {
+		warnings := make([]model.Warning, 0, len(assemblyFindings))
+		for _, f := range assemblyFindings {
+			warnings = append(warnings, f.Warning())
 		}
-		topics = append(topics, topic)
-	}
-	var index *model.FactIndex
-	if draft.Index != nil {
-		index, err = model.NewFactIndex(draft.Index.Title, draft.Index.Topic)
-		if err != nil {
-			return CreateEntryResult{}, err
-		}
-	}
-	entry := &model.Entry{
-		ID: id, Type: entryType, Kind: kind, Layer: layer, Intent: model.Intent(draft.Intent),
-		Content: draft.Body, Participants: append([]string(nil), draft.Participants...),
-		Confidence: draft.Confidence, Topics: topics, Index: index, Time: runtime.options.Now(),
-		Canonical: draft.Canonical, Aliases: append([]string(nil), draft.Aliases...), Actor: draft.Actor,
-		FocusActors: append([]string(nil), draft.FocusActors...), FocusWhen: draft.FocusWhen,
-		Involvement: append([]model.Involvement(nil), draft.Involvement...),
+		return CreateEntryResult{}, &ValidationError{Warnings: warnings}
 	}
 	if len(entry.Participants) == 0 {
 		if principal.Participant != "" {
 			entry.Participants = []string{principal.Participant}
 		}
 	}
-	for _, ref := range draft.Refs {
-		entry.Refs = append(entry.Refs, model.Ref{ID: ref.ID, Kind: model.RefKind(ref.Kind), Desc: ref.Desc})
-	}
-	entry.Closes = append([]string(nil), draft.Closes...)
-	entry.Supersedes = append([]string(nil), draft.Supersedes...)
 	if entry.Refs, err = snapshot.graph.ResolveRefIDs(entry.Refs); err != nil {
 		return CreateEntryResult{}, fmt.Errorf("resolving refs: %w", err)
 	}
@@ -197,10 +176,21 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	if entry.Supersedes, err = snapshot.graph.ResolveIDs(entry.Supersedes); err != nil {
 		return CreateEntryResult{}, fmt.Errorf("resolving supersedes: %w", err)
 	}
-	model.ValidateEntry(entry, snapshot.graph)
-	if len(entry.Warnings) > 0 {
-		return CreateEntryResult{}, &ValidationError{Warnings: append([]model.Warning(nil), entry.Warnings...)}
+	// The construction boundary is the write gate: stray per-kind fields
+	// surface as projection findings, and ValidateForWrite runs the full rule
+	// set including the capture-only rules the read path waives — so this
+	// surface enforces exactly what the CLI write path enforces.
+	construction, findings := model.ConstructFromEntry(entry)
+	validated, writeFindings := construction.ValidateForWrite(snapshot.graph)
+	findings = append(findings, writeFindings...)
+	if len(findings) > 0 {
+		warnings := make([]model.Warning, 0, len(findings))
+		for _, f := range findings {
+			warnings = append(warnings, f.Warning())
+		}
+		return CreateEntryResult{}, &ValidationError{Warnings: warnings}
 	}
+	entry = validated
 
 	result := CreateEntryResult{Project: runtime.options.Project, Binding: binding, EntryID: id}
 	if !draft.SkipPreflight {
@@ -394,7 +384,66 @@ func newMutationID(prefix string) (string, error) {
 	return prefix + "-" + hex.EncodeToString(random[:]), nil
 }
 
+// draftLayer expands an abbreviated layer to its canonical form.
+func draftLayer(layer string) model.Layer {
+	if expanded, ok := model.LayerFromAbbrev[layer]; ok {
+		return expanded
+	}
+	return model.Layer(layer)
+}
+
+// entryFromDraft materializes a draft's fields as a model.Entry — the one
+// draft-to-entry assembly, shared by the write gate and the assemble-gate
+// predicate (draftValidates). Shape problems — missing or unknown kind,
+// malformed topic or index — come back as findings rather than errors, so
+// both callers serve them as actionable diagnostics.
+func entryFromDraft(draft EntryDraft, id string, now time.Time) (*model.Entry, []model.Finding) {
+	kind := model.Kind(draft.Kind)
+	entryType, err := entryTypeForKind(kind)
+	if err != nil {
+		return nil, []model.Finding{{Field: "kind", Value: draft.Kind, Message: err.Error()}}
+	}
+	var findings []model.Finding
+	topics := make([]model.TopicPath, 0, len(draft.Topics))
+	for _, label := range draft.Topics {
+		topic, err := model.ParseTopicPath(label)
+		if err != nil {
+			findings = append(findings, model.Finding{Field: "topics", Value: label, Message: fmt.Sprintf("topic %q: %v", label, err)})
+			continue
+		}
+		topics = append(topics, topic)
+	}
+	var index *model.FactIndex
+	if draft.Index != nil {
+		index, err = model.NewFactIndex(draft.Index.Title, draft.Index.Topic)
+		if err != nil {
+			findings = append(findings, model.Finding{Field: "index", Message: err.Error()})
+		}
+	}
+	entry := &model.Entry{
+		ID: id, Type: entryType, Kind: kind, Layer: draftLayer(draft.Layer), Intent: model.Intent(draft.Intent),
+		Content: draft.Body, Participants: append([]string(nil), draft.Participants...),
+		Confidence: draft.Confidence, Topics: topics, Index: index, Time: now,
+		Canonical: draft.Canonical, Aliases: append([]string(nil), draft.Aliases...), Actor: draft.Actor,
+		Class:       model.ProcedureClass(draft.Class),
+		FocusActors: append([]string(nil), draft.FocusActors...), FocusWhen: draft.FocusWhen,
+		Involvement: append([]model.Involvement(nil), draft.Involvement...),
+	}
+	for _, ref := range draft.Refs {
+		entry.Refs = append(entry.Refs, model.Ref{ID: ref.ID, Kind: model.RefKind(ref.Kind), Desc: ref.Desc})
+	}
+	entry.Closes = append([]string(nil), draft.Closes...)
+	entry.Supersedes = append([]string(nil), draft.Supersedes...)
+	return entry, findings
+}
+
 func entryTypeForKind(kind model.Kind) (model.EntryType, error) {
+	// An empty kind is valid for both types at the model layer (defaults are
+	// a construction concern), so it must be rejected here — deriving the
+	// type from it would silently mint a kindless signal.
+	if kind == "" {
+		return "", fmt.Errorf("entry kind is required")
+	}
 	switch {
 	case model.IsValidKindForType(model.TypeSignal, kind):
 		return model.TypeSignal, nil

@@ -513,12 +513,12 @@ func TestCapture_StallNamesExactlyWhatIsMissing(t *testing.T) {
 	}
 }
 
-// TestCapture_OrdinaryKindGateEnforcesRefsAndTopics confirms refs/topics stay
-// mandatory for ordinary kinds through the gate (not the collect list): once
-// every required collect is present, a draft still missing topics holds on the
-// hasTopics predicate — the enforcement moved from collect-nudge to gate, so
-// identity kinds can skip refs/topics while ordinary kinds cannot.
-func TestCapture_OrdinaryKindGateEnforcesRefsAndTopics(t *testing.T) {
+// TestCapture_GateDelegatesKindRulesToBoundary confirms the assemble gate
+// carries no per-kind required-field list of its own: a topic-less ordinary
+// draft passes (topics are not a contract-backed requirement), while a done
+// draft with no closes and no refs holds on draftValidates — the construction
+// boundary's closes-or-refs rule for the done kind.
+func TestCapture_GateDelegatesKindRulesToBoundary(t *testing.T) {
 	env := newFixtureEnv(t)
 	sv, err := env.session.Start(env.spec, nil, "")
 	if err != nil {
@@ -530,20 +530,34 @@ func TestCapture_OrdinaryKindGateEnforcesRefsAndTopics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sv.Step != "assemble" {
-		t.Fatalf("ordinary draft without topics must hold assemble, got %q", sv.Step)
+	if sv.Step == "assemble" {
+		t.Fatalf("a topic-less ordinary draft must pass assemble, failing=%+v", sv.Failing)
 	}
-	if len(sv.Missing) != 0 {
-		t.Fatalf("required collects are complete, so nothing should be Missing, got %v", sv.Missing)
+
+	env2 := newFixtureEnv(t)
+	sv2, err := env2.session.Start(env2.spec, nil, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	found := false
-	for _, f := range sv.Failing {
-		if f.Name == "hasTopics" {
-			found = true
+	done := fullDraft()
+	done["entryKind"] = "done"
+	delete(done, "refs")
+	delete(done, "intent")
+	sv2, err = env2.session.Report(sv2.Instance, done)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv2.Step != "assemble" {
+		t.Fatalf("a done draft without closes or refs must hold assemble, got %q", sv2.Step)
+	}
+	failed := false
+	for _, f := range sv2.Failing {
+		if f.Name == "draftValidates" {
+			failed = true
 		}
 	}
-	if !found {
-		t.Fatalf("failing = %+v, want hasTopics (gate-enforced for ordinary kinds)", sv.Failing)
+	if !failed {
+		t.Fatalf("failing = %+v, want draftValidates (done anchor rule)", sv2.Failing)
 	}
 }
 

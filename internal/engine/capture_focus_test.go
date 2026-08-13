@@ -64,8 +64,8 @@ func TestCapture_FocusMissingInvolvementStalls(t *testing.T) {
 	if sv.Step != "assemble" {
 		t.Fatalf("focus without involvement must hold assemble, got %q", sv.Step)
 	}
-	if !hasFailing(sv.Failing, "hasInvolvement") {
-		t.Fatalf("failing = %+v, want hasInvolvement", sv.Failing)
+	if !hasFailing(sv.Failing, "draftValidates") {
+		t.Fatalf("failing = %+v, want draftValidates (involvement is the focus kind's structural rule)", sv.Failing)
 	}
 }
 
@@ -85,8 +85,8 @@ func TestCapture_FocusUnresolvableTargetBlocks(t *testing.T) {
 	if sv.Step != "assemble" {
 		t.Fatalf("focus with an unresolvable target must hold assemble, got %q", sv.Step)
 	}
-	if !hasFailing(sv.Failing, "involvementTargetsResolve") {
-		t.Fatalf("failing = %+v, want involvementTargetsResolve", sv.Failing)
+	if !hasFailing(sv.Failing, "draftValidates") {
+		t.Fatalf("failing = %+v, want draftValidates (involvement targets resolve inside the boundary's focus rules)", sv.Failing)
 	}
 }
 

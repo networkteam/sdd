@@ -1005,15 +1005,40 @@ func validateAliasAmbiguity(g *Graph) {
 // projects the raw parsed form and keeps the findings that hold on historical
 // entries, so it never owns a per-kind rule of its own.
 func ValidateEntry(e *Entry, g *Graph) {
+	validateEdges(e, g)
+	c, findings := ConstructFromEntry(e)
+	findings = append(findings, c.Validate(g)...)
+	e.Warnings = append(e.Warnings, ReadWarnings(findings)...)
+	validateAttachmentLinks(e)
+}
+
+// validateEdges runs the graph-edge rules — refs, lifecycle IDs, and the
+// kind-conditional closes/supersedes semantics — populating e.Warnings.
+func validateEdges(e *Entry, g *Graph) {
 	validateRefs(e, g)
 	validateIDRefs(e, g, "closes", e.Closes)
 	validateIDRefs(e, g, "supersedes", e.Supersedes)
 	validateCloses(e, g)
 	validateSupersedes(e, g)
-	c, findings := ConstructFromEntry(e)
-	findings = append(findings, c.Validate(g)...)
-	e.Warnings = append(e.Warnings, ReadWarnings(findings)...)
+}
+
+// ValidateForWrite runs the full write-path rule set on a construction: every
+// construction rule including the capture-only ones, plus the graph-edge rules
+// on the materialized entry. Every returned finding blocks the write — this is
+// the one boundary all write surfaces (CLI, engine capture, base-entry
+// assembly) validate through. The materialized entry is returned for the
+// caller to carry forward; its Warnings stay empty.
+func (c *EntryConstruction) ValidateForWrite(g *Graph) (*Entry, []Finding) {
+	e := c.Entry()
+	validateEdges(e, g)
 	validateAttachmentLinks(e)
+	findings := make([]Finding, 0, len(e.Warnings))
+	for _, w := range e.Warnings {
+		findings = append(findings, Finding{Field: w.Field, Value: w.Value, Message: w.Message})
+	}
+	e.Warnings = nil
+	findings = append(findings, c.Validate(g)...)
+	return e, findings
 }
 
 // validateRefs checks the refs field with kind awareness. Cross-repo refs
