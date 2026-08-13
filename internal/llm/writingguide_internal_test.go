@@ -176,4 +176,3 @@ func TestRenderWritingGuidePrompt_ReferenceFacts(t *testing.T) {
 		t.Error("a missing fact source must fail loud")
 	}
 }
-
