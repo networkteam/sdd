@@ -3,22 +3,32 @@ package finders
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// WritingGuide runs the writing guide against the draft in the query. Unlike
-// Preflight it takes no graph: the guide judges the draft in isolation — that
-// scope is the check's design (d-cpt-20r), not a missing dependency, and the
-// one thing it needs from outside the draft arrives already described in the
-// query's closure targets. Returns an error only for infrastructure failures;
-// findings, including none, are the result.
-func (f *Finder) WritingGuide(ctx context.Context, q query.WritingGuideQuery) (*query.WritingGuideResult, error) {
+// WritingGuide runs the writing guide against the draft in the query. The
+// guide judges the draft in isolation from the dialogue and the graph around
+// it — that scope is the check's design (d-cpt-20r) — but it reads with the
+// framework's own kind knowledge: the graph supplies the type-system overview
+// and the drafted kind's authoring fact, rendered into the prompt so kind-fit
+// judgments run on meaning rather than bare tokens (s-tac-fu8). Returns an
+// error only for infrastructure failures; findings, including none, are the
+// result.
+func (f *Finder) WritingGuide(ctx context.Context, graph *model.Graph, q query.WritingGuideQuery) (*query.WritingGuideResult, error) {
 	if f.writingGuideRunner == nil {
 		return nil, fmt.Errorf("writing guide: no LLM runner configured")
 	}
-	result, err := llm.WritingGuide(ctx, f.writingGuideRunner, q.Entry, q.ClosureTargets)
+	refFacts := llm.ReferenceFacts{
+		Source:           graphFactSource{graph: graph},
+		TypeSystemFactID: basefacts.OverviewFactID,
+		KindFactID:       basefacts.AuthoringFactID(q.Entry.Kind),
+	}
+	result, err := llm.WritingGuide(ctx, f.writingGuideRunner, q.Entry, q.ClosureTargets, refFacts)
 	if err != nil {
 		return nil, err
 	}
@@ -33,4 +43,24 @@ func (f *Finder) WritingGuide(ctx context.Context, q query.WritingGuideQuery) (*
 		})
 	}
 	return &query.WritingGuideResult{Findings: findings}, nil
+}
+
+// graphFactSource resolves fact bodies from the loaded graph for prompt
+// inlining, following the supersession chain so a project override of a base
+// fact wins. A missing or empty fact fails loud — a silently absent reference
+// section would be exactly the wrong degradation.
+type graphFactSource struct {
+	graph *model.Graph
+}
+
+func (s graphFactSource) FactBody(id string) (string, error) {
+	head := s.graph.ResolveRef(id).Head()
+	e, ok := s.graph.ByID[head]
+	if !ok {
+		return "", fmt.Errorf("reference fact %s does not resolve in the graph", id)
+	}
+	if strings.TrimSpace(e.Content) == "" {
+		return "", fmt.Errorf("reference fact %s has an empty body", head)
+	}
+	return e.Content, nil
 }

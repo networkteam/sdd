@@ -52,12 +52,15 @@ func (a *Application) WritingGuideCheck(ctx context.Context, identity RequestIde
 	entry.Closes = append([]string(nil), draft.Closes...)
 	entry.Supersedes = append([]string(nil), draft.Supersedes...)
 
+	// The snapshot serves two reads: closure targets, and the reference facts
+	// the prompt renders from the graph (type-system overview plus the drafted
+	// kind's authoring fact).
+	snapshot, err := a.snapshotWithDependencies(ctx, identity, runtime)
+	if err != nil {
+		return nil, err
+	}
 	var closureTargets []model.ClosureTarget
 	if len(entry.Closes) > 0 || len(entry.Supersedes) > 0 {
-		snapshot, err := a.snapshotWithDependencies(ctx, identity, runtime)
-		if err != nil {
-			return nil, err
-		}
 		// An ID with no entry behind it passes through resolution unchanged and
 		// is described by ID alone; only a genuinely ambiguous ID errors here.
 		if entry.Closes, err = snapshot.graph.ResolveIDs(entry.Closes); err != nil {
@@ -72,7 +75,7 @@ func (a *Application) WritingGuideCheck(ctx context.Context, identity RequestIde
 	finder := finders.New(finders.Options{WritingGuideRunner: runtimeLLMRunner{executor: runtime.options.LLM, purpose: "writing-guide"}})
 	guideCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	result, err := finder.WritingGuide(guideCtx, query.WritingGuideQuery{Entry: entry, ClosureTargets: closureTargets})
+	result, err := finder.WritingGuide(guideCtx, snapshot.graph, query.WritingGuideQuery{Entry: entry, ClosureTargets: closureTargets})
 	if err != nil {
 		return nil, fmt.Errorf("writing guide: %w", err)
 	}

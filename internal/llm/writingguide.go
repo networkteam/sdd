@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"text/template"
 
 	"github.com/networkteam/sdd/internal/model"
@@ -63,13 +62,36 @@ type WritingGuideResult struct {
 	Findings []GuideFinding
 }
 
+// FactSource resolves a fact entry's body for inlining into the prompt.
+// Consumer-defined so the prompt layer stays free of graph wiring; the finder
+// supplies a graph-backed implementation that resolves to live supersession
+// heads, so a project override of a base fact wins.
+type FactSource interface {
+	FactBody(id string) (string, error)
+}
+
+// ReferenceFacts names the graph facts the prompt inlines as framework
+// knowledge: the type-system overview always, the drafted kind's authoring
+// fact when one ships. This is reference knowledge, not neighborhood — the
+// guide still judges the draft in isolation from the dialogue and the graph
+// around it (d-cpt-20r).
+type ReferenceFacts struct {
+	Source           FactSource
+	TypeSystemFactID string
+	// KindFactID is empty when the drafted kind has no authoring fact yet;
+	// the prompt section is simply absent then.
+	KindFactID string
+}
+
 // WritingGuide runs the writing guide against a draft entry in isolation:
-// the prompt carries the draft and the entry-craft instructions, and nothing
-// else — no dialogue, no graph context. That absence is the instrument
-// (d-cpt-20r): only a reader outside the dialogue can run the stands-alone
-// test. Returns an error only for infrastructure failures.
-func WritingGuide(ctx context.Context, runner Runner, entry *model.Entry, closureTargets []model.ClosureTarget) (*WritingGuideResult, error) {
-	req, err := renderWritingGuidePrompt(entry, closureTargets)
+// the prompt carries the draft, the entry-craft instructions, and the
+// framework's own kind knowledge rendered from the graph — no dialogue and no
+// neighborhood context. That absence is the instrument (d-cpt-20r): only a
+// reader outside the dialogue can run the stands-alone test, and the
+// reference facts tell that reader what the draft's kind means (s-tac-fu8).
+// Returns an error only for infrastructure failures.
+func WritingGuide(ctx context.Context, runner Runner, entry *model.Entry, closureTargets []model.ClosureTarget, refFacts ReferenceFacts) (*WritingGuideResult, error) {
+	req, err := renderWritingGuidePrompt(entry, closureTargets, refFacts)
 	if err != nil {
 		return nil, fmt.Errorf("rendering writing-guide prompt: %w", err)
 	}
@@ -86,36 +108,38 @@ func WritingGuide(ctx context.Context, runner Runner, entry *model.Entry, closur
 	return result, nil
 }
 
-var (
-	writingGuideTmplOnce sync.Once
-	writingGuideTmpl     *template.Template
-	writingGuideTmplErr  error
-)
-
-func parsedWritingGuideTemplates() (*template.Template, error) {
-	writingGuideTmplOnce.Do(func() {
-		writingGuideTmpl, writingGuideTmplErr = template.ParseFS(writingGuideTemplates, "writingguide_templates/*.tmpl")
-	})
-	return writingGuideTmpl, writingGuideTmplErr
-}
-
-// renderWritingGuidePrompt renders the two-part request: the system block is
-// the byte-stable guide text (cacheable prefix across sequential captures,
-// same invariant as pre-flight's universal preamble), the user block carries
-// only the formatted draft.
-func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.ClosureTarget) (Request, error) {
-	tmpl, err := parsedWritingGuideTemplates()
+// renderWritingGuidePrompt renders the two-part request. The system block
+// carries the guide text and the type-system overview — byte-stable across
+// sequential captures while the graph's facts are unchanged (the cacheable
+// prefix, same invariant as pre-flight's universal preamble). The user block
+// carries the drafted kind's authoring fact, when one exists, and the
+// formatted draft last. Templates parse per render because factBody closes
+// over the per-call fact source.
+func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.ClosureTarget, refFacts ReferenceFacts) (Request, error) {
+	if refFacts.Source == nil || refFacts.TypeSystemFactID == "" {
+		return Request{}, fmt.Errorf("no type-system reference fact configured")
+	}
+	funcs := template.FuncMap{
+		"factBody":      refFacts.Source.FactBody,
+		"shiftHeadings": shiftHeadings,
+	}
+	tmpl, err := template.New("writing_guide").Funcs(funcs).ParseFS(writingGuideTemplates, "writingguide_templates/*.tmpl")
 	if err != nil {
 		return Request{}, fmt.Errorf("parsing writing-guide templates: %w", err)
 	}
 
-	data := struct{ Draft string }{Draft: formatDraftForWritingGuide(entry, closureTargets)}
+	sysData := struct{ TypeSystemFactID string }{TypeSystemFactID: refFacts.TypeSystemFactID}
+	userData := struct{ Draft, Kind, KindFactID string }{
+		Draft:      formatDraftForWritingGuide(entry, closureTargets),
+		Kind:       string(entry.Kind),
+		KindFactID: refFacts.KindFactID,
+	}
 
 	var sysB, userB strings.Builder
-	if err := tmpl.ExecuteTemplate(&sysB, "writing_guide_system", nil); err != nil {
+	if err := tmpl.ExecuteTemplate(&sysB, "writing_guide_system", sysData); err != nil {
 		return Request{}, fmt.Errorf("executing writing_guide_system template: %w", err)
 	}
-	if err := tmpl.ExecuteTemplate(&userB, "writing_guide_user", data); err != nil {
+	if err := tmpl.ExecuteTemplate(&userB, "writing_guide_user", userData); err != nil {
 		return Request{}, fmt.Errorf("executing writing_guide_user template: %w", err)
 	}
 
@@ -123,6 +147,34 @@ func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.Closure
 		SystemPrompt: strings.TrimSpace(sysB.String()),
 		UserPrompt:   strings.TrimSpace(userB.String()),
 	}, nil
+}
+
+// shiftHeadings demotes every markdown heading in text by n levels, clamped
+// at h6 and skipping fenced code blocks. It is a template pipeline function
+// because only the surrounding template region knows its own depth — inlined
+// graph content arrives carrying its own h1.
+func shiftHeadings(n int, text string) string {
+	lines := strings.Split(text, "\n")
+	inFence := false
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || !strings.HasPrefix(line, "#") {
+			continue
+		}
+		level := 0
+		for level < len(line) && line[level] == '#' {
+			level++
+		}
+		if level >= len(line) || line[level] != ' ' {
+			continue
+		}
+		lines[i] = strings.Repeat("#", min(level+n, 6)) + line[level:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // formatDraftForWritingGuide renders the draft for the isolation-scoped

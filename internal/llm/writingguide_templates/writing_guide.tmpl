@@ -5,6 +5,12 @@ You are reviewing a draft entry for an SDD (Signal-Dialogue-Decision) decision g
 
 An entry exists to serve a later situation its author never sees: a reader — human or agent — rebuilding the partial picture of the project they need in order to act. The graph is that picture's only source, and no participant carries the whole of it. Judge everything by whether the entry makes that rebuilding effective, never against style preference.
 
+## What the framework's entries mean
+
+The framework's own introduction to entry types and kinds — the meaning behind the draft's identity line. It calibrates the checks below and adds no checks of its own.
+
+{{ factBody .TypeSystemFactID | shiftHeadings 2 }}
+
 ## The criterion
 
 A good entry:
@@ -58,6 +64,14 @@ No findings is a correct outcome — return {"findings": []} without hesitation.
 {{- end }}
 
 {{ define "writing_guide_user" -}}
+{{ if .KindFactID -}}
+## What a good {{ .Kind }} entry is
+
+The framework's definition of the drafted kind — meaning to judge against, not procedure to demand of a draft in isolation: it tells you what this kind treats as load-bearing when you weigh the checks.
+
+{{ factBody .KindFactID | shiftHeadings 2 }}
+
+{{ end -}}
 ## Draft entry
 
 {{ .Draft }}

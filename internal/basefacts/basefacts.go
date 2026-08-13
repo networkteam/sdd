@@ -62,6 +62,20 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	return entries, nil
 }
 
+// authoringFactIDs maps each kind to its shipped authoring fact — the
+// per-kind depth behind the overview. Kinds absent here have no fact yet;
+// consumers treat absence as "no section", so coverage grows as the sweep
+// ships each kind.
+var authoringFactIDs = map[model.Kind]string{
+	model.KindDone: DoneFactID,
+}
+
+// AuthoringFactID returns the stable ID of the kind's authoring fact, or ""
+// when none ships yet.
+func AuthoringFactID(kind model.Kind) string {
+	return authoringFactIDs[kind]
+}
+
 // build materializes one base fact from its frontmatter and rendered body
 // through the same ParseEntry path every on-disk entry uses, then marks it
 // Embedded so write-side surfaces (summary regeneration, lint, rewrite) skip

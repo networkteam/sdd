@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -59,18 +60,41 @@ func TestParseWritingGuideResult_Errors(t *testing.T) {
 	}
 }
 
+// fakeFactSource serves canned fact bodies; a missing ID errors like the real
+// graph-backed source.
+type fakeFactSource map[string]string
+
+func (s fakeFactSource) FactBody(id string) (string, error) {
+	body, ok := s[id]
+	if !ok {
+		return "", fmt.Errorf("reference fact %s does not resolve", id)
+	}
+	return body, nil
+}
+
+func testReferenceFacts(kindFactID string) ReferenceFacts {
+	return ReferenceFacts{
+		Source: fakeFactSource{
+			"20260812-180000-s-prc-typ": "# The type system — test stub\n\nTwo types, fifteen kinds.\n\n## Kinds\n\nThe kind list.",
+			"20260812-170000-s-prc-dnk": "# Recording completed work — test stub\n\nOne act, one done.",
+		},
+		TypeSystemFactID: "20260812-180000-s-prc-typ",
+		KindFactID:       kindFactID,
+	}
+}
+
 func TestRenderWritingGuidePrompt_SystemByteStableAcrossDrafts(t *testing.T) {
 	a := &model.Entry{Type: model.TypeSignal, Kind: model.KindGap, Layer: model.LayerTactical, Content: "First draft body."}
 	b := &model.Entry{Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerProcess, Intent: model.IntentGuiding, Content: "A different body entirely.",
 		Refs: []model.Ref{{ID: "20260601-120000-d-tac-ref", Kind: model.RefKind("refines"), Desc: "target"}}}
 
-	reqA, err := renderWritingGuidePrompt(a, nil)
+	reqA, err := renderWritingGuidePrompt(a, nil, testReferenceFacts(""))
 	if err != nil {
 		t.Fatal(err)
 	}
 	reqB, err := renderWritingGuidePrompt(b, []model.ClosureTarget{
 		{Relation: "closes", ID: "20260601-120000-d-tac-old", Type: model.TypeDecision, Kind: model.KindDirective, Summary: "The commitment this draft retires."},
-	})
+	}, testReferenceFacts(""))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,5 +126,66 @@ func TestRenderWritingGuidePrompt_SystemByteStableAcrossDrafts(t *testing.T) {
 	}
 	if strings.Contains(reqA.UserPrompt, "Closure edges") {
 		t.Error("a draft with no closure edges must not carry the section")
+	}
+}
+
+// TestRenderWritingGuidePrompt_ReferenceFacts pins the framework-knowledge
+// slots: the type-system overview renders into the system block with its
+// headings demoted under the section, and the drafted kind's authoring fact
+// renders into the user block before the draft — absent when the kind has no
+// fact, loud when a configured fact does not resolve.
+func TestRenderWritingGuidePrompt_ReferenceFacts(t *testing.T) {
+	done := &model.Entry{Type: model.TypeSignal, Kind: model.KindDone, Layer: model.LayerTactical, Content: "Draft done body."}
+
+	req, err := renderWritingGuidePrompt(done, nil, testReferenceFacts("20260812-170000-s-prc-dnk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(req.SystemPrompt, "## What the framework's entries mean") {
+		t.Error("system prompt missing the reference-knowledge section")
+	}
+	if !strings.Contains(req.SystemPrompt, "### The type system — test stub") {
+		t.Errorf("system prompt missing the overview body with shifted h1:\n%s", req.SystemPrompt)
+	}
+	if !strings.Contains(req.SystemPrompt, "#### Kinds") {
+		t.Error("overview h2 not demoted to h4")
+	}
+	if !strings.Contains(req.UserPrompt, "## What a good done entry is") {
+		t.Errorf("user prompt missing the kind-fact section:\n%s", req.UserPrompt)
+	}
+	if !strings.Contains(req.UserPrompt, "### Recording completed work — test stub") {
+		t.Error("user prompt missing the kind fact body with shifted h1")
+	}
+	if kindIdx, draftIdx := strings.Index(req.UserPrompt, "What a good done entry is"), strings.Index(req.UserPrompt, "## Draft entry"); kindIdx > draftIdx {
+		t.Error("kind fact must precede the draft")
+	}
+
+	gap := &model.Entry{Type: model.TypeSignal, Kind: model.KindGap, Layer: model.LayerTactical, Content: "Draft gap body."}
+	reqGap, err := renderWritingGuidePrompt(gap, nil, testReferenceFacts(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(reqGap.UserPrompt, "What a good") {
+		t.Error("a kind without an authoring fact must not carry the kind-fact section")
+	}
+
+	if _, err := renderWritingGuidePrompt(done, nil, testReferenceFacts("20260101-000000-s-prc-mis")); err == nil {
+		t.Error("a configured kind fact that does not resolve must fail loud")
+	}
+	if _, err := renderWritingGuidePrompt(done, nil, ReferenceFacts{}); err == nil {
+		t.Error("a missing fact source must fail loud")
+	}
+}
+
+func TestShiftHeadings(t *testing.T) {
+	in := "# Title\n\n## Section\n\n```\n# not a heading\n```\n\n###### Deep\n#NoSpace stays"
+	got := shiftHeadings(2, in)
+	for _, want := range []string{"### Title", "#### Section", "\n# not a heading\n", "###### Deep", "#NoSpace stays"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("shiftHeadings output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "######## ") {
+		t.Error("headings must clamp at h6")
 	}
 }

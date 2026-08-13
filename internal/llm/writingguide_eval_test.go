@@ -22,9 +22,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/viewlayout"
 )
+
+// evalFactSource serves the shipped base facts, so the eval exercises the
+// prompt exactly as production renders it — reference knowledge included.
+type evalFactSource map[string]string
+
+func (s evalFactSource) FactBody(id string) (string, error) {
+	body, ok := s[id]
+	if !ok {
+		return "", fmt.Errorf("reference fact %s does not resolve", id)
+	}
+	return body, nil
+}
+
+func evalReferenceFacts(t *testing.T, kind model.Kind) llm.ReferenceFacts {
+	t.Helper()
+	entries, err := basefacts.Entries(viewlayout.Vocabulary{})
+	if err != nil {
+		t.Fatalf("basefacts.Entries: %v", err)
+	}
+	source := evalFactSource{}
+	for _, e := range entries {
+		source[e.ID] = e.Content
+	}
+	return llm.ReferenceFacts{
+		Source:           source,
+		TypeSystemFactID: basefacts.OverviewFactID,
+		KindFactID:       basefacts.AuthoringFactID(kind),
+	}
+}
 
 // runGuideEvalOnce runs the real writing-guide pipeline once; infrastructure
 // errors are returned, not fatal, so pass-rate cases count them as failed runs.
@@ -33,7 +64,7 @@ func runGuideEvalOnce(t *testing.T, draft *model.Entry, closure ...model.Closure
 	runner := evalRunner(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
-	result, err := llm.WritingGuide(ctx, runner, draft, closure)
+	result, err := llm.WritingGuide(ctx, runner, draft, closure, evalReferenceFacts(t, draft.Kind))
 	return result, runner.lastText, err
 }
 
