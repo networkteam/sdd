@@ -3,6 +3,7 @@
   "packages": [
     "go@1.26",
     "golangci-lint@2.11",
+    "jq",
     "uv",
     "nodejs@24"
   ],
@@ -13,6 +14,7 @@
       "docs:build":      "cd website && pnpm build",
       "docs:dev":        "cd website && pnpm dev",
       "gen-installer":   "binst gen -o install.sh",
+      "lint":            "bash scripts/lint.sh",
       "validate-skills": "rc=0; for d in .agents/skills/*/; do [ -f \"$d/SKILL.md\" ] || continue; uvx --from skills-ref@0.1.1 agentskills validate \"$d\" || rc=1; done; exit $rc"
     }
   },

@@ -25,7 +25,7 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 - `go test ./...` — run all tests
 - `go test -tags=eval -run TestPreflightEval ./internal/llm/...` — pre-flight prompt calibration eval (live `claude` CLI, slow + paid; model via `SDD_EVAL_MODEL`, default `sonnet`). Capture full output to a file and grep the file — `… -v 2>&1 | tee /tmp/eval.log` — never filter the live stream, or a failure shows no findings and forces a costly re-run.
 - `go fmt ./...` — format code
-- `golangci-lint run ./...` — lint (must be clean; CI enforces)
+- `devbox run lint` — lint (must be clean of error-severity issues; CI enforces). The wrapper (`scripts/lint.sh`) fails only on error severity: warning-severity findings — `testpackage` over legacy internal test files awaiting conversion (see the testing rule under Architecture) — print on every run without failing it. A bare `golangci-lint run ./...` exits non-zero on *any* finding, warnings included, so use the wrapper.
 - `devbox run validate-skills` — validate the rendered Codex skills under `.agents/skills/` against the Agent Skills standard (`uvx skills-ref@0.1.1 agentskills validate`, managed via the devbox `uv` package). Requires a Codex render present (i.e. `codex` in `supported_agents`).
 - `sdd view` — smoke-test the binary against the graph at `.sdd/graph/`
 - `goreleaser check` — validate `.goreleaser.yaml`

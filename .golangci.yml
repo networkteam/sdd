@@ -10,7 +10,15 @@ linters:
     - unused
     - misspell
     - unparam
+    - testpackage
   settings:
+    testpackage:
+      # Internal tests are the exception and carry the marker suffix (see
+      # AGENTS.md: test the exported surface).
+      skip-regexp: (export|internal)_test\.go
+      # Packages allowed to keep internal tests wholesale (e.g. main).
+      allow-packages:
+        - main
     errcheck:
       exclude-functions:
         # Ignore stdio writer errors — failure modes are rare and callers
@@ -31,6 +39,17 @@ linters:
       - path: test_helpers_test\.go
         linters:
           - unused
+
+# Severity is reporting metadata — golangci-lint cannot gate its exit code on
+# it. scripts/lint.sh runs with --issues-exit-code 0 and fails only on
+# error-severity issues, so warnings (testpackage over legacy internal tests,
+# convert-as-touched per AGENTS.md) stay visible on every run without failing.
+severity:
+  default: error
+  rules:
+    - linters:
+        - testpackage
+      severity: warning
 
 formatters:
   enable:
