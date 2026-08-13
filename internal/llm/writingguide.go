@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/networkteam/sdd/internal/mdcompose"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -120,8 +121,13 @@ func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.Closure
 		return Request{}, fmt.Errorf("no type-system reference fact configured")
 	}
 	funcs := template.FuncMap{
-		"factBody":      refFacts.Source.FactBody,
-		"shiftHeadings": shiftHeadings,
+		"factBody": refFacts.Source.FactBody,
+		// demoteTo pipelines mdcompose.DemoteTo: the template region knows the
+		// level its inlined fragment must sit at, the fragment arrives with
+		// its own h1.
+		"demoteTo": func(level int, fragment string) string {
+			return mdcompose.DemoteTo(fragment, level)
+		},
 	}
 	tmpl, err := template.New("writing_guide").Funcs(funcs).ParseFS(writingGuideTemplates, "writingguide_templates/*.tmpl")
 	if err != nil {
@@ -147,34 +153,6 @@ func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.Closure
 		SystemPrompt: strings.TrimSpace(sysB.String()),
 		UserPrompt:   strings.TrimSpace(userB.String()),
 	}, nil
-}
-
-// shiftHeadings demotes every markdown heading in text by n levels, clamped
-// at h6 and skipping fenced code blocks. It is a template pipeline function
-// because only the surrounding template region knows its own depth — inlined
-// graph content arrives carrying its own h1.
-func shiftHeadings(n int, text string) string {
-	lines := strings.Split(text, "\n")
-	inFence := false
-	for i, line := range lines {
-		trimmed := strings.TrimLeft(line, " ")
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inFence = !inFence
-			continue
-		}
-		if inFence || !strings.HasPrefix(line, "#") {
-			continue
-		}
-		level := 0
-		for level < len(line) && line[level] == '#' {
-			level++
-		}
-		if level >= len(line) || line[level] != ' ' {
-			continue
-		}
-		lines[i] = strings.Repeat("#", min(level+n, 6)) + line[level:]
-	}
-	return strings.Join(lines, "\n")
 }
 
 // formatDraftForWritingGuide renders the draft for the isolation-scoped

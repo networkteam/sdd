@@ -67,6 +67,8 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 
 - **Fail loud — never swallow errors into silent fallbacks**: Catch errors early and propagate them to a caller that can act; never degrade a failure to a stderr `warning:` (or any other fallback) that lets execution continue as if nothing broke. This includes background side effects like the git auto-commit: a failed or timed-out commit returns an error — the entry file stays on disk for durability, but the failure surfaces — it is not printed and swallowed.
 
+- **Test the exported surface**: Test files use the external test package (`package foo_test`) and exercise exported types, functions, and methods — that keeps tests honest about the API and free to refactor internals. An internal test is the exception, not the default: it needs an unexported seam that genuinely cannot be reached through the API, and it lives in a file named `*_internal_test.go` so the exception is visible. (Much existing code predates this rule — follow it for new test files, and prefer converting when touching old ones.)
+
 ## Structure
 
 ```
