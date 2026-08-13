@@ -1,0 +1,206 @@
+=== RUN   TestWritingGuideSweep_DoneKind
+=== RUN   TestWritingGuideSweep_DoneKind/sux_dense_multi_commit_delivery
+    writingguide_sweep_eval_test.go:85: GROUND TRUTH expects: one conflation on the a08266b4 overturned-diagnosis paragraph (own lifecycle); form at most minor
+    writingguide_sweep_eval_test.go:86: GROUND TRUTH non-findings: the five-commit batching itself; the commit hashes; the per-commit delivery descriptions
+    writingguide_sweep_eval_test.go:97: run 1/3: 5 finding(s)
+    writingguide_sweep_eval_test.go:99:   [1] axis=form severity=substantive repair=reword
+              quote: Slice 4 of the session-subsystem rebuild (20260730-093011-d-tac-k4q), the transport-vocabulary directive it implements against, the branch-precedence consolidation, and a read-side recovery of lost session endings are delivered in commits `2e961f00`, `7b4fee69`, `1fb24286`, `627ed373` and `a08266b4` on branch worktree-k4q-session-rebuild
+              reasoning: The first sentence lists what was delivered as four things — slice 4, the transport-vocabulary directive, the branch-precedence consolidation, and the read-side recovery — but names five commit hashes including `7b4fee69`, the retention day-parsing fix detailed two sentences later. A reader relying on the opening sentence as the entry's summary would come away thinking only four things landed and would miss that a defect fix shipped in the same batch; the ref annotation for d-tac-k4q, by contrast, does list 'the retention fix' among its five items, showing the omission is inconsistent within the draft itself.
+    writingguide_sweep_eval_test.go:99:   [2] axis=conflation severity=substantive repair=split
+              quote: The truth is the opposite: 36 of the store's 58 sessions have a completed shell and 17 more an abandoned one — Christopher concludes nearly every dialogue — but the engine recorded each conclude only as the shell's own event, while the metadata-level record the collector reads was never written, its write site lost in the mid-July session-model rebuild.
+              reasoning: This sentence and its surrounding paragraph don't describe the act performed (building the read-side decorator) — they assert a standalone factual claim about the world: how many of the store's real sessions were actually concluded, and why the engine failed to record it. Per the done kind's own rule, 'when something noticed in the doing stands on its own — a problem, a claim, an open question — it becomes its own entry pointing back at this one; the done keeps the mention, not the full story,' but here the full diagnosis, with its figures and root-cause narrative, is carried entirely inside this done rather than in a fact/insight entry it could point back to.
+    writingguide_sweep_eval_test.go:99:   [3] axis=dilution severity=minor repair=cut
+              quote: The store was not full of unended dialogues; it was full of endings the engine had failed to record.
+              reasoning: This sentence restates, in punchier form, the conclusion the immediately preceding sentence already established (that the store's conclude events existed but went unrecorded rather than the store being full of unended dialogues). Removing it loses no information a reader needs, only rhetorical emphasis.
+    writingguide_sweep_eval_test.go:99:   [4] axis=stranding severity=substantive repair=write-in
+              quote: the one wg5 item independent of relocation
+              reasoning: 'wg5' is an opaque internal label with no explanation and no inline anchor to the plan it presumably comes from, and 'relocation' is equally unglossed — relocation of what is never said. A reader acting on this entry has no way to resolve either term without independently digging through the plan (d-tac-k4q) on the chance it defines a 'wg5' work-item scheme, and the body never points them to that explicitly at this mention.
+    writingguide_sweep_eval_test.go:99:   [5] axis=dilution severity=minor repair=cut
+              quote: Verification went beyond the suite (all green, lint clean) and beyond fixtures.
+              reasoning: Stating that the suite is 'all green, lint clean' names the project's standing baseline check passing with nothing unusual about the outcome — it wasn't skipped, tightened, or accepted despite failure. Per the done kind's rule that 'the baseline goes without saying,' this parenthetical is noise the claim of a completed act already carries implicitly.
+    writingguide_sweep_eval_test.go:97: run 2/3: 3 finding(s)
+    writingguide_sweep_eval_test.go:99:   [1] axis=conflation severity=substantive repair=split
+              quote: The truth is the opposite: 36 of the store's 58 sessions have a completed shell and 17 more an abandoned one — Christopher concludes nearly every dialogue — but the engine recorded each conclude only as the shell's own event, while the metadata-level record the collector reads was never written, its write site lost in the mid-July session-model rebuild. The store was not full of unended dialogues; it was full of endings the engine had failed to record.
+              reasoning: This passage doesn't narrate the act of shipping commit a08266b4 — it re-derives and states a corrected understanding of the store's actual historical state (36/58 sessions concluded, 17 abandoned, the missing write site) as a synthesized claim about how the world is, which is exactly what an insight entry captures ('what have we synthesized?'). A future reader who wants just the corrected conclude-rate diagnosis, independent of whether slice 4 shipped, would need to pull this specific claim on its own, so it is a second coherent thing riding inside the done rather than a mention pointing back at it.
+    writingguide_sweep_eval_test.go:99:   [2] axis=dilution severity=minor repair=cut
+              quote: the collection pass removed exactly one session before the derivation fix and fifty at a 24-hour retention after it, leaving only the genuinely open and the recently ended; an independent run at the default fourteen days removed forty-three and was idempotent
+              reasoning: These tallies are measurements left over from a checking run rather than the claim itself: the actionable meaning for a future reader is that the derivation fix now retains only genuinely open or recently-ended sessions and that collection is idempotent at default retention. The exact counts (one, fifty, forty-three) are snapshot-specific figures against a store that keeps changing, and per the done kind's own guidance such leftover counts just bind later readers to reconcile numbers that add nothing to the verified claim.
+    writingguide_sweep_eval_test.go:99:   [3] axis=stranding severity=minor repair=write-in
+              quote: the one wg5 item independent of relocation
+              reasoning: "wg5" is dropped in as a bare label with no explanation and no specific ref. The plan d-tac-k4q is referenced elsewhere in the entry, but only generally — nothing anchors this particular sub-item to a place a reader could check, so someone wanting to know what wg5 designates within that plan has no path to it.
+    writingguide_sweep_eval_test.go:97: run 3/3: 4 finding(s)
+    writingguide_sweep_eval_test.go:99:   [1] axis=conflation severity=substantive repair=split
+              quote: The store was not full of unended dialogues; it was full of endings the engine had failed to record.
+              reasoning: Paragraph 6 doesn't just record that commit a08266b4 was made — it carries a full, self-standing claim about how the world is ('36 of the store's 58 sessions have a completed shell and 17 more an abandoned one... The store was not full of unended dialogues; it was full of endings the engine had failed to record'), overturning s-tac-jkw's prior diagnosis. Per the done kind's own rule, a claim noticed in the doing that stands on its own belongs in its own entry with the done keeping only the mention and a pointer back. The draft already applies exactly this split elsewhere for a different in-flight discovery (the config-strictness gap became its own signal, s-tac-8ae, cited by pointer only) — which makes the failure to do the same for the store-completion-rate insight an inconsistency, not a judgment call. A future reader reasoning about session-completion health would want this claim as its own fact/insight superseding jkw, not buried in a code-delivery done.
+    writingguide_sweep_eval_test.go:99:   [2] axis=pointing severity=minor repair=point
+              quote: captured as 20260810-144515-s-tac-8ae: strict config parsing makes any new config key fatal to older binaries sharing the user-global config.
+              reasoning: The surfaces ref's job is to state why s-tac-8ae matters here (the swap produced it); the clause after the colon instead restates the gap's own content — that strict config parsing is fatal to older binaries on shared config — which is the target entry's material, not a pointer to it. A reader who wants that detail should follow the ref; this line duplicates work the ref already does and blurs where the gap's authoritative description lives.
+    writingguide_sweep_eval_test.go:99:   [3] axis=stranding severity=minor repair=cut
+              quote: the one wg5 item independent of relocation
+              reasoning: Neither 'wg5' nor 'relocation' is explained in the body or anchored by any ref — the addresses ref to d-tac-k4q names 'branch-precedence consolidation' but not these two terms, so a reader has no way to know what work-item set 'wg5' names or what the contrasted 'relocation' item is. The substantive description that follows ('reads honored an explicit workBranch that writes ignored...') stands on its own without this framing clause, so the unexplained jargon can simply be dropped rather than glossed.
+    writingguide_sweep_eval_test.go:99:   [4] axis=stranding severity=minor repair=write-in
+              quote: its write site lost in the mid-July session-model rebuild
+              reasoning: The root-cause explanation for the lost metadata writes points at 'the mid-July session-model rebuild' as if it were a known, locatable event, but nothing anchors it to an actual entry in the graph — it reads like 'the earlier approach' with no ref a reader could follow to verify or learn more. The causal detail itself is worth keeping, so the fix is to anchor the reference rather than remove the explanation.
+=== RUN   TestWritingGuideSweep_DoneKind/wts_thin_retirement
+    writingguide_sweep_eval_test.go:85: GROUND TRUTH expects: clean, or at most one minor on the close-vs-settled sentence
+    writingguide_sweep_eval_test.go:86: GROUND TRUTH non-findings: stranding for absent commit hashes (provenance follows the act: a retirement done points at the delivery done); stranding on the retired directive, which the closure edge now anchors
+panic: test timed out after 10m0s
+	running tests:
+		TestWritingGuideSweep_DoneKind (10m0s)
+		TestWritingGuideSweep_DoneKind/wts_thin_retirement (38s)
+
+goroutine 69 [running]:
+testing.(*M).startAlarm.func1()
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2802 +0x2c4
+created by time.goFunc
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/time/sleep.go:215 +0x38
+
+goroutine 1 [chan receive]:
+testing.(*T).Run(0x14ad32f80d88, {0x10145c172?, 0x14ad32e81b18?}, 0x1019fc200)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2109 +0x3bc
+testing.runTests.func1(0x14ad32f80d88)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2585 +0x38
+testing.tRunner(0x14ad32f80d88, 0x14ad32e81c48)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2036 +0xc4
+testing.runTests({0x101457f8c, 0x1a}, {0x101464b9d, 0x27}, 0x14ad32f32258, {0x101a9ef00, 0x56, 0x56}, {0x80047e674579182e?, 0x10144e17d?, ...})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2583 +0x3f0
+testing.(*M).Run(0x14ad32f255e0)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2443 +0x578
+main.main()
+	_testmain.go:218 +0x80
+
+goroutine 21 [chan receive]:
+testing.(*T).Run(0x14ad32f80fc8, {0x101451753?, 0x1010b4c70?}, 0x14ad33254ee0)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2109 +0x3bc
+github.com/networkteam/sdd/internal/llm_test.TestWritingGuideSweep_DoneKind(0x14ad32f80fc8)
+	/Users/hlubek/Dev/AI/Claude/sdd/internal/llm/writingguide_sweep_eval_test.go:83 +0x1d8
+testing.tRunner(0x14ad32f80fc8, 0x1019fc200)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2036 +0xc4
+created by testing.(*T).Run in goroutine 1
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2101 +0x3a8
+
+goroutine 41 [syscall]:
+syscall.syscalln(0x101024a00, {0x14ad32f936a8, 0x6, 0x6})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/runtime/sys_darwin.go:38 +0x20
+syscall.syscall6(0x90010133368400?, 0x103e745a8?, 0x103ba1bf0?, 0x90?, 0x14ad32f00008?, 0x14ad32f90120?, 0x14ad32f93748?)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/syscall/syscall_darwin.go:388 +0x28
+syscall.wait4(0x14ad32f93778?, 0x10104bf0c?, 0x90?, 0x1019e5500?)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/syscall/zsyscall_darwin_arm64.go:44 +0x4c
+syscall.Wait4(0x14ad33182150?, 0x14ad32f937b4, 0x14ad33368400?, 0x14ad331820e0?)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/syscall/syscall_bsd.go:144 +0x28
+os.(*Process).pidWait.func1(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec_unix.go:64
+os.ignoringEINTR2[...](...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/file_posix.go:266
+os.(*Process).pidWait(0x14ad32f16000)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec_unix.go:63 +0x9c
+os.(*Process).wait(0x103bb87c0?)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec_unix.go:28 +0x24
+os.(*Process).Wait(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec.go:346
+os/exec.(*Cmd).Wait(0x14ad332424e0)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:930 +0x38
+os/exec.(*Cmd).Run(0x14ad332424e0)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:632 +0x38
+os/exec.(*Cmd).Output(0x14ad332424e0)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:1026 +0xb4
+github.com/networkteam/sdd/internal/llm/claude.(*Runner).Run(0x255a0ac6d695bb?, {0x101a07b20, 0x14ad332550a0}, {{0x14ad33374000?, 0x14ad3305baf8?}, {0x14ad33286f00?, 0x14ad3305bb08?}})
+	/Users/hlubek/Dev/AI/Claude/sdd/internal/llm/claude/claude.go:33 +0x18c
+github.com/networkteam/sdd/internal/llm_test.(*capturingRunner).Run(0x14ad33222e60, {0x101a07b20?, 0x14ad332550a0?}, {{0x14ad33374000?, 0x0?}, {0x14ad33286f00?, 0x0?}})
+	/Users/hlubek/Dev/AI/Claude/sdd/internal/llm/preflight_eval_test.go:46 +0x38
+github.com/networkteam/sdd/internal/llm.Run({0x101a07b20, 0x14ad332550a0}, {0x101a025a0, 0x14ad33222e60}, {{0x14ad33374000?, 0x14ad3335c4b0?}, {0x14ad33286f00?, 0x19?}}, {0x10144cb6b, 0xd})
+	/Users/hlubek/Dev/AI/Claude/sdd/internal/llm/llm.go:48 +0x88
+github.com/networkteam/sdd/internal/llm.WritingGuide({0x101a07b20, 0x14ad332550a0}, {0x101a025a0, 0x14ad33222e60}, 0x14ad33309710?, {0x14ad32f70c30?, 0x14ad32f93d08?, 0x1010b2108?}, {{0x101a025c0, 0x14ad3335c4b0}, ...})
+	/Users/hlubek/Dev/AI/Claude/sdd/internal/llm/writingguide.go:100 +0x114
+github.com/networkteam/sdd/internal/llm_test.runGuideEvalOnce(0x14ad3333c008, 0x14ad33265000, {0x14ad32f70c30, 0x1, 0x1})
+	/Users/hlubek/Dev/AI/Claude/sdd/internal/llm/writingguide_eval_test.go:67 +0xf8
+github.com/networkteam/sdd/internal/llm_test.TestWritingGuideSweep_DoneKind.func1(0x14ad3333c008)
+	/Users/hlubek/Dev/AI/Claude/sdd/internal/llm/writingguide_sweep_eval_test.go:88 +0xe8
+testing.tRunner(0x14ad3333c008, 0x14ad33254ee0)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2036 +0xc4
+created by testing.(*T).Run in goroutine 21
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/testing/testing.go:2101 +0x3a8
+
+goroutine 66 [IO wait]:
+internal/poll.runtime_pollWait(0x103eaa000, 0x72)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/runtime/netpoll.go:351 +0xa0
+internal/poll.(*pollDesc).wait(0x14ad33205e00?, 0x14ad3337e600?, 0x1)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/internal/poll/fd_poll_runtime.go:84 +0x28
+internal/poll.(*pollDesc).waitRead(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x14ad33205e00, {0x14ad3337e600, 0x200, 0x200})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/internal/poll/fd_unix.go:165 +0x234
+os.(*File).read(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/file_posix.go:29
+os.(*File).Read(0x14ad3321e380, {0x14ad3337e600?, 0x14ad32ec2518?, 0x0?})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/file.go:144 +0x68
+bytes.(*Buffer).ReadFrom(0x14ad3335d3b0, {0x101a023a8, 0x14ad3321e380})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/bytes/buffer.go:229 +0x90
+io.copyBuffer({0x101a02980, 0x14ad3335d3b0}, {0x101a023a8, 0x14ad3321e380}, {0x0, 0x0, 0x0})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/io/io.go:415 +0x14c
+io.Copy(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/io/io.go:388
+os.genericWriteTo(0x1?, {0x101a02980?, 0x14ad3335d3b0?})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/file.go:295 +0x44
+os.(*File).WriteTo(0x101a8eb90?, {0x101a02980?, 0x14ad3335d3b0?})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/file.go:273 +0x5c
+io.copyBuffer({0x101a02980, 0x14ad3335d3b0}, {0x101a024a0, 0x14ad3321e380}, {0x0, 0x0, 0x0})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/io/io.go:411 +0x98
+io.Copy(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/io/io.go:388
+os/exec.(*Cmd).writerDescriptor.func1()
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:602 +0x40
+os/exec.(*Cmd).Start.func2(0x0?)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:757 +0x30
+created by os/exec.(*Cmd).Start in goroutine 41
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:756 +0x6c8
+
+goroutine 67 [IO wait]:
+internal/poll.runtime_pollWait(0x103eaa600, 0x72)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/runtime/netpoll.go:351 +0xa0
+internal/poll.(*pollDesc).wait(0x14ad3339c000?, 0x14ad32eee000?, 0x1)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/internal/poll/fd_poll_runtime.go:84 +0x28
+internal/poll.(*pollDesc).waitRead(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x14ad3339c000, {0x14ad32eee000, 0x8000, 0x8000})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/internal/poll/fd_unix.go:165 +0x234
+os.(*File).read(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/file_posix.go:29
+os.(*File).Read(0x14ad3321e390, {0x14ad32eee000?, 0x1?, 0x0?})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/file.go:144 +0x68
+io.copyBuffer({0x101a02da0, 0x14ad33228eb0}, {0x101a023a8, 0x14ad3321e390}, {0x0, 0x0, 0x0})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/io/io.go:429 +0x18c
+io.Copy(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/io/io.go:388
+os.genericWriteTo(0x1?, {0x101a02da0?, 0x14ad33228eb0?})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/file.go:295 +0x44
+os.(*File).WriteTo(0x101a8eb90?, {0x101a02da0?, 0x14ad33228eb0?})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/file.go:273 +0x5c
+io.copyBuffer({0x101a02da0, 0x14ad33228eb0}, {0x101a024a0, 0x14ad3321e390}, {0x0, 0x0, 0x0})
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/io/io.go:411 +0x98
+io.Copy(...)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/io/io.go:388
+os/exec.(*Cmd).writerDescriptor.func1()
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:602 +0x40
+os/exec.(*Cmd).Start.func2(0x0?)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:757 +0x30
+created by os/exec.(*Cmd).Start in goroutine 41
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:756 +0x6c8
+
+goroutine 68 [select]:
+os/exec.(*Cmd).watchCtx(0x14ad332424e0, 0x14ad32f180e0)
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:797 +0x74
+created by os/exec.(*Cmd).Start in goroutine 41
+	/nix/store/kh43nhaz1qcpwws2xq805lrmwpmn9i3k-go-1.26.1/share/go/src/os/exec/exec.go:783 +0x69c
+FAIL	github.com/networkteam/sdd/internal/llm	600.234s
+?   	github.com/networkteam/sdd/internal/llm/claude	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/networkteam/sdd/internal/llm/embed	0.685s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/networkteam/sdd/internal/llm/factory	0.546s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/networkteam/sdd/internal/llm/gollm	0.385s [no tests to run]
+FAIL

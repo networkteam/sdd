@@ -1,0 +1,33 @@
+=== RUN   TestWritingGuideSweep_DoneKind
+=== RUN   TestWritingGuideSweep_DoneKind/wts_thin_retirement
+    writingguide_sweep_eval_test.go:85: GROUND TRUTH expects: clean, or at most one minor on the close-vs-settled sentence
+    writingguide_sweep_eval_test.go:86: GROUND TRUTH non-findings: stranding for absent commit hashes (provenance follows the act: a retirement done points at the delivery done); stranding on the retired directive, which the closure edge now anchors
+    writingguide_sweep_eval_test.go:97: run 1/3: 1 finding(s)
+    writingguide_sweep_eval_test.go:99:   [1] axis=dilution severity=substantive repair=cut
+              quote: Closing rather than marking `settled` because the directive was a one-shot deliverable that spawned and completed real work — not a born-terminal decision — so a closing done is its standard retirement.
+              reasoning: The Closure edges section already marks this entry as a `closes` edge against directive d-tac-w30, and by the framework's own split only a done closes a completed commitment (a directive instead closes itself as settled, or a superseding directive closes it as no-longer-holding). So the fact that this is a closing rather than a settling is already fully entailed by the entry's own kind and its closure edge; the sentence just re-derives generic framework retirement mechanics instead of adding any project-specific fact a future reader needs. Removing it loses nothing the closes edge and entry kind don't already convey.
+    writingguide_sweep_eval_test.go:97: run 2/3: 2 finding(s)
+    writingguide_sweep_eval_test.go:99:   [1] axis=stranding severity=substantive repair=point
+              quote: The stats-vs-view surface separation it asserted holds as built.
+              reasoning: The directive's commitment has two parts: a dedicated stats command, and that it stays kept separate from `sdd view`. The done confirms the first with a concrete pointer (v1 delivered, evidenced at s-tac-4wp), but for the second it only asserts 'holds as built' with no distinct evidence — the same ref is described as evidence the command was delivered, not that the surfaces stayed separate in the shipped result. A reader trying to trust this closure has no way to check whether the separation was actually verified (e.g. against `sdd view`'s current behavior) or just assumed from the directive's original intent.
+    writingguide_sweep_eval_test.go:99:   [2] axis=dilution severity=minor repair=cut
+              quote: Closing rather than marking `settled` because the directive was a one-shot deliverable that spawned and completed real work — not a born-terminal decision — so a closing done is its standard retirement.
+              reasoning: This sentence spells out that the entry is a closing done rather than a settled directive, but that distinction is already carried by the entry's own structure: it's a done with a closes edge, which is definitionally the 'closing done' pattern per the framework's own retirement rules (assumed-known vocabulary), not something requiring narrative justification. It also re-treads ground the second sentence already covered ('fulfilling the directive's commitment and retiring it'), restating the retirement outcome a second time under the guise of explaining the mechanism. Removing it loses no fact a future reader needs to act on.
+    writingguide_sweep_eval_test.go:97: run 3/3: 1 finding(s)
+    writingguide_sweep_eval_test.go:99:   [1] axis=dilution severity=minor repair=cut
+              quote: Closing rather than marking `settled` because the directive was a one-shot deliverable that spawned and completed real work — not a born-terminal decision — so a closing done is its standard retirement.
+              reasoning: The closing sentence justifies choosing a closing done over marking the directive 'settled', but settled is a posture fixed at the directive's authoring time for born-terminal decisions — it is never something a later done chooses instead of closing, so the contrast defends against an option that was never live. Removing the sentence loses no information the reader needs to trust or act on the record; it just restates general retirement mechanics the framework vocabulary already assumes known.
+--- PASS: TestWritingGuideSweep_DoneKind (365.98s)
+    --- PASS: TestWritingGuideSweep_DoneKind/wts_thin_retirement (365.98s)
+PASS
+ok  	github.com/networkteam/sdd/internal/llm	366.227s
+?   	github.com/networkteam/sdd/internal/llm/claude	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/networkteam/sdd/internal/llm/embed	0.382s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/networkteam/sdd/internal/llm/factory	0.546s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/networkteam/sdd/internal/llm/gollm	0.709s [no tests to run]
