@@ -31,10 +31,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      # Severity-aware lint (mirrors scripts/lint.sh): the run itself never
-      # fails on issues; the gate step fails on error severity only, so
-      # warning-severity findings (testpackage conventions) stay visible
-      # without breaking the build.
+      # Mirrors scripts/lint.sh: fail on error-severity issues only.
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.11.4

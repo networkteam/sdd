@@ -2,9 +2,8 @@
 # Severity-aware lint: golangci-lint's exit code cannot distinguish severities
 # (severity is reporting metadata), so the run itself never fails on issues
 # (--issues-exit-code 0) and this wrapper exits 1 only when an error-severity
-# issue is present. Warning-severity findings — the testpackage sweep over
-# legacy internal tests, convert-as-touched per AGENTS.md — stay visible on
-# every run without failing it.
+# issue is present. Warning-severity findings stay visible on every run
+# without failing it; which linters warn is the .golangci.yml severity block.
 set -uo pipefail
 
 json="$(mktemp)"
