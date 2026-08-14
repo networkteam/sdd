@@ -60,7 +60,7 @@ An agent chooser (`chooser: agent`) or user chooser (`chooser: user`) declares `
 
 - `collect` — the state fields reportable here; a `?` suffix marks one optional (quote the marker: `"anchor?"`), and required ones hold the step until reported.
 - `inject` — a list of `{fn: <query name>, args?}` calls: each result is served into the step's instructions under its function's name.
-- `render` — a state field shown with the serve.
+- `render` — the name of an extra `## unit:` section from the body, served with the step (typically presenting one collected field's content).
 
 A run ends by transitioning to {{ .EndTargets }}.
 
