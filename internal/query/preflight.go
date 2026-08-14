@@ -28,11 +28,13 @@ const (
 	SeverityLow    Severity = "low"
 )
 
-// Finding is a single observation from pre-flight validation.
+// Finding is a single observation from pre-flight validation. The lowercase
+// JSON tags are load-bearing: store values normalize through JSON, and the
+// capture unit's template addresses findings by these keys.
 type Finding struct {
-	Severity    Severity
-	Category    string
-	Observation string
+	Severity    Severity `json:"severity"`
+	Category    string   `json:"category"`
+	Observation string   `json:"observation"`
 }
 
 // PreflightResult holds all findings from a pre-flight validator run.
