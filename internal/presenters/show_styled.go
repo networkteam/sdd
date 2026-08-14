@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
+	"github.com/networkteam/sdd/internal/mdcompose"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
@@ -47,10 +48,10 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 	fmt.Fprintln(w, styleEnvelopeYAML(env.String()))
 	fmt.Fprintln(w)
 
-	// Body under a top-level heading so the body's own `##` sections nest
-	// beneath it; glamour-rendered (raw fallback on any render error).
+	// Body under a top-level heading, demoted beneath it (d-cpt-5wv);
+	// glamour-rendered (raw fallback on any render error).
 	fmt.Fprintln(w, clrHeading.Render("# body"))
-	fmt.Fprint(w, renderStyledBody(g.Primary.Content, opts.Width))
+	fmt.Fprint(w, renderStyledBody(mdcompose.DemoteTo(g.Primary.Content, bodyHeadingLevel), opts.Width))
 
 	if len(g.Upstream) > 0 {
 		fmt.Fprintln(w)

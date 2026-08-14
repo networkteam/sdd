@@ -388,3 +388,53 @@ func TestRenderShow_EnvelopeKind(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderShow_BodyHeadingDemoted(t *testing.T) {
+	// An embedded body's headings are demoted beneath the `# body` section so
+	// no embedded heading outranks its container (d-cpt-5wv).
+	e := entry("20260410-100000-s-tac-aaa",
+		withContent("# Title\n\nProse.\n\n## Section\n\nMore prose."))
+	g := model.NewGraph([]*model.Entry{e})
+	out := renderShow(t, g, []string{e.ID})
+	if !contains(out, "\n## Title\n") || !contains(out, "\n### Section\n") {
+		t.Errorf("expected body headings demoted beneath # body:\n%s", out)
+	}
+}
+
+func TestRenderShow_ProcedureSpecInEnvelope(t *testing.T) {
+	// A procedure's machine part — class, params, state, steps — renders in
+	// the envelope so an author can read a worked spec through show.
+	content := `---
+type: decision
+layer: prc
+kind: procedure
+confidence: medium
+canonical: example-move
+class: move
+params:
+    anchorHint: {type: text, optional: true, desc: pointer in the user's words}
+state:
+    synthesis: {type: text, desc: the account the run produces}
+steps:
+    - id: work
+      collect: [synthesis]
+      transitions:
+          - when: hasSynthesis
+            to: end(completed)
+---
+
+# Example move
+
+Turns a pointer into an account.
+
+## unit: work
+
+Do the work.
+`
+	e, err := model.ParseEntry("20260814-120000-d-prc-exm.md", content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := model.NewGraph([]*model.Entry{e})
+	cupaloy.SnapshotT(t, renderShow(t, g, []string{e.ID}))
+}

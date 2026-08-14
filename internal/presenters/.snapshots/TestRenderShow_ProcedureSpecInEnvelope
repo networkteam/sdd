@@ -1,0 +1,32 @@
+---
+id: 20260814-120000-d-prc-exm
+type: decision
+kind: procedure
+layer: process
+confidence: medium
+canonical: example-move
+class: move
+status: active
+time: "2026-08-14 12:00:00"
+params:
+    anchorHint: {type: text, optional: true, desc: pointer in the user's words}
+state:
+    synthesis: {type: text, desc: the account the run produces}
+steps:
+    - id: work
+      collect: [synthesis]
+      transitions:
+        - when: hasSynthesis
+          to: end(completed)
+---
+
+# body
+
+## Example move
+
+Turns a pointer into an account.
+
+### unit: work
+
+Do the work.
+

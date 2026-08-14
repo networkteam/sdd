@@ -7,9 +7,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/networkteam/sdd/internal/mdcompose"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
+
+// bodyHeadingLevel is where an embedded entry body starts: one level below the
+// `# body` section heading that contains it.
+const bodyHeadingLevel = 2
 
 // ShowOptions controls optional segments of the show rendering.
 type ShowOptions struct {
@@ -44,11 +49,12 @@ func RenderShow(w io.Writer, result *query.ShowResult, opts ShowOptions) {
 func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 	writeEnvelope(w, g, opts)
 	fmt.Fprintln(w)
-	// Top-level `# body` heading so the body's own `##` sections nest beneath
-	// it rather than colliding with the neighborhood section headings.
+	// Top-level `# body` heading with the body demoted beneath it, so an
+	// embedded heading never sits level with the section containing it
+	// (d-cpt-5wv).
 	fmt.Fprintln(w, "# body")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, g.Primary.Content)
+	fmt.Fprintln(w, mdcompose.DemoteTo(g.Primary.Content, bodyHeadingLevel))
 
 	if len(g.Upstream) > 0 {
 		fmt.Fprintln(w)
@@ -83,8 +89,9 @@ func primaryDisplayID(g query.ShowGroup) string {
 // mirrors the on-disk frontmatter (reusing model.Ref's object-form marshaling)
 // and adds the filename-derived id, the entry time, discovered attachments,
 // and the derived status and effective topics. Field order here is the YAML
-// output order. Summary renders last (and only with --with-summary) so the
-// long opt-in text never pushes the scannable fields down.
+// output order. A procedure's machine part (params/state/steps/framing)
+// renders after the scannable tail, and Summary last (and only with
+// --with-summary), so neither pushes the scannable fields down.
 type showEnvelope struct {
 	ID           string           `yaml:"id"`
 	Type         string           `yaml:"type"`
@@ -95,6 +102,7 @@ type showEnvelope struct {
 	Participants []string         `yaml:"participants,omitempty"`
 	Canonical    string           `yaml:"canonical,omitempty"`
 	Aliases      []string         `yaml:"aliases,omitempty"`
+	Class        string           `yaml:"class,omitempty"`
 	Actor        string           `yaml:"actor,omitempty"`
 	Topics       []string         `yaml:"topics,omitempty"`
 	Index        *model.FactIndex `yaml:"index,omitempty"`
@@ -104,6 +112,10 @@ type showEnvelope struct {
 	Attachments  []string         `yaml:"attachments,omitempty"`
 	Status       string           `yaml:"status,omitempty"`
 	Time         string           `yaml:"time"`
+	Params       yaml.Node        `yaml:"params,omitempty"`
+	State        yaml.Node        `yaml:"state,omitempty"`
+	Steps        yaml.Node        `yaml:"steps,omitempty"`
+	Framing      yaml.Node        `yaml:"framing,omitempty"`
 	Summary      string           `yaml:"summary,omitempty"`
 }
 
@@ -119,6 +131,7 @@ func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		Participants: e.Participants,
 		Canonical:    e.Canonical,
 		Aliases:      e.Aliases,
+		Class:        string(e.Class),
 		Actor:        e.Actor,
 		Topics:       topicLabels(g.PrimaryTopics),
 		Index:        e.Index,
@@ -128,6 +141,12 @@ func writeEnvelope(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		Attachments:  e.Attachments,
 		Status:       formatStatusTrailValue(g.PrimaryStatus, g.PrimarySupersedePath),
 		Time:         e.Time.Format("2006-01-02 15:04:05"),
+	}
+	if e.ProcedureSpec != nil {
+		env.Params = e.ProcedureSpec.Params
+		env.State = e.ProcedureSpec.State
+		env.Steps = e.ProcedureSpec.Steps
+		env.Framing = e.ProcedureSpec.Framing
 	}
 	if opts.WithSummary {
 		env.Summary = e.Summary
