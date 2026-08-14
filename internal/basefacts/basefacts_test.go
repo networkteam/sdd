@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/viewlayout"
 )
@@ -251,5 +252,114 @@ func TestBuildRejectsInvalidFactIndexEnrollment(t *testing.T) {
 	_, err := build("20260101-000000-s-prc-idx", frontmatter, "body")
 	if err == nil || !strings.Contains(err.Error(), "must also appear in topics") {
 		t.Fatalf("build error = %v", err)
+	}
+}
+
+// TestEntriesShipProcedureKindFact covers the procedure authoring fact: like
+// the done fact it is teased from the capture lane (no index enrollment), and
+// its generated blocks render from the declarations that enforce them — the
+// model's class enumeration and the engine's domain-type vocabulary.
+func TestEntriesShipProcedureKindFact(t *testing.T) {
+	fact := factByID(t, ProcedureFactID)
+	if fact.Index != nil {
+		t.Errorf("procedure fact carries index enrollment %+v, want none — authoring facts are teased from the capture lane", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("procedure fact has no summary; every reading surface needs one")
+	}
+	if !strings.Contains(fact.Content, "## Mechanics") {
+		t.Error("procedure fact body missing the rendered mechanics block")
+	}
+	for _, class := range model.ProcedureClassValues() {
+		if !strings.Contains(fact.Content, "`"+string(class)+"` — "+class.Description()) {
+			t.Errorf("procedure fact body missing class %q with its declared description", class)
+		}
+	}
+	if len(fact.Refs) == 0 || fact.Refs[0].ID != ProcedureSpecFactID {
+		t.Errorf("procedure fact refs = %v, want the spec reference fact", fact.Refs)
+	}
+	if strings.Contains(fact.Content, "{{") {
+		t.Error("procedure fact body contains an unrendered template placeholder")
+	}
+}
+
+// TestEntriesShipProcedureSpecFact covers the spec reference — the indexed
+// how-to-write-it fact beside the kind's authoring fact. Its variable types
+// and end targets render from the engine declarations; the ability inventory
+// is deliberately a pull cue for the live registry, never a baked list.
+func TestEntriesShipProcedureSpecFact(t *testing.T) {
+	fact := factByID(t, ProcedureSpecFactID)
+	if fact.Index != nil {
+		t.Errorf("spec reference carries index enrollment %+v, want none — it is reached through the procedure fact and lane teasers", fact.Index)
+	}
+	for _, baseType := range engine.BaseTypeValues() {
+		if !strings.Contains(fact.Content, string(baseType)) {
+			t.Errorf("spec reference missing domain type %q", baseType)
+		}
+	}
+	for _, want := range []string{"# Writing a procedure spec", "`params`", "`state`", "`steps`", "end(completed)", "end(abandoned)", "## Skeleton", "```yaml", "registry", "## unit:"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("spec reference missing %q", want)
+		}
+	}
+	if len(fact.Refs) == 0 || fact.Refs[0].ID != ProcedureFactID {
+		t.Errorf("spec reference refs = %v, want the procedure authoring fact", fact.Refs)
+	}
+	if strings.Contains(fact.Content, "{{") {
+		t.Error("spec reference body contains an unrendered template placeholder")
+	}
+	body := fact.Content
+	if loc := entryIDPattern.FindString(body); loc != "" {
+		t.Errorf("spec reference cites entry %q in its body; pointers live in refs", loc)
+	}
+	for _, host := range []string{"sdd ", "MCP", "CLI"} {
+		if strings.Contains(body, host) {
+			t.Errorf("spec reference body contains host-specific reference %q", host)
+		}
+	}
+}
+
+// TestEveryProcedureClassHasADescription pins the completeness rule: a class
+// declared in the model without a description fails here (and the render
+// errors), not at a reader's graph load.
+func TestEveryProcedureClassHasADescription(t *testing.T) {
+	for _, class := range model.ProcedureClassValues() {
+		if class.Description() == "" {
+			t.Errorf("procedure class %q has no description beside its declaration", class)
+		}
+	}
+}
+
+// baseFactIDs is the sanctioned exception to the no-IDs-in-prose rule: a base
+// fact's ID resolves in every graph the binary serves, so a base fact may
+// point at another one by ID without stranding any reader.
+func baseFactIDs() map[string]bool {
+	return map[string]bool{
+		ViewGrammarFactID: true, PrinciplesFactID: true, DoneFactID: true,
+		OverviewFactID: true, ProcedureFactID: true, ProcedureSpecFactID: true,
+	}
+}
+
+// TestProcedureFactBodyIsSelfContained holds the procedure fact to the
+// framework-generic standard: no graph-local entry IDs (base-fact IDs are the
+// sanctioned exception — they resolve everywhere), no host-specific surface
+// names.
+func TestProcedureFactBodyIsSelfContained(t *testing.T) {
+	body := factByID(t, ProcedureFactID).Content
+
+	for _, want := range []string{"# Defining a way of working", "Every other entry is read; a procedure is also run", "canonical is the identity", "Class places how it enters", "workflow is frontmatter", "Ask where the choice is real", "Shipped and project procedures", "Retire deliberately", "Validation waits for the engine", "spec reference fact `" + ProcedureSpecFactID + "`"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("procedure fact body missing %q", want)
+		}
+	}
+	for _, id := range entryIDPattern.FindAllString(body, -1) {
+		if !baseFactIDs()[id] {
+			t.Errorf("procedure fact cites project entry %q; a base fact's prose may only cite other base facts", id)
+		}
+	}
+	for _, host := range []string{"sdd ", "MCP", "CLI"} {
+		if strings.Contains(body, host) {
+			t.Errorf("procedure fact body contains host-specific reference %q", host)
+		}
 	}
 }

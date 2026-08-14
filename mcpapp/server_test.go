@@ -322,7 +322,10 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 		t.Fatal(err)
 	}
 	targets := &testBranchTargets{fallback: graph, graphs: map[string]sdd.GraphStore{"main": graph}}
-	now := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC).Add(time.Duration(testRuntimeGeneration.Add(1)) * time.Hour)
+	// The fixture clock stays after every embedded base fact's authoring
+	// stamp — the real world's invariant — so recency-sorted lanes rank
+	// test-written entries above the merged base facts.
+	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(testRuntimeGeneration.Add(1)) * time.Hour)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, DefaultBranch: "main", Language: language,
 		Graph: graph, Targets: targets, Sessions: sessions, StagedBlobs: blobs, Now: func() time.Time { return now },

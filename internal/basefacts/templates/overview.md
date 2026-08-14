@@ -10,6 +10,9 @@ refs:
     - id: 20260812-170000-s-prc-dnk
       kind: related
       desc: the done kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260813-170000-s-prc-prd
+      kind: related
+      desc: the procedure kind's authoring fact — the per-kind depth behind this overview
 index:
     title: 'Understanding the type system: how types, kinds, and layers fit together, which entry to draft when kinds compete, and where each kind''s crafting guide lives'
     topic: type-system/kinds

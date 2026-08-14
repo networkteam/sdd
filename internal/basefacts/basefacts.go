@@ -59,6 +59,26 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	}
 	entries = append(entries, overviewFact)
 
+	procedureContent, err := procedureFactContent()
+	if err != nil {
+		return nil, err
+	}
+	procedureFact, err := buildContent(ProcedureFactID, procedureContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, procedureFact)
+
+	procedureSpecContent, err := procedureSpecFactContent()
+	if err != nil {
+		return nil, err
+	}
+	procedureSpecFact, err := buildContent(ProcedureSpecFactID, procedureSpecContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, procedureSpecFact)
+
 	return entries, nil
 }
 
@@ -67,7 +87,8 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 // consumers treat absence as "no section", so coverage grows as the sweep
 // ships each kind.
 var authoringFactIDs = map[model.Kind]string{
-	model.KindDone: DoneFactID,
+	model.KindDone:      DoneFactID,
+	model.KindProcedure: ProcedureFactID,
 }
 
 // AuthoringFactID returns the stable ID of the kind's authoring fact, or ""

@@ -331,17 +331,38 @@ func (e *Entry) IsProcedure() bool {
 }
 
 // ProcedureClass classifies a procedure's execution role. See Entry.Class.
+// Each class carries its meaning in Description — the single declaration
+// surfaces render from.
 type ProcedureClass string
 
 const (
 	ProcedureClassMove  ProcedureClass = "move"
 	ProcedureClassShell ProcedureClass = "shell"
-	// ProcedureClassTask is a procedure a move delegates work to: dispatched
-	// with resolved params, no user choosers, kept off the shell's move
-	// enumeration and junction offers, and preferring a disposable (forked)
-	// context. Explore is its first member.
-	ProcedureClassTask ProcedureClass = "task"
+	ProcedureClassTask  ProcedureClass = "task"
 )
+
+// procedureClassOrder is the canonical enumeration; the descriptions beside
+// it are the served meaning of each class (rendered into the procedure
+// authoring fact — a class without one fails the render).
+var procedureClassOrder = []ProcedureClass{ProcedureClassMove, ProcedureClassShell, ProcedureClassTask}
+
+var procedureClassDesc = map[ProcedureClass]string{
+	ProcedureClassMove:  "a playbook move started through the engine loop — the default when class is empty",
+	ProcedureClassShell: "a session base auto-started by the session door, never started as a move",
+	ProcedureClassTask:  "a delegate a move dispatches with resolved inputs and no user choosers, kept off the session's offered moves",
+}
+
+// ProcedureClassValues lists the procedure classes in canonical order, for
+// surfaces that render or generate from the enumeration instead of restating
+// it.
+func ProcedureClassValues() []ProcedureClass {
+	return append([]ProcedureClass(nil), procedureClassOrder...)
+}
+
+// Description returns the class's served meaning; empty for an unknown class.
+func (c ProcedureClass) Description() string {
+	return procedureClassDesc[c]
+}
 
 // IsShellProcedure returns true if this procedure is a session shell —
 // auto-started by the session door rather than startable as a move.

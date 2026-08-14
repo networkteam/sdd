@@ -43,23 +43,27 @@ const (
 	TypeInvolvementWhen   BaseType = "involvement-when"
 )
 
-var baseTypes = map[BaseType]bool{
-	TypeText:              true,
-	TypeBool:              true,
-	TypeEntryID:           true,
-	TypeRef:               true,
-	TypeLabel:             true,
-	TypeParticipant:       true,
-	TypeEntryKind:         true,
-	TypeLayer:             true,
-	TypeConfidence:        true,
-	TypeIntent:            true,
-	TypeAttachmentHandle:  true,
-	TypeFactIndex:         true,
-	TypePreflightFindings: true,
-	TypeGuideFindings:     true,
-	TypeInvolvement:       true,
-	TypeInvolvementWhen:   true,
+// baseTypeOrder is the canonical enumeration of domain types; baseTypes
+// derives from it so set and order share one declaration.
+var baseTypeOrder = []BaseType{
+	TypeText, TypeBool, TypeEntryID, TypeRef, TypeLabel, TypeParticipant,
+	TypeEntryKind, TypeLayer, TypeConfidence, TypeIntent, TypeAttachmentHandle,
+	TypeFactIndex, TypePreflightFindings, TypeGuideFindings, TypeInvolvement,
+	TypeInvolvementWhen,
+}
+
+var baseTypes = func() map[BaseType]bool {
+	set := make(map[BaseType]bool, len(baseTypeOrder))
+	for _, t := range baseTypeOrder {
+		set[t] = true
+	}
+	return set
+}()
+
+// BaseTypeValues lists the domain types in canonical order, for surfaces that
+// render or generate from the enumeration instead of restating it.
+func BaseTypeValues() []BaseType {
+	return append([]BaseType(nil), baseTypeOrder...)
 }
 
 // VarType is a declared variable type: a base domain type, optionally
