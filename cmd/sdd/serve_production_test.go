@@ -245,7 +245,11 @@ func prodServeSearch(t *testing.T, root string) string {
 		t.Fatalf("connect serve: %v\nstderr:\n%s", err, stderr.String())
 	}
 	defer func() { _ = session.Close() }()
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "search", Arguments: map[string]any{"query": phrase}})
+	// The fake embeddings are content-hash noise, so ranking is arbitrary; a
+	// limit covering the whole corpus (seeded entries + embedded base facts
+	// and procedures) keeps this warm-index assertion independent of base
+	// content edits.
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "search", Arguments: map[string]any{"query": phrase, "limit": 50}})
 	if err != nil {
 		t.Fatalf("search over stdio: %v\nstderr:\n%s", err, stderr.String())
 	}

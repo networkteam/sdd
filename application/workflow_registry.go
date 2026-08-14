@@ -27,7 +27,7 @@ func (w *WorkflowSession) buildRegistry() (*engine.Registry, error) {
 }
 
 func (w *WorkflowSession) registerWorkflowPredicates(registry *engine.Registry) error {
-	return registry.RegisterPredicate(engine.Predicate{
+	if err := registry.RegisterPredicate(engine.Predicate{
 		Doc: engine.FuncDoc{Name: "sessionQuiescent", Doc: "Nothing but the session shell is running — no open move instances in this session."},
 		Fn: func(*engine.Context) (bool, error) {
 			for _, instance := range w.session.Instances() {
@@ -38,7 +38,10 @@ func (w *WorkflowSession) registerWorkflowPredicates(registry *engine.Registry) 
 			return true, nil
 		},
 		FailMessage: "the session still has open move instances",
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) error {
@@ -325,6 +328,8 @@ func (w *WorkflowSession) draftFromStore(store *engine.Store) EntryDraft {
 	}
 	draft.Canonical, _ = workflowStoreString(store, "canonical")
 	draft.Actor, _ = workflowStoreString(store, "roleActor")
+	draft.Class, _ = workflowStoreString(store, "class")
+	draft.ProcedureSpec, _ = workflowStoreString(store, "procedureSpec")
 	draft.Aliases = workflowStoreStrings(store, "aliases")
 	draft.FocusActors = workflowStoreStrings(store, "focusActors")
 	// Store values are normalized JSON documents, so focusWhen comes back as a

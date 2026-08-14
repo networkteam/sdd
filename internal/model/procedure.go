@@ -1,7 +1,9 @@
 package model
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,6 +20,32 @@ type ProcedureSpecRaw struct {
 	State   yaml.Node
 	Steps   yaml.Node
 	Framing yaml.Node
+}
+
+// ParseProcedureSpecYAML decodes a workflow declaration written as bare YAML
+// (params/state/steps, framing on a shell) into the raw spec the entry
+// carries — the write-side counterpart of the frontmatter routing in
+// ParseEntry. Unknown top-level keys are rejected so a typo'd section fails
+// the capture instead of being silently dropped; interpretation stays with
+// the engine (see ProcedureSpecRaw).
+func ParseProcedureSpecYAML(text string) (*ProcedureSpecRaw, error) {
+	var decoded struct {
+		Params  yaml.Node `yaml:"params"`
+		State   yaml.Node `yaml:"state"`
+		Steps   yaml.Node `yaml:"steps"`
+		Framing yaml.Node `yaml:"framing"`
+	}
+	dec := yaml.NewDecoder(strings.NewReader(text))
+	dec.KnownFields(true)
+	if err := dec.Decode(&decoded); err != nil {
+		return nil, fmt.Errorf("parsing procedure workflow YAML: %w", err)
+	}
+	return &ProcedureSpecRaw{
+		Params:  decoded.Params,
+		State:   decoded.State,
+		Steps:   decoded.Steps,
+		Framing: decoded.Framing,
+	}, nil
 }
 
 // ProcedureChain represents a supersession chain of kind: procedure

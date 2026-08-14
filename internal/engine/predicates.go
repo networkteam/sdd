@@ -90,6 +90,45 @@ var presenceFields = map[string]string{
 	"hasWipMarker": "wipMarker",
 }
 
+// loadDraftSpec judges a procedure draft's workflow exactly as the engine
+// will at start: parse the declared YAML, assemble a probe entry from the
+// draft's identity fields and body, and run the loader against the live
+// registry (r is the registry the predicate was registered into, seen after
+// the shell's own registrations). Non-procedure drafts pass vacuously.
+func loadDraftSpec(ctx *Context, r *Registry) error {
+	if draftStoreString(ctx, "entryKind") != string(model.KindProcedure) {
+		return nil
+	}
+	specText := draftStoreString(ctx, "procedureSpec")
+	if strings.TrimSpace(specText) == "" {
+		return fmt.Errorf("a procedure draft declares its workflow — report procedureSpec (params/state/steps as YAML)")
+	}
+	spec, err := model.ParseProcedureSpecYAML(specText)
+	if err != nil {
+		return err
+	}
+	probe := &model.Entry{
+		ID: "00000000-000000-d-prc-draft", Type: model.TypeDecision, Kind: model.KindProcedure,
+		Layer:     model.LayerProcess,
+		Canonical: draftStoreString(ctx, "canonical"),
+		Class:     model.ProcedureClass(draftStoreString(ctx, "class")),
+		Content:   draftStoreString(ctx, "body"), ProcedureSpec: spec,
+	}
+	_, err = LoadSpec(probe, r)
+	return err
+}
+
+// draftStoreString reads a store field as a string, "" when unset or not a
+// string.
+func draftStoreString(ctx *Context, field string) string {
+	v, ok := ctx.Store.Get(field)
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
+}
+
 // PresencePair is one gateable field with the presence predicate that reads
 // it — the pairing surfaces render instead of restating.
 type PresencePair struct {
@@ -122,6 +161,26 @@ func registerBuiltinPredicates(r *Registry) {
 			FailMessage: fmt.Sprintf("%s is missing or empty", field),
 		})
 	}
+
+	mustRegisterPredicate(r, Predicate{
+		Doc: FuncDoc{
+			Name: "specLoads",
+			Doc: "For a procedure draft, the declared workflow loads: procedureSpec parses and validates " +
+				"against this registry through the engine's own loader — capture never duplicates spec rules. " +
+				"Any other draft passes.",
+			Reads: []string{"entryKind", "procedureSpec", "canonical", "class", "body"},
+		},
+		Fn: func(ctx *Context) (bool, error) {
+			return loadDraftSpec(ctx, r) == nil, nil
+		},
+		FailMessage: "the procedure workflow does not load",
+		FailDetail: func(ctx *Context) string {
+			if err := loadDraftSpec(ctx, r); err != nil {
+				return err.Error()
+			}
+			return ""
+		},
+	})
 
 	mustRegisterPredicate(r, Predicate{
 		Doc: FuncDoc{

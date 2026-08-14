@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd/internal/model"
@@ -198,5 +199,76 @@ func TestRegistryListQuery(t *testing.T) {
 	// Registry names are unique across classes.
 	if err := reg.RegisterQuery(Query{Doc: FuncDoc{Name: "hasBody"}}); err == nil {
 		t.Error("cross-class name collision must be rejected")
+	}
+}
+
+func specLoadsFixtureStore(t *testing.T) *Store {
+	t.Helper()
+	entry := specFixture(t, `state:
+    entryKind: {type: entry-kind, desc: kind}
+    procedureSpec: {type: text, desc: workflow yaml}
+    canonical: {type: text, desc: name}
+    class: {type: text, desc: class}
+    body: {type: text, desc: body}
+steps:
+    - id: only
+      collect: [entryKind, "procedureSpec?", "canonical?", "class?", "body?"]
+      transitions:
+          - when: specLoads
+            to: end(completed)
+`, "")
+	spec, err := ParseSpec(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewStore(spec)
+}
+
+func TestSpecLoads(t *testing.T) {
+	store := specLoadsFixtureStore(t)
+	ctx := &Context{Store: store}
+
+	if !evalPredicate(t, "specLoads", ctx) {
+		t.Error("a draft with no kind yet should pass vacuously")
+	}
+	if _, err := store.WriteState(map[string]any{"entryKind": "gap"}); err != nil {
+		t.Fatal(err)
+	}
+	if !evalPredicate(t, "specLoads", ctx) {
+		t.Error("a non-procedure draft should pass vacuously")
+	}
+
+	if _, err := store.WriteState(map[string]any{"entryKind": "procedure", "canonical": "test-move"}); err != nil {
+		t.Fatal(err)
+	}
+	if evalPredicate(t, "specLoads", ctx) {
+		t.Error("a procedure draft without a workflow should fail")
+	}
+
+	valid := "state:\n" +
+		"    synthesis: {type: text, desc: outcome}\n" +
+		"steps:\n" +
+		"    - id: examine\n" +
+		"      collect: [synthesis]\n" +
+		"      transitions:\n" +
+		"          - when: hasSynthesis\n" +
+		"            to: end(completed)\n"
+	if _, err := store.WriteState(map[string]any{"procedureSpec": valid, "body": "Move.\n\n## unit: examine\n\nExamine."}); err != nil {
+		t.Fatal(err)
+	}
+	if !evalPredicate(t, "specLoads", ctx) {
+		t.Error("a valid workflow should pass")
+	}
+
+	broken := strings.Replace(valid, "hasSynthesis", "hasTimeline", 1)
+	if _, err := store.WriteState(map[string]any{"procedureSpec": broken}); err != nil {
+		t.Fatal(err)
+	}
+	if evalPredicate(t, "specLoads", ctx) {
+		t.Error("a workflow naming an unknown predicate should fail")
+	}
+	p, _ := NewRegistry().Predicate("specLoads")
+	if detail := p.FailDetail(ctx); !strings.Contains(detail, "hasTimeline") {
+		t.Errorf("FailDetail = %q, want the unknown predicate named", detail)
 	}
 }

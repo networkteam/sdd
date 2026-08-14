@@ -80,3 +80,59 @@ func TestCreateEntry_RejectsEmptyKind(t *testing.T) {
 		t.Fatalf("err = %v, want kind-required error", err)
 	}
 }
+
+func TestCreateEntry_ProcedureSpecRoundTrips(t *testing.T) {
+	app, identity, binding, dir := newIdentityWriteApp(t)
+	spec := "params:\n" +
+		"    goalHint: {type: text, optional: true, desc: what the caller wants examined}\n" +
+		"state:\n" +
+		"    synthesis: {type: text, desc: the outcome the run hands back}\n" +
+		"steps:\n" +
+		"    - id: examine\n" +
+		"      collect: [synthesis]\n" +
+		"      transitions:\n" +
+		"          - when: hasSynthesis\n" +
+		"            to: end(completed)\n"
+	result, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
+		Kind: "procedure", Layer: "process", Confidence: "high",
+		Canonical: "test-move", ProcedureSpec: spec,
+		Body: "A move captured with its workflow.\n\n## unit: examine\n\nExamine.",
+	})
+	if err != nil || result.EntryID == "" {
+		t.Fatalf("CreateEntry = %+v, err %v", result, err)
+	}
+	e := loadEntryByID(t, dir, result.EntryID)
+	if e.ProcedureSpec == nil || e.ProcedureSpec.Steps.IsZero() {
+		t.Fatal("persisted entry lost its workflow frontmatter")
+	}
+}
+
+func TestCreateEntry_RejectsSpecOnNonProcedure(t *testing.T) {
+	app, identity, binding, _ := newIdentityWriteApp(t)
+	_, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
+		Kind: "gap", Layer: "tactical", Confidence: "high",
+		ProcedureSpec: "steps:\n    - id: x\n",
+		Body:          "A gap carrying a stray workflow declaration.",
+	})
+	validationErrorMentions(t, err, "procedureSpec")
+}
+
+func TestCreateEntry_RejectsMalformedSpecYAML(t *testing.T) {
+	app, identity, binding, _ := newIdentityWriteApp(t)
+	_, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
+		Kind: "procedure", Layer: "process", Confidence: "high",
+		Canonical: "test-broken", ProcedureSpec: "steps: [unclosed\n",
+		Body: "A procedure whose workflow YAML does not parse.",
+	})
+	validationErrorMentions(t, err, "procedureSpec")
+}
+
+func TestCreateEntry_RejectsUnknownSpecSection(t *testing.T) {
+	app, identity, binding, _ := newIdentityWriteApp(t)
+	_, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
+		Kind: "procedure", Layer: "process", Confidence: "high",
+		Canonical: "test-typo", ProcedureSpec: "stepps:\n    - id: x\n",
+		Body: "A procedure whose workflow declares a typo'd section.",
+	})
+	validationErrorMentions(t, err, "procedureSpec")
+}
