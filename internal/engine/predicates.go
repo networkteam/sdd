@@ -186,7 +186,7 @@ func registerBuiltinPredicates(r *Registry) {
 	mustRegisterPredicate(r, Predicate{
 		Doc: FuncDoc{
 			Name:  "anchorsResolve",
-			Doc:   "The anchor and every target resolve to existing graph entries.",
+			Doc:   "Every set anchor and target resolves to an existing graph entry; an absent field passes — this checks resolution, not presence.",
 			Reads: []string{"anchor", "targets"},
 		},
 		Fn:          idsResolve("anchor", "targets"),
@@ -196,7 +196,7 @@ func registerBuiltinPredicates(r *Registry) {
 	mustRegisterPredicate(r, Predicate{
 		Doc: FuncDoc{
 			Name:  "inspectedIdsResolve",
-			Doc:   "Every inspected ID resolves to an existing graph entry.",
+			Doc:   "Every inspected ID resolves to an existing graph entry; an absent field passes — this checks resolution, not presence.",
 			Reads: []string{"inspectedIds"},
 		},
 		Fn:          idsResolve("inspectedIds"),
@@ -206,7 +206,7 @@ func registerBuiltinPredicates(r *Registry) {
 	mustRegisterPredicate(r, Predicate{
 		Doc: FuncDoc{
 			Name:  "doneEntryResolves",
-			Doc:   "The recorded done signal resolves to an existing graph entry.",
+			Doc:   "A set doneEntry resolves to an existing graph entry; an absent field passes — this checks resolution, not presence.",
 			Reads: []string{"doneEntry"},
 		},
 		Fn:          idsResolve("doneEntry"),

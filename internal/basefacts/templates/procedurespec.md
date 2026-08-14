@@ -93,9 +93,15 @@ The entry's body carries one `## unit: <step id>` section per step — the guida
 A small review move, written for width rather than realism: an optional param and an optional collect, two injects with differently shaped arguments, compound guards, a user chooser that loops back for correction, a dispatch seed on the confirming option, and a closing gate on the field the dispatched recording hands back. It ships from the same source the engine's own tests load, so it is valid by construction:
 
 ```yaml
+# one frontmatter: the entry's identity fields, then the workflow it runs
+type: decision
+kind: procedure
+layer: process
+canonical: example-review
+class: move
 {{ .Example }}```
 
-With a body carrying one `## unit:` section per step — `## unit: scope`, `## unit: account`, `## unit: review`, `## unit: record` — telling the runner what each step wants, and the review unit instructing that the confirming answer leads to starting the recording procedure as a sub-move.
+The workflow sits in the same frontmatter as the entry's usual fields (references, topics, confidence), and the guidance lives in the body: one `## unit:` section per step — `## unit: scope`, `## unit: account`, `## unit: review`, `## unit: record` — telling the runner what each step wants, with the review unit instructing that the confirming answer leads to starting the recording procedure as a sub-move.
 
 ## Validation
 
