@@ -78,7 +78,7 @@ Guards name checks, `inject` names queries, `op` and `call` name commands — an
 
 ## Dispatching another procedure
 
-A step never starts another procedure, and no command does. The handoff lives in the unit's prose: the instruction tells the runner to start the named procedure as a sub-move of this run, and the product comes back the same way — the runner reports it into a field this spec declares, and the next gate holds on that field. Nothing else flows back: the child writes nothing into this run's store, so the reported field is the only bridge.
+A step never starts another procedure, and no command does. The handoff lives in the unit's prose: the instruction tells the running agent to start the named procedure as a sub-move of this run, and the product comes back the same way — the agent reports it into a field this spec declares, and the next gate holds on that field. Nothing else flows back: the child writes nothing into this run's store, so the reported field is the only bridge.
 
 An option's `dispatch` block declares seeding for that handoff, never the start itself: `dispatch: {procedure: <canonical>, seed: {<child field>: <parent field>}}` on the answered option arms the mapping, and the next procedure started under this run receives each value into the *state* field it declares under the child name — a value passed explicitly at start wins, and an empty source seeds nothing.
 
@@ -86,7 +86,7 @@ A delegate procedure (class `task`) is dispatched the same way, with its inputs 
 
 ## Instruction units
 
-The entry's body carries one `## unit: <step id>` section per step — the guidance served while that step runs. Units may use template placeholders over the store's fields and the step's injected data.
+The entry's body carries one `## unit: <step id>` section per step, served verbatim as the instructions the agent works from while that step runs — write it as what to do there and how to report the step's fields. Units may use template placeholders over the store's fields and the step's injected data.
 
 ## A worked example
 
@@ -101,7 +101,7 @@ canonical: example-review
 class: move
 {{ .Example }}```
 
-The workflow sits in the same frontmatter as the entry's usual fields (references, topics, confidence), and the guidance lives in the body: one `## unit:` section per step — `## unit: scope`, `## unit: account`, `## unit: review`, `## unit: record` — telling the runner what each step wants, with the review unit instructing that the confirming answer leads to starting the recording procedure as a sub-move.
+The workflow sits in the same frontmatter as the entry's usual fields (references, topics, confidence). The body carries one `## unit:` section per step — here `## unit: scope`, `## unit: account`, `## unit: review`, `## unit: record` — each served verbatim as the instructions the agent works from while that step runs: what to do there, and how to report the step's fields. The review unit, for example, presents the account for the user's ruling and instructs that a confirming answer leads to starting the recording procedure as a sub-move.
 
 ## Validation
 
