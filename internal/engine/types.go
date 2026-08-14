@@ -36,6 +36,7 @@ const (
 	TypeConfidence        BaseType = "confidence"
 	TypeIntent            BaseType = "intent"
 	TypeAttachmentHandle  BaseType = "attachment-handle"
+	TypeProcedureSpec     BaseType = "procedure-spec"
 	TypeFactIndex         BaseType = "fact-index"
 	TypePreflightFindings BaseType = "preflight-findings"
 	TypeGuideFindings     BaseType = "guide-findings"
@@ -48,8 +49,8 @@ const (
 var baseTypeOrder = []BaseType{
 	TypeText, TypeBool, TypeEntryID, TypeRef, TypeLabel, TypeParticipant,
 	TypeEntryKind, TypeLayer, TypeConfidence, TypeIntent, TypeAttachmentHandle,
-	TypeFactIndex, TypePreflightFindings, TypeGuideFindings, TypeInvolvement,
-	TypeInvolvementWhen,
+	TypeProcedureSpec, TypeFactIndex, TypePreflightFindings, TypeGuideFindings,
+	TypeInvolvement, TypeInvolvementWhen,
 }
 
 var baseTypes = func() map[BaseType]bool {
@@ -82,6 +83,7 @@ var baseTypeDesc = map[BaseType]string{
 	TypeConfidence:        "a confidence grade",
 	TypeIntent:            "a directive's intent",
 	TypeAttachmentHandle:  "a staged attachment's handle",
+	TypeProcedureSpec:     "a procedure's workflow declaration as one structured value: params, state, steps, and a shell's framing",
 	TypeFactIndex:         "a fact's retrieval-index enrollment: title and topic",
 	TypePreflightFindings: "write-gate findings — engine-written, never collected by a step",
 	TypeGuideFindings:     "writing-guide findings — engine-written, never collected by a step",
@@ -195,6 +197,23 @@ func validateBaseValue(base BaseType, v any) (any, error) {
 			return nil, err
 		}
 		return ref, nil
+
+	case TypeProcedureSpec:
+		m, ok := v.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("expected a workflow object {params?, state?, steps, framing?}")
+		}
+		for key := range m {
+			switch key {
+			case "params", "state", "steps", "framing":
+			default:
+				return nil, fmt.Errorf("unknown workflow section %q (params, state, steps, framing)", key)
+			}
+		}
+		if _, ok := m["steps"]; !ok {
+			return nil, fmt.Errorf("a workflow declares steps")
+		}
+		return m, nil
 
 	case TypeInvolvement:
 		switch iv := v.(type) {

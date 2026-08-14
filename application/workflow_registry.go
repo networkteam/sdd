@@ -329,7 +329,9 @@ func (w *WorkflowSession) draftFromStore(store *engine.Store) EntryDraft {
 	draft.Canonical, _ = workflowStoreString(store, "canonical")
 	draft.Actor, _ = workflowStoreString(store, "roleActor")
 	draft.Class, _ = workflowStoreString(store, "class")
-	draft.ProcedureSpec, _ = workflowStoreString(store, "procedureSpec")
+	if spec, ok := workflowStoreDocument(store, "procedureSpec"); ok {
+		draft.ProcedureSpec = spec
+	}
 	draft.Aliases = workflowStoreStrings(store, "aliases")
 	draft.FocusActors = workflowStoreStrings(store, "focusActors")
 	// Store values are normalized JSON documents, so focusWhen comes back as a

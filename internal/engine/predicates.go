@@ -99,11 +99,12 @@ func loadDraftSpec(ctx *Context, r *Registry) error {
 	if draftStoreString(ctx, "entryKind") != string(model.KindProcedure) {
 		return nil
 	}
-	specText := draftStoreString(ctx, "procedureSpec")
-	if strings.TrimSpace(specText) == "" {
-		return fmt.Errorf("a procedure draft declares its workflow — report procedureSpec (params/state/steps as YAML)")
+	v, _ := ctx.Store.Get("procedureSpec")
+	doc, _ := v.(map[string]any)
+	if len(doc) == 0 {
+		return fmt.Errorf("a procedure draft declares its workflow — report procedureSpec ({params?, state?, steps, framing?} per the served schema)")
 	}
-	spec, err := model.ParseProcedureSpecYAML(specText)
+	spec, err := model.ProcedureSpecFromDocument(doc)
 	if err != nil {
 		return err
 	}

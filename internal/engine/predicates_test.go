@@ -206,7 +206,7 @@ func specLoadsFixtureStore(t *testing.T) *Store {
 	t.Helper()
 	entry := specFixture(t, `state:
     entryKind: {type: entry-kind, desc: kind}
-    procedureSpec: {type: text, desc: workflow yaml}
+    procedureSpec: {type: procedure-spec, desc: the workflow declaration}
     canonical: {type: text, desc: name}
     class: {type: text, desc: class}
     body: {type: text, desc: body}
@@ -245,23 +245,30 @@ func TestSpecLoads(t *testing.T) {
 		t.Error("a procedure draft without a workflow should fail")
 	}
 
-	valid := "state:\n" +
-		"    synthesis: {type: text, desc: outcome}\n" +
-		"steps:\n" +
-		"    - id: examine\n" +
-		"      collect: [synthesis]\n" +
-		"      transitions:\n" +
-		"          - when: hasSynthesis\n" +
-		"            to: end(completed)\n"
-	if _, err := store.WriteState(map[string]any{"procedureSpec": valid, "body": "Move.\n\n## unit: examine\n\nExamine."}); err != nil {
+	workflow := func(guard string) map[string]any {
+		return map[string]any{
+			"state": map[string]any{
+				"synthesis": map[string]any{"type": "text", "desc": "outcome"},
+			},
+			"steps": []any{
+				map[string]any{
+					"id":      "examine",
+					"collect": []any{"synthesis"},
+					"transitions": []any{
+						map[string]any{"when": guard, "to": "end(completed)"},
+					},
+				},
+			},
+		}
+	}
+	if _, err := store.WriteState(map[string]any{"procedureSpec": workflow("hasSynthesis"), "body": "Move.\n\n## unit: examine\n\nExamine."}); err != nil {
 		t.Fatal(err)
 	}
 	if !evalPredicate(t, "specLoads", ctx) {
 		t.Error("a valid workflow should pass")
 	}
 
-	broken := strings.Replace(valid, "hasSynthesis", "hasTimeline", 1)
-	if _, err := store.WriteState(map[string]any{"procedureSpec": broken}); err != nil {
+	if _, err := store.WriteState(map[string]any{"procedureSpec": workflow("hasTimeline")}); err != nil {
 		t.Fatal(err)
 	}
 	if evalPredicate(t, "specLoads", ctx) {

@@ -3,7 +3,6 @@ package model
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,30 +21,36 @@ type ProcedureSpecRaw struct {
 	Framing yaml.Node
 }
 
-// ParseProcedureSpecYAML decodes a workflow declaration written as bare YAML
-// (params/state/steps, framing on a shell) into the raw spec the entry
-// carries — the write-side counterpart of the frontmatter routing in
-// ParseEntry. Unknown top-level keys are rejected so a typo'd section fails
-// the capture instead of being silently dropped; interpretation stays with
-// the engine (see ProcedureSpecRaw).
-func ParseProcedureSpecYAML(text string) (*ProcedureSpecRaw, error) {
-	var decoded struct {
-		Params  yaml.Node `yaml:"params"`
-		State   yaml.Node `yaml:"state"`
-		Steps   yaml.Node `yaml:"steps"`
-		Framing yaml.Node `yaml:"framing"`
+// ProcedureSpecFromDocument converts a workflow declaration reported as one
+// structured value — {params?, state?, steps, framing?}, as the report schema
+// advertises it — into the raw spec the entry carries. The write-side
+// counterpart of the frontmatter routing in ParseEntry: unknown sections are
+// rejected so a typo'd key fails the capture instead of being silently
+// dropped, and interpretation stays with the engine (see ProcedureSpecRaw).
+func ProcedureSpecFromDocument(doc map[string]any) (*ProcedureSpecRaw, error) {
+	spec := &ProcedureSpecRaw{}
+	sections := map[string]*yaml.Node{
+		"params":  &spec.Params,
+		"state":   &spec.State,
+		"steps":   &spec.Steps,
+		"framing": &spec.Framing,
 	}
-	dec := yaml.NewDecoder(strings.NewReader(text))
-	dec.KnownFields(true)
-	if err := dec.Decode(&decoded); err != nil {
-		return nil, fmt.Errorf("parsing procedure workflow YAML: %w", err)
+	for key, value := range doc {
+		node, ok := sections[key]
+		if !ok {
+			return nil, fmt.Errorf("unknown workflow section %q (params, state, steps, framing)", key)
+		}
+		if value == nil {
+			continue
+		}
+		if err := node.Encode(value); err != nil {
+			return nil, fmt.Errorf("encoding workflow section %q: %w", key, err)
+		}
 	}
-	return &ProcedureSpecRaw{
-		Params:  decoded.Params,
-		State:   decoded.State,
-		Steps:   decoded.Steps,
-		Framing: decoded.Framing,
-	}, nil
+	if spec.Steps.IsZero() {
+		return nil, fmt.Errorf("a workflow declares steps")
+	}
+	return spec, nil
 }
 
 // ProcedureChain represents a supersession chain of kind: procedure

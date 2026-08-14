@@ -58,9 +58,10 @@ type EntryDraft struct {
 	Actor     string
 	Class     string
 	// ProcedureSpec carries a kind: procedure decision's workflow declaration
-	// as bare YAML (params/state/steps, framing on a shell), parsed strictly
-	// at draft-to-entry assembly. Interpretation stays with the engine.
-	ProcedureSpec string
+	// as one structured document — {params?, state?, steps, framing?} —
+	// converted strictly at draft-to-entry assembly. Interpretation stays
+	// with the engine.
+	ProcedureSpec map[string]any
 	// FocusActors, FocusWhen, and Involvement carry a kind: focus decision's
 	// advances list and its focus-level defaults. Mirrors the CLI-side
 	// NewEntryCmd fields — ignored on other kinds, written onto the entry so
@@ -433,10 +434,10 @@ func entryFromDraft(draft EntryDraft, id string, now time.Time) (*model.Entry, [
 		FocusActors: append([]string(nil), draft.FocusActors...), FocusWhen: draft.FocusWhen,
 		Involvement: append([]model.Involvement(nil), draft.Involvement...),
 	}
-	if draft.ProcedureSpec != "" {
+	if len(draft.ProcedureSpec) > 0 {
 		if kind != model.KindProcedure {
 			findings = append(findings, model.Finding{Field: "procedureSpec", Message: "a workflow declaration is only meaningful on a kind: procedure decision"})
-		} else if spec, err := model.ParseProcedureSpecYAML(draft.ProcedureSpec); err != nil {
+		} else if spec, err := model.ProcedureSpecFromDocument(draft.ProcedureSpec); err != nil {
 			findings = append(findings, model.Finding{Field: "procedureSpec", Message: err.Error()})
 		} else {
 			entry.ProcedureSpec = spec

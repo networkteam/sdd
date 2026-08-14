@@ -83,16 +83,23 @@ func TestCreateEntry_RejectsEmptyKind(t *testing.T) {
 
 func TestCreateEntry_ProcedureSpecRoundTrips(t *testing.T) {
 	app, identity, binding, dir := newIdentityWriteApp(t)
-	spec := "params:\n" +
-		"    goalHint: {type: text, optional: true, desc: what the caller wants examined}\n" +
-		"state:\n" +
-		"    synthesis: {type: text, desc: the outcome the run hands back}\n" +
-		"steps:\n" +
-		"    - id: examine\n" +
-		"      collect: [synthesis]\n" +
-		"      transitions:\n" +
-		"          - when: hasSynthesis\n" +
-		"            to: end(completed)\n"
+	spec := map[string]any{
+		"params": map[string]any{
+			"goalHint": map[string]any{"type": "text", "optional": true, "desc": "what the caller wants examined"},
+		},
+		"state": map[string]any{
+			"synthesis": map[string]any{"type": "text", "desc": "the outcome the run hands back"},
+		},
+		"steps": []any{
+			map[string]any{
+				"id":      "examine",
+				"collect": []any{"synthesis"},
+				"transitions": []any{
+					map[string]any{"when": "hasSynthesis", "to": "end(completed)"},
+				},
+			},
+		},
+	}
 	result, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
 		Kind: "procedure", Layer: "process", Confidence: "high",
 		Canonical: "test-move", ProcedureSpec: spec,
@@ -111,18 +118,8 @@ func TestCreateEntry_RejectsSpecOnNonProcedure(t *testing.T) {
 	app, identity, binding, _ := newIdentityWriteApp(t)
 	_, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
 		Kind: "gap", Layer: "tactical", Confidence: "high",
-		ProcedureSpec: "steps:\n    - id: x\n",
+		ProcedureSpec: map[string]any{"steps": []any{map[string]any{"id": "x"}}},
 		Body:          "A gap carrying a stray workflow declaration.",
-	})
-	validationErrorMentions(t, err, "procedureSpec")
-}
-
-func TestCreateEntry_RejectsMalformedSpecYAML(t *testing.T) {
-	app, identity, binding, _ := newIdentityWriteApp(t)
-	_, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
-		Kind: "procedure", Layer: "process", Confidence: "high",
-		Canonical: "test-broken", ProcedureSpec: "steps: [unclosed\n",
-		Body: "A procedure whose workflow YAML does not parse.",
 	})
 	validationErrorMentions(t, err, "procedureSpec")
 }
@@ -131,8 +128,18 @@ func TestCreateEntry_RejectsUnknownSpecSection(t *testing.T) {
 	app, identity, binding, _ := newIdentityWriteApp(t)
 	_, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
 		Kind: "procedure", Layer: "process", Confidence: "high",
-		Canonical: "test-typo", ProcedureSpec: "stepps:\n    - id: x\n",
+		Canonical: "test-typo", ProcedureSpec: map[string]any{"stepps": []any{map[string]any{"id": "x"}}},
 		Body: "A procedure whose workflow declares a typo'd section.",
+	})
+	validationErrorMentions(t, err, "procedureSpec")
+}
+
+func TestCreateEntry_RejectsSpecWithoutSteps(t *testing.T) {
+	app, identity, binding, _ := newIdentityWriteApp(t)
+	_, err := app.CreateEntry(t.Context(), identity, "example", binding, sdd.EntryDraft{
+		Kind: "procedure", Layer: "process", Confidence: "high",
+		Canonical: "test-stepless", ProcedureSpec: map[string]any{"state": map[string]any{"synthesis": map[string]any{"type": "text"}}},
+		Body: "A procedure whose workflow declares no steps.",
 	})
 	validationErrorMentions(t, err, "procedureSpec")
 }

@@ -125,6 +125,94 @@ func schemaForState(decl VarDecl) map[string]any {
 	return schema
 }
 
+// procedureSpecSchema is the advertised shape of a workflow declaration —
+// hand-written beside the type like every fragment here, mirroring the YAML
+// intermediate structs the engine decodes (spec.go); ParseSpec is the
+// enforcement, so a drift here mis-advertises but never mis-accepts.
+func procedureSpecSchema() map[string]any {
+	declBlock := map[string]any{
+		"type":        "object",
+		"description": "field name → declaration",
+		"additionalProperties": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"type":     map[string]any{"type": "string"},
+				"optional": map[string]any{"type": "boolean"},
+				"desc":     map[string]any{"type": "string"},
+				"default":  map[string]any{},
+			},
+			"required":             []string{"type"},
+			"additionalProperties": false,
+		},
+	}
+	inject := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"fn":   map[string]any{"type": "string"},
+			"args": map[string]any{"type": "object"},
+		},
+		"required":             []string{"fn"},
+		"additionalProperties": false,
+	}
+	transition := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"when":      map[string]any{"type": "string"},
+			"otherwise": map[string]any{"type": "string"},
+			"to":        map[string]any{"type": "string"},
+		},
+		"additionalProperties": false,
+	}
+	option := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"choice":  map[string]any{"type": "string"},
+			"call":    map[string]any{"type": "string"},
+			"collect": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"to":      map[string]any{"type": "string"},
+			"dispatch": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"procedure": map[string]any{"type": "string"},
+					"seed":      map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+				},
+				"required":             []string{"seed"},
+				"additionalProperties": false,
+			},
+		},
+		"required":             []string{"choice", "to"},
+		"additionalProperties": false,
+	}
+	step := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"id":          map[string]any{"type": "string"},
+			"collect":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"inject":      map[string]any{"type": "array", "items": inject},
+			"render":      map[string]any{"type": "string"},
+			"chooser":     map[string]any{"type": "string", "enum": []any{"gate", "agent", "user"}},
+			"options":     map[string]any{"type": "array", "items": option},
+			"guard":       map[string]any{"type": "string"},
+			"op":          map[string]any{"type": "string"},
+			"transitions": map[string]any{"type": "array", "items": transition},
+			"goal":        map[string]any{"type": "string"},
+		},
+		"required":             []string{"id"},
+		"additionalProperties": false,
+	}
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"params":  declBlock,
+			"state":   declBlock,
+			"steps":   map[string]any{"type": "array", "items": step},
+			"framing": map[string]any{"type": "array", "items": inject},
+		},
+		"required":             []string{"steps"},
+		"additionalProperties": false,
+	}
+}
+
 // schemaForType maps a domain type to its JSON Schema fragment. Validation
 // on arrival is VarType.ValidateValue — the schema is the advertised
 // contract, the store write is the enforcement.
@@ -169,6 +257,8 @@ func schemaForType(t VarType, desc string) map[string]any {
 			"required":             []string{"id", "kind"},
 			"additionalProperties": false,
 		}
+	case TypeProcedureSpec:
+		schema = procedureSpecSchema()
 	case TypeInvolvement:
 		schema = map[string]any{
 			"type": "object",
