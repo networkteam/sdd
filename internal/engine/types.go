@@ -66,6 +66,34 @@ func BaseTypeValues() []BaseType {
 	return append([]BaseType(nil), baseTypeOrder...)
 }
 
+// baseTypeDesc carries each domain type's served meaning — the single
+// declaration surfaces render from (a type without one fails the render).
+// Semantics only: the concrete shape, enums included, is generated into the
+// step's report schema (schemaForType), never restated here.
+var baseTypeDesc = map[BaseType]string{
+	TypeText:              "free prose — accounts, reports, syntheses; the default for anything narrative",
+	TypeBool:              "true or false",
+	TypeEntryID:           "a full entry identifier, resolvable against the graph",
+	TypeRef:               "a reference: target id, relationship kind from the closed ref-kind set, optional why",
+	TypeLabel:             "a topic label path (family/member)",
+	TypeParticipant:       "a participant's canonical name",
+	TypeEntryKind:         "one of the entry kinds",
+	TypeLayer:             "one of the thinking layers",
+	TypeConfidence:        "a confidence grade",
+	TypeIntent:            "a directive's intent",
+	TypeAttachmentHandle:  "a staged attachment's handle",
+	TypeFactIndex:         "a fact's retrieval-index enrollment: title and topic",
+	TypePreflightFindings: "write-gate findings — engine-written, never collected by a step",
+	TypeGuideFindings:     "writing-guide findings — engine-written, never collected by a step",
+	TypeInvolvement:       "a focus involvement: target entry, optional actors, optional time range",
+	TypeInvolvementWhen:   "a from/to date range",
+}
+
+// Description returns the type's served meaning; empty for an unknown type.
+func (t BaseType) Description() string {
+	return baseTypeDesc[t]
+}
+
 // VarType is a declared variable type: a base domain type, optionally
 // wrapped as list<T>.
 type VarType struct {

@@ -297,9 +297,17 @@ func TestEntriesShipProcedureSpecFact(t *testing.T) {
 			t.Errorf("spec reference missing domain type %q", baseType)
 		}
 	}
-	for _, want := range []string{"# Writing a procedure spec", "`params`", "`state`", "`steps`", "end(completed)", "end(abandoned)", "## Skeleton", "```yaml", "registry", "## unit:"} {
+	for _, want := range []string{"# Writing a procedure spec", "`params`", "`state`", "`steps`", "end(completed)", "end(abandoned)", "## A worked example", "```yaml", "registry", "## unit:", "## Dispatching another procedure"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("spec reference missing %q", want)
+		}
+	}
+	if !strings.Contains(fact.Content, engine.ExampleSpecFrontmatter) {
+		t.Error("spec reference does not embed the engine's worked example verbatim")
+	}
+	for _, pair := range engine.PresencePairs() {
+		if !strings.Contains(fact.Content, "`"+pair.Field+"` — checked by `"+pair.Predicate+"`") {
+			t.Errorf("spec reference missing gateable pair %s/%s", pair.Field, pair.Predicate)
 		}
 	}
 	if len(fact.Refs) == 0 || fact.Refs[0].ID != ProcedureFactID {
@@ -347,7 +355,7 @@ func baseFactIDs() map[string]bool {
 func TestProcedureFactBodyIsSelfContained(t *testing.T) {
 	body := factByID(t, ProcedureFactID).Content
 
-	for _, want := range []string{"# Defining a way of working", "Every other entry is read; a procedure is also run", "canonical is the identity", "Class places how it enters", "workflow is frontmatter", "Ask where the choice is real", "Shipped and project procedures", "Retire deliberately", "Validation waits for the engine", "spec reference fact `" + ProcedureSpecFactID + "`"} {
+	for _, want := range []string{"# Extending the process with workflows", "Every other entry is read; a procedure is also run", "canonical is the identity", "Class places how it enters", "workflow is frontmatter", "Ask where the choice is real", "Shipped and project procedures", "Retire deliberately", "Validation waits for the engine", "spec reference fact `" + ProcedureSpecFactID + "`"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("procedure fact body missing %q", want)
 		}
@@ -360,6 +368,17 @@ func TestProcedureFactBodyIsSelfContained(t *testing.T) {
 	for _, host := range []string{"sdd ", "MCP", "CLI"} {
 		if strings.Contains(body, host) {
 			t.Errorf("procedure fact body contains host-specific reference %q", host)
+		}
+	}
+}
+
+// TestEveryBaseTypeHasADescription mirrors the class rule: a domain type
+// declared in the engine without a description fails here (and the spec
+// reference render errors), not at a reader's graph load.
+func TestEveryBaseTypeHasADescription(t *testing.T) {
+	for _, bt := range engine.BaseTypeValues() {
+		if bt.Description() == "" {
+			t.Errorf("domain type %q has no description", bt)
 		}
 	}
 }

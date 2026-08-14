@@ -42,15 +42,16 @@ type playbackConfirmation struct {
 }
 
 // presenceFields maps each presence predicate to the store field it reads.
-// One predicate per commonly collected field; the mapping is the documented
-// contract (hasKind reads entryKind — the capture spine collects the target
-// kind under that name, kind being the param that pre-selects it).
+// One predicate per commonly collected field, named has<Field> throughout —
+// the regularity is a served contract (PresencePairs), so a new entry here
+// keeps it. (The drafted kind lives in state as entryKind because capture's
+// pre-selection param already owns the name kind.)
 var presenceFields = map[string]string{
 	"hasBody":        "body",
 	"hasRefs":        "refs",
 	"hasTopics":      "topics",
 	"hasConfidence":  "confidence",
-	"hasKind":        "entryKind",
+	"hasEntryKind":   "entryKind",
 	"hasLayer":       "layer",
 	"hasWidenReport": "widenReport",
 	// Identity-kind capture fields (bootstrap's actor/role captures): canonical
@@ -87,6 +88,24 @@ var presenceFields = map[string]string{
 	// Engine-written by wipStart (see the shell's Writes contract): presence
 	// routes the implementation closeout through wipDone only on tracked runs.
 	"hasWipMarker": "wipMarker",
+}
+
+// PresencePair is one gateable field with the presence predicate that reads
+// it — the pairing surfaces render instead of restating.
+type PresencePair struct {
+	Field     string
+	Predicate string
+}
+
+// PresencePairs lists the presence predicates and the store field each reads,
+// sorted by field — the closed gateable vocabulary.
+func PresencePairs() []PresencePair {
+	pairs := make([]PresencePair, 0, len(presenceFields))
+	for pred, field := range presenceFields {
+		pairs = append(pairs, PresencePair{Field: field, Predicate: pred})
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].Field < pairs[j].Field })
+	return pairs
 }
 
 func registerBuiltinPredicates(r *Registry) {

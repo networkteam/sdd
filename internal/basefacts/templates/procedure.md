@@ -20,7 +20,7 @@ summary: >-
     capture.
 ---
 
-# Defining a way of working — the procedure kind
+# Extending the process with workflows — the procedure kind
 
 A procedure records a committed way of working that runs: a repeatable dialogue the engine executes step by step — capturing an entry, a roastery's weekly cupping review, cutting a release. Every other entry is read; a procedure is also run. A directive, an activity, a plan record something — a direction held, work committed, an outcome to reach — and the graph holds them as records. A procedure instead defines a workflow the agent operates step by step while the engine holds the structure: a step cannot be skipped, a gate holds until what it checks is true, and a question declared for the user stops everything until the user answers. That is what the kind buys — dialogue with guaranteed structure, instead of guidance an agent might drift from. Reach for it only when you are defining something to run.
 
