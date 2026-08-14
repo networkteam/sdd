@@ -2,6 +2,7 @@
 type: signal
 layer: process
 kind: fact
+override: closed
 confidence: high
 topics:
     - engine/base-facts

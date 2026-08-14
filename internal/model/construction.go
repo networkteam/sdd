@@ -86,9 +86,11 @@ type FocusFields struct {
 	Involvement []Involvement
 }
 
-// FactFields carries a fact's optional index enrollment.
+// FactFields carries a fact's optional index enrollment and override marker
+// (Entry.Override).
 type FactFields struct {
-	Index *FactIndex
+	Index    *FactIndex
+	Override string
 }
 
 // Finding is one structural-rule violation from validating a construction.
@@ -235,11 +237,16 @@ func ConstructFromEntry(e *Entry) (*EntryConstruction, []Finding) {
 
 	isFact := e.Type == TypeSignal && e.Kind == KindFact
 	if isFact {
-		if e.Index != nil {
-			c.Fact = &FactFields{Index: e.Index}
+		if e.Index != nil || e.Override != "" {
+			c.Fact = &FactFields{Index: e.Index, Override: e.Override}
 		}
-	} else if e.Index != nil {
-		stray("index", "", "index is only valid on kind: fact")
+	} else {
+		if e.Index != nil {
+			stray("index", "", "index is only valid on kind: fact")
+		}
+		if e.Override != "" {
+			stray("override", e.Override, "override is only valid on kind: fact")
+		}
 	}
 
 	return c, findings
@@ -291,6 +298,7 @@ func (c *EntryConstruction) Entry() *Entry {
 	}
 	if c.Fact != nil {
 		e.Index = c.Fact.Index
+		e.Override = c.Fact.Override
 	}
 	return e
 }
@@ -398,6 +406,10 @@ func (c *EntryConstruction) Validate(g *Graph) []Finding {
 		if err := c.Fact.Index.ValidateForEntry(c.Kind, c.Topics); err != nil {
 			add("index", "", err.Error())
 		}
+	}
+
+	if c.Fact != nil && c.Fact.Override != "" && c.Fact.Override != OverrideClosed {
+		add("override", c.Fact.Override, fmt.Sprintf("override: only %q is defined", OverrideClosed))
 	}
 
 	findings = append(findings, c.validateInlineTopics()...)

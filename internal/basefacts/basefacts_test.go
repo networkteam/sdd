@@ -384,3 +384,18 @@ func TestEveryBaseTypeHasADescription(t *testing.T) {
 		}
 	}
 }
+
+// TestTypeSystemFactsAreOverrideClosed pins the declared property (d-tac-9be):
+// facts whose content renders from the running version's declarations refuse
+// supersession, and the marker — not an ID list — is what the write path reads.
+func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
+	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID}
+	for _, id := range closed {
+		if fact := factByID(t, id); fact.Override != model.OverrideClosed {
+			t.Errorf("fact %s: Override = %q, want %q", id, fact.Override, model.OverrideClosed)
+		}
+	}
+	if fact := factByID(t, PrinciplesFactID); fact.Override != "" {
+		t.Errorf("principles fact must stay project-overridable, got Override = %q", fact.Override)
+	}
+}

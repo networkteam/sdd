@@ -269,6 +269,14 @@ type Entry struct {
 	// are handled.
 	Topics []TopicPath
 	Index  *FactIndex
+	// Override is only meaningful on kind: fact signals. The value "closed"
+	// (OverrideClosed)
+	// marks a fact whose content is coupled to declarations the running
+	// version enforces (the type-system facts, d-tac-9be): superseding it is
+	// refused on every write surface, because a frozen copy would silently
+	// outrank the generated truth. Recognized by this declared property,
+	// never by an ID list.
+	Override string
 	// AnnotationTopics carries the topic assignments declared by a
 	// kind: annotation entry. Each item is either a plain label (Members nil
 	// — applies to all of the annotation's Refs) or a label with explicit
@@ -412,6 +420,9 @@ func (e *Entry) IsSettled() bool {
 // has no knowledge of kind at parse time. The kind-conditional shape rules
 // are enforced after the fact in ParseEntry — we let YAML decode whatever
 // is present, then route fields into the Entry based on Kind.
+// OverrideClosed is the one defined value of Entry.Override.
+const OverrideClosed = "closed"
+
 type frontmatter struct {
 	Type         string            `yaml:"type"`
 	Layer        string            `yaml:"layer"`
@@ -428,6 +439,7 @@ type frontmatter struct {
 	Actor        string            `yaml:"actor,omitempty"`
 	Topics       []AnnotationTopic `yaml:"topics,omitempty"`
 	Index        *FactIndex        `yaml:"index,omitempty"`
+	Override     string            `yaml:"override,omitempty"`
 	FocusActors  []string          `yaml:"actors,omitempty"`
 	FocusWhen    *FocusWhen        `yaml:"when,omitempty"`
 	Involvement  []involvementYAML `yaml:"involvement,omitempty"`
@@ -518,6 +530,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		Class:        ProcedureClass(fm.Class),
 		Actor:        fm.Actor,
 		Index:        fm.Index,
+		Override:     fm.Override,
 		FocusActors:  fm.FocusActors,
 		FocusWhen:    fm.FocusWhen,
 		Preflight:    fm.Preflight,
@@ -730,6 +743,7 @@ func FormatFrontmatter(e *Entry) string {
 		Class:        string(e.Class),
 		Actor:        e.Actor,
 		Index:        e.Index,
+		Override:     e.Override,
 		FocusActors:  e.FocusActors,
 		FocusWhen:    e.FocusWhen,
 		Preflight:    e.Preflight,

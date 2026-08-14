@@ -1179,6 +1179,14 @@ func validateSupersedes(e *Entry, g *Graph) {
 			continue // already reported by validateIDRefs
 		}
 
+		if target.Override == OverrideClosed {
+			e.Warnings = append(e.Warnings, Warning{
+				Field:   "supersedes",
+				Value:   id,
+				Message: fmt.Sprintf("supersede refused: %s declares override: closed — its content renders from the running version's declarations, so a superseding copy would freeze stale truth; narrow through project rules instead", id),
+			})
+		}
+
 		if target.Type != e.Type {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "supersedes",

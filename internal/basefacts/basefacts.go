@@ -3,7 +3,10 @@
 // Embedded `fact` signals — the pull layer that answers the engine's
 // push-only knowledge gap (d-cpt-dtv). They mirror the base-procedures
 // pattern: always loaded, no participants, no project refs, stable IDs, and
-// overridable per-project by a superseding entry on the same ID.
+// overridable per-project by a superseding entry on the same ID — except the
+// type-system facts, which declare `override: closed` (model.OverrideClosed)
+// because their content renders from the running version's declarations and a
+// frozen project copy would silently outrank that truth (d-tac-9be).
 //
 // Unlike base procedures — static .md files embedded at compile time — a base
 // fact body may be rendered at load from live executor vocabularies, so the
