@@ -14,35 +14,37 @@ summary: >-
     The procedure spec reference: the frontmatter fields a runnable procedure
     declares — typed params and state, the step list with its gates, choosers,
     and transitions — the closed sets of variable types and gateable field
-    names, how a run hands work to another procedure, a worked example valid
-    by construction, and how to pull the live registry of abilities a step
-    can name.
+    names, how a run receives its initial values and hands work to another
+    procedure, a worked example valid by construction, and the live ability
+    registry a step's guards, injects, and ops draw from.
 ---
 
 # Writing a procedure spec
 
-A procedure entry's frontmatter declares the workflow the engine executes. Three fields carry it, beside the entry's usual ones: `params`, `state`, and `steps`.
+A procedure entry's frontmatter declares the workflow the engine executes. Three fields carry it, beside the entry's usual ones: `params`, `state`, and `steps`. The engine runs the workflow over a per-run variable store; params and state declare its fields.
 
 ## `params` — what a caller passes at start
 
-Each entry is a declaration, `name: {type, optional?, desc}`. Params seed the store once, at start.
+Each entry is a declaration, `name: {type, optional?, desc}`. Params are written into the store once, at start.
 
 ## `state` — the working fields of the run
 
-Same declaration shape as params, and steps collect and read these fields as the run advances. A field that arrives from a dispatching parent rather than the caller is state, not a param — seeding writes state only.
+Same declaration shape as params, and steps collect and read these fields as the run advances. A field that arrives from a dispatching parent rather than the caller is state, not a param — a parent's seed writes state only.
 
 **Field names are a vocabulary, not a free choice.** The commonest gate is a presence check: it passes once one specific field is present and non-empty, and each check is bound to its field by name — `hasAnchor` reads `anchor`, and nothing reads a name outside this vocabulary. So a field is gateable on presence only when it carries one of these names:
 
 {{ .GateableFields }}
 
-Prefer these names over inventing near-synonyms (`brief`, not `timeline`); a field outside the vocabulary can still be collected and served, but no gate can hold on it. Declaring stays your job: a guard naming a check whose field the spec never declares loads cleanly and then never advances — the run waits on a field nothing can collect.
+Prefer these names over inventing near-synonyms (`brief`, not `timeline`); a field outside the vocabulary can still be collected and served, but no gate can hold on it. Declaring stays your job: a guard naming a check whose field the spec never declares loads cleanly and then never advances — the run waits on a field nothing can collect. This list — like the type list below — renders from the running engine's own declarations each time the fact is served, so it is the running version's truth and cannot disagree with the live registry.
 
 The declaration attributes:
 
 - `type` — a domain type, or `list<T>` around one; see the closed set below.
 - `optional` — `true` marks the field as not required where it is collected.
 - `desc` — one line, served to the running agent when the field is asked for; write it as the instruction it is.
-- `default` — state only: applied at start when the caller left the field unset — the one literal a spec carries.
+- `default` — state only: applied at start when no channel supplied the field — the one literal a spec carries, written in the type's natural YAML form (`true`, a quoted string, a list).
+
+**How a run's store fills.** Initial values arrive through three channels, and naming them apart matters because one word — "seed" — is casually used for all three. In rank order: a value passed explicitly at start wins (params always arrive this way, and a start may also carry any *declared state field* the caller chooses to set); a dispatching parent's armed seed writes next (state only, see Dispatching below); `default` applies last, only where nothing else supplied the field. Everything after start is collected by steps.
 
 ## `steps` — the walk itself
 
@@ -66,15 +68,13 @@ A run ends by transitioning to {{ .EndTargets }}.
 
 ## Variable types
 
-A declaration's `type` is a domain type, or `list<T>` around one. The closed set:
+A declaration's `type` is a domain type, or `list<T>` around one. You declare the semantic type only. The concrete shape a value must take — object fields, identifier patterns, the accepted values of closed enumerations such as the ref-kind set or the confidence grades — is generated from the declaration and served as the step's report schema while the procedure runs, then enforced when the value arrives. Nothing about shape needs restating in the spec. The closed set:
 
 {{ .VarTypes }}
 
-You declare the semantic type only. The concrete shape a value must take — object fields, identifier patterns, the accepted values of closed enumerations — is generated from the declaration and served as the step's report schema while the procedure runs, then enforced when the value arrives. Nothing about shape needs restating in the spec.
-
 ## Abilities
 
-Guards name checks, `inject` names queries, `op` and `call` name commands — and the engine serves the live inventory of all three, with each ability's contract (what it reads, what it writes), through its function registry. The registry is askable on demand, the same way entries are read — request it by class (predicate, query, command) whenever you write steps: what it lists is exactly what a spec can name, for the running version, including each query's argument names. A step that asks the user is always available for whatever no ability covers.
+Guards name checks, `inject` names queries, `op` and `call` name commands — and the engine serves the live inventory of all three, with each ability's contract (what it reads, what it writes), through its function registry. Where the engine is connected, its `registry` tool returns that inventory by class (predicate, query, command), including each query's argument names; what it lists is exactly what a spec can name, for the running version. Beyond the presence checks printed above, this reference deliberately carries no ability list — pull the registry when you write steps. A step that asks the user is always available for whatever no ability covers.
 
 ## Dispatching another procedure
 
@@ -86,7 +86,7 @@ A delegate procedure (class `task`) is dispatched the same way, with its inputs 
 
 ## Instruction units
 
-The entry's body carries one `## unit: <step id>` section per step, served verbatim as the instructions the agent works from while that step runs — write it as what to do there and how to report the step's fields. Units may use template placeholders over the store's fields and the step's injected data.
+The entry's body carries one `## unit: <step id>` section per step, served as the instructions the agent works from while that step runs — write it as what to do there and how to report the step's fields. A step's `render` field may name an extra unit section beyond the per-step ones. Units may use template placeholders over the store's fields and the step's injected data — Go-template form, each field by its declared name: `The anchor under review: {{"{{.anchor}}"}}` serves with the store's `anchor` value in place, and an inject's result appears under its function's name the same way. A field not yet collected renders empty.
 
 ## A worked example
 

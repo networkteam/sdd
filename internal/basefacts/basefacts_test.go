@@ -313,7 +313,9 @@ func TestEntriesShipProcedureSpecFact(t *testing.T) {
 	if len(fact.Refs) == 0 || fact.Refs[0].ID != ProcedureFactID {
 		t.Errorf("spec reference refs = %v, want the procedure authoring fact", fact.Refs)
 	}
-	if strings.Contains(fact.Content, "{{") {
+	// The body teaches a literal lowercase placeholder ({{.anchor}}); only the
+	// template's own capitalized data fields would mark a failed render.
+	if regexp.MustCompile(`\{\{\s*\.[A-Z]`).MatchString(fact.Content) {
 		t.Error("spec reference body contains an unrendered template placeholder")
 	}
 	body := fact.Content
