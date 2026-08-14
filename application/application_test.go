@@ -66,6 +66,11 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(attachmentDir, "evidence.md"), []byte("attachment"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	brokenProcedure := "---\ntype: decision\nlayer: prc\nkind: procedure\ncanonical: broken-move\nparams:\n    goalHint: {type: text, optional: true, desc: hint}\nstate:\n    synthesis: {type: text, desc: outcome}\nsteps:\n    - id: work\n      collect: [synthesis]\n      transitions:\n          - when: hasSynthesis\n            to: nowhere\n---\n\nA procedure whose transition targets a step that does not exist.\n\n## unit: work\n\nWork.\n"
+	brokenPath := filepath.Join(graphDir, "2026", "07", "13-040000-d-prc-brk.md")
+	if err := os.WriteFile(brokenPath, []byte(brokenProcedure), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	wipDir := filepath.Join(graphDir, "wip")
 	if err := os.MkdirAll(wipDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -151,6 +156,9 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 	procedures, err := application.Procedures(t.Context(), identity, "example", sdd.ProcedureListRequest{})
 	if err != nil || !strings.Contains(procedures.Procedures, "capture") {
 		t.Fatalf("Procedures = %q, %v", procedures.Procedures, err)
+	}
+	if !strings.Contains(procedures.Procedures, "broken-move — spec fails to load:") || !strings.Contains(procedures.Procedures, "nowhere") {
+		t.Fatalf("broken procedure not listed as broken: %q", procedures.Procedures)
 	}
 	attachment, err := application.ReadAttachment(t.Context(), identity, "example", sdd.ReadAttachmentRequest{
 		EntryID: "20260713-030000-s-tac-api", Filename: "evidence.md", MaxBytes: 20,

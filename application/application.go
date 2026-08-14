@@ -357,7 +357,14 @@ func (a *Application) Procedures(ctx context.Context, identity RequestIdentity, 
 		if head == nil || head.Canonical == "" || head.IsShellProcedure() || head.IsTaskProcedure() || len(chain.LiveHeads) == 0 {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- %s%s — %s", head.Canonical, publicProcedureSignature(head), head.FirstSummarySentence()))
+		signature, err := publicProcedureSignature(head)
+		if err != nil {
+			// A broken spec is listed as broken, never silently signature-less
+			// — the author's only load test is this surface and the start.
+			lines = append(lines, fmt.Sprintf("- %s — spec fails to load: %s", head.Canonical, oneLineError(err)))
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- %s%s — %s", head.Canonical, signature, head.FirstSummarySentence()))
 	}
 	sort.Strings(lines)
 	return ProcedureListResult{Project: runtime.options.Project, Procedures: strings.Join(lines, "\n")}, nil
@@ -519,10 +526,19 @@ func publicGraphFilter(request SearchRequest) (model.GraphFilter, error) {
 	return filter, nil
 }
 
-func publicProcedureSignature(head *model.Entry) string {
+// oneLineError compacts a (possibly multi-line, joined) spec error into one
+// served list line.
+func oneLineError(err error) string {
+	return strings.Join(strings.Fields(err.Error()), " ")
+}
+
+func publicProcedureSignature(head *model.Entry) (string, error) {
 	spec, err := engine.ParseSpec(head)
-	if err != nil || len(spec.Params) == 0 {
-		return ""
+	if err != nil {
+		return "", err
+	}
+	if len(spec.Params) == 0 {
+		return "", nil
 	}
 	var names []string
 	for name := range spec.Params {
@@ -538,7 +554,7 @@ func publicProcedureSignature(head *model.Entry) string {
 		}
 		parts = append(parts, fmt.Sprintf("%s%s: %s", name, optional, decl.Type))
 	}
-	return "(" + strings.Join(parts, ", ") + ")"
+	return "(" + strings.Join(parts, ", ") + ")", nil
 }
 
 var errVectorUnavailable = errors.New("vector search requires EmbeddingExecutor and SearchIndexStore")
