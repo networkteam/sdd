@@ -188,6 +188,17 @@ func (g *Graph) Aspirations() []*Entry {
 // resolved), and done signals are terminal facts of execution. The
 // allow-list shape means new signal kinds default to "not an attention
 // item" rather than silently flooding the open set.
+// openAttentionKinds are the signal kinds whose open entries demand
+// resolution — the attention set OpenSignals filters on, declared once so
+// served kind facts render the same enumeration.
+var openAttentionKinds = []Kind{KindGap, KindQuestion}
+
+// OpenAttentionKinds lists the attention kinds for surfaces that render or
+// generate from the declaration instead of restating it.
+func OpenAttentionKinds() []Kind {
+	return append([]Kind(nil), openAttentionKinds...)
+}
+
 func (g *Graph) OpenSignals() []*Entry {
 	closed := g.closedSet()
 	superseded := g.supersededSet()
@@ -197,7 +208,7 @@ func (g *Graph) OpenSignals() []*Entry {
 		if e.Type != TypeSignal {
 			continue
 		}
-		if e.Kind != KindGap && e.Kind != KindQuestion {
+		if !slices.Contains(openAttentionKinds, e.Kind) {
 			continue
 		}
 		if !closed[e.ID] && !superseded[e.ID] {
@@ -1130,7 +1141,7 @@ func validateCloses(e *Entry, g *Graph) {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "closes",
 				Value:   id,
-				Message: fmt.Sprintf("cannot close settled directive %s — it is born terminal; supersede it instead", id),
+				Message: fmt.Sprintf("%s (closing %s)", SettledCloseRule, id),
 			})
 			continue
 		}
@@ -1148,7 +1159,7 @@ func validateCloses(e *Entry, g *Graph) {
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "closes",
 				Value:   id,
-				Message: fmt.Sprintf("only done-kind signals may close entries, or a fact/insight dissolving a question (got %s signal closing %s %s)", e.Kind, target.Type, id),
+				Message: fmt.Sprintf("%s (got %s signal closing %s %s)", SignalCloseRule, e.Kind, target.Type, id),
 			})
 		case e.Type == TypeDecision && target.Type == TypeDecision:
 			// Retirement without replacement: a kind: directive decision may

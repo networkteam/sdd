@@ -125,6 +125,19 @@ func ReadWarnings(findings []Finding) []Warning {
 // rule cannot drift from what capture enforces.
 const DoneAnchorRequirement = "done signal must carry at least one closes or refs (target of the completion claim)"
 
+// SignalCloseRule is the closes rule over signal kinds, declared once so the
+// validator and the served kind facts render the same words.
+const SignalCloseRule = "only done-kind signals may close entries, or a fact/insight dissolving a question"
+
+// DirectiveIntentRequirement is the directive kind's structural rule,
+// declared once so the validator and the served kind fact render the same
+// words.
+const DirectiveIntentRequirement = "directive decisions require an explicit intent (pending, guiding, or settled)"
+
+// SettledCloseRule is the settled directive's lifecycle rule, declared once
+// so the validator and the served kind fact render the same words.
+const SettledCloseRule = "a settled directive is born terminal and cannot be closed — supersede it instead"
+
 // PlanAcceptanceHeading and PlanChecklistItem are the plan kind's structural
 // markers, declared once for the validator and rendered kind facts alike.
 const (
@@ -328,7 +341,7 @@ func (c *EntryConstruction) Validate(g *Graph) []Finding {
 			add("intent", string(c.Directive.Intent), fmt.Sprintf("invalid intent %q (expected pending, guiding, or settled)", c.Directive.Intent))
 		}
 	} else if isDirective {
-		addWriteOnly("intent", "", "directive decisions require an explicit intent (pending, guiding, or settled)")
+		addWriteOnly("intent", "", DirectiveIntentRequirement)
 	}
 
 	if c.isKind(TypeSignal, KindActor) {

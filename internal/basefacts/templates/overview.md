@@ -14,6 +14,12 @@ refs:
     - id: 20260813-170000-s-prc-prd
       kind: related
       desc: the procedure kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260815-100000-s-prc-gpk
+      kind: related
+      desc: the gap kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260815-110000-s-prc-drk
+      kind: related
+      desc: the directive kind's authoring fact — the per-kind depth behind this overview
 index:
     title: 'Understanding the type system: how types, kinds, and layers fit together, which entry to draft when kinds compete, and where each kind''s crafting guide lives'
     topic: type-system/kinds
@@ -41,7 +47,7 @@ Where two kinds compete, these tests settle it:
 - **Plan vs activity — WHAT vs THAT.** A plan defines what must be true when the work is done — verifiable outcomes, stated as acceptance criteria. An activity dispatches work whose shape is already known; its validation is a single "was it done?".
 - **A directive states its posture** as intent:
   - `pending` — demands follow-up
-  - `guiding` — standing context that never completes
+  - `guiding` — a guideline that keeps applying
   - `settled` — born terminal, with the why in its body
 - **Standing constraints are guiding directives.** The contract kind takes no new entries — existing contracts stay valid, and a constraint that must always hold is captured as a directive with guiding intent.
 - **Actor vs role — outside vs here.** What a participant brings from outside the project is their actor identity; what they do within it is a role bound to that actor. This week's task is neither.

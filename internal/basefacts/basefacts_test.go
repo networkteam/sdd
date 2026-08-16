@@ -389,7 +389,7 @@ func TestEveryBaseTypeHasADescription(t *testing.T) {
 // facts whose content renders from the running version's declarations refuse
 // supersession, and the marker — not an ID list — is what the write path reads.
 func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
-	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID}
+	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID}
 	for _, id := range closed {
 		if fact := factByID(t, id); fact.Override != model.OverrideClosed {
 			t.Errorf("fact %s: Override = %q, want %q", id, fact.Override, model.OverrideClosed)
@@ -397,5 +397,58 @@ func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
 	}
 	if fact := factByID(t, PrinciplesFactID); fact.Override != "" {
 		t.Errorf("principles fact must stay project-overridable, got Override = %q", fact.Override)
+	}
+}
+
+// TestEntriesShipGapKindFact covers the gap authoring fact: unindexed like
+// every authoring fact, with mechanics rendered from the model declarations.
+func TestEntriesShipGapKindFact(t *testing.T) {
+	fact := factByID(t, GapFactID)
+	if fact.Index != nil {
+		t.Errorf("gap fact carries index enrollment %+v, want none — authoring facts are teased from the capture lane", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("gap fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "Both sides, each with its source", "The world input is the substance", "Reasoning enters only under its own name", "Observed, never decided", "Record the act, not the readings", "Frame the level that needs to change", "How a gap resolves", "Choosing gap at all"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("gap fact body missing %q", want)
+		}
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipDirectiveKindFact covers the directive authoring fact.
+func TestEntriesShipDirectiveKindFact(t *testing.T) {
+	fact := factByID(t, DirectiveFactID)
+	if fact.Index != nil {
+		t.Errorf("directive fact carries index enrollment %+v, want none — authoring facts are teased from the capture lane", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("directive fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", model.DirectiveIntentRequirement, model.SettledCloseRule, "The choice carries its why", "Intent is chosen, never defaulted", "A guiding directive binds", "Retirement follows the posture", "Refining without replacing", "Choosing directive at all"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("directive fact body missing %q", want)
+		}
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// assertFactSelfContained holds a fact body to the framework-generic
+// standard: no graph-local entry IDs, no host-specific tool references, no
+// unrendered template placeholders.
+func assertFactSelfContained(t *testing.T, fact *model.Entry) {
+	t.Helper()
+	if loc := entryIDPattern.FindString(fact.Content); loc != "" {
+		t.Errorf("fact %s cites project entry %q; a base fact carries no graph-local references", fact.ID, loc)
+	}
+	for _, host := range []string{"sdd ", "MCP", "CLI"} {
+		if strings.Contains(fact.Content, host) {
+			t.Errorf("fact %s body contains host-specific reference %q", fact.ID, host)
+		}
+	}
+	if strings.Contains(fact.Content, "{{") {
+		t.Errorf("fact %s body contains an unrendered template placeholder", fact.ID)
 	}
 }

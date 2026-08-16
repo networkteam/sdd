@@ -185,7 +185,7 @@ func DefaultKindForType(t EntryType) Kind {
 // decisions:
 //
 //   - pending — demands follow-up; the action-on default
-//   - guiding — standing context that shapes later decisions, never "completed"
+//   - guiding — a guideline that keeps applying, shaping later decisions
 //   - settled — born terminal; needs no follow-up and carries no closing edge
 //
 // A directive with no intent reads as unspecified (legacy / pre-attribute) and

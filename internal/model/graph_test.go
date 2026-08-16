@@ -1014,7 +1014,7 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 				entry("20260406-100100-s-tac-don", withKind(KindDone), withCloses("20260406-100000-d-tac-set")),
 			},
 			wantWarns: 1,
-			wantMsg:   "cannot close settled directive",
+			wantMsg:   "settled directive is born terminal",
 		},
 		{
 			name: "valid: directive closes contract (retirement)",
