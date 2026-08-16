@@ -6,15 +6,24 @@ Ten drafted authoring facts for the remaining kinds (contract deliberately exclu
 
 Walk the drafts with Christopher kind by kind (batches of 2–3 worked well for gap/directive), fold review edits in, then register each reviewed fact: Go wiring + mechanics renderer + tests + overview ref, and cut the corresponding lane teaser into the capture procedure.
 
+## Reviewed and registered
+
+- **insight** — ruling 1 settled (see below); compressed; registered as `20260816-100000-s-prc-syn`.
+
+## Rulings made in review (beyond the numbered list)
+
+- **Summary and topic craft belong to the capture procedure, not the kind facts.** The copied claim "the first sentence stands alone, because overview surfaces lead with it" is wrong — generated summaries lead those surfaces, not entry bodies — and was cut from the shipped gap fact and the fact, plan, question and role drafts. Per-kind topic conventions stay: they state how much of an entry's meaning that kind already carries elsewhere (done's work-shape topics, fact's index topic, role's rarely-owed, focus's optional, annotation's topics-as-payload), which is entry semantics. Per-kind confidence conventions stay for the same reason.
+- **Layer names where the thinking landed, not where its inputs sit.** Applied to insight ("a reading drawn from several operational deviations and one survey result is strategic if that is where the thinking arrived"). The gap and fact drafts still say "depth of the deviation" / "scope of the claim" — check those against this framing when their turn comes.
+
 ## Cross-read fixes to apply mechanically before/with review
 
-- Terminology: four drafts say "the overview"; shipped facts say "the type-system introduction" — harmonize to the latter everywhere (including one mixed use in the shipped directive fact).
-- actor.md: "Yusuf, known in the graph as Yusuf" doubling — polish.
-- "load-bearing joints are pegged, not screwed" now appears in directive (shipped), activity, and focus drafts — keep as deliberate canon or diversify (Christopher's call).
+- ~~Terminology: harmonize "the overview" to "the type-system introduction"~~ — done.
+- ~~actor.md doubling~~ — done.
+- "load-bearing joints are pegged, not screwed" now appears in directive (shipped), activity, and focus drafts — keep as deliberate canon or diversify (Christopher's call). **Still open.**
 
 ## Open rulings (one per line, writer recommendation in parentheses)
 
-1. Insight retirement path: docs say directive-close, practice mostly done-close — open gap 20260608-004727-s-prc-4kh. Draft absorbs either; a ruling would let it name the path.
+1. ~~Insight retirement path~~ — **SETTLED**: kind-open and rationale-bound. Any entry may retire a reading; what qualifies it is saying why the reading stopped holding (the material moved, or the reasoning had a flaw). Being acted on is not a retirement — a commitment taking the reading up points at it and leaves it standing. Closes 20260608-004727-s-prc-4kh; a settled directive recording this is still to be captured.
 2. Fact-closes-fact: model warns, pre-flight teaches it as a valid unusual close (keep warned-but-permitted; draft avoids exclusivity claims).
 3. Role head-ref: pre-flight demands role refs include the actor head's entry ID; capture lane says "no natural refs" (drop the pre-flight check — the canonical binding already carries the relationship). Recorded miss in 20260722-141659-s-cpt-rza either way.
 4. Per-kind confidence conventions (actor high, role medium, aspiration medium-indefinitely): all kept out as CLI-legacy-shaped per 20260816-170529-d-cpt-1dk (stay out; aspiration's origin rationale could ship as one sentence if wanted).

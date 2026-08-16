@@ -389,7 +389,7 @@ func TestEveryBaseTypeHasADescription(t *testing.T) {
 // facts whose content renders from the running version's declarations refuse
 // supersession, and the marker — not an ID list — is what the write path reads.
 func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
-	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID}
+	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID}
 	for _, id := range closed {
 		if fact := factByID(t, id); fact.Override != model.OverrideClosed {
 			t.Errorf("fact %s: Override = %q, want %q", id, fact.Override, model.OverrideClosed)
@@ -430,6 +430,25 @@ func TestEntriesShipDirectiveKindFact(t *testing.T) {
 	for _, want := range []string{"## Mechanics", model.DirectiveIntentRequirement, model.SettledCloseRule, "The choice carries its why", "Intent is chosen, never defaulted", "A guiding directive binds", "Retirement follows the posture", "Refining without replacing", "Choosing directive at all"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("directive fact body missing %q", want)
+		}
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipInsightKindFact covers the insight authoring fact, whose
+// mechanics render the one derived rule the kind turns on: insight is absent
+// from the attention set, so an open insight owes nothing.
+func TestEntriesShipInsightKindFact(t *testing.T) {
+	fact := factByID(t, InsightFactID)
+	if fact.Index != nil {
+		t.Errorf("insight fact carries index enrollment %+v, want none — authoring facts are teased from the capture lane", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("insight fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "not an attention kind", "the reasoning is the part only this entry holds", "re-derivability", "One synthesis, one entry", "Understanding, never commitment", "Narrowing an earlier reading", "Nothing owed after the reading", "Being acted on is not a retirement", "Choosing insight at all"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("insight fact body missing %q", want)
 		}
 	}
 	assertFactSelfContained(t, fact)
