@@ -389,7 +389,7 @@ func TestEveryBaseTypeHasADescription(t *testing.T) {
 // facts whose content renders from the running version's declarations refuse
 // supersession, and the marker — not an ID list — is what the write path reads.
 func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
-	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID}
+	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID, QuestionFactID}
 	for _, id := range closed {
 		if fact := factByID(t, id); fact.Override != model.OverrideClosed {
 			t.Errorf("fact %s: Override = %q, want %q", id, fact.Override, model.OverrideClosed)
@@ -468,6 +468,25 @@ func TestEntriesShipFactKindFact(t *testing.T) {
 	for _, want := range []string{"## Mechanics", model.SignalCloseRule, model.FactIndexKindRule, model.FactIndexTopicRule, "The claim carries how it was reached", "Verification is not the price of entry", "Informs, never demands", "Cited and extracted", "Answering a question", "Enrolling in the pull index", "never on the drafter's say-so", "Choosing fact at all"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("fact fact body missing %q", want)
+		}
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipQuestionKindFact covers the question authoring fact. Unlike
+// the other signal kinds shipped so far it IS an attention kind, and the
+// mechanics say so from the same declaration the read side filters on.
+func TestEntriesShipQuestionKindFact(t *testing.T) {
+	fact := factByID(t, QuestionFactID)
+	if fact.Index != nil {
+		t.Errorf("question fact carries index enrollment %+v, want none — authoring facts are teased from the capture lane", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("question fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "is an attention kind", "# Querying for input", "an unasked question gets answered anyway", "As specific as the demand that raised it", "brought into dialogue", "One demand, with its strands", "How a question resolves", "Choosing question at all"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("question fact body missing %q", want)
 		}
 	}
 	assertFactSelfContained(t, fact)

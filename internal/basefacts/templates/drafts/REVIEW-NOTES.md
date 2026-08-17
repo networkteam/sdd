@@ -10,10 +10,17 @@ Walk the drafts with Christopher kind by kind (batches of 2–3 worked well for 
 
 - **insight** — ruling 1 settled (see below); compressed; registered as `20260816-100000-s-prc-syn`.
 - **fact** — rulings 2 and 10 settled (see below), plus provenance-over-verification; compressed; index rules extracted to `model.FactIndexKindRule` / `model.FactIndexTopicRule`; registered as `20260816-110000-s-prc-kno`.
+- **question** — ruling 12 settled (see below); the draft was judged badly written (duplication across four paragraphs circling two themes) and **rewritten from scratch by a Fable subagent** against the designer's line-by-line feedback: reframed from "marking an unknown" to **querying for input** — the demand goes into the record so later work finds it, with the unknown becoming explicit named as a byproduct — dialogue installed as the structural centre, the tension paragraph cut, ten paragraphs down to seven and ~1100 words to ~800. Registered as `20260817-100000-s-prc-qry`. Two sentences were weighed and settled separately: the confidence convention was **cut** as too thin (one specimen's gloss), and the deciding-by-omission clause was **restored** on the posture sentence after the subagent argued it — non-redundant, behaviour-changing at the capture margin, and consistent with insight's capture-threshold paragraph, which would otherwise have to go too.
 
 ## Compression method (worth repeating per kind)
 
 An Opus subagent, given the target draft plus the type-system introduction, the style contract, and the shipped sibling facts, instructed to analyze every paragraph for what it serves *before* cutting, to treat overview-owned content as the richest cut, and to flag judgment calls rather than make them. Insight 1167→1070, fact 1170→1089, nothing load-bearing lost. It also caught a reserved-word violation the human review had missed ("procedures" in fact's hygiene-plan example).
+
+## Standing checks for every remaining kind
+
+- **Every decision kind must say where its why comes from.** Dialogue is the framework's central mechanism and the question draft never mentioned it once. Counting mentions across all fourteen: directive/insight/role carry 3–4, gap/fact/plan/aspiration/procedure carry 2, and **done (shipped), activity, focus, actor and annotation carry none**. Annotation is defensible (it carries no proposition of its own); actor and done are arguable. **Activity and focus are real holes** — both commit something, and a commitment's why is reached in dialogue. Fix each inside its own review pass, not blind.
+- **An unexercised path is not evidence against the design.** Where research reports a corpus count of zero for a sanctioned move (e.g. dissolution-by-knowledge on questions: every closed question in this graph was closed by a decision), read it as the absence of capture guidance until now, not as a refutation. Ship the design; the guidance is what makes the path reachable.
+- **Reserved-word check**: grep each draft for "procedure" used in the ordinary sense. Caught once already, in fact's hygiene-plan example.
 
 ## Rulings made in review (beyond the numbered list)
 
