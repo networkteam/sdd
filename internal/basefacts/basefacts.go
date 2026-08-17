@@ -102,6 +102,16 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	}
 	entries = append(entries, insightFact)
 
+	factContent, err := factFactContent()
+	if err != nil {
+		return nil, err
+	}
+	factFact, err := buildContent(FactFactID, factContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, factFact)
+
 	procedureSpecContent, err := procedureSpecFactContent()
 	if err != nil {
 		return nil, err
@@ -125,6 +135,7 @@ var authoringFactIDs = map[model.Kind]string{
 	model.KindGap:       GapFactID,
 	model.KindDirective: DirectiveFactID,
 	model.KindInsight:   InsightFactID,
+	model.KindFact:      FactFactID,
 }
 
 // AuthoringFactID returns the stable ID of the kind's authoring fact, or ""

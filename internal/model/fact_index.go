@@ -10,6 +10,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// The enrollment rules, stated once so the fact kind's authoring fact serves
+// the same words the validator enforces.
+const (
+	FactIndexKindRule  = "index enrollment is only valid on kind: fact"
+	FactIndexTopicRule = "an enrolled fact's index topic must also appear in topics"
+)
+
 type FactIndex struct {
 	Title string
 	Topic TopicPath
@@ -62,12 +69,12 @@ func (i *FactIndex) ValidateForEntry(kind Kind, topics []TopicPath) error {
 		return err
 	}
 	if kind != KindFact {
-		return fmt.Errorf("index is only valid on kind: fact")
+		return fmt.Errorf("%s", FactIndexKindRule)
 	}
 	if slices.ContainsFunc(topics, i.Topic.Equal) {
 		return nil
 	}
-	return fmt.Errorf("index.topic %q must also appear in topics", i.Topic.String())
+	return fmt.Errorf("%s (index.topic %q)", FactIndexTopicRule, i.Topic.String())
 }
 
 func (i *FactIndex) UnmarshalYAML(node *yaml.Node) error {

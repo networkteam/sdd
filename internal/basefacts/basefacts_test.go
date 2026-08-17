@@ -389,7 +389,7 @@ func TestEveryBaseTypeHasADescription(t *testing.T) {
 // facts whose content renders from the running version's declarations refuse
 // supersession, and the marker — not an ID list — is what the write path reads.
 func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
-	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID}
+	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID}
 	for _, id := range closed {
 		if fact := factByID(t, id); fact.Override != model.OverrideClosed {
 			t.Errorf("fact %s: Override = %q, want %q", id, fact.Override, model.OverrideClosed)
@@ -449,6 +449,25 @@ func TestEntriesShipInsightKindFact(t *testing.T) {
 	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "not an attention kind", "the reasoning is the part only this entry holds", "re-derivability", "One synthesis, one entry", "Understanding, never commitment", "Narrowing an earlier reading", "Nothing owed after the reading", "Being acted on is not a retirement", "Choosing insight at all"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("insight fact body missing %q", want)
+		}
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipFactKindFact covers the fact authoring fact, whose mechanics
+// carry the index-enrollment rules alongside the signal declarations — the one
+// kind whose own structure the drafter can extend.
+func TestEntriesShipFactKindFact(t *testing.T) {
+	fact := factByID(t, FactFactID)
+	if fact.Index != nil {
+		t.Errorf("fact fact carries index enrollment %+v, want none — authoring facts are teased from the capture lane", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("fact fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", model.SignalCloseRule, model.FactIndexKindRule, model.FactIndexTopicRule, "The claim carries how it was reached", "Verification is not the price of entry", "Informs, never demands", "Cited and extracted", "Answering a question", "Enrolling in the pull index", "never on the drafter's say-so", "Choosing fact at all"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("fact fact body missing %q", want)
 		}
 	}
 	assertFactSelfContained(t, fact)

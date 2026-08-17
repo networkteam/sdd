@@ -23,6 +23,9 @@ refs:
     - id: 20260816-100000-s-prc-syn
       kind: related
       desc: the insight kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260816-110000-s-prc-kno
+      kind: related
+      desc: the fact kind's authoring fact — the per-kind depth behind this overview
 index:
     title: 'Understanding the type system: how types, kinds, and layers fit together, which entry to draft when kinds compete, and where each kind''s crafting guide lives'
     topic: type-system/kinds
