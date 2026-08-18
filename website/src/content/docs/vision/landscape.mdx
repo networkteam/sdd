@@ -1,0 +1,116 @@
+---
+title: The SDD Landscape
+description: "Where the Signal, Dialogue, Decision idea stands and where it is heading: regions of connected ideas, each opening with why we want it, marked honestly by maturity."
+sidebar:
+  order: 1
+---
+
+import MaturityDefs from "../../../components/vision/MaturityDefs.astro";
+import MaturityLegend from "../../../components/vision/MaturityLegend.astro";
+import LandscapeMap from "../../../components/vision/LandscapeMap.astro";
+import CollaborationView from "../../../components/vision/CollaborationView.astro";
+import WorkLifecycle from "../../../components/vision/WorkLifecycle.astro";
+
+<MaturityDefs />
+
+A map for people joining the conversation: where the Signal, Dialogue, Decision idea stands and where it is heading. The landscape shows SDD as regions of connected ideas. Each region opens with why we want it, then what SDD's answer is, and closes with an honest maturity mark. Nothing here is polished away; the open edges are part of the picture, and nothing that merely has a foundation is rounded up to "done".
+
+<MaturityLegend />
+
+## The map
+
+Six regions around one shared picture of the project. Everything we are working on sits somewhere on this map, including the parts that are still only an idea.
+
+<LandscapeMap />
+
+## The six regions
+
+### 1. A shared context
+
+Ask three people what the project's state is, and why it is that way, and you get three answers. Decisions live in chat threads, meeting minutes, documents, and heads. The reasoning evaporates, gets re-litigated, and every newcomer rebuilds the picture by asking around.
+
+SDD keeps one shared context: a graph of small, linked entries. Things noticed (signals) and things committed to (decisions), each keeping its reasoning, its alternatives, and its links to what it builds on. Nothing is ever edited; direction changes by adding an entry that supersedes an older one, so the current picture is derived, never stale by neglect, and honest about open questions and tensions. Every participant, human or agent, reads from and adds to the same picture. And the picture is made to be read: you can search it by meaning, asking in your own words and finding the entries that matter without knowing where they live, and compose views that collect what belongs together for a purpose. Connected graphs let separate organizations, yours and a client's, each keep their own record while referencing each other's.
+
+This serves one pull: one record instead of scattered copies, with the why preserved.
+
+**Maturity: works today.** The graph, its immutability, derived status, search by meaning, composed views, and cross-organization references are in daily use.
+
+### 2. Thinking in dialogue
+
+Writing things up after the fact is a chore nobody does well; forms capture fields, not thinking. And coming back after a week away costs half a day of reconstructing where things stand.
+
+In SDD, the dialogue is the work. Sometimes it starts from something you noticed: you say it, your agent drafts it grounded in what already stands, plays it back in your words, and you confirm before anything is recorded. Just as often it is sparring: thinking through a concept or a design with your agent asking the questions, until the outcome is clear enough to capture. Either way the results land in the graph, where other people and agents can act on them. The conversation is the filter: it separates what matters from noise, which is why the record stays small and true instead of becoming a pile. When you return, a briefing meets you at the edge of the thinking, telling you what moved and what waits for you instead of a generic status dump. Finished work is evaluated the same way: checked against what was committed, put in front of users, and the findings flow back in as new signals.
+
+The aspiration behind this: decisions emerge from dialogue, and every tool serves the conversation. None replaces it.
+
+**Maturity: works today**, inside coding-agent sessions, which are the current surface (see Surfaces).
+
+### 3. Everyone working together
+
+Keeping a team aligned usually costs meetings, standups, status rounds, sync calls, and still someone starts work that's already in progress elsewhere, or decides past a decision made last week.
+
+SDD treats three kinds of participants as equals: people, people in dialogue with their agent, and agents working autonomously over the graph. Because direction, agreements, and constraints are visible to everyone in the shared context, each participant can decide autonomously in their own domain, confident the decision will fit. An agent contributes to the graph and to the work according to rules and guidelines that live in the graph itself, and what it does varies with the project and its process: watching for tensions, bringing information in, carrying work out. Meetings are elevated rather than replaced. Everyone arrives better prepared because the shared context did the groundwork, the meeting stays what it is for, alignment between people, and afterwards it feeds back into the graph, with humans curating the notes so the captured knowledge stays true to what was said and its subtext.
+
+Two aspirations pull here, deliberately in tension: stay coherent as one project, and let everyone decide autonomously in their own domain.
+
+**Maturity: mixed.** Parallel working sessions, participants and roles as entries, and in-progress markers **work today**. Automatic sharing of each other's movement is **decided and taking shape**. Autonomous agents that watch for contradictions, route questions to whoever holds the knowledge, and tailor briefings to each person are **ideas in dialogue**.
+
+### 4. The world flowing in
+
+Between what a customer actually said and the issue that finally describes the work, most of the meaning is lost to compression. The full input rarely survives into the record, and with it goes the reasoning a later decision would need.
+
+The decided model treats outside channels (email, chat, meeting notes, an issue tracker) as transport. An agent picks each item up and proposes it as a candidate: already connected to related entries, carrying its source and the agent's reasoning. Only dialogue promotes a candidate into the shared context, so nothing lands unseen. After a meeting there is still follow-up, but of a different kind: instead of one protocol document that flattens everything, the notes are sorted into entries that reflect the new shared understanding, and where something stayed unclear, a question or an open gap can honestly say so. And where a team runs an issue tracker as its current system of record, SDD connects to it rather than fighting it: a transitional bridge, because with the right views the graph itself provides that information.
+
+The aspiration: the record grows out of ongoing work. No separate bookkeeping mode, no dedicated capture sessions.
+
+**Maturity: decided and taking shape.** The intake model is committed; the machinery is not yet built. Treating user research and usability findings as input is still an open, unexplored edge.
+
+### 5. Extending the process
+
+Every team works differently, and most tools force their process on you, while the team's actual way of working sits scattered across silos of different tools where information cannot flow and connect.
+
+In SDD the process itself lives in the graph and is changed the same way everything else is: through dialogue, not code. It takes three forms. Procedures are runnable ways of working; the built-in moves ship this way, and a project can add its own or override a shipped one. Rules are learnings that resurface and enforce themselves at the right moments. Facts are reference knowledge, findable when needed and adaptable per project. A further case sits on the exploratory edge: making a project's own business domain explicit, as shared vocabulary whose meaning is settled once and referenced everywhere, by humans and agents alike; a graph ontology is one rough idea for that. SDD already does exactly this for its own working vocabulary, which is the proof the pattern works.
+
+The pull behind this: the way of working belongs to the team, and adapting it is part of the same dialogue as everything else.
+
+**Maturity: mixed.** Facts and the built-in procedures **work today**; project-authored procedures and the rule system are **decided and taking shape**; explicit domain vocabulary is an **idea in dialogue**.
+
+### 6. Surfaces: the ways in
+
+The people whose knowledge shapes a project (owners, domain experts, designers, operators) usually don't live in a terminal. Today, that is still where SDD's main surface is.
+
+The path runs from what exists toward less friction, step by step. Today SDD is used through coding agents in the terminal (e.g. Claude Code, Codex). Underneath, an engine already serves complete working sessions over an open protocol: the technical foundation for other applications to host the same dialogue. Desktop apps like Claude or ChatGPT can already connect to it, a first step out of the terminal, though the setup still takes developer-level work. The honest line: foundation built, the low-friction ways in are not there yet. What will follow is a hosted version, so a non-technical participant joins through chat with no setup at all; its runtime is chosen. Beyond that come voice, and visual views and reports tailored to each role: the surfaces that let questions like "what's open, who's on it, what's next" be answered from the graph instead of a separate tool.
+
+The aspiration: everyone participates directly, through surfaces they already use.
+
+**Maturity: a thread.** Terminal use and the engine foundation **work today**; desktop-app connections work, but only with developer-level setup; the hosted version is **decided and taking shape**; voice and visual role-tailored views are **ideas in dialogue**.
+
+## The collaboration view
+
+People take part through whichever surface suits them. Each has an agent as a thinking partner, and agents also work autonomously over the shared picture, within the rules and guidelines the graph itself carries. Dialogue is what connects all of it: between a person and their agent, between two people, and between the agents and the record.
+
+<CollaborationView />
+
+How does that feel in practice? [Three scenes](/sdd/vision/scenes/) tell it from the inside: a product owner, a project lead, and a designer.
+
+## The work lifecycle
+
+One motion moves the shared picture: talking through what is missing, settling what we want, planning how. That is real work, not overhead; it is what keeps the picture true to the project. The other motion moves the world: building, acting, talking to people. What changes out there comes back as something newly noticed.
+
+<WorkLifecycle />
+
+---
+
+*Draft for dialogue: the landscape itself is not finished and deliberately shows ideas next to shipped work.*
+
+{/*
+Maintainer map — region → backing graph entries (short IDs, resolve with `sdd show`).
+Source plan: d-tac-okx; its attachment vision-landscape-synthesis.md holds the full synthesis and reading lists.
+
+1 A shared context:          d-stg-3k0, s-stg-miu, s-stg-ob9, s-prc-way, s-tac-cr0, d-stg-com
+2 Thinking in dialogue:      d-stg-beb, d-stg-qlt, s-cpt-p6f, d-prc-cap, d-prc-cat, d-prc-evl, d-prc-int, d-prc-dlg
+3 Everyone working together: d-stg-7lu, d-stg-qlt, d-cpt-9of, s-cpt-w80, d-cpt-kvb, d-cpt-r8k, s-cpt-ji9, s-cpt-5jk, s-cpt-dnh, s-cpt-s37
+4 The world flowing in:      d-cpt-fbi, d-stg-2wb, s-cpt-5ox, s-cpt-jnr, s-cpt-yve, d-stg-com, s-stg-erj
+5 Extending the process:     d-cpt-dtv, d-cpt-rh6, d-cpt-30v, d-tac-eho, s-prc-tso, s-prc-way, s-cpt-b44
+6 Surfaces:                  d-stg-x0l, d-stg-6za, d-cpt-8k5, s-cpt-4v3, s-cpt-r57, s-tac-7kh, s-tac-bta
+*/}

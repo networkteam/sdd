@@ -1,0 +1,54 @@
+<div class="legend" aria-label="Maturity legend">
+  <span class="legend-title">How to read the marks</span>
+  <span class="item">
+    <svg class="mk" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><use href="#mk-works"></use></svg>
+    <span><b>Works today</b>: you can use it now</span>
+  </span>
+  <span class="item">
+    <svg class="mk" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><use href="#mk-decided"></use></svg>
+    <span><b>Decided</b>: the shape is settled, it is taking form</span>
+  </span>
+  <span class="item">
+    <svg class="mk" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><use href="#mk-idea"></use></svg>
+    <span><b>An idea in dialogue</b>: still being talked through</span>
+  </span>
+</div>
+
+<style>
+  .legend {
+    margin: 1.5rem 0;
+    padding: 16px 20px;
+    background: #f7f9fa;
+    border: 1px solid #e6eaec;
+    border-radius: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 30px;
+    align-items: center;
+    color: #3e4c59;
+  }
+  .legend-title {
+    font-size: 11.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: #7b8794;
+    margin-right: 4px;
+  }
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  .item b {
+    font-weight: 600;
+    color: #1f2933;
+  }
+  .mk {
+    flex: none;
+    display: inline-block;
+    vertical-align: -1px;
+  }
+</style>
