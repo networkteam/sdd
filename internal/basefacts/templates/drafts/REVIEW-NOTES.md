@@ -1,8 +1,16 @@
 # Kind facts — review state, rulings, and what remains
 
-Thirteen of the fourteen kinds now ship an authoring fact. This file is the handoff record:
-what landed, what was ruled along the way, and what is still owed. The per-kind research
-briefs are under `research/`; the binding form and content rules are in `STYLE-CONTRACT.md`.
+Thirteen of the fourteen kinds ship an authoring fact, plus a discrimination fact holding
+the tests that settle a competing kind. This file is what is left: the rulings still open
+and the reconciliation items nobody has taken yet. It retires once those are resolved or
+captured.
+
+Two things that used to live beside it have moved:
+
+- **The style contract** is now the guiding directive `20260818-194123-d-prc-qge` — standing
+  authoring rules for every base fact, findable in the graph rather than in a working file.
+- **The ten research briefs** moved to `.sdd/tmp/basefacts-research/`, out of the repository.
+  They were the sourced material behind the drafts; the shipped facts carry the claims now.
 
 ## Reviewed and registered — 13 of 14 kinds ship
 
