@@ -32,6 +32,24 @@ refs:
     - id: 20260818-100000-s-prc-spc
       kind: related
       desc: the plan kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260818-110000-s-prc-act
+      kind: related
+      desc: the actor kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260818-110100-s-prc-rol
+      kind: related
+      desc: the role kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260818-110200-s-prc-dsp
+      kind: related
+      desc: the activity kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260818-110300-s-prc-foc
+      kind: related
+      desc: the focus kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260818-110400-s-prc-asp
+      kind: related
+      desc: the aspiration kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260818-110500-s-prc-ann
+      kind: related
+      desc: the annotation kind's authoring fact — the per-kind depth behind this overview
 index:
     title: 'Understanding the type system: how types, kinds, and layers fit together, which entry to draft when kinds compete, and where each kind''s crafting guide lives'
     topic: type-system/kinds

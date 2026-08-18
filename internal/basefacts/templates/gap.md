@@ -33,8 +33,6 @@ A gap records a deviation: the actual state of something in the project set agai
 
 **How a gap resolves.** It stays open until something closes it: normally a decision addressing it — the deeper the layer, the firmer that expectation, since a strategic deviation is never resolved by execution alone — or a completed act directly, when resolving it genuinely required no choice. A gap whose context has moved on is retired by a done saying why it no longer applies — moot is a resolution, silence is not. Sharpening the understanding of a still-open deviation is supersession by a refined gap, not closure. And a gap never closes anything itself: noticing is not resolving.
 
-**Choosing gap at all.** The neighbor tests, each a single question. Remove the expected side: if nothing is left unmet, it is knowledge — a fact ("the delivered timber is grade C16") informs, a gap ("the spec calls for C24 and the delivered stock is C16") demands. Could new knowledge alone resolve it? Then the expected side itself is unknown, and it is a question. Does the entry connect what is already recorded without leaving anything owed? An insight.
-
 **Honesty in the small fields.** Confidence grades the two sides: with both named and detailed, high is the natural grade; low or medium says one side is uncertain and needs further exploration — and the body names which. The layer names the depth of the deviation, not its urgency.
 
 {{ .Mechanics }}

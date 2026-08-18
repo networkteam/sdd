@@ -132,6 +132,66 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	}
 	entries = append(entries, planFact)
 
+	actorContent, err := actorFactContent()
+	if err != nil {
+		return nil, err
+	}
+	actorFact, err := buildContent(ActorFactID, actorContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, actorFact)
+
+	roleContent, err := roleFactContent()
+	if err != nil {
+		return nil, err
+	}
+	roleFact, err := buildContent(RoleFactID, roleContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, roleFact)
+
+	activityContent, err := activityFactContent()
+	if err != nil {
+		return nil, err
+	}
+	activityFact, err := buildContent(ActivityFactID, activityContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, activityFact)
+
+	focusContent, err := focusFactContent()
+	if err != nil {
+		return nil, err
+	}
+	focusFact, err := buildContent(FocusFactID, focusContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, focusFact)
+
+	aspirationContent, err := aspirationFactContent()
+	if err != nil {
+		return nil, err
+	}
+	aspirationFact, err := buildContent(AspirationFactID, aspirationContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, aspirationFact)
+
+	annotationContent, err := annotationFactContent()
+	if err != nil {
+		return nil, err
+	}
+	annotationFact, err := buildContent(AnnotationFactID, annotationContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, annotationFact)
+
 	procedureSpecContent, err := procedureSpecFactContent()
 	if err != nil {
 		return nil, err
@@ -150,14 +210,20 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 // consumers treat absence as "no section", so coverage grows as the sweep
 // ships each kind.
 var authoringFactIDs = map[model.Kind]string{
-	model.KindDone:      DoneFactID,
-	model.KindProcedure: ProcedureFactID,
-	model.KindGap:       GapFactID,
-	model.KindDirective: DirectiveFactID,
-	model.KindInsight:   InsightFactID,
-	model.KindFact:      FactFactID,
-	model.KindQuestion:  QuestionFactID,
-	model.KindPlan:      PlanFactID,
+	model.KindDone:       DoneFactID,
+	model.KindProcedure:  ProcedureFactID,
+	model.KindGap:        GapFactID,
+	model.KindDirective:  DirectiveFactID,
+	model.KindInsight:    InsightFactID,
+	model.KindFact:       FactFactID,
+	model.KindQuestion:   QuestionFactID,
+	model.KindPlan:       PlanFactID,
+	model.KindActor:      ActorFactID,
+	model.KindRole:       RoleFactID,
+	model.KindActivity:   ActivityFactID,
+	model.KindFocus:      FocusFactID,
+	model.KindAspiration: AspirationFactID,
+	model.KindAnnotation: AnnotationFactID,
 }
 
 // AuthoringFactID returns the stable ID of the kind's authoring fact, or ""

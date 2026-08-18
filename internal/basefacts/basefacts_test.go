@@ -389,7 +389,7 @@ func TestEveryBaseTypeHasADescription(t *testing.T) {
 // facts whose content renders from the running version's declarations refuse
 // supersession, and the marker — not an ID list — is what the write path reads.
 func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
-	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID, QuestionFactID, PlanFactID}
+	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID, QuestionFactID, PlanFactID, ActorFactID, RoleFactID, ActivityFactID, FocusFactID, AspirationFactID, AnnotationFactID}
 	for _, id := range closed {
 		if fact := factByID(t, id); fact.Override != model.OverrideClosed {
 			t.Errorf("fact %s: Override = %q, want %q", id, fact.Override, model.OverrideClosed)
@@ -410,7 +410,7 @@ func TestEntriesShipGapKindFact(t *testing.T) {
 	if fact.Summary == "" {
 		t.Error("gap fact has no summary; every reading surface needs one")
 	}
-	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "Both sides, each with its source", "The world input is the substance", "Reasoning enters only under its own name", "Observed, never decided", "Record the act, not the readings", "Frame the level that needs to change", "How a gap resolves", "Choosing gap at all"} {
+	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "Both sides, each with its source", "The world input is the substance", "Reasoning enters only under its own name", "Observed, never decided", "Record the act, not the readings", "Frame the level that needs to change", "How a gap resolves"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("gap fact body missing %q", want)
 		}
@@ -427,7 +427,7 @@ func TestEntriesShipDirectiveKindFact(t *testing.T) {
 	if fact.Summary == "" {
 		t.Error("directive fact has no summary; every reading surface needs one")
 	}
-	for _, want := range []string{"## Mechanics", model.DirectiveIntentRequirement, model.SettledCloseRule, "The choice carries its why", "Intent is chosen, never defaulted", "A guiding directive binds", "Retirement follows the posture", "Refining without replacing", "Choosing directive at all"} {
+	for _, want := range []string{"## Mechanics", model.DirectiveIntentRequirement, model.SettledCloseRule, "The choice carries its why", "Intent is chosen, never defaulted", "A guiding directive binds", "Retirement follows the posture", "Refining without replacing"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("directive fact body missing %q", want)
 		}
@@ -446,7 +446,7 @@ func TestEntriesShipInsightKindFact(t *testing.T) {
 	if fact.Summary == "" {
 		t.Error("insight fact has no summary; every reading surface needs one")
 	}
-	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "not an attention kind", "the reasoning is the part only this entry holds", "re-derivability", "One synthesis, one entry", "Understanding, never commitment", "Narrowing an earlier reading", "Nothing owed after the reading", "Being acted on is not a retirement", "Choosing insight at all"} {
+	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "not an attention kind", "the reasoning is the part only this entry holds", "re-derivability", "One synthesis, one entry", "Understanding, never commitment", "Narrowing an earlier reading", "Nothing owed after the reading", "Being acted on is not a retirement"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("insight fact body missing %q", want)
 		}
@@ -465,7 +465,7 @@ func TestEntriesShipFactKindFact(t *testing.T) {
 	if fact.Summary == "" {
 		t.Error("fact fact has no summary; every reading surface needs one")
 	}
-	for _, want := range []string{"## Mechanics", model.SignalCloseRule, model.FactIndexKindRule, model.FactIndexTopicRule, "The claim carries how it was reached", "Verification is not the price of entry", "Informs, never demands", "Cited and extracted", "Answering a question", "Enrolling in the pull index", "never on the drafter's say-so", "Choosing fact at all"} {
+	for _, want := range []string{"## Mechanics", model.SignalCloseRule, model.FactIndexKindRule, model.FactIndexTopicRule, "The claim carries how it was reached", "Verification is not the price of entry", "Informs, never demands", "Cited and extracted", "Answering a question", "Enrolling in the pull index", "never on the drafter's say-so"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("fact fact body missing %q", want)
 		}
@@ -484,7 +484,7 @@ func TestEntriesShipQuestionKindFact(t *testing.T) {
 	if fact.Summary == "" {
 		t.Error("question fact has no summary; every reading surface needs one")
 	}
-	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "is an attention kind", "# Querying for input", "an unasked question gets answered anyway", "As specific as the demand that raised it", "brought into dialogue", "One demand, with its strands", "How a question resolves", "Choosing question at all"} {
+	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "is an attention kind", "# Querying for input", "an unasked question gets answered anyway", "As specific as the demand that raised it", "brought into dialogue", "One demand, with its strands", "How a question resolves"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("question fact body missing %q", want)
 		}
@@ -503,10 +503,157 @@ func TestEntriesShipPlanKindFact(t *testing.T) {
 	if fact.Summary == "" {
 		t.Error("plan fact has no summary; every reading surface needs one")
 	}
-	for _, want := range []string{"## Mechanics", model.PlanAcceptanceRequirement, "# Specifying an outcome", "An outcome, not a mechanism", "residue of a design dialogue", "The depth of the record varies", "One criterion, one thing to verify", "A proposal until the work proves it", "Refined in place", "Choosing plan at all"} {
+	for _, want := range []string{"## Mechanics", model.PlanAcceptanceRequirement, "# Specifying an outcome", "An outcome, not a mechanism", "residue of a design dialogue", "The depth of the record varies", "One criterion, one thing to verify", "A proposal until the work proves it", "Refined in place"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("plan fact body missing %q", want)
 		}
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipActorKindFact covers the actor authoring fact: unindexed
+// like every authoring fact, carrying no discrimination paragraph (that lives in
+// the discrimination fact), with mechanics rendered from the model declarations.
+func TestEntriesShipActorKindFact(t *testing.T) {
+	fact := factByID(t, ActorFactID)
+	if fact.Index != nil {
+		t.Errorf("actor fact carries index enrollment %+v, want none", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("actor fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", "# Declaring a participant", "The canonical is the name already in use"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("actor fact body missing %q", want)
+		}
+	}
+	if strings.Contains(fact.Content, "Choosing actor at all") {
+		t.Error("actor fact still carries a discrimination paragraph; that material moved to the discrimination fact")
+	}
+	if !strings.Contains(fact.Content, model.ActorCanonicalRequirement) {
+		t.Error("actor fact mechanics do not carry the declared rule the validator enforces")
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipRoleKindFact covers the role authoring fact: unindexed
+// like every authoring fact, carrying no discrimination paragraph (that lives in
+// the discrimination fact), with mechanics rendered from the model declarations.
+func TestEntriesShipRoleKindFact(t *testing.T) {
+	fact := factByID(t, RoleFactID)
+	if fact.Index != nil {
+		t.Errorf("role fact carries index enrollment %+v, want none", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("role fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", "# Granting a part", "The part is granted in dialogue"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("role fact body missing %q", want)
+		}
+	}
+	if strings.Contains(fact.Content, "Choosing role at all") {
+		t.Error("role fact still carries a discrimination paragraph; that material moved to the discrimination fact")
+	}
+	if !strings.Contains(fact.Content, model.RoleActorRequirement) {
+		t.Error("role fact mechanics do not carry the declared rule the validator enforces")
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipActivityKindFact covers the activity authoring fact: unindexed
+// like every authoring fact, carrying no discrimination paragraph (that lives in
+// the discrimination fact), with mechanics rendered from the model declarations.
+func TestEntriesShipActivityKindFact(t *testing.T) {
+	fact := factByID(t, ActivityFactID)
+	if fact.Index != nil {
+		t.Errorf("activity fact carries index enrollment %+v, want none", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("activity fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", "# Dispatching a piece of work", "The choosing happened before the entry"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("activity fact body missing %q", want)
+		}
+	}
+	if strings.Contains(fact.Content, "Choosing activity at all") {
+		t.Error("activity fact still carries a discrimination paragraph; that material moved to the discrimination fact")
+	}
+	if !strings.Contains(fact.Content, model.SignalCloseRule) {
+		t.Error("activity fact mechanics do not carry the declared rule the validator enforces")
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipFocusKindFact covers the focus authoring fact: unindexed
+// like every authoring fact, carrying no discrimination paragraph (that lives in
+// the discrimination fact), with mechanics rendered from the model declarations.
+func TestEntriesShipFocusKindFact(t *testing.T) {
+	fact := factByID(t, FocusFactID)
+	if fact.Index != nil {
+		t.Errorf("focus fact carries index enrollment %+v, want none", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("focus fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", "# Declaring current attention", "A focus points at work"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("focus fact body missing %q", want)
+		}
+	}
+	if strings.Contains(fact.Content, "Choosing focus at all") {
+		t.Error("focus fact still carries a discrimination paragraph; that material moved to the discrimination fact")
+	}
+	if !strings.Contains(fact.Content, model.FocusInvolvementRule) {
+		t.Error("focus fact mechanics do not carry the declared rule the validator enforces")
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipAspirationKindFact covers the aspiration authoring fact: unindexed
+// like every authoring fact, carrying no discrimination paragraph (that lives in
+// the discrimination fact), with mechanics rendered from the model declarations.
+func TestEntriesShipAspirationKindFact(t *testing.T) {
+	fact := factByID(t, AspirationFactID)
+	if fact.Index != nil {
+		t.Errorf("aspiration fact carries index enrollment %+v, want none", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("aspiration fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", "# Orienting the work", "A pull that binds nothing"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("aspiration fact body missing %q", want)
+		}
+	}
+	if strings.Contains(fact.Content, "Choosing aspiration at all") {
+		t.Error("aspiration fact still carries a discrimination paragraph; that material moved to the discrimination fact")
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipAnnotationKindFact covers the annotation authoring fact: unindexed
+// like every authoring fact, carrying no discrimination paragraph (that lives in
+// the discrimination fact), with mechanics rendered from the model declarations.
+func TestEntriesShipAnnotationKindFact(t *testing.T) {
+	fact := factByID(t, AnnotationFactID)
+	if fact.Index != nil {
+		t.Errorf("annotation fact carries index enrollment %+v, want none", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("annotation fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", "# Making a thread findable", "Membership is the whole effect"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("annotation fact body missing %q", want)
+		}
+	}
+	if strings.Contains(fact.Content, "Choosing annotation at all") {
+		t.Error("annotation fact still carries a discrimination paragraph; that material moved to the discrimination fact")
+	}
+	if !strings.Contains(fact.Content, model.AnnotationRefsRequirement) {
+		t.Error("annotation fact mechanics do not carry the declared rule the validator enforces")
 	}
 	assertFactSelfContained(t, fact)
 }

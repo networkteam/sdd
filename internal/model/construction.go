@@ -145,6 +145,24 @@ const (
 	PlanChecklistItem     = "- [ ]"
 )
 
+// The per-kind structural requirements, each stated once so the validator
+// message and the kind's authoring fact cannot drift apart.
+const (
+	ActorCanonicalRequirement  = "an actor signal requires a canonical field naming the participant"
+	RoleActorRequirement       = "a role decision requires an actor field naming the participant it binds"
+	AnnotationRefsRequirement  = "an annotation signal must carry at least one ref — the entries it is about"
+	AnnotationTopicRequirement = "an annotation signal must declare at least one topic, and any members it names must be a subset of its refs"
+	FocusInvolvementRule       = "a focus decision requires at least one involvement whose target resolves in the graph"
+	AliasHygieneRule           = "each alias is non-empty, distinct from the canonical, and listed once"
+)
+
+// processPinnedKinds are the kinds whose entries always live at the process
+// layer, because they describe how the project works rather than the work.
+var processPinnedKinds = []Kind{KindActor, KindRole, KindProcedure}
+
+// ProcessPinnedKinds returns the kinds pinned to the process layer.
+func ProcessPinnedKinds() []Kind { return append([]Kind(nil), processPinnedKinds...) }
+
 // PlanAcceptanceRequirement states the rule the validator enforces, so the
 // plan kind's authoring fact serves the same words.
 var PlanAcceptanceRequirement = fmt.Sprintf("a plan decision requires a %q section with at least one %q checklist item", PlanAcceptanceHeading, PlanChecklistItem)
@@ -350,7 +368,7 @@ func (c *EntryConstruction) Validate(g *Graph) []Finding {
 
 	if c.isKind(TypeSignal, KindActor) {
 		if c.Actor == nil || strings.TrimSpace(c.Actor.Canonical) == "" {
-			add("canonical", "", "actor signal missing required canonical field")
+			add("canonical", "", ActorCanonicalRequirement)
 		}
 		if c.Layer != LayerProcess {
 			add("layer", string(c.Layer), fmt.Sprintf("actor signal should live at process layer (got %s)", c.Layer))
@@ -373,7 +391,7 @@ func (c *EntryConstruction) Validate(g *Graph) []Finding {
 
 	if c.isKind(TypeDecision, KindRole) {
 		if c.Role == nil || strings.TrimSpace(c.Role.Actor) == "" {
-			add("actor", "", "role decision missing required actor field")
+			add("actor", "", RoleActorRequirement)
 		}
 		if c.Layer != LayerProcess {
 			add("layer", string(c.Layer), fmt.Sprintf("role decision should live at process layer (got %s)", c.Layer))
@@ -498,14 +516,14 @@ func (c *EntryConstruction) validateAnnotation() []Finding {
 		findings = append(findings, Finding{Field: field, Value: value, Message: message})
 	}
 	if len(c.Refs) == 0 {
-		add("refs", "", "annotation signal must carry at least one ref (the entries the annotation is about)")
+		add("refs", "", AnnotationRefsRequirement)
 	}
 	var topics []AnnotationTopic
 	if c.Annotation != nil {
 		topics = c.Annotation.Topics
 	}
 	if len(topics) == 0 {
-		add("topics", "", "annotation signal must declare at least one topic")
+		add("topics", "", AnnotationTopicRequirement)
 		return findings
 	}
 	refSet := make(map[string]bool, len(c.Refs))
