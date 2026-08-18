@@ -175,6 +175,27 @@ func TestCaptureStartPreselectedKindNamesAuthoringFact(t *testing.T) {
 	}
 }
 
+func TestCaptureKindSelectedMidAssembleGetsAuthoringFactPointer(t *testing.T) {
+	application, identity := newDraftingKnowledgeApp(t, t.TempDir())
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "dk-midkind"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serve := startCapture(t, workflow, identity, nil)
+	if strings.Contains(serve.Instructions, basefacts.DirectiveFactID) {
+		t.Fatalf("an unselected start must not name a kind's authoring fact yet")
+	}
+
+	held := advanceWorkflow(t, workflow, identity, serve.Instance, map[string]any{"entryKind": "directive"})
+	if held.Step != "assemble" {
+		t.Fatalf("an incomplete report should re-serve assemble, got %q", held.Step)
+	}
+	if !strings.Contains(held.Instructions, basefacts.DirectiveFactID) {
+		t.Fatalf("reporting the kind mid-assemble must surface its authoring-fact pointer on the re-serve")
+	}
+}
+
 func TestCaptureStartKindWithoutAuthoringFactGetsNoPointer(t *testing.T) {
 	application, identity := newDraftingKnowledgeApp(t, t.TempDir())
 	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "dk-contract"})

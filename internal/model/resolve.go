@@ -57,6 +57,22 @@ type InboundRef struct {
 	Hops   int
 }
 
+// FactBody resolves a fact reference to its live head — so a project override
+// that supersedes a base fact wins — and returns the head ID with the head's
+// body. A missing or empty fact fails loud: a silently absent reference
+// section would be exactly the wrong degradation.
+func (g *Graph) FactBody(id string) (string, string, error) {
+	head := g.ResolveRef(id).Head()
+	e, ok := g.ByID[head]
+	if !ok {
+		return "", "", fmt.Errorf("reference fact %s does not resolve in the graph", id)
+	}
+	if strings.TrimSpace(e.Content) == "" {
+		return "", "", fmt.Errorf("reference fact %s has an empty body", head)
+	}
+	return head, e.Content, nil
+}
+
 // Path returns the ordered supersession trail from origin to head (origin
 // first, head last). Rendering-only — reasoning consumers want Head(). The
 // returned slice is a copy; mutating it does not affect the resolution.
@@ -78,22 +94,6 @@ func (r ResolvedRef) Path() []string {
 // cycles, so it always terminates. Distinct from ResolveRefIDs, which resolves
 // short-form ID strings to full form — this resolves a full ID forward through
 // supersession.
-// FactBody resolves a fact reference to its live head — so a project override
-// that supersedes a base fact wins — and returns the head ID with the head's
-// body. A missing or empty fact fails loud: a silently absent reference
-// section would be exactly the wrong degradation.
-func (g *Graph) FactBody(id string) (string, string, error) {
-	head := g.ResolveRef(id).Head()
-	e, ok := g.ByID[head]
-	if !ok {
-		return "", "", fmt.Errorf("reference fact %s does not resolve in the graph", id)
-	}
-	if strings.TrimSpace(e.Content) == "" {
-		return "", "", fmt.Errorf("reference fact %s has an empty body", head)
-	}
-	return head, e.Content, nil
-}
-
 func (g *Graph) ResolveRef(id string) ResolvedRef {
 	path := []string{id}
 	seen := map[string]bool{id: true}
