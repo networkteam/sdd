@@ -230,8 +230,10 @@ func TestOverviewBodyIsSelfContained(t *testing.T) {
 			t.Errorf("overview body missing %q", want)
 		}
 	}
-	if loc := entryIDPattern.FindString(body); loc != "" {
-		t.Errorf("overview body cites entry %q; pointers to authoring facts live in refs, not prose", loc)
+	for _, id := range entryIDPattern.FindAllString(body, -1) {
+		if !baseFactIDs(t)[id] {
+			t.Errorf("overview body cites project entry %q; a base fact's prose may only cite other base facts", id)
+		}
 	}
 	for _, host := range []string{"sdd ", "MCP", "CLI"} {
 		if strings.Contains(body, host) {
@@ -341,13 +343,20 @@ func TestEveryProcedureClassHasADescription(t *testing.T) {
 }
 
 // baseFactIDs is the sanctioned exception to the no-IDs-in-prose rule: a base
-// fact's ID resolves in every graph the binary serves, so a base fact may
-// point at another one by ID without stranding any reader.
-func baseFactIDs() map[string]bool {
-	return map[string]bool{
-		ViewGrammarFactID: true, PrinciplesFactID: true, DoneFactID: true,
-		OverviewFactID: true, ProcedureFactID: true, ProcedureSpecFactID: true,
+// fact's ID resolves in every graph the binary serves, so one base fact may
+// point at another by ID without stranding any reader. Derived from the shipped
+// set rather than listed, so it cannot go stale as facts are added.
+func baseFactIDs(t *testing.T) map[string]bool {
+	t.Helper()
+	entries, err := Entries(testVocabulary())
+	if err != nil {
+		t.Fatalf("Entries: %v", err)
 	}
+	ids := make(map[string]bool, len(entries))
+	for _, fact := range entries {
+		ids[fact.ID] = true
+	}
+	return ids
 }
 
 // TestProcedureFactBodyIsSelfContained holds the procedure fact to the
@@ -363,7 +372,7 @@ func TestProcedureFactBodyIsSelfContained(t *testing.T) {
 		}
 	}
 	for _, id := range entryIDPattern.FindAllString(body, -1) {
-		if !baseFactIDs()[id] {
+		if !baseFactIDs(t)[id] {
 			t.Errorf("procedure fact cites project entry %q; a base fact's prose may only cite other base facts", id)
 		}
 	}
@@ -389,7 +398,7 @@ func TestEveryBaseTypeHasADescription(t *testing.T) {
 // facts whose content renders from the running version's declarations refuse
 // supersession, and the marker — not an ID list — is what the write path reads.
 func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
-	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID, QuestionFactID, PlanFactID, ActorFactID, RoleFactID, ActivityFactID, FocusFactID, AspirationFactID, AnnotationFactID}
+	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID, QuestionFactID, PlanFactID, ActorFactID, RoleFactID, ActivityFactID, FocusFactID, AspirationFactID, AnnotationFactID, DiscriminationFactID}
 	for _, id := range closed {
 		if fact := factByID(t, id); fact.Override != model.OverrideClosed {
 			t.Errorf("fact %s: Override = %q, want %q", id, fact.Override, model.OverrideClosed)
@@ -656,6 +665,50 @@ func TestEntriesShipAnnotationKindFact(t *testing.T) {
 		t.Error("annotation fact mechanics do not carry the declared rule the validator enforces")
 	}
 	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipDiscriminationFact covers the kind-discrimination fact: the
+// one home for the tests that settle a competing kind, unindexed and reached
+// from the type-system introduction, with the closed kind set rendered from the
+// model enumeration so the prose cannot drift from the kinds that exist.
+func TestEntriesShipDiscriminationFact(t *testing.T) {
+	fact := factByID(t, DiscriminationFactID)
+	if fact.Index != nil {
+		t.Errorf("discrimination fact carries index enrollment %+v, want none — it is reached from the introduction", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("discrimination fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{
+		"## Mechanics", "# Telling the kinds apart",
+		"## Something was noticed", "## Something is being committed",
+		"## A person is entering the record", "## Structure is being laid over entries",
+		"how does the commitment end?",
+		"the absence of a completion criterion cannot pick between them",
+		"lossy in one direction",
+		"read the shape of the work, not of its outputs",
+		"strip the references away",
+	} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("discrimination fact missing %q", want)
+		}
+	}
+	for _, kind := range append(model.SignalKindValues(), model.DecisionKindValues()...) {
+		if !strings.Contains(fact.Content, string(kind)) {
+			t.Errorf("discrimination fact never mentions kind %q", kind)
+		}
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestOverviewPointsAtDiscrimination pins the one pointer that makes the
+// discrimination fact reachable: the introduction is read before a kind is
+// chosen, so it must name where the remaining tests live.
+func TestOverviewPointsAtDiscrimination(t *testing.T) {
+	body := factByID(t, OverviewFactID).Content
+	if !strings.Contains(body, DiscriminationFactID) {
+		t.Error("overview does not point at the discrimination fact; the remaining tests would be unreachable")
+	}
 }
 
 // assertFactSelfContained holds a fact body to the framework-generic

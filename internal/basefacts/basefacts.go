@@ -192,6 +192,16 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	}
 	entries = append(entries, annotationFact)
 
+	discriminationContent, err := discriminationFactContent()
+	if err != nil {
+		return nil, err
+	}
+	discriminationFact, err := buildContent(DiscriminationFactID, discriminationContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, discriminationFact)
+
 	procedureSpecContent, err := procedureSpecFactContent()
 	if err != nil {
 		return nil, err

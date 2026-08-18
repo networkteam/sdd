@@ -50,6 +50,9 @@ refs:
     - id: 20260818-110500-s-prc-ann
       kind: related
       desc: the annotation kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260818-120000-s-prc-dsc
+      kind: related
+      desc: the discrimination fact — every test that settles which kind to draft when two compete
 index:
     title: 'Understanding the type system: how types, kinds, and layers fit together, which entry to draft when kinds compete, and where each kind''s crafting guide lives'
     topic: type-system/kinds
@@ -94,4 +97,4 @@ Every entry also names its **layer**, the depth of the thinking:
 - operational — individual steps
 - process — how we work
 
-This is the map, not the depth: each kind has its own authoring fact carrying its meaning, make-up, and craft — pull it before drafting that kind.
+This is the map, not the depth. Each kind has its own authoring fact carrying its meaning, make-up, and craft — pull it before drafting that kind. And when two kinds compete and the tests above do not settle it, the discrimination fact `20260818-120000-s-prc-dsc` carries every remaining test, sorted by the situation you are in.
