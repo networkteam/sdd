@@ -1,27 +1,37 @@
 # Style contract for SDD kind authoring facts
 
-Calibrated on the shipped done, gap, directive, and procedure facts and two full review rounds with Christopher. Binding for every new kind fact draft.
+Calibrated on the shipped done, gap, directive, procedure, insight, fact and question facts and the full review rounds behind them. Binding for every new kind fact draft.
 
 ## Form (match the exemplars exactly)
 
 - Frontmatter: `type: signal`, `layer: process`, `kind: fact`, `override: closed`, `confidence: high`, topics `engine/base-facts` + `type-system/kinds`, a `summary: >-` block. No `index` block (authoring facts are unindexed — reached from lanes, not the pull index).
-- H1: `# <Verb-phrase> — the <kind> kind` — an active phrase for what the kind does ("Recording a deviation", "Deciding how to go forward", "Recording completed work"). Not a noun label.
+- H1: `# <Verb-phrase> — the <kind> kind` — an active phrase for **what the kind is for**, not what it looks like, and specifically for **what distinguishes this kind from its siblings** rather than what it shares with its type. Two retitles in review show both traps: question went from "Marking an unknown" to "Querying for input" because marking describes the artifact while querying names the purpose; plan went from "Committing to an outcome" to "Specifying an outcome" because every decision kind commits — a plan is the specification vehicle, while the directive is what commits to a direction, so the first title named the shared half and blurred the very line the document then spends a paragraph drawing. Get this right first: the reframing drives the whole document.
 - Opening paragraph: what the kind records in one plain sentence; that it is a signal (noticed) or decision (committed); the two or three questions its reader arrives with; "a good X is the shortest record that answers them" only if it genuinely fits.
-- Body: bold-lead paragraphs, each carrying exactly ONE claim with the reasoning a drafter can argue from — never a field checklist. 6–9 paragraphs total.
-- A "Choosing X at all" paragraph near the end: ONLY the neighbor tests the overview does NOT run, each a single question, with the real contenders only (don't list non-contenders). Point at "the type-system introduction" for tests the overview owns.
+- Body: bold-lead paragraphs, each carrying exactly ONE claim with the reasoning a drafter can argue from — never a field checklist. **Terser is better.** Write the claims the kind has and stop; two paragraphs circling one theme is the failure to watch for, and it is what sank the first question draft.
+- A "Choosing X at all" paragraph near the end, opening with the exact words **"The neighbor tests, each a single question."** Real contenders only — don't list non-contenders, and don't announce which tests the introduction owns. Where a test genuinely lives elsewhere, point: "the deciding test — force, not completion — lives in the type-system introduction".
 - Final line before mechanics: `{{ .Mechanics }}` placeholder verbatim (the Go layer renders enforced rules there — do not write mechanics prose yourself).
 
 ## Content rules
 
 - **Consolidate, never invent.** Every claim traces to a source in the research brief. A claim you want but can't source goes into a separate "proposed additions" list for user ruling — never blended into the draft.
+- **Dialogue is the framework's central mechanism, and every decision kind must say where its why comes from.** The question draft failed review partly for never mentioning dialogue once. Each kind gets its own angle, never a fourth telling of someone else's: directive — decisions are born in dialogue and the reasoning stays retrievable; insight — the dialogue is kept nowhere else, so the entry is that reasoning's durable representation; question — the answer is reached in dialogue, so the entry seeds a dialogue not yet held. Read those before writing yours.
+- **Re-derivability is the standard, instantiated per kind.** A later session must be able to reach the entry's claims again from its writing, attachments and references. What is irreplaceable differs: a gap owes the world input, an insight owes the reasoning (its ground can be re-read; the thinking cannot), a fact owes its provenance — the source it rests on, or the method it was worked out by.
+- **Capture-threshold reasoning is in scope.** Why an observation earns an entry at all is craft, not motivational prose — insight's "captured because it changes something" and question's "an unasked question gets answered anyway" both survived review on that ground.
+- **No summary or topic craft.** How the entry's summary reads and how topic labels are chosen belong to the capture procedure. Never justify anything by what an overview surface displays — generated summaries lead those surfaces, not entry bodies. **Per-kind conventions do belong**: what a kind's topics carry when the kind already carries the subject elsewhere (done, role, focus, annotation), and what confidence means for this kind — but only where the source is more than a single specimen's gloss.
+- **Layer names where the thinking landed**, not where its inputs sit: a reading drawn from several operational deviations can itself be strategic.
 - **No implementation details.** Serving mechanics, session-shell behavior, always-on lanes, CLI conveniences stay out. The kind default is ruled CLI-surface legacy (20260816-170529-d-cpt-1dk) — never present a default as semantics; never write "resist the default".
 - **No absolutes unless truly total.** "always", "never completes", "the one thing" — each survived review only when literally total. Prefer "most often", "a category error", precise scoping.
-- **World input over elaboration** (signal kinds): what the entry carries in from the world with its provenance is the substance; derivable statements can be re-reasoned later (20260816-165718-s-cpt-sne).
-- **The why over the what** (decision kinds): dialogue material — arguments raised, alternatives weighed and set aside — must be retrievable from the entry; attachments carry bulk, the body summarizes.
+- **Retirement is kind-open and rationale-bound.** Any entry may retire another by saying why it stopped holding; being acted on is not a retirement. Supersede points at what changed the picture and says why the reasoning moved; closing is for what goes entirely. Don't teach a single closing kind as the path.
+- **A zero corpus count is not a refutation.** Where the research reports no live instances of a sanctioned move, that reflects the absence of capture guidance until now. Teach the design.
 - **Audience test:** ships to projects doing no software work. Non-software instantiations (roastery, timber construction, child care) are woven in as short quoted examples where a discriminator needs grounding. No Go names, no repo paths, no entry IDs, no host tools ("sdd", "CLI", "MCP" are all test-enforced forbidden strings), no `{{` except the Mechanics placeholder.
+- **Reserved words.** "procedure" is an entry kind — never use it in the ordinary sense; write "method", "steps", or "move". Grep the finished draft for it.
 - **One voice:** if a phrase also lives in the overview gloss or a code doc comment, the wording must not contradict them; flag any needed alignment of those surfaces instead of diverging.
-- **Point, don't restate:** anything the overview owns (kind questions, kind lists, immutability, the retirement split, layer glosses, cross-kind tests it runs) is referenced as "the type-system introduction", never re-taught.
+- **Point, don't restate:** anything the type-system introduction owns (kind questions, kind lists, immutability, the retirement split, layer glosses, cross-kind tests it runs) is referenced as "the type-system introduction", never re-taught.
 
-## Length calibration
+## Length
 
-gap.md and directive.md are the size target (~900–1100 words of body before mechanics). done.md is the upper bound.
+There is no target length, and nothing here should be written to reach one. Say what the kind demands, as tersely as it can be said, and stop — a fact that reads shorter than its siblings is doing better, not less. The one thing terseness must not cost is the reasoning a drafter would argue from: cut restatement, elaboration, a second example doing the first one's work, and anything the type-system introduction already owns — never a claim.
+
+## Process that works
+
+Settle semantics in dialogue with the user first, then compress, then register. Compression by a fresh subagent given the draft plus this contract, the type-system introduction and the shipped siblings, told to analyze what each paragraph serves before cutting and to flag judgment calls rather than make them. Where a draft is structurally wrong rather than merely long, rewrite from the research brief instead of editing.
