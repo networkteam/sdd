@@ -1,5 +1,10 @@
 package model
 
+import (
+	"fmt"
+	"strings"
+)
+
 // ResolvedRef is the resolution of a target ID to its live head by walking
 // supersession transitively. The path runs origin-first to head-last; a target
 // that nothing supersedes resolves to a single-element path whose head is the
@@ -73,6 +78,22 @@ func (r ResolvedRef) Path() []string {
 // cycles, so it always terminates. Distinct from ResolveRefIDs, which resolves
 // short-form ID strings to full form — this resolves a full ID forward through
 // supersession.
+// FactBody resolves a fact reference to its live head — so a project override
+// that supersedes a base fact wins — and returns the head ID with the head's
+// body. A missing or empty fact fails loud: a silently absent reference
+// section would be exactly the wrong degradation.
+func (g *Graph) FactBody(id string) (string, string, error) {
+	head := g.ResolveRef(id).Head()
+	e, ok := g.ByID[head]
+	if !ok {
+		return "", "", fmt.Errorf("reference fact %s does not resolve in the graph", id)
+	}
+	if strings.TrimSpace(e.Content) == "" {
+		return "", "", fmt.Errorf("reference fact %s has an empty body", head)
+	}
+	return head, e.Content, nil
+}
+
 func (g *Graph) ResolveRef(id string) ResolvedRef {
 	path := []string{id}
 	seen := map[string]bool{id: true}

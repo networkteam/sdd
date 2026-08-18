@@ -3,7 +3,6 @@ package finders
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/llm"
@@ -45,22 +44,13 @@ func (f *Finder) WritingGuide(ctx context.Context, graph *model.Graph, q query.W
 	return &query.WritingGuideResult{Findings: findings}, nil
 }
 
-// graphFactSource resolves fact bodies from the loaded graph for prompt
-// inlining, following the supersession chain so a project override of a base
-// fact wins. A missing or empty fact fails loud — a silently absent reference
-// section would be exactly the wrong degradation.
+// graphFactSource adapts model.Graph.FactBody to the prompt-inlining
+// interface, which wants the body alone.
 type graphFactSource struct {
 	graph *model.Graph
 }
 
 func (s graphFactSource) FactBody(id string) (string, error) {
-	head := s.graph.ResolveRef(id).Head()
-	e, ok := s.graph.ByID[head]
-	if !ok {
-		return "", fmt.Errorf("reference fact %s does not resolve in the graph", id)
-	}
-	if strings.TrimSpace(e.Content) == "" {
-		return "", fmt.Errorf("reference fact %s has an empty body", head)
-	}
-	return e.Content, nil
+	_, body, err := s.graph.FactBody(id)
+	return body, err
 }

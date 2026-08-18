@@ -31,6 +31,17 @@ func captureEntry(t *testing.T) *model.Entry {
 	return nil
 }
 
+// registerFakeDraftingKnowledge stubs the capture assemble inject with a
+// static overview serve, mirroring the real query's template-context shape.
+func registerFakeDraftingKnowledge(reg *Registry) {
+	mustRegisterQuery(reg, Query{
+		Doc: FuncDoc{Name: "draftingKnowledge", Doc: "fake type-system drafting knowledge", Reads: []string{"entryKind", "kind"}},
+		Fn: func(_ *Context, _ map[string]any) (any, error) {
+			return map[string]any{"OverviewID": "20260812-180000-s-prc-typ", "OverviewBody": "overview body (fake)"}, nil
+		},
+	})
+}
+
 const fixtureRefID = "20260601-120000-d-tac-ref"
 
 // fixtureRef2ID resolves in the fixture graph but is never logged as read —
@@ -121,6 +132,7 @@ func newFixtureEnv(t *testing.T) *fixtureEnv {
 			return fmt.Sprintf("summary of %v", id), nil
 		},
 	})
+	registerFakeDraftingKnowledge(reg)
 	mustRegisterCommand(reg, Command{
 		Doc: FuncDoc{Name: "newEntry", Doc: "fake write gate", Writes: []string{"entryId", "findings"}},
 		Fn: func(ctx *Context) error {

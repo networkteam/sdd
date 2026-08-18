@@ -347,6 +347,7 @@ func newBootstrapCaptureEnv(t *testing.T) *bootstrapCaptureEnv {
 			return "", nil
 		},
 	})
+	registerFakeDraftingKnowledge(reg)
 	mustRegisterCommand(reg, Command{
 		Doc:          FuncDoc{Name: "newEntry", Doc: "graph-appending fake write gate", Writes: []string{"entryId", "findings"}},
 		MutatesGraph: true,
