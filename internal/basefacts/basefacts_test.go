@@ -389,7 +389,7 @@ func TestEveryBaseTypeHasADescription(t *testing.T) {
 // facts whose content renders from the running version's declarations refuse
 // supersession, and the marker — not an ID list — is what the write path reads.
 func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
-	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID, QuestionFactID}
+	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID, QuestionFactID, PlanFactID}
 	for _, id := range closed {
 		if fact := factByID(t, id); fact.Override != model.OverrideClosed {
 			t.Errorf("fact %s: Override = %q, want %q", id, fact.Override, model.OverrideClosed)
@@ -487,6 +487,25 @@ func TestEntriesShipQuestionKindFact(t *testing.T) {
 	for _, want := range []string{"## Mechanics", model.SignalCloseRule, "is an attention kind", "# Querying for input", "an unasked question gets answered anyway", "As specific as the demand that raised it", "brought into dialogue", "One demand, with its strands", "How a question resolves", "Choosing question at all"} {
 		if !strings.Contains(fact.Content, want) {
 			t.Errorf("question fact body missing %q", want)
+		}
+	}
+	assertFactSelfContained(t, fact)
+}
+
+// TestEntriesShipPlanKindFact covers the plan authoring fact — the first
+// decision kind shipped with a structural requirement of its own, so the
+// mechanics render the acceptance-criteria rule the validator enforces.
+func TestEntriesShipPlanKindFact(t *testing.T) {
+	fact := factByID(t, PlanFactID)
+	if fact.Index != nil {
+		t.Errorf("plan fact carries index enrollment %+v, want none — authoring facts are teased from the capture lane", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("plan fact has no summary; every reading surface needs one")
+	}
+	for _, want := range []string{"## Mechanics", model.PlanAcceptanceRequirement, "# Specifying an outcome", "An outcome, not a mechanism", "residue of a design dialogue", "The depth of the record varies", "One criterion, one thing to verify", "A proposal until the work proves it", "Refined in place", "Choosing plan at all"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("plan fact body missing %q", want)
 		}
 	}
 	assertFactSelfContained(t, fact)

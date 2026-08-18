@@ -1,0 +1,39 @@
+---
+type: signal
+layer: process
+kind: fact
+override: closed
+confidence: high
+topics:
+    - engine/base-facts
+    - type-system/kinds
+summary: >-
+    The plan kind records a decision on what must be true when a piece of
+    work is done — an outcome rather than a mechanism, stated first and
+    enumerated as verifiable acceptance criteria out of the design dialogue
+    that shaped them — advanced by partial deliveries, refined in place by
+    augmenting directives, and closed by the act that covers the whole
+    commitment or retired with the reasoning why it will not be built.
+---
+
+# Specifying an outcome — the plan kind
+
+A plan records a decision on what must be true when a piece of work is done: an end-state, enumerated as acceptance criteria a closing act can be checked against. It is a decision — something committed to, not something noticed: it does not report that the world changed, it defines what change will count. Not every piece of work is owed one: work that needs decomposition — several requirements, design choices to hold together — earns a plan; work specific enough to dispatch as it stands does not, and a plan is never a tax paid before every act. Its reader arrives asking three things — what will be true when this work is finished, how completion will be recognized, and what was deliberately left out — and a good plan is the shortest record that answers all three.
+
+**An outcome, not a mechanism.** The plan's substance is what is true about the world when the work is finished — not the deliverables that will exist, the order they land in, or the structure they take. Criteria that only name deliverables pass every mechanical check and still miss the target: "are we done?" quietly resolves to "do the pieces exist?", and the pieces can all exist without the result they were for. "The information pack is printed and handed to every family" names a mechanism; "every parent can say who to call when their child falls ill" names the outcome the pack exists to produce. When the outcome cannot be stated without listing the artifacts, that is the sign the outcome itself is not yet understood.
+
+**Acceptance criteria are the residue of a design dialogue, not its replacement.** A plan's why is made in the dialogue that shapes it: the dimensions of the outcome are surfaced there — the trade-offs, the alternatives weighed and set aside — and the criteria are what remains once that conversation settles. Enumerating them first bakes unexamined choices into the definition of done, and a plan's choices harden: an ungrounded proposition, once captured, becomes structure later work builds on — so what the plan commits to traces to the record, the decisions it reasons from and the signals it acts on. And the deviation or question the dialogue set out from may be closed by the plan at the moment of capture — a closure that claims genuine resolution, not acquaintance.
+
+**The depth of the record varies; the shape of the criteria does not.** How much specification a plan carries is settled per plan rather than fixed by the kind: what the work needs weighs on it, a standing guideline may demand a floor, and where neither settles it the participants choose in the dialogue — criteria alone where the route is genuinely open; a fuller record beside them — drawings, layouts, the shape of the data, how the parts meet, whatever this domain specifies with — where the outcome cannot be judged without it. When the dialogue produced trade-offs and rejected alternatives worth keeping, an attachment carries that design record while the body keeps to the plan itself.
+
+**State the end, then enumerate it.** The body opens by stating the end-state in plain words, whole enough to be read on its own — "plan for the new blend" tells a reader nothing. The criteria break that stated end into its checkable pieces: each a fragment of the same picture, so that reading the list reassembles the opening statement rather than introducing commitments it never made. Delivery order, slicing, and staging are routes to the outcome, not parts of it — they stay in the body, guiding the work without being mistaken for what done means — and scope carve-outs are stated explicitly: a line naming what the plan deliberately does not commit to, so a later reader can tell a boundary that was drawn from a hole that was missed.
+
+**One criterion, one thing to verify.** Each item carries a single claim that can be confirmed or denied on its own, and that is usually one aspect of the outcome rather than the whole of it — "every loaf leaves the counter with its allergen list attached" verifies one facet of customers being able to tell what is in what they buy. What breaks an item is welding two results into one, or stating a quality so vague no act could demonstrably meet it. Verifiable means evidence can be given for it, and the done signals that advance and close the plan are what carry that evidence — one done for the whole commitment, or several across partial deliveries — so the test while drafting is what evidence would show this criterion met, and whether a done could carry it. A criterion nobody could produce evidence for fails its purpose at the moment of writing, and where the evidence is not obvious, the body says what completion is checked by.
+
+**A proposal until the work proves it.** An open plan is a commitment to an outcome, not evidence the outcome holds — only the completed work turns proposal into established truth. It closes when a done signal covers the whole commitment: every criterion confirmed with its evidence, or its deviation named with the reasoning — a criterion may be deliberately carved out at close with its why stated; silent omission is the failure. Partial delivery advances a plan without closing it: the partial done points at the plan, says which criteria it covers and what remains, and leaves closure to the act that finishes. A plan whose work will never be built is retired by whatever entry carries the reasoning why — the stated rationale is what qualifies the retirement, not the kind carrying it. And closure ends the plan's open status, not its life in the graph: judging what the work actually achieved comes after, and the closed plan is what it is judged against.
+
+**Refined in place, superseded on a change of direction.** An active plan is never amended: a refinement is a directive that points at it, sharpening or narrowing what the plan must satisfy while the plan stays untouched — and from the moment it lands, what the work must satisfy is the plan's criteria together with every open refinement, all answered and closed together by the act that delivers. Narrowing scope this way is the pattern working as intended, not scope being smuggled. Supersession is for the change refinement cannot express: the direction shifts, several criteria need restructuring, or the framing no longer holds — then a successor plan covers the retired plan's remaining ground and names what changed. When in doubt, refine first; refinements stacking high enough that the plan's shape no longer reads cleanly is itself the signal to supersede.
+
+**Choosing plan at all.** The neighbor tests, each a single question. Does the commitment state a route or rule the work must conform to, rather than an end-state that could be checked off item by item? Then it is a directive — "no batch ships uncupped" directs; "the launch is done when the blend is on the shelf and the first orders have gone out clean" plans. Is the commitment a repeatable way of working that will run again and again, rather than something delivered once? A procedure. Does it hold only for the present period, naming who attends to what? A focus. The plan-vs-activity test — WHAT versus THAT — lives in the type-system introduction; pull it there.
+
+{{ .Mechanics }}

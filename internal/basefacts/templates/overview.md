@@ -29,6 +29,9 @@ refs:
     - id: 20260817-100000-s-prc-qry
       kind: related
       desc: the question kind's authoring fact — the per-kind depth behind this overview
+    - id: 20260818-100000-s-prc-spc
+      kind: related
+      desc: the plan kind's authoring fact — the per-kind depth behind this overview
 index:
     title: 'Understanding the type system: how types, kinds, and layers fit together, which entry to draft when kinds compete, and where each kind''s crafting guide lives'
     topic: type-system/kinds

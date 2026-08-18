@@ -145,6 +145,10 @@ const (
 	PlanChecklistItem     = "- [ ]"
 )
 
+// PlanAcceptanceRequirement states the rule the validator enforces, so the
+// plan kind's authoring fact serves the same words.
+var PlanAcceptanceRequirement = fmt.Sprintf("a plan decision requires a %q section with at least one %q checklist item", PlanAcceptanceHeading, PlanChecklistItem)
+
 // kindListPhrase renders a kind enumeration as "a, b, or c" — generated from
 // the declaration so messages track the enumeration.
 func kindListPhrase(kinds []Kind) string {
@@ -403,7 +407,7 @@ func (c *EntryConstruction) Validate(g *Graph) []Finding {
 	// its original form.
 	if c.isKind(TypeDecision, KindPlan) {
 		if !strings.Contains(c.Body, PlanAcceptanceHeading) || !strings.Contains(c.Body, PlanChecklistItem) {
-			addWriteOnly("content", "", fmt.Sprintf("plan decision requires a %q section with at least one %q checklist item", PlanAcceptanceHeading, PlanChecklistItem))
+			addWriteOnly("content", "", PlanAcceptanceRequirement)
 		}
 	}
 
