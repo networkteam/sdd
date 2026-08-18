@@ -1,6 +1,12 @@
-<figure class="card">
-  <div class="scroll">
-    <svg viewBox="0 0 920 570" role="img" aria-labelledby="cycleTitle cycleDesc">
+---
+import DiagramFrame from "./DiagramFrame.astro";
+---
+
+<DiagramFrame
+  label="The two motions of the work, and the path of one piece of work"
+  caption="The path is not a queue to be emptied. Going forward beats finishing chunks: partial results land as real results, and what people tell us afterwards comes back in as something newly noticed."
+>
+    <svg class="vision-diagram" viewBox="0 0 920 570" role="img" aria-labelledby="cycleTitle cycleDesc">
       <title id="cycleTitle">The two motions of the work, and the path of one piece of work</title>
       <desc id="cycleDesc">A large loop split down the middle: the left half is “moving the graph”, the right half “moving the world”. Below it, six steps in a row (a gap, dialogue, a directive, a plan, work, evaluation), with new signals returning to the start.</desc>
 
@@ -80,13 +86,13 @@
       <rect x="330" y="512" width="260" height="28" rx="7" fill="#ffffff"></rect>
       <text class="s-b" x="460" y="531" text-anchor="middle">what we learn starts the next turn</text>
     </svg>
-  </div>
-  <figcaption>The path is not a queue to be emptied. Going forward beats finishing chunks: partial results land as real results, and what people tell us afterwards comes back in as something newly noticed.</figcaption>
-</figure>
+</DiagramFrame>
 
-<figure class="card">
-  <div class="scroll">
-    <svg viewBox="0 0 920 310" role="img" aria-labelledby="baTitle baDesc">
+<DiagramFrame
+  label="Before and after"
+  caption="Many small loops turning at once, instead of sprint after sprint."
+>
+    <svg class="vision-diagram" viewBox="0 0 920 310" role="img" aria-labelledby="baTitle baDesc">
       <title id="baTitle">Before and after</title>
       <desc id="baDesc">On the left, four disconnected boxes (emails, meetings, documents, issue tracker) drifting apart, with one person as the only connector. On the right, one flow through the shared picture where each piece keeps its reasoning and its links.</desc>
 
@@ -170,36 +176,9 @@
       </g>
       <text class="s-note" x="492" y="278">Follow any piece and you can still see what it came from and what it changed.</text>
     </svg>
-  </div>
-  <figcaption>Many small loops turning at once, instead of sprint after sprint.</figcaption>
-</figure>
+</DiagramFrame>
 
 <style>
-  .card {
-    background: #ffffff;
-    border: 1px solid #d3dade;
-    border-radius: 12px;
-    padding: 18px 18px 12px;
-    margin: 1.5rem 0;
-  }
-  .scroll {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  .scroll svg {
-    display: block;
-    width: 100%;
-    min-width: 760px;
-    height: auto;
-  }
-  figcaption {
-    font-size: 13.5px;
-    line-height: 1.5;
-    color: #52606d;
-    margin-top: 12px;
-    border-left: 2px solid #d3dade;
-    padding-left: 12px;
-  }
   svg text { font-family: inherit; }
   .s-eyebrow { font-size: 10.5px; letter-spacing: 0.11em; font-weight: 650; fill: #7b8794; }
   .s-eyebrow-t { font-size: 10.5px; letter-spacing: 0.11em; font-weight: 650; fill: #0f766e; }

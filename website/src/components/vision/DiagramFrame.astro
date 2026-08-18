@@ -1,0 +1,409 @@
+---
+interface Props {
+  label: string;
+  caption: string;
+}
+
+const { label, caption } = Astro.props;
+---
+
+<vision-diagram-frame>
+  <figure class="diagram-frame">
+    <div class="diagram-viewport">
+      <div class="diagram-scroll">
+        <div class="diagram-preview">
+          <slot />
+        </div>
+      </div>
+      <button
+        class="zoom-control zoom-open"
+        type="button"
+        aria-label={`Enlarge diagram: ${label}`}
+        aria-haspopup="dialog"
+        aria-expanded="false"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M9.8 12.8 4 18.6V17a1 1 0 0 0-2 0v4a1 1 0 0 0 1 1h4a1 1 0 0 0 0-2H5.4l5.8-5.8a1 1 0 0 0-1.4-1.4ZM22 3a1 1 0 0 0-1-1h-4a1 1 0 0 0 0 2h1.6l-5.8 5.8a1 1 0 1 0 1.4 1.4L20 5.4V7a1 1 0 0 0 2 0V3Z"></path>
+        </svg>
+      </button>
+    </div>
+    <figcaption>{caption}</figcaption>
+  </figure>
+
+  <dialog class="diagram-dialog" aria-label={label}>
+    <button
+      class="zoom-control zoom-close"
+      type="button"
+      aria-label={`Close enlarged diagram: ${label}`}
+    >
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M15 22a1 1 0 0 0 1-1v-1.6l4.3 4.3a1 1 0 0 0 1.4-1.4L17.4 18H19a1 1 0 0 0 0-2h-4a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1ZM9 2a1 1 0 0 0-1 1v1.6L3.7.3a1 1 0 0 0-1.4 1.4L6.6 6H5a1 1 0 0 0 0 2h4a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1Z"></path>
+      </svg>
+    </button>
+    <div class="diagram-dialog-viewport" data-dialog-backdrop>
+      <div class="diagram-dialog-canvas" data-dialog-backdrop></div>
+    </div>
+  </dialog>
+</vision-diagram-frame>
+
+<style>
+  vision-diagram-frame {
+    display: block;
+    margin: 2.5rem 0;
+  }
+
+  .diagram-frame {
+    --vision-diagram-max-width: 72rem;
+    --vision-diagram-edge-gap: 1rem;
+    position: relative;
+    left: 50%;
+    width: min(
+      var(--vision-diagram-max-width),
+      calc(
+        100vw - var(--sl-content-pad-x) - var(--sl-content-pad-x) -
+          var(--vision-diagram-edge-gap) - var(--vision-diagram-edge-gap)
+      )
+    );
+    max-width: none;
+    margin: 0;
+    transform: translateX(-50%);
+  }
+
+  .diagram-viewport {
+    position: relative;
+  }
+
+  .diagram-scroll {
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .diagram-preview {
+    position: relative;
+    min-width: 760px;
+  }
+
+  .diagram-preview :global(svg[role="img"]) {
+    display: block;
+    width: 100%;
+    height: auto;
+    cursor: zoom-in;
+  }
+
+  figcaption {
+    box-sizing: border-box;
+    width: min(100%, var(--sl-content-width));
+    margin: 12px auto 0;
+    border-left: 2px solid var(--sl-color-hairline);
+    padding-left: 12px;
+    color: var(--sl-color-gray-3);
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+
+  .zoom-control {
+    display: grid;
+    position: absolute;
+    z-index: 1;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    border: 2px solid var(--sl-color-gray-2);
+    border-radius: 50%;
+    padding: 10px;
+    place-items: center;
+    background: var(--sl-color-bg-nav);
+    color: var(--sl-color-text);
+  }
+
+  .zoom-control:hover {
+    color: var(--sl-color-accent-high);
+  }
+
+  .zoom-control:focus-visible {
+    outline: 2px solid var(--sl-color-accent-high);
+    outline-offset: 2px;
+  }
+
+  .zoom-control svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+  }
+
+  .zoom-open {
+    top: 12px;
+    right: 12px;
+    opacity: 0;
+    pointer-events: none;
+    cursor: zoom-in;
+  }
+
+  .diagram-viewport:hover .zoom-open,
+  .zoom-open:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .diagram-dialog {
+    width: 100vw;
+    width: 100dvw;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    border: 0;
+    padding: 0;
+    overflow: hidden;
+    background: transparent;
+  }
+
+  .diagram-dialog::backdrop {
+    background: rgb(0 0 0 / 88%);
+  }
+
+  .zoom-close {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    cursor: zoom-out;
+  }
+
+  .diagram-dialog-viewport {
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    padding: 4rem 2rem 2rem;
+  }
+
+  .diagram-dialog-canvas {
+    display: grid;
+    width: max-content;
+    min-width: 100%;
+    min-height: 100%;
+    place-items: center;
+  }
+
+  .diagram-dialog-canvas :global(svg) {
+    display: block;
+    max-width: none;
+    height: auto;
+    box-shadow: 0 1rem 4rem rgb(0 0 0 / 35%);
+  }
+
+  @media (min-width: 50rem) {
+    :global(html[data-has-sidebar]) .diagram-frame {
+      width: min(
+        var(--vision-diagram-max-width),
+        calc(
+          100vw - var(--sl-sidebar-width) - var(--sl-content-pad-x) -
+            var(--sl-content-pad-x) - var(--vision-diagram-edge-gap) -
+            var(--vision-diagram-edge-gap)
+        )
+      );
+    }
+  }
+
+  @media (min-width: 72rem) {
+    :global(html[data-has-sidebar][data-has-toc]) .diagram-frame {
+      width: min(
+        var(--vision-diagram-max-width),
+        calc(
+          100vw - var(--sl-sidebar-width) - var(--sl-sidebar-width) -
+            var(--sl-content-pad-x) - var(--sl-content-pad-x) -
+            var(--vision-diagram-edge-gap) - var(--vision-diagram-edge-gap)
+        )
+      );
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .zoom-open {
+      transition: opacity 120ms ease-out;
+    }
+
+    .diagram-dialog[open] {
+      animation: diagram-dialog-in 160ms ease-out;
+    }
+  }
+
+  @keyframes diagram-dialog-in {
+    from {
+      opacity: 0;
+    }
+  }
+</style>
+
+<style is:global>
+  svg.vision-diagram {
+    background: #ffffff;
+  }
+</style>
+
+<script>
+  class VisionDiagramFrame extends HTMLElement {
+    private dialog: HTMLDialogElement | null;
+    private openButton: HTMLButtonElement | null;
+    private closeButton: HTMLButtonElement | null;
+    private source: SVGSVGElement | null;
+    private viewport: HTMLElement | null;
+    private canvas: HTMLElement | null;
+    private previousFocus: HTMLElement | null = null;
+    private bodyOverflow = "";
+    private bodyPaddingInlineEnd = "";
+    private headerPaddingInlineEnd = "";
+    private scrollLocked = false;
+
+    constructor() {
+      super();
+      this.dialog = null;
+      this.openButton = null;
+      this.closeButton = null;
+      this.source = null;
+      this.viewport = null;
+      this.canvas = null;
+    }
+
+    connectedCallback() {
+      this.dialog = this.querySelector("dialog");
+      this.openButton = this.querySelector<HTMLButtonElement>(".zoom-open");
+      this.closeButton = this.querySelector<HTMLButtonElement>(".zoom-close");
+      this.source = this.querySelector<SVGSVGElement>(".diagram-preview > svg");
+      this.viewport = this.querySelector<HTMLElement>(".diagram-dialog-viewport");
+      this.canvas = this.querySelector<HTMLElement>(".diagram-dialog-canvas");
+      this.openButton?.addEventListener("click", this.open);
+      this.source?.addEventListener("click", this.open);
+      this.closeButton?.addEventListener("click", this.close);
+      this.dialog?.addEventListener("click", this.handleDialogClick);
+      this.dialog?.addEventListener("close", this.cleanup);
+      window.addEventListener("resize", this.resizeOpenDiagram);
+    }
+
+    disconnectedCallback() {
+      this.openButton?.removeEventListener("click", this.open);
+      this.source?.removeEventListener("click", this.open);
+      this.closeButton?.removeEventListener("click", this.close);
+      this.dialog?.removeEventListener("click", this.handleDialogClick);
+      this.dialog?.removeEventListener("close", this.cleanup);
+      window.removeEventListener("resize", this.resizeOpenDiagram);
+      this.cleanup();
+    }
+
+    private open = () => {
+      if (!this.dialog || !this.source || !this.canvas || this.dialog.open) return;
+
+      const activeElement = document.activeElement;
+      this.previousFocus =
+        activeElement instanceof HTMLElement && activeElement !== document.body
+          ? activeElement
+          : this.openButton;
+
+      const clone = this.source.cloneNode(true) as SVGSVGElement;
+      clone.classList.add("diagram-dialog-svg");
+      clone.setAttribute("aria-hidden", "true");
+      clone.removeAttribute("aria-labelledby");
+      this.removeClonedLabelIds(clone);
+      this.canvas.replaceChildren(clone);
+      this.sizeOpenDiagram();
+      this.lockBackgroundScroll();
+      this.dialog.showModal();
+      this.openButton?.setAttribute("aria-expanded", "true");
+      this.closeButton?.focus();
+
+      requestAnimationFrame(() => {
+        if (!this.viewport) return;
+        this.viewport.scrollLeft =
+          (this.viewport.scrollWidth - this.viewport.clientWidth) / 2;
+      });
+    };
+
+    private close = () => {
+      this.dialog?.close();
+    };
+
+    private handleDialogClick = (event: MouseEvent) => {
+      if (!(event.target instanceof HTMLElement)) return;
+      if (event.target.hasAttribute("data-dialog-backdrop")) this.close();
+    };
+
+    private cleanup = () => {
+      this.unlockBackgroundScroll();
+      this.canvas?.replaceChildren();
+      this.openButton?.setAttribute("aria-expanded", "false");
+      this.previousFocus?.focus();
+      this.previousFocus = null;
+    };
+
+    private resizeOpenDiagram = () => {
+      if (this.dialog?.open) this.sizeOpenDiagram();
+    };
+
+    private sizeOpenDiagram() {
+      const clone = this.canvas?.querySelector<SVGSVGElement>(".diagram-dialog-svg");
+      if (!clone || !this.source) return;
+
+      const viewBox = this.source.viewBox.baseVal;
+      if (viewBox.width <= 0 || viewBox.height <= 0) return;
+
+      const horizontalPadding = window.innerWidth < 640 ? 32 : 64;
+      const verticalPadding = window.innerWidth < 640 ? 96 : 64;
+      const availableWidth = Math.max(window.innerWidth - horizontalPadding, 1);
+      const availableHeight = Math.max(window.innerHeight - verticalPadding, 1);
+      const fitScale = Math.min(
+        availableWidth / viewBox.width,
+        availableHeight / viewBox.height,
+      );
+      const readableScale = 760 / viewBox.width;
+      const maxScale = 1440 / viewBox.width;
+      const scale = Math.min(Math.max(fitScale, readableScale), maxScale);
+
+      clone.style.width = `${viewBox.width * scale}px`;
+      clone.style.height = `${viewBox.height * scale}px`;
+    }
+
+    private removeClonedLabelIds(clone: SVGSVGElement) {
+      const labelledBy = this.source?.getAttribute("aria-labelledby")?.split(/\s+/) ?? [];
+      for (const id of labelledBy) clone.querySelector(`#${CSS.escape(id)}`)?.removeAttribute("id");
+    }
+
+    private lockBackgroundScroll() {
+      if (this.scrollLocked) return;
+
+      const body = document.body;
+      const header = document.querySelector<HTMLElement>("header");
+      const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+
+      this.bodyOverflow = body.style.overflow;
+      this.bodyPaddingInlineEnd = body.style.paddingInlineEnd;
+      this.headerPaddingInlineEnd = header?.style.paddingInlineEnd ?? "";
+      body.style.overflow = "hidden";
+      if (scrollbarWidth > 0) {
+        body.style.paddingInlineEnd = `${scrollbarWidth}px`;
+        header?.style.setProperty(
+          "padding-inline-end",
+          `calc(var(--sl-nav-pad-x) + ${scrollbarWidth}px)`,
+        );
+      }
+      this.scrollLocked = true;
+    }
+
+    private unlockBackgroundScroll() {
+      if (!this.scrollLocked) return;
+
+      const body = document.body;
+      const header = document.querySelector<HTMLElement>("header");
+      body.style.overflow = this.bodyOverflow;
+      body.style.paddingInlineEnd = this.bodyPaddingInlineEnd;
+      if (header) header.style.paddingInlineEnd = this.headerPaddingInlineEnd;
+      this.scrollLocked = false;
+    }
+  }
+
+  if (!customElements.get("vision-diagram-frame")) {
+    customElements.define("vision-diagram-frame", VisionDiagramFrame);
+  }
+</script>

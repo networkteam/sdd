@@ -1,6 +1,12 @@
-<figure class="card">
-  <div class="scroll">
-    <svg viewBox="0 0 920 620" role="img" aria-labelledby="collabTitle collabDesc">
+---
+import DiagramFrame from "./DiagramFrame.astro";
+---
+
+<DiagramFrame
+  label="The collaboration view"
+  caption="Every double-headed line is dialogue: nothing moves into the shared picture without a turn of conversation. Line style follows the same marks as everywhere else: firm where it works today, evenly dashed where the shape is decided, finely dashed where it is still an idea."
+>
+    <svg class="vision-diagram" viewBox="0 0 920 620" role="img" aria-labelledby="collabTitle collabDesc">
       <title id="collabTitle">The collaboration view</title>
       <desc id="collabDesc">Three people, each at a different surface and each paired with an agent, all in dialogue with a shared graph in the middle. An arc across the top shows person-to-person dialogue. Below the graph, three background agents work over it: intake, sync and review.</desc>
 
@@ -95,36 +101,9 @@
         <text class="s-b" x="460" y="582" text-anchor="middle">They contribute according to rules and guidelines that live in the graph itself.</text>
       </g>
     </svg>
-  </div>
-  <figcaption>Every double-headed line is dialogue: nothing moves into the shared picture without a turn of conversation. Line style follows the same marks as everywhere else: firm where it works today, evenly dashed where the shape is decided, finely dashed where it is still an idea.</figcaption>
-</figure>
+</DiagramFrame>
 
 <style>
-  .card {
-    background: #ffffff;
-    border: 1px solid #d3dade;
-    border-radius: 12px;
-    padding: 18px 18px 12px;
-    margin: 1.5rem 0;
-  }
-  .scroll {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  .scroll svg {
-    display: block;
-    width: 100%;
-    min-width: 760px;
-    height: auto;
-  }
-  figcaption {
-    font-size: 13.5px;
-    line-height: 1.5;
-    color: #52606d;
-    margin-top: 12px;
-    border-left: 2px solid #d3dade;
-    padding-left: 12px;
-  }
   svg text { font-family: inherit; }
   .s-eyebrow { font-size: 10.5px; letter-spacing: 0.11em; font-weight: 650; fill: #7b8794; }
   .s-h2 { font-size: 12px; font-weight: 650; fill: #1f2933; }

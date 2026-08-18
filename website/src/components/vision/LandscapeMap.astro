@@ -1,6 +1,12 @@
-<figure class="card">
-  <div class="scroll">
-    <svg viewBox="0 0 920 540" role="img" aria-labelledby="mapTitle mapDesc">
+---
+import DiagramFrame from "./DiagramFrame.astro";
+---
+
+<DiagramFrame
+  label="The SDD landscape: six regions around the shared graph"
+  caption="A region drawn with a firm outline already has working parts; a dashed outline means the whole region is still ahead of us. Inside every region each line carries its own mark, so a solid region can still hold ideas, and does."
+>
+    <svg class="vision-diagram" viewBox="0 0 920 540" role="img" aria-labelledby="mapTitle mapDesc">
       <title id="mapTitle">The SDD landscape: six regions around the shared graph</title>
       <desc id="mapDesc">A central circle labelled “the graph, shared context” with six rounded region cards around it: a shared context, thinking in dialogue, everyone working together, the world flowing in, extending the process, and surfaces. Each region lists a few elements, each carrying its own maturity mark.</desc>
 
@@ -131,36 +137,9 @@
         <text class="s-b" x="670" y="504">chat, voice, seeing it laid out</text>
       </g>
     </svg>
-  </div>
-  <figcaption>A region drawn with a firm outline already has working parts; a dashed outline means the whole region is still ahead of us. Inside every region each line carries its own mark, so a solid region can still hold ideas, and does.</figcaption>
-</figure>
+</DiagramFrame>
 
 <style>
-  .card {
-    background: #ffffff;
-    border: 1px solid #d3dade;
-    border-radius: 12px;
-    padding: 18px 18px 12px;
-    margin: 1.5rem 0;
-  }
-  .scroll {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-  .scroll svg {
-    display: block;
-    width: 100%;
-    min-width: 760px;
-    height: auto;
-  }
-  figcaption {
-    font-size: 13.5px;
-    line-height: 1.5;
-    color: #52606d;
-    margin-top: 12px;
-    border-left: 2px solid #d3dade;
-    padding-left: 12px;
-  }
   svg text { font-family: inherit; }
   .s-eyebrow-t { font-size: 10.5px; letter-spacing: 0.11em; font-weight: 650; fill: #0f766e; }
   .s-h { font-size: 13.5px; font-weight: 650; fill: #1f2933; }
