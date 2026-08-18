@@ -1,63 +1,110 @@
-# Kind-fact drafts — review state and open rulings
+# Kind facts — review state, rulings, and what remains
 
-Ten drafted authoring facts for the remaining kinds (contract deliberately excluded — the kind takes no new entries and gets no fact). Drafted from per-kind research briefs (see `research/`) under `STYLE-CONTRACT.md`, calibrated on the shipped done/gap/directive/procedure facts. **Unregistered**: nothing here is embedded or rendered until each kind gets its `internal/basefacts/<kind>.go` wiring, `authoringFactIDs` entry, and overview ref — after Christopher's per-kind review.
+Thirteen of the fourteen kinds now ship an authoring fact. This file is the handoff record:
+what landed, what was ruled along the way, and what is still owed. The per-kind research
+briefs are under `research/`; the binding form and content rules are in `STYLE-CONTRACT.md`.
 
-## Review procedure (next session)
+## Reviewed and registered — 13 of 14 kinds ship
 
-Walk the drafts with Christopher kind by kind (batches of 2–3 worked well for gap/directive), fold review edits in, then register each reviewed fact: Go wiring + mechanics renderer + tests + overview ref, and cut the corresponding lane teaser into the capture procedure.
+All kinds now ship an authoring fact except `contract`, which takes no new entries and
+deliberately gets none.
 
-## Reviewed and registered
+| kind | fact ID | note |
+|---|---|---|
+| done | `20260812-170000-s-prc-dnk` | shipped earlier |
+| procedure | `20260813-170000-s-prc-prd` | shipped earlier, with the spec reference beside it |
+| gap | `20260815-100000-s-prc-gpk` | shipped earlier |
+| directive | `20260815-110000-s-prc-drk` | shipped earlier |
+| insight | `20260816-100000-s-prc-syn` | ruling 1 settled; compressed |
+| fact | `20260816-110000-s-prc-kno` | rulings 2 and 10 settled; provenance over verification; compressed |
+| question | `20260817-100000-s-prc-qry` | ruling 12 settled; rewritten from scratch |
+| plan | `20260818-100000-s-prc-spc` | rewritten; retitled to *Specifying an outcome* |
+| actor | `20260818-110000-s-prc-act` | rewritten |
+| role | `20260818-110100-s-prc-rol` | rewritten; retitled to *Granting a part* |
+| activity | `20260818-110200-s-prc-dsp` | rewritten |
+| focus | `20260818-110300-s-prc-foc` | rewritten |
+| aspiration | `20260818-110400-s-prc-asp` | rewritten; retitled to *Orienting the work* |
+| annotation | `20260818-110500-s-prc-ann` | rewritten; retitled to *Making a thread findable* |
 
-- **insight** — ruling 1 settled (see below); compressed; registered as `20260816-100000-s-prc-syn`.
-- **fact** — rulings 2 and 10 settled (see below), plus provenance-over-verification; compressed; index rules extracted to `model.FactIndexKindRule` / `model.FactIndexTopicRule`; registered as `20260816-110000-s-prc-kno`.
-- **question** — ruling 12 settled (see below); the draft was judged badly written (duplication across four paragraphs circling two themes) and **rewritten from scratch by a Fable subagent** against the designer's line-by-line feedback: reframed from "marking an unknown" to **querying for input** — the demand goes into the record so later work finds it, with the unknown becoming explicit named as a byproduct — dialogue installed as the structural centre, the tension paragraph cut, ten paragraphs down to seven and ~1100 words to ~800. Registered as `20260817-100000-s-prc-qry`. Two sentences were weighed and settled separately: the confidence convention was **cut** as too thin (one specimen's gloss), and the deciding-by-omission clause was **restored** on the posture sentence after the subagent argued it — non-redundant, behaviour-changing at the capture margin, and consistent with insight's capture-threshold paragraph, which would otherwise have to go too.
+**Still to land:** the discrimination fact (`drafts/discrimination.md`, in compression),
+its registration, one pointer sentence in the type-system introduction, and the done
+signal that records all of it and closes `20260507-122000-s-prc-01i`. `NEIGHBOUR-TESTS.md`
+retires once the discrimination fact ships.
+
+## Rulings settled in this review round
+
+- **Retirement is kind-open and rationale-bound** (rulings 1 and 2): any entry may retire
+  another by saying why it stopped holding; being acted on is not a retirement. **Owes a
+  code change** — `validateCloses` today sanctions only decision-closes-signal,
+  done-closes-anything, and fact/insight dissolving a question, so a fact cannot retire an
+  insight, which the shipped insight and fact facts now teach. The directive recording this
+  is parked mid-capture with intent pending, closing `20260608-004727-s-prc-4kh`.
+- **Kind discrimination leaves the per-kind facts** (`20260818-133146-d-cpt-fpm`).
+- **Ruling 3 settled**: repeated examples stay, but every example names its domain, terse,
+  from one set — timber framing, a village bakery, a coffee roastery, a child-care group.
+- **Ruling 10 settled**: the actor-versus-fact discriminator is kept, ruled on merit.
+- **Ruling 12 settled**: question strands travel together when one resolution answers them;
+  the guard is against ceremony, not bundling.
+- **Confidence keeps one meaning across kinds** — how much backs the claim — while each kind
+  may say what backs it. Actor gets no sentence (no source beyond a repeated default), role
+  keeps its evolving-commitment sentence, aspiration gets one: confidence rises as the work
+  aligns with the pull and the alignment proves useful, and a high-confidence aspiration
+  carries more force in dialogue.
+- **Actor topics are optional, not forbidden** — the live entries are ratified; grouping
+  earns its place once a project has more than a handful.
+- **Focus layer is not pinned** — the layer sets reach and specificity, most land tactical,
+  and foci nest. The wider question of the ordering and execution domain is unsettled and
+  needs its own dialogue; nothing here pre-empts it.
+- **Legacy surfaces are never named in shipped facts** — a discredited test may be warned
+  about generically, but this repository's history stays out.
+- **Summary and general topic craft stay out of kind facts** (capture-procedure territory);
+  per-kind topic and confidence conventions stay.
+
+## Open rulings still outstanding
+
+- **Role references**: the validation flow demands a role reference the actor's entry; the
+  capture flow says a role needs none. Recommendation stands — drop the check, since binding
+  to the canonical already carries the relationship. Blocks nothing in the text; decides what
+  role's mechanics block renders.
+- **Activity bookkeeping**: `20260507-122000-s-prc-01i` closes on the done recording the
+  discrimination fact, not on the activity fact, because the boundary test it complains about
+  now lives in the discrimination fact.
+- **Annotation reference kind**: required but unspecified — rule one the convention or have
+  the write path fill it in.
+- **Focus time range**: an elapsed end date does not by itself end a focus — true of the
+  implementation, stated in no prose source. Write it into the focus fact, or leave it out?
+- **Focus targets create no reference edge**, so a focus is invisible from its targets' side.
+  Recommendation: involvement is the work channel and downstream visibility is a serving
+  concern, not an authoring duty. Confirm rather than assume.
+- **Annotation and focus confidence**: no sourced convention; confidence on an entry that
+  asserts nothing is an odd fit and may deserve a design question rather than a sentence.
+
+## Mechanics extraction — done and remaining
+
+Exported and rendering: `DoneAnchorRequirement`, `SignalCloseRule`, `DirectiveIntentRequirement`,
+`SettledCloseRule`, `PlanAcceptanceRequirement`, `FactIndexKindRule`, `FactIndexTopicRule`,
+`ActorCanonicalRequirement`, `RoleActorRequirement`, `AnnotationRefsRequirement`,
+`AnnotationTopicRequirement`, `FocusInvolvementRule`, `AliasHygieneRule`, `ProcessPinnedKinds()`.
+
+Still inline, and only worth extracting if a fact needs to quote them: focus when-shape and
+target-resolution details, annotation per-topic label parsing, the decision-close rule in
+closure validation.
 
 ## Compression method (worth repeating per kind)
 
 An Opus subagent, given the target draft plus the type-system introduction, the style contract, and the shipped sibling facts, instructed to analyze every paragraph for what it serves *before* cutting, to treat overview-owned content as the richest cut, and to flag judgment calls rather than make them. Insight 1167→1070, fact 1170→1089, nothing load-bearing lost. It also caught a reserved-word violation the human review had missed ("procedures" in fact's hygiene-plan example).
 
-## Standing checks for every remaining kind
+## Standing checks, still live
 
-- **Every decision kind must say where its why comes from.** Dialogue is the framework's central mechanism and the question draft never mentioned it once. Counting mentions across all fourteen: directive/insight/role carry 3–4, gap/fact/plan/aspiration/procedure carry 2, and **done (shipped), activity, focus, actor and annotation carry none**. Annotation is defensible (it carries no proposition of its own); actor and done are arguable. **Activity and focus are real holes** — both commit something, and a commitment's why is reached in dialogue. Fix each inside its own review pass, not blind.
-- **An unexercised path is not evidence against the design.** Where research reports a corpus count of zero for a sanctioned move (e.g. dissolution-by-knowledge on questions: every closed question in this graph was closed by a decision), read it as the absence of capture guidance until now, not as a refutation. Ship the design; the guidance is what makes the path reachable.
-- **Reserved-word check**: grep each draft for "procedure" used in the ordinary sense. Caught once already, in fact's hygiene-plan example.
-
-## Rulings made in review (beyond the numbered list)
-
-- **Summary and topic craft belong to the capture procedure, not the kind facts.** The copied claim "the first sentence stands alone, because overview surfaces lead with it" is wrong — generated summaries lead those surfaces, not entry bodies — and was cut from the shipped gap fact and the fact, plan, question and role drafts. Per-kind topic conventions stay: they state how much of an entry's meaning that kind already carries elsewhere (done's work-shape topics, fact's index topic, role's rarely-owed, focus's optional, annotation's topics-as-payload), which is entry semantics. Per-kind confidence conventions stay for the same reason.
-- **Layer names where the thinking landed, not where its inputs sit.** Applied to insight ("a reading drawn from several operational deviations and one survey result is strategic if that is where the thinking arrived"). The gap and fact drafts still say "depth of the deviation" / "scope of the claim" — check those against this framing when their turn comes.
-
-## Cross-read fixes to apply mechanically before/with review
-
-- ~~Terminology: harmonize "the overview" to "the type-system introduction"~~ — done.
-- ~~actor.md doubling~~ — done.
-- "load-bearing joints are pegged, not screwed" now appears in directive (shipped), activity, and focus drafts — keep as deliberate canon or diversify (Christopher's call). **Still open.**
-
-## Open rulings (one per line, writer recommendation in parentheses)
-
-1. ~~Insight retirement path~~ — **SETTLED**: kind-open and rationale-bound. Any entry may retire a reading; what qualifies it is saying why the reading stopped holding (the material moved, or the reasoning had a flaw). Being acted on is not a retirement — a commitment taking the reading up points at it and leaves it standing. Closes 20260608-004727-s-prc-4kh; a settled directive recording this is still to be captured.
-2. ~~Fact-closes-fact~~ — **SETTLED** by the same kind-open rationale-bound rule as ruling 1: whatever entry carries the news that a claim stopped holding may close it. Stops being an exception; folds into the `validateCloses` widening that ruling 1 owes.
-3. Role head-ref: pre-flight demands role refs include the actor head's entry ID; capture lane says "no natural refs" (drop the pre-flight check — the canonical binding already carries the relationship). Recorded miss in 20260722-141659-s-cpt-rza either way.
-4. Per-kind confidence conventions (actor high, role medium, aspiration medium-indefinitely): all kept out as CLI-legacy-shaped per 20260816-170529-d-cpt-1dk (stay out; aspiration's origin rationale could ship as one sentence if wanted).
-5. Actor topics: live exemplars carry collaboration/identity; capture procedure says no natural topics (ratify the exemplars or fix the procedure — one line).
-6. Annotation: {label, members} sub-selection form is unexercised in the live graph (teach it, don't name prose-only sub-grouping an anti-pattern — confirm); ref kind for member refs is unspecified while required (rule `related` as convention or auto-default).
-7. Focus: layer line (framework-concepts: cadence-flexible; capture procedure: "typically tactical"; corpus 8/8 tactical) — pick one voice. Elapsed when.to does not end a focus (code-true, unstated) — adopt or leave out.
-8. Plan: outside-observable-criteria rule (20260728-083647-d-prc-pck, intent pending, contradicted by live practice incl. d-tac-9be itself) — binding, preference, or omit (draft omits).
-9. Activity: does shipping its fact close the work-shape gap 20260507-122000-s-prc-01i or only address it (legacy skill text stays frozen under d-tac-9be)? Writer leans close-with-carve-out.
-10. ~~Actor-vs-fact discriminator~~ — **SETTLED**: kept and ruled here. Actor capture is the sharpest recorded failure point, and "this person is a trained X with twenty years at Y" is exactly the claim that reads like discovered knowledge but belongs in an actor.
-11. Focus targets-in-refs: involvement creates no ref edge, so a focus is invisible in its targets' downstream (rule: involvement is the work channel, downstream visibility a serving concern — not an authoring duty).
-12. ~~Question strands~~ — **SETTLED**: accepted as the reconciliation, with the reasoning written in — a question is temporary, whatever answers it can split what turned out to be two, so the guard is against multiplying entries into ceremony rather than against bundling.
-
-## Mechanics extraction needed at registration (inline strings → exported model constants)
-
-- plan: AC requirement string (construction.go:406) → e.g. PlanAcceptanceRequirement.
-- actor: canonical-required, layer pin, alias hygiene (3 findings), write-once-across-chains rule text.
-- role: actor-required, layer pin; resolution-gate strings (post ruling 3).
-- annotation: refs-required, topics-required, members-subset, no-inline-topics.
-- focus: involvement-required, target-resolution, when-shape rules.
-- activity/aspiration: decision-close rule (graph.go validateCloses inline) → e.g. DecisionCloseRule, shared.
-- fact: index rules (fact_index.go inline strings) if the mechanics should quote them; OverrideClosed line pending ruling on whether override renders at all.
-- question/insight: nothing new — SignalKindValues, OpenAttentionKinds, SignalCloseRule all exist.
+- **Every decision kind says where its why comes from.** All six rewrites now carry a
+  dialogue paragraph with its own angle; actor and annotation carry none, deliberately.
+  Any new kind fact must earn its zero or write the paragraph.
+- **An unexercised path is not evidence against the design.** Where research reports a
+  corpus count of zero for a sanctioned move, read it as the absence of capture guidance
+  until now, not as a refutation. Ship the design.
+- **Reserved-word check**: grep each draft for `procedure`, `contract`, `fact`, `plan`,
+  `done`, `activity`, `focus` and `role` used in their ordinary senses. Caught twice so far.
+- **Domain-marked examples**: every quoted example names its domain, from the one set.
 
 ## Reconciliation items surfaced by research (for the plan's reconciliation phase, not the facts)
 
