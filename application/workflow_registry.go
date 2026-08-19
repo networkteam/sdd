@@ -687,8 +687,13 @@ func WorkflowRegistryDocs(class string) ([]RegistryFunction, error) {
 	return result, nil
 }
 
-// workflowLiveHead resolves a local ID to its supersession head; a cross-repo
-// ID passes through, since the local graph cannot walk a foreign chain.
+// workflowLiveHead resolves a local ID to its supersession head. A cross-repo
+// ID passes through unwalked — a deliberate deferral, not a missing capability:
+// the context graph composes dependencies and ResolveAcross can walk the
+// owning member's chain, but serve-time member graphs are best-effort
+// (mirroring refsResolve's carve-out) and no shipped procedure serves a
+// foreign ID yet. Whether the walk is wanted, and relative to which owning
+// repo an ID resolves, is the open gap 20260819-171110-s-tac-4km.
 func workflowLiveHead(graph *model.Graph, id string) string {
 	if model.IsCrossRepoID(id) {
 		return id
