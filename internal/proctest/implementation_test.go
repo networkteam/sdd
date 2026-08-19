@@ -27,22 +27,22 @@ const (
 	implMissingID = "20260601-140000-d-tac-gon"
 )
 
-func implAnchorEntry() proctest.Entry {
-	return proctest.Entry{
-		ID: implAnchorID, Type: "decision", Kind: "directive", Layer: "tactical", Intent: "pending",
+func implAnchorEntry() *model.Entry {
+	return &model.Entry{
+		ID: implAnchorID, Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical, Intent: model.IntentPending,
 		Summary: "A directive the implementation anchors on.",
-		Body:    "A directive the implementation anchors on.",
+		Content: "A directive the implementation anchors on.",
 	}
 }
 
 // implDoneEntry is a pre-recorded closing done fixture for scenarios that
 // exercise routing rather than the capture sub-move itself.
-func implDoneEntry() proctest.Entry {
-	return proctest.Entry{
-		ID: implDoneID, Type: "signal", Kind: "done", Layer: "tactical",
+func implDoneEntry() *model.Entry {
+	return &model.Entry{
+		ID: implDoneID, Type: model.TypeSignal, Kind: model.KindDone, Layer: model.LayerTactical,
 		Closes:  []string{implAnchorID},
 		Summary: "The anchor directive was delivered in commit abc1234.",
-		Body:    "The anchor directive was delivered in commit abc1234.",
+		Content: "The anchor directive was delivered in commit abc1234.",
 	}
 }
 

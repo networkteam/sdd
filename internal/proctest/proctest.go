@@ -87,50 +87,27 @@ func marshalFindings[F any](findings []F) (sdd.LLMResult, error) {
 	return sdd.LLMResult{Output: output, ExecutorFingerprint: "proctest"}, err
 }
 
-// Entry declares a fixture graph entry written to disk before the world's
-// stores open — a thin, string-friendly front over model.Entry; rendering
-// stays with the production serializer, never duplicated here.
-type Entry struct {
-	ID         string
-	Type       string // signal | decision
-	Kind       string
-	Layer      string
-	Intent     string
-	Summary    string
-	Body       string
-	Canonical  string
-	Actor      string
-	Supersedes []string
-	Closes     []string
-	Topics     []string
-	Refs       []model.Ref
-}
-
-func (e Entry) render(t *testing.T) string {
-	t.Helper()
-	entry := &model.Entry{
-		Type: model.EntryType(e.Type), Kind: model.Kind(e.Kind), Layer: model.Layer(e.Layer),
-		Intent: model.Intent(e.Intent), Summary: e.Summary, Content: e.Body,
-		Canonical: e.Canonical, Actor: e.Actor,
-		Supersedes: e.Supersedes, Closes: e.Closes, Refs: e.Refs,
-	}
-	for _, topic := range e.Topics {
-		path, err := model.ParseTopicPath(topic)
+// MustTopics parses topic labels into the typed paths a fixture entry
+// carries; fixtures are static, so a bad label is a programming error.
+func MustTopics(labels ...string) []model.TopicPath {
+	topics := make([]model.TopicPath, 0, len(labels))
+	for _, label := range labels {
+		path, err := model.ParseTopicPath(label)
 		if err != nil {
-			t.Fatal(err)
+			panic(err)
 		}
-		entry.Topics = append(entry.Topics, path)
+		topics = append(topics, path)
 	}
-	// The exact composition the write handler persists.
-	return model.FormatFrontmatter(entry) + "\n" + entry.Content + "\n"
+	return topics
 }
 
 // WriteEntry writes one fixture entry into the graph dir at its ID-derived
-// path — usable before NewWorld and mid-test (reads snapshot per call, so
-// later reads see it).
-func WriteEntry(t *testing.T, graphDir string, e Entry) {
+// path, rendered by the production serializer exactly as the write handler
+// persists it — usable before NewWorld and mid-test (reads snapshot per
+// call, so later reads see it).
+func WriteEntry(t *testing.T, graphDir string, e *model.Entry) {
 	t.Helper()
-	WriteRawEntry(t, graphDir, e.ID, e.render(t))
+	WriteRawEntry(t, graphDir, e.ID, model.FormatFrontmatter(e)+"\n"+e.Content+"\n")
 }
 
 // WriteRawEntry writes entry content verbatim for shapes the Entry struct
@@ -153,7 +130,7 @@ func WriteRawEntry(t *testing.T, graphDir, id, content string) {
 type config struct {
 	graphDir    string
 	participant string
-	entries     []Entry
+	entries     []*model.Entry
 	branchDirs  map[string]string
 }
 
@@ -165,7 +142,7 @@ type Option func(*config)
 func WithGraphDir(dir string) Option { return func(c *config) { c.graphDir = dir } }
 
 // WithEntries writes fixture entries before the stores open.
-func WithEntries(entries ...Entry) Option {
+func WithEntries(entries ...*model.Entry) Option {
 	return func(c *config) { c.entries = append(c.entries, entries...) }
 }
 

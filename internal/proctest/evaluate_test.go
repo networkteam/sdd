@@ -5,16 +5,17 @@ import (
 	"testing"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
 const evalAnchorID = "20260601-121500-d-tac-anc"
 
-func evalAnchorEntry() proctest.Entry {
-	return proctest.Entry{
-		ID: evalAnchorID, Type: "decision", Kind: "directive", Layer: "tactical", Intent: "pending",
+func evalAnchorEntry() *model.Entry {
+	return &model.Entry{
+		ID: evalAnchorID, Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical, Intent: model.IntentPending,
 		Summary: "A directive the evaluation anchors on.",
-		Body:    "A directive the evaluation anchors on.",
+		Content: "A directive the evaluation anchors on.",
 	}
 }
 

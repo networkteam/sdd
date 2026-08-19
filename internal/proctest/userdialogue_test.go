@@ -11,6 +11,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/baseprocedures"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
@@ -26,7 +27,7 @@ func openShell(t *testing.T, world *proctest.World, connID string) (*proctest.Se
 	return &proctest.Session{World: world, WF: workflow, ID: serve.Session}, serve
 }
 
-// writeIndexedFact writes an index-enrolled fact, a shape proctest.Entry does
+// writeIndexedFact writes an index-enrolled fact, a shape *model.Entry does
 // not model (index frontmatter). Candidate to graduate into the harness.
 func writeIndexedFact(t *testing.T, graphDir, id, title, topic string) {
 	t.Helper()
@@ -137,17 +138,17 @@ func TestUserDialogue_ConcludeCarriesNoDischargeGate(t *testing.T) {
 // names, one dedupable block per lane.
 func TestUserDialogue_FramingLanesRenderRealGraphContent(t *testing.T) {
 	world := proctest.NewWorld(t, proctest.WithEntries(
-		proctest.Entry{
-			ID: "20260601-090000-d-tac-gdr", Type: "decision", Kind: "directive", Layer: "tactical",
-			Intent:  "guiding",
+		&model.Entry{
+			ID: "20260601-090000-d-tac-gdr", Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical,
+			Intent:  model.IntentGuiding,
 			Summary: "Always test through the exported surface.",
-			Body:    "Always test through the exported surface.",
+			Content: "Always test through the exported surface.",
 		},
-		proctest.Entry{
-			ID: "20260601-091000-s-prc-wpr", Type: "signal", Kind: "fact", Layer: "process",
+		&model.Entry{
+			ID: "20260601-091000-s-prc-wpr", Type: model.TypeSignal, Kind: model.KindFact, Layer: model.LayerProcess,
 			Summary: "Keep dialogue turns short.",
-			Body:    "Keep dialogue turns short.",
-			Topics:  []string{"principles/interactive"},
+			Content: "Keep dialogue turns short.",
+			Topics:  proctest.MustTopics("principles/interactive"),
 		},
 	))
 	session, _ := openShell(t, world, "dlg-framing")

@@ -11,16 +11,17 @@ import (
 	"testing"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
 const bootstrapAspirationID = "20260601-090000-d-stg-asp"
 
-func bootstrapAspirationFixture() proctest.Entry {
-	return proctest.Entry{
-		ID: bootstrapAspirationID, Type: "decision", Kind: "aspiration", Layer: "strategic",
+func bootstrapAspirationFixture() *model.Entry {
+	return &model.Entry{
+		ID: bootstrapAspirationID, Type: model.TypeDecision, Kind: model.KindAspiration, Layer: model.LayerStrategic,
 		Summary: "Make project reasoning a shared searchable record.",
-		Body:    "Make project reasoning a shared searchable record.",
+		Content: "Make project reasoning a shared searchable record.",
 	}
 }
 

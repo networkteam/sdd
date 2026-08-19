@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
@@ -18,10 +19,10 @@ const identityActorID = "20260601-100000-s-prc-act"
 // grace mode with the resolved participant still valid.
 func newIdentityWorld(t *testing.T, connID string) (*proctest.World, *proctest.Session) {
 	t.Helper()
-	entries := append(captureFixtureEntries(), proctest.Entry{
-		ID: identityActorID, Type: "signal", Kind: "actor", Layer: "process", Canonical: "Christopher",
+	entries := append(captureFixtureEntries(), &model.Entry{
+		ID: identityActorID, Type: model.TypeSignal, Kind: model.KindActor, Layer: model.LayerProcess, Canonical: "Christopher",
 		Summary: "Christopher, the known actor role captures bind to.",
-		Body:    "Christopher, the known actor role captures bind to.",
+		Content: "Christopher, the known actor role captures bind to.",
 	})
 	world := proctest.NewWorld(t, proctest.WithEntries(entries...))
 	session := world.Open(t, connID)

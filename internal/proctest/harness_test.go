@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
@@ -13,9 +14,9 @@ const smokeRefID = "20260601-120000-d-tac-ref"
 // real path — assemble, guide, playback, write, summary — and the entry lands
 // on disk. Procedure behavior beyond this lives in the per-procedure suites.
 func TestHarnessCaptureRunsEndToEnd(t *testing.T) {
-	world := proctest.NewWorld(t, proctest.WithEntries(proctest.Entry{
-		ID: smokeRefID, Type: "decision", Kind: "directive", Layer: "tactical", Intent: "pending",
-		Summary: "A directive the smoke capture refs.", Body: "A directive the smoke capture refs.",
+	world := proctest.NewWorld(t, proctest.WithEntries(&model.Entry{
+		ID: smokeRefID, Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical, Intent: model.IntentPending,
+		Summary: "A directive the smoke capture refs.", Content: "A directive the smoke capture refs.",
 	}))
 	session := world.Open(t, "harness-smoke")
 

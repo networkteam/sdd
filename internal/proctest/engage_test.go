@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	sdd "github.com/networkteam/sdd/application"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
@@ -21,13 +22,13 @@ const (
 func engageWorld(t *testing.T) *proctest.World {
 	t.Helper()
 	return proctest.NewWorld(t, proctest.WithEntries(
-		proctest.Entry{
-			ID: engageAnchorID, Type: "decision", Kind: "directive", Layer: "tactical", Intent: "pending",
-			Summary: engageAnchorBody, Body: engageAnchorBody,
+		&model.Entry{
+			ID: engageAnchorID, Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical, Intent: model.IntentPending,
+			Summary: engageAnchorBody, Content: engageAnchorBody,
 		},
-		proctest.Entry{
-			ID: engageNeighborID, Type: "signal", Kind: "gap", Layer: "tactical",
-			Summary: engageNeighborBody, Body: engageNeighborBody,
+		&model.Entry{
+			ID: engageNeighborID, Type: model.TypeSignal, Kind: model.KindGap, Layer: model.LayerTactical,
+			Summary: engageNeighborBody, Content: engageNeighborBody,
 		},
 	))
 }

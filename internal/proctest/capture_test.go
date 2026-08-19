@@ -10,6 +10,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/basefacts"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
@@ -20,16 +21,16 @@ const (
 	captureRef2ID = "20260601-130000-s-tac-raw"
 )
 
-func captureFixtureEntries() []proctest.Entry {
-	return []proctest.Entry{
+func captureFixtureEntries() []*model.Entry {
+	return []*model.Entry{
 		{
-			ID: captureRefID, Type: "decision", Kind: "directive", Layer: "tactical", Intent: "pending",
-			Summary: "A directive the fixture capture refs.", Body: "A directive the fixture capture refs.",
-			Topics: []string{"cli/ux"},
+			ID: captureRefID, Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical, Intent: model.IntentPending,
+			Summary: "A directive the fixture capture refs.", Content: "A directive the fixture capture refs.",
+			Topics: proctest.MustTopics("cli/ux"),
 		},
 		{
-			ID: captureRef2ID, Type: "signal", Kind: "gap", Layer: "tactical",
-			Summary: "A signal no fixture session has read in full.", Body: "A signal no fixture session has read in full.",
+			ID: captureRef2ID, Type: model.TypeSignal, Kind: model.KindGap, Layer: model.LayerTactical,
+			Summary: "A signal no fixture session has read in full.", Content: "A signal no fixture session has read in full.",
 		},
 	}
 }

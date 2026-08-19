@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
@@ -13,11 +14,11 @@ const (
 	interviewMissingID = "20260601-140000-d-tac-gon"
 )
 
-func interviewAnchorEntry() proctest.Entry {
-	return proctest.Entry{
-		ID: interviewAnchorID, Type: "decision", Kind: "directive", Layer: "tactical", Intent: "pending",
+func interviewAnchorEntry() *model.Entry {
+	return &model.Entry{
+		ID: interviewAnchorID, Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical, Intent: model.IntentPending,
 		Summary: "A directive the interview story centers on.",
-		Body:    "A directive the interview story centers on.",
+		Content: "A directive the interview story centers on.",
 	}
 }
 

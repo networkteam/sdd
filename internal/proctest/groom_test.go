@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
@@ -14,11 +15,11 @@ const (
 	groomMarkerID = "20260706-114441-christopher"
 )
 
-func groomGapEntry() proctest.Entry {
-	return proctest.Entry{
-		ID: groomGapID, Type: "signal", Kind: "gap", Layer: "tactical",
+func groomGapEntry() *model.Entry {
+	return &model.Entry{
+		ID: groomGapID, Type: model.TypeSignal, Kind: model.KindGap, Layer: model.LayerTactical,
 		Summary: "A resolved gap still deriving as open.",
-		Body:    "A resolved gap still deriving as open.",
+		Content: "A resolved gap still deriving as open.",
 	}
 }
 

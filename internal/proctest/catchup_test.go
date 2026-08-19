@@ -4,34 +4,35 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 )
 
 // catchupEntries populates the graph so every asserted lane has real content:
 // a closed directive with its closing done (Recent done), an active pending
 // directive (Active and hot / Open loops), and an open gap (Open and warm).
-func catchupEntries() []proctest.Entry {
-	return []proctest.Entry{
+func catchupEntries() []*model.Entry {
+	return []*model.Entry{
 		{
-			ID: "20260815-090000-d-tac-old", Type: "decision", Kind: "directive", Layer: "tactical", Intent: "pending",
+			ID: "20260815-090000-d-tac-old", Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical, Intent: model.IntentPending,
 			Summary: "An earlier engine slice awaits closure.",
-			Body:    "An earlier engine slice awaits closure.",
+			Content: "An earlier engine slice awaits closure.",
 		},
 		{
-			ID: "20260816-110000-s-tac-don", Type: "signal", Kind: "done", Layer: "tactical",
+			ID: "20260816-110000-s-tac-don", Type: model.TypeSignal, Kind: model.KindDone, Layer: model.LayerTactical,
 			Summary: "The earlier engine slice landed.",
-			Body:    "The earlier engine slice landed; its closure is recorded here.",
+			Content: "The earlier engine slice landed; its closure is recorded here.",
 			Closes:  []string{"20260815-090000-d-tac-old"},
 		},
 		{
-			ID: "20260815-100000-d-tac-nxt", Type: "decision", Kind: "directive", Layer: "tactical", Intent: "pending",
+			ID: "20260815-100000-d-tac-nxt", Type: model.TypeDecision, Kind: model.KindDirective, Layer: model.LayerTactical, Intent: model.IntentPending,
 			Summary: "Ship the next engine slice.",
-			Body:    "Ship the next engine slice.",
+			Content: "Ship the next engine slice.",
 		},
 		{
-			ID: "20260816-120000-s-tac-gap", Type: "signal", Kind: "gap", Layer: "tactical",
+			ID: "20260816-120000-s-tac-gap", Type: model.TypeSignal, Kind: model.KindGap, Layer: model.LayerTactical,
 			Summary: "The catch-up lanes need real fixture coverage.",
-			Body:    "The catch-up lanes need real fixture coverage.",
+			Content: "The catch-up lanes need real fixture coverage.",
 		},
 	}
 }
