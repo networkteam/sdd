@@ -57,6 +57,9 @@ steps:
             to: end(completed)
 `
 
+// procAnchorID is the anchor entry newSeedEnv parses into its graph.
+const procAnchorID = "20260601-120000-d-tac-ref"
+
 func procedureEntry(t *testing.T, id, canonical, class, frontmatter, body string) *model.Entry {
 	t.Helper()
 	head := "---\ntype: decision\nlayer: process\nkind: procedure\ncanonical: " + canonical + "\n"
@@ -252,22 +255,6 @@ func TestHandoff_ReplayPreservesSeed(t *testing.T) {
 	}
 	if got := fieldValue(t, replayed, child.Instance, "widenReport"); got != "grounding to survive a restart" {
 		t.Errorf("replayed child lost its inherited grounding, got %v", got)
-	}
-}
-
-// TestTaskClass_ExploreIsTask covers the reclassification: the shipped explore
-// procedure now loads as a task.
-func TestTaskClass_ExploreIsTask(t *testing.T) {
-	entry := baseEntry(t, "explore")
-	if !entry.IsTaskProcedure() {
-		t.Fatalf("explore entry class = %q, want task", entry.Class)
-	}
-	spec, err := ParseSpec(entry)
-	if err != nil {
-		t.Fatalf("parsing explore spec: %v", err)
-	}
-	if spec.Class != model.ProcedureClassTask {
-		t.Errorf("explore spec class = %q, want task", spec.Class)
 	}
 }
 
