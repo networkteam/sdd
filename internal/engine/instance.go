@@ -547,7 +547,10 @@ func (s *Session) renderUnit(inst *Instance, step *Step) (string, error) {
 		return "", nil // gates without prose serve diagnostics and schema only
 	}
 
-	tmplCtx := inst.Store.TemplateContext()
+	tmplCtx, err := s.templateContext(inst)
+	if err != nil {
+		return "", fmt.Errorf("unit %s: %w", unitName, err)
+	}
 	if len(step.Inject) > 0 {
 		fctx, err := s.funcContext(inst)
 		if err != nil {
@@ -589,7 +592,10 @@ func (s *Session) renderInjectArgs(inst *Instance, args map[string]any) (map[str
 		return nil, nil
 	}
 	out := make(map[string]any, len(args))
-	tmplCtx := inst.Store.TemplateContext()
+	tmplCtx, err := s.templateContext(inst)
+	if err != nil {
+		return nil, err
+	}
 	for name, v := range args {
 		str, ok := v.(string)
 		if !ok || !strings.Contains(str, "{{") {
@@ -607,4 +613,22 @@ func (s *Session) renderInjectArgs(inst *Instance, args map[string]any) (map[str
 		out[name] = buf.String()
 	}
 	return out, nil
+}
+
+// templateContext is the store's template context plus the engine's host-
+// supplied template values. A value whose name collides with a declared param
+// or state field fails the render — the spec's own vocabulary always wins,
+// and silently shadowing either side would corrupt whichever loses.
+func (s *Session) templateContext(inst *Instance) (map[string]any, error) {
+	ctx := inst.Store.TemplateContext()
+	for name, value := range s.engine.templateValues {
+		if _, ok := inst.Spec.Params[name]; ok {
+			return nil, fmt.Errorf("template value %q collides with a procedure param", name)
+		}
+		if _, ok := inst.Spec.State[name]; ok {
+			return nil, fmt.Errorf("template value %q collides with a procedure state field", name)
+		}
+		ctx[name] = value
+	}
+	return ctx, nil
 }

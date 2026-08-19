@@ -31,15 +31,31 @@ func captureEntry(t *testing.T) *model.Entry {
 	return nil
 }
 
-// registerFakeDraftingKnowledge stubs the capture assemble inject with a
-// static overview serve, mirroring the real query's template-context shape.
-func registerFakeDraftingKnowledge(reg *Registry) {
+// registerFakeDraftingInjects stubs the capture assemble injects: a static
+// overview serve for entryChains and an id-echoing entryHead.
+func registerFakeDraftingInjects(reg *Registry) {
 	mustRegisterQuery(reg, Query{
-		Doc: FuncDoc{Name: "draftingKnowledge", Doc: "fake type-system drafting knowledge", Reads: []string{"entryKind", "kind"}},
-		Fn: func(_ *Context, _ map[string]any) (any, error) {
-			return map[string]any{"OverviewID": "20260812-180000-s-prc-typ", "OverviewBody": "overview body (fake)"}, nil
+		Doc: FuncDoc{Name: "entryChains", Doc: "fake entry chains", Reads: []string{"anchor", "targets"}},
+		Fn:  func(*Context, map[string]any) (any, error) { return "test type-system overview", nil },
+	})
+	mustRegisterQuery(reg, Query{
+		Doc:       FuncDoc{Name: "entryHead", Doc: "fake live head: echoes the id arg"},
+		ServeSafe: true,
+		Fn: func(_ *Context, args map[string]any) (any, error) {
+			id, _ := args["id"].(string)
+			return id, nil
 		},
 	})
+}
+
+// fakeKindAuthoringFactIDs mirrors the template-values map the application
+// supplies, with per-kind fake IDs the tests can assert on.
+func fakeKindAuthoringFactIDs() map[string]string {
+	result := map[string]string{}
+	for _, kind := range append(model.SignalKindValues(), model.DecisionKindValues()...) {
+		result[string(kind)] = "fact-for-" + string(kind)
+	}
+	return result
 }
 
 const fixtureRefID = "20260601-120000-d-tac-ref"
@@ -132,7 +148,7 @@ func newFixtureEnv(t *testing.T) *fixtureEnv {
 			return fmt.Sprintf("summary of %v", id), nil
 		},
 	})
-	registerFakeDraftingKnowledge(reg)
+	registerFakeDraftingInjects(reg)
 	mustRegisterCommand(reg, Command{
 		Doc: FuncDoc{Name: "newEntry", Doc: "fake write gate", Writes: []string{"entryId", "findings"}},
 		Fn: func(ctx *Context) error {
@@ -183,7 +199,9 @@ func newFixtureEnv(t *testing.T) *fixtureEnv {
 		t.Fatal(err)
 	}
 
-	env.engine = New(reg, StaticGraphs{Graph: fixtureGraph(t)})
+	env.engine = New(reg, StaticGraphs{Graph: fixtureGraph(t)}, WithTemplateValues(map[string]any{
+		"kindAuthoringFactIDs": fakeKindAuthoringFactIDs(),
+	}))
 	env.spec = spec
 	env.sink = &memorySink{}
 	ts := time.Date(2026, 7, 2, 23, 0, 0, 0, time.UTC)
@@ -274,6 +292,34 @@ func TestCapture_OneShotHappyPath(t *testing.T) {
 	}
 	if sv.Produced["entryId"] != "20260702-130001-s-tac-new" {
 		t.Errorf("produced = %v, want the created entry ID", sv.Produced)
+	}
+}
+
+func TestCapture_SelectedKindPointsAtItsAuthoringFact(t *testing.T) {
+	env := newFixtureEnv(t)
+
+	sv, err := env.session.Start(env.spec, map[string]any{"kind": "directive"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sv.Instructions, "Selected-kind authoring fact") || !strings.Contains(sv.Instructions, "fact-for-directive") {
+		t.Fatalf("preselected kind guidance = %q", sv.Instructions)
+	}
+}
+
+func TestTemplateValueCollisionFailsRender(t *testing.T) {
+	entry := procedureEntry(t, "20260819-100000-d-prc-col", "collide", "", seedChildFrontmatter, "collision fixture\n\n## unit: draft\n\nDraft.\n")
+	reg := NewRegistry()
+	spec, err := LoadSpec(entry, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := New(reg, StaticGraphs{Graph: model.NewGraph(nil)}, WithTemplateValues(map[string]any{
+		"body": "shadowing a declared state field",
+	}))
+	session := eng.NewSession("s_col", "tester", &memorySink{})
+	if _, err := session.Start(spec, nil, ""); err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Fatalf("a template value shadowing declared state must fail the render, got err=%v", err)
 	}
 }
 

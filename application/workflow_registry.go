@@ -6,7 +6,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
@@ -95,15 +94,41 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		// Not serve-safe: it calls LogRead, so it writes a read event. It may
 		// inject into a step unit, but never as a framing lane (a serve must not
 		// write — I7); the spec loader enforces that.
-		Doc: engine.FuncDoc{Name: "entryChains", Doc: "Entries with upstream/downstream chains for the store's anchor (or targets). Args up, down: expansion depths.", Reads: []string{"anchor", "targets"}},
+		Doc: engine.FuncDoc{Name: "entryChains", Doc: "Entries with upstream/downstream chains for an explicit id arg or the store's anchor/targets. Args up, down: expansion depths; onceFull: serve nothing when every entry was already served in full this session; requireBody: fail when a primary resolves to an empty body. An explicit id resolves to its live supersession head before serving, so a project override wins and the read logs under the same ID the dedup checks.", Reads: []string{"anchor", "targets"}},
 		Fn: func(ctx *engine.Context, args map[string]any) (any, error) {
 			var ids []string
-			if id, ok := workflowStoreString(ctx.Store, "anchor"); ok {
-				ids = append(ids, id)
+			if id, _ := args["id"].(string); strings.TrimSpace(id) != "" {
+				ids = append(ids, workflowLiveHead(ctx.Graph, strings.TrimSpace(id)))
+			} else {
+				if id, ok := workflowStoreString(ctx.Store, "anchor"); ok {
+					ids = append(ids, id)
+				}
+				ids = append(ids, workflowStoreStrings(ctx.Store, "targets")...)
 			}
-			ids = append(ids, workflowStoreStrings(ctx.Store, "targets")...)
 			if len(ids) == 0 {
-				return nil, fmt.Errorf("entryChains: neither anchor nor targets is set in the store")
+				return nil, fmt.Errorf("entryChains: no explicit id and neither anchor nor targets is set in the store")
+			}
+			if onceFull, _ := args["onceFull"].(bool); onceFull {
+				pending := ids[:0]
+				for _, id := range ids {
+					if ctx.Reads[workflowLiveHead(ctx.Graph, id)] != engine.ReadFull {
+						pending = append(pending, id)
+					}
+				}
+				ids = pending
+				if len(ids) == 0 {
+					return "", nil
+				}
+			}
+			if requireBody, _ := args["requireBody"].(bool); requireBody {
+				for _, id := range ids {
+					if model.IsCrossRepoID(id) {
+						return nil, fmt.Errorf("entryChains: requireBody does not support cross-repo primary %s", id)
+					}
+					if _, _, err := ctx.Graph.FactBody(id); err != nil {
+						return nil, fmt.Errorf("entryChains: %w", err)
+					}
+				}
 			}
 			target, fromBinding := w.effectiveTarget(ctx.Store)
 			result, err := w.app.Show(w.ctx, w.identity, w.project, ShowRequest{
@@ -133,36 +158,25 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
-		// Not serve-safe: serving the overview body records it as a full session
-		// read (LogRead), which is what suppresses the automatic re-serve for the
-		// rest of the durable session (d-tac-vzz). Deliberately absent from every
-		// transition predicate — fact use stays instructional and observable.
-		Doc: engine.FuncDoc{Name: "draftingKnowledge", Doc: "Type-system drafting knowledge for capture: the live overview fact, served in full at most once per session, and the selected kind's authoring-fact pointer.", Reads: []string{"entryKind", "kind"}},
-		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
-			overviewID, overviewBody, err := ctx.Graph.FactBody(basefacts.OverviewFactID)
-			if err != nil {
-				return nil, fmt.Errorf("draftingKnowledge: %w", err)
+		Doc:       engine.FuncDoc{Name: "entryHead", Doc: "The live supersession head of the entry named by arg id — a pointer, not a serve; an empty id yields an empty result. Arg requireBody: fail when the head has an empty body, so the pointer never aims at nothing."},
+		ServeSafe: true,
+		Fn: func(ctx *engine.Context, args map[string]any) (any, error) {
+			id, _ := args["id"].(string)
+			id = strings.TrimSpace(id)
+			if id == "" {
+				return "", nil
 			}
-			result := DraftingKnowledge{OverviewID: overviewID}
-			if ctx.Reads[overviewID] != engine.ReadFull {
-				result.OverviewBody = overviewBody
-				w.session.LogRead("inject:draftingKnowledge", []string{overviewID}, nil)
+			if model.IsCrossRepoID(id) {
+				return id, nil
 			}
-			kind, ok := workflowStoreString(ctx.Store, "entryKind")
-			if !ok {
-				kind, _ = workflowStoreString(ctx.Store, "kind")
-			}
-			// A kind without an authoring fact (absence in the basefacts map) gets
-			// no pointer; a mapped fact that fails to resolve is an error.
-			if factID := basefacts.AuthoringFactID(model.Kind(kind)); factID != "" {
-				head, _, err := ctx.Graph.FactBody(factID)
+			if requireBody, _ := args["requireBody"].(bool); requireBody {
+				head, _, err := ctx.Graph.FactBody(id)
 				if err != nil {
-					return nil, fmt.Errorf("draftingKnowledge: %w", err)
+					return nil, fmt.Errorf("entryHead: %w", err)
 				}
-				result.KindFactID = head
-				result.Kind = kind
+				return head, nil
 			}
-			return result, nil
+			return ctx.Graph.ResolveRef(id).Head(), nil
 		},
 	}); err != nil {
 		return err
@@ -673,16 +687,13 @@ func WorkflowRegistryDocs(class string) ([]RegistryFunction, error) {
 	return result, nil
 }
 
-// DraftingKnowledge is the template-context shape of the draftingKnowledge
-// inject. OverviewBody is set only when this render is the session's first
-// full serve of the overview; KindFactID carries the live head of the selected
-// kind's authoring fact, empty when no kind is selected yet or the kind ships
-// no authoring fact.
-type DraftingKnowledge struct {
-	OverviewID   string
-	OverviewBody string
-	Kind         string
-	KindFactID   string
+// workflowLiveHead resolves a local ID to its supersession head; a cross-repo
+// ID passes through, since the local graph cannot walk a foreign chain.
+func workflowLiveHead(graph *model.Graph, id string) string {
+	if model.IsCrossRepoID(id) {
+		return id
+	}
+	return graph.ResolveRef(id).Head()
 }
 
 // FactIndexRow is the application-boundary shape of an indexed fact: plain,

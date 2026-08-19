@@ -183,15 +183,17 @@ func TestCaptureKindSelectedMidAssembleGetsAuthoringFactPointer(t *testing.T) {
 	}
 
 	serve := startCapture(t, workflow, identity, nil)
-	if strings.Contains(serve.Instructions, basefacts.DirectiveFactID) {
-		t.Fatalf("an unselected start must not name a kind's authoring fact yet")
+	// The full overview body indexes every authoring fact, so absence is
+	// asserted on the pointer block, not the ID.
+	if strings.Contains(serve.Instructions, "Selected-kind authoring fact") {
+		t.Fatalf("an unselected start must not carry the selected-kind pointer yet")
 	}
 
 	held := advanceWorkflow(t, workflow, identity, serve.Instance, map[string]any{"entryKind": "directive"})
 	if held.Step != "assemble" {
 		t.Fatalf("an incomplete report should re-serve assemble, got %q", held.Step)
 	}
-	if !strings.Contains(held.Instructions, basefacts.DirectiveFactID) {
+	if !strings.Contains(held.Instructions, "Selected-kind authoring fact") || !strings.Contains(held.Instructions, basefacts.DirectiveFactID) {
 		t.Fatalf("reporting the kind mid-assemble must surface its authoring-fact pointer on the re-serve")
 	}
 }
@@ -255,7 +257,7 @@ func TestCaptureStartFailsLoudOnEmptyOverviewFact(t *testing.T) {
 	if err == nil {
 		t.Fatal("a capture over an empty overview override must fail loudly, not drop the guidance")
 	}
-	if !strings.Contains(err.Error(), "draftingKnowledge") || !strings.Contains(err.Error(), "empty body") {
+	if !strings.Contains(err.Error(), "entryChains") || !strings.Contains(err.Error(), "empty body") {
 		t.Fatalf("the failure must name the inject and the empty fact, got: %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"sort"
 	"time"
 
@@ -150,11 +151,31 @@ type ContextualGraphs interface {
 type Engine struct {
 	Registry *Registry
 	Graphs   Graphs
+	// templateValues are host-supplied read-only values merged into every
+	// procedure template context — a generic data channel that keeps the
+	// engine agnostic to what the values mean. Name collisions with a spec's
+	// params or state fail the render (templateContext).
+	templateValues map[string]any
+}
+
+// EngineOption configures an engine.
+type EngineOption func(*Engine)
+
+// WithTemplateValues adds read-only values available to procedure templates
+// and inject-argument templates.
+func WithTemplateValues(values map[string]any) EngineOption {
+	return func(e *Engine) {
+		maps.Copy(e.templateValues, values)
+	}
 }
 
 // New creates an engine reading the current graph through graphs.
-func New(registry *Registry, graphs Graphs) *Engine {
-	return &Engine{Registry: registry, Graphs: graphs}
+func New(registry *Registry, graphs Graphs, opts ...EngineOption) *Engine {
+	e := &Engine{Registry: registry, Graphs: graphs, templateValues: map[string]any{}}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 // StaticGraphs is a Graphs backed by a fixed in-memory graph — for tests and

@@ -347,7 +347,7 @@ func newBootstrapCaptureEnv(t *testing.T) *bootstrapCaptureEnv {
 			return "", nil
 		},
 	})
-	registerFakeDraftingKnowledge(reg)
+	registerFakeDraftingInjects(reg)
 	mustRegisterCommand(reg, Command{
 		Doc:          FuncDoc{Name: "newEntry", Doc: "graph-appending fake write gate", Writes: []string{"entryId", "findings"}},
 		MutatesGraph: true,
@@ -371,7 +371,9 @@ func newBootstrapCaptureEnv(t *testing.T) *bootstrapCaptureEnv {
 	if env.capture, err = LoadSpec(baseEntry(t, "capture"), reg); err != nil {
 		t.Fatalf("loading capture: %v", err)
 	}
-	eng := New(reg, env.graph)
+	eng := New(reg, env.graph, WithTemplateValues(map[string]any{
+		"kindAuthoringFactIDs": fakeKindAuthoringFactIDs(),
+	}))
 	ts := time.Date(2026, 7, 19, 16, 0, 0, 0, time.UTC)
 	env.session = eng.NewSession("s_bc", "christopher", &memorySink{}, WithClock(func() time.Time {
 		ts = ts.Add(time.Second)
