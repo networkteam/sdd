@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
@@ -89,7 +88,8 @@ func marshalFindings[F any](findings []F) (sdd.LLMResult, error) {
 }
 
 // Entry declares a fixture graph entry written to disk before the world's
-// stores open. Zero values are omitted from the frontmatter.
+// stores open — a thin, string-friendly front over model.Entry; rendering
+// stays with the production serializer, never duplicated here.
 type Entry struct {
 	ID         string
 	Type       string // signal | decision
@@ -103,39 +103,26 @@ type Entry struct {
 	Supersedes []string
 	Closes     []string
 	Topics     []string
+	Refs       []model.Ref
 }
 
-func (e Entry) render() string {
-	var b strings.Builder
-	b.WriteString("---\ntype: " + e.Type + "\nkind: " + e.Kind + "\nlayer: " + e.Layer + "\n")
-	if e.Intent != "" {
-		b.WriteString("intent: " + e.Intent + "\n")
+func (e Entry) render(t *testing.T) string {
+	t.Helper()
+	entry := &model.Entry{
+		Type: model.EntryType(e.Type), Kind: model.Kind(e.Kind), Layer: model.Layer(e.Layer),
+		Intent: model.Intent(e.Intent), Summary: e.Summary, Content: e.Body,
+		Canonical: e.Canonical, Actor: e.Actor,
+		Supersedes: e.Supersedes, Closes: e.Closes, Refs: e.Refs,
 	}
-	if e.Summary != "" {
-		b.WriteString("summary: " + e.Summary + "\n")
-	}
-	if e.Canonical != "" {
-		b.WriteString("canonical: " + e.Canonical + "\n")
-	}
-	if e.Actor != "" {
-		b.WriteString("actor: " + e.Actor + "\n")
-	}
-	for field, ids := range map[string][]string{"supersedes": e.Supersedes, "closes": e.Closes} {
-		if len(ids) > 0 {
-			b.WriteString(field + ":\n")
-			for _, id := range ids {
-				b.WriteString("    - " + id + "\n")
-			}
+	for _, topic := range e.Topics {
+		path, err := model.ParseTopicPath(topic)
+		if err != nil {
+			t.Fatal(err)
 		}
+		entry.Topics = append(entry.Topics, path)
 	}
-	if len(e.Topics) > 0 {
-		b.WriteString("topics:\n")
-		for _, topic := range e.Topics {
-			b.WriteString("    - " + topic + "\n")
-		}
-	}
-	b.WriteString("---\n\n" + e.Body + "\n")
-	return b.String()
+	// The exact composition the write handler persists.
+	return model.FormatFrontmatter(entry) + "\n" + entry.Content + "\n"
 }
 
 // WriteEntry writes one fixture entry into the graph dir at its ID-derived
@@ -143,7 +130,7 @@ func (e Entry) render() string {
 // later reads see it).
 func WriteEntry(t *testing.T, graphDir string, e Entry) {
 	t.Helper()
-	WriteRawEntry(t, graphDir, e.ID, e.render())
+	WriteRawEntry(t, graphDir, e.ID, e.render(t))
 }
 
 // WriteRawEntry writes entry content verbatim for shapes the Entry struct
