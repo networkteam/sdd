@@ -69,6 +69,8 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 
 - **Test the exported surface**: Test files use the external test package (`package foo_test`) and exercise exported types, functions, and methods — that keeps tests honest about the API and free to refactor internals. An internal test is the exception, not the default: it needs an unexported seam that genuinely cannot be reached through the API, and it lives in a file named `*_internal_test.go` so the exception is visible. (Much existing code predates this rule — follow it for new test files, and prefer converting when touching old ones.)
 
+- **Tests live at the layer that owns what they assert, and no test fakes another layer's contract** (graph entry 20260819-152950-d-prc-h1m carries the full reasoning): `internal/engine` tests engine semantics over synthetic specs its test files own; `internal/proctest` tests shipped-procedure behavior against the real application (real registry, real ops, scripted LLM); `application` keeps unit tests for its own surfaces; `mcpapp` tests transport concerns.
+
 ## Structure
 
 ```
@@ -85,6 +87,8 @@ sdd/
 │   ├── git/                # Git adapter: exec-based implementations of the consumer-defined git interfaces (handlers.Committer/…, finders.GitSyncer, repos.Git)
 │   ├── repos/              # Connected repos for cross-repo refs: Locations (explicit paths), Registry (pure reads → finders), Manager (clone/pull/config writes → handlers)
 │   ├── meta/               # Config resolution
+│   ├── engine/             # Workflow engine: procedure specs, typed store, choosers, session event log
+│   ├── proctest/           # Integration harness + per-procedure behavior suites over the real application
 │   └── bundledskills/      # Skill source of truth (agent-neutral templates), embedded via //go:embed
 │       └── templates/      # Neutral *.md.tmpl skill tree, rendered per agent (sdd, sdd-catchup, sdd-explore, sdd-groom)
 ├── .claude/skills/         # Installed Claude render for this repo (rebuilt from internal/bundledskills/templates)

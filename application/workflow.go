@@ -14,6 +14,7 @@ import (
 
 	"github.com/networkteam/slogutils"
 
+	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
 )
@@ -393,7 +394,9 @@ func (a *Application) newWorkflow(ctx context.Context, identity RequestIdentity,
 	if err != nil {
 		return nil, err
 	}
-	w.engine = engine.New(registry, w.graphs)
+	w.engine = engine.New(registry, w.graphs, engine.WithTemplateValues(map[string]any{
+		"kindAuthoringFactIDs": basefacts.AuthoringFactIDs(),
+	}))
 	return w, nil
 }
 

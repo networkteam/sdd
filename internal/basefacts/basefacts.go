@@ -242,6 +242,16 @@ func AuthoringFactID(kind model.Kind) string {
 	return authoringFactIDs[kind]
 }
 
+// AuthoringFactIDs returns the shipped authoring-fact IDs keyed by kind name,
+// for read-only presentation contexts (procedure template values).
+func AuthoringFactIDs() map[string]string {
+	result := make(map[string]string, len(authoringFactIDs))
+	for kind, id := range authoringFactIDs {
+		result[string(kind)] = id
+	}
+	return result
+}
+
 // build materializes one base fact from its frontmatter and rendered body
 // through the same ParseEntry path every on-disk entry uses, then marks it
 // Embedded so write-side surfaces (summary regeneration, lint, rewrite) skip
