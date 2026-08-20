@@ -99,7 +99,7 @@ gh release view vX.Y.Z          # body intact, assets attached
 
 The workflow run typically completes in ~2 minutes. Sanity-check that the release body still shows the curated notes (not auto-generated) and that the assets list includes binaries, checksums, and `install.sh`.
 
-For a prerelease, check the two things a prerelease is for — that stable consumers were left alone:
+For a prerelease, check the two things a prerelease is for, namely that stable consumers were left alone:
 
 ```bash
 gh release view vX.Y.Z --json isPrerelease --jq .isPrerelease   # true
