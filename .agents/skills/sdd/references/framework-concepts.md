@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: 1f1a15c8e305cd865fd09ee2bb63a2a574e26ab1ef36a3f7b4f6c6ad1e05699f
+    sdd-content-hash: 546258a8ce98d5f877ff2a85d9536dc90b7158367fbe0492b0f5e0aeb3049459
     sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -174,7 +174,7 @@ Typical per-kind retirement paths:
 | gap | refined gap | decision addressing it; done signal (short-loop, see below); or any entry that says why it no longer applies |
 | fact | corrected fact | any entry that says why it stopped holding (often a directive: "no longer true / no longer relevant"; a fact may retire a fact when no corrected version exists) |
 | question | refined question | directive: "answered as X" or "won't pursue"; or fact / insight (dissolution) |
-| insight | corrected insight | any entry that says why it no longer holds (directive: "noted, no action needed"; or the done that records the work that made it moot) |
+| insight | corrected insight | any entry that says why it no longer holds (directive: "noted, no action needed"; or the done that records the work that made the insight no longer correct) |
 | done | corrective done (rare) | — (terminal — facts of execution) |
 | annotation | replacement annotation (rare; usually a new annotation entry instead) | any entry that says why the label is no longer wanted |
 | directive | replacement directive | done signal (standard); directive retiring it |
