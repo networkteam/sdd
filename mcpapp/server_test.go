@@ -489,6 +489,77 @@ func assembleReport() map[string]any {
 	}
 }
 
+func TestShowDepthDefaultsPreserveExplicitZero(t *testing.T) {
+	graphDir := filepath.Join(t.TempDir(), "graph")
+	entries := map[string]string{
+		"2026/08/20-100000-s-tac-upa.md": `---
+type: signal
+layer: tactical
+kind: gap
+summary: Upstream fixture.
+---
+
+Upstream fixture.
+`,
+		"2026/08/20-100100-d-tac-mid.md": `---
+type: decision
+layer: tactical
+kind: activity
+summary: Primary fixture.
+refs:
+    - id: 20260820-100000-s-tac-upa
+      kind: addresses
+---
+
+Primary fixture.
+`,
+		"2026/08/20-100200-s-tac-dwn.md": `---
+type: signal
+layer: tactical
+kind: done
+summary: Downstream fixture.
+refs:
+    - id: 20260820-100100-d-tac-mid
+      kind: builds-on
+---
+
+Downstream fixture.
+`,
+	}
+	for rel, content := range entries {
+		path := filepath.Join(graphDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	env := newTestServer(t, nil, graphDir, "")
+	cs := connect(t, env.srv)
+
+	var shown mcpserver.ShowResult
+	call(t, cs, "show", map[string]any{"ids": []string{"20260820-100100-d-tac-mid"}}, &shown)
+	for _, heading := range []string{"# upstream", "# downstream"} {
+		if !strings.Contains(shown.Entries, heading) {
+			t.Fatalf("omitted depths should apply defaults and render %s:\n%s", heading, shown.Entries)
+		}
+	}
+
+	call(t, cs, "show", map[string]any{
+		"ids": []string{"20260820-100100-d-tac-mid"}, "up": 0, "down": 0,
+	}, &shown)
+	for _, heading := range []string{"# upstream", "# downstream"} {
+		if strings.Contains(shown.Entries, heading) {
+			t.Fatalf("explicit zero depths should omit %s:\n%s", heading, shown.Entries)
+		}
+	}
+	if !strings.Contains(shown.Entries, "refs:") {
+		t.Fatalf("explicit zero depths should retain the primary entry's frontmatter:\n%s", shown.Entries)
+	}
+}
+
 // TestSearchDefaults_HeaderOnlyHitCapped pins the drill-serve defaults
 // (d-tac-dbk): no limit and no max_citations means at most 8 hits and zero
 // citation lines — the measured 26.5KB drill was this tool with snippet
@@ -804,7 +875,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "19b559d7a588da504c928f77fe866b32aa5f6b5e87f4de22c11406d96436ba85"
+	const want = "06d5f7c50a2489fb778eb02bcc6553209304ef11fdc995addd1e92ca81e35f3e"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
