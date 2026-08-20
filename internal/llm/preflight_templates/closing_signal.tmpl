@@ -1,0 +1,29 @@
+{{ define "closing_signal_user" -}}
+## Task
+
+A signal is being created that closes one or more entries, and the targets are not questions being answered. This is a retirement: the closing entry must say why each closed entry no longer holds. The close itself is allowed; pre-flight checks that the narrative states that why, not whether the reasoning is correct.
+
+## Checks
+
+1. **Stated why present**: The closing entry's narrative says why each closed target stopped holding — the situation changed, the reading was overturned, the value is stale with no corrected version. A retirement that merely restates the closed entry's content explains nothing.
+2. **Content is not adjudicated**: Do not evaluate whether the stated reason is true or sufficient. The presence of the stated why is the test, not its quality.
+
+## Calibration
+
+- `medium` — Narrative only states the new entry's own content and never says why a closed target stopped holding. Example: fact "the courier ships for €4.80 flat" closing fact "the courier ships for €4.50-5.80 per parcel" with narrative only describing the new rate and nothing about why the old value is retired rather than superseded.
+- `low` — The why is implicit; a sentence would sharpen it. Example: a gap closing a fact where the reported deviation plainly overturns the fact, but the narrative never says the fact is retired for that reason.
+- No finding — The why is explicit. Examples: "Not superseding: no updated measurement is available, just retiring the stale value"; "The supplier has gone out of business, so the deviation about their failing deliveries no longer applies."
+
+## Proposed entry
+
+{{ .ProposedEntry }}
+
+## Closed entries
+
+{{ .ClosedEntries }}
+{{ if .ReferencedEntries }}
+## Referenced entries (context)
+
+{{ .ReferencedEntries }}
+{{ end -}}
+{{- end }}

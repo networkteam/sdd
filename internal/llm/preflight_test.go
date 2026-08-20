@@ -55,9 +55,29 @@ func Test_selectCheckType(t *testing.T) {
 			expected: checkDissolution,
 		},
 		{
-			name:     "fact signal closing non-question routes to dissolution (unusual pattern)",
+			name:     "fact signal closing non-question routes to closing-signal",
 			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindFact, Closes: []string{factSignal.ID}},
-			expected: checkDissolution,
+			expected: checkClosingSignal,
+		},
+		{
+			name:     "insight closing question and fact (mixed targets) routes to closing-signal",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindInsight, Closes: []string{questionSignal.ID, factSignal.ID}},
+			expected: checkClosingSignal,
+		},
+		{
+			name:     "gap signal closing fact routes to closing-signal",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindGap, Closes: []string{factSignal.ID}},
+			expected: checkClosingSignal,
+		},
+		{
+			name:     "gap signal closing gap routes to closing-signal",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindGap, Closes: []string{gapSignal.ID}},
+			expected: checkClosingSignal,
+		},
+		{
+			name:     "fact closing unresolvable target routes to closing-signal",
+			entry:    &model.Entry{Type: model.TypeSignal, Kind: model.KindFact, Closes: []string{"20260410-999999-s-cpt-zzz"}},
+			expected: checkClosingSignal,
 		},
 		{
 			name:     "decision closing signal",

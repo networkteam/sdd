@@ -102,7 +102,8 @@ const (
 	checkClosingDecision                    // decision closing signals or stable-kind entries
 	checkDecisionRefs                       // decision with refs, no closes
 	checkShortLoop                          // done signal (or legacy action) closing a signal directly
-	checkDissolution                        // fact/insight signal closing a question
+	checkDissolution                        // fact/insight signal closing only questions
+	checkClosingSignal                      // any other non-done signal closure — stated-why check (20260820-215529-d-tac-4yb)
 	checkAspirationCapture                  // aspiration decision captured without closes
 	checkSignalCapture                      // signal validation
 	checkSupersedes                         // supersedes operation
@@ -124,6 +125,8 @@ func (c checkType) String() string {
 		return "short-loop"
 	case checkDissolution:
 		return "dissolution"
+	case checkClosingSignal:
+		return "closing-signal"
 	case checkAspirationCapture:
 		return "aspiration-capture"
 	case checkSignalCapture:
@@ -152,6 +155,7 @@ var checkTypeTemplates = map[checkType]string{
 	checkDecisionRefs:      "decision_refs",
 	checkShortLoop:         "short_loop",
 	checkDissolution:       "dissolution",
+	checkClosingSignal:     "closing_signal",
 	checkAspirationCapture: "aspiration_capture",
 	checkSignalCapture:     "signal_capture",
 	checkSupersedes:        "supersedes",
@@ -222,13 +226,15 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 		return checkShortLoop
 	}
 
-	// Fact or insight closing an entry — dissolution. The dissolution template
-	// targets question closures; non-question targets are flagged as unusual
-	// close patterns by the shared partial.
-	if entry.Type == model.TypeSignal &&
-		(entry.Kind == model.KindFact || entry.Kind == model.KindInsight) &&
-		len(entry.Closes) > 0 {
-		return checkDissolution
+	// Remaining signal closures route by target kind: a fact or insight whose
+	// targets are all questions is a dissolution; every other signal closure
+	// runs the closing-signal stated-why check (20260820-215529-d-tac-4yb).
+	if entry.Type == model.TypeSignal && len(entry.Closes) > 0 {
+		if (entry.Kind == model.KindFact || entry.Kind == model.KindInsight) &&
+			closesOnlyQuestions(entry, graph) {
+			return checkDissolution
+		}
+		return checkClosingSignal
 	}
 
 	if entry.Type == model.TypeDecision && len(entry.Closes) > 0 {
@@ -243,6 +249,20 @@ func selectCheckType(entry *model.Entry, graph *model.Graph) checkType {
 	}
 
 	return checkSignalCapture
+}
+
+// closesOnlyQuestions reports whether every closes target resolves to a
+// question signal. An unresolvable target counts as non-question, so the
+// closure runs the generic stated-why check rather than the dissolution
+// rubric, whose framing assumes a question.
+func closesOnlyQuestions(entry *model.Entry, graph *model.Graph) bool {
+	for _, id := range entry.Closes {
+		target, ok := graph.ByID[id]
+		if !ok || target.Type != model.TypeSignal || target.Kind != model.KindQuestion {
+			return false
+		}
+	}
+	return true
 }
 
 // assembleContext gathers graph data needed for the pre-flight prompt.
