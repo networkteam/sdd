@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: abcd612cdcd20d48c310b86bc302cae310ad4828dc82c6afb43f816cde5ae715
+    sdd-content-hash: dff091a1781d5e514c7d7ec02305ad8999d867b16ebb3d45a1d169638c2327a6
     sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -118,7 +118,7 @@ Three fields with distinct semantics:
 
 - `refs`: "builds on / depends on" — context or foundation, **no status effect**. Each ref carries a `kind` from the closed set below; the kind names *why* the reference exists.
 - `supersedes`: "replaces" — the referenced entry is no longer active/open. Bare-string ID list; no per-edge metadata.
-- `closes`: "resolves / fulfills" — the referenced entry is no longer active/open. Decisions close signals; done-kind signals close decisions and gap signals. Bare-string ID list.
+- `closes`: "resolves / fulfills" — the referenced entry is no longer active/open. The closing entry says why the target no longer holds (see Retirement primitives). Bare-string ID list.
 
 **Open signal** = not superseded, not closed. **Active decision** = not superseded, not closed.
 
@@ -195,7 +195,7 @@ A `kind: done` signal may close a `kind: gap` signal directly, bypassing a decis
 
 ## Proposals vs Facts
 
-Open entries — signals, unclosed decisions, open plans — describe *where the graph might go*, not where it is. Only a closing done signal (or a retirement directive) declares what was done, turning proposal into fact.
+Open entries — signals, unclosed decisions, open plans — describe *where the graph might go*, not where it is. Only a closing entry turns proposal into fact: a done signal declares what was done, a retirement says why the entry no longer applies.
 
 ## Contracts
 
