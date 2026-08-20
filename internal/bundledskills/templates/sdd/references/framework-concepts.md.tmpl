@@ -127,7 +127,7 @@ Every entry is retireable. Two primitives:
 - **supersedes** — same-kind successor replaces it
 - **closes** — new entry retires it without replacement
 
-**What makes a close valid is the stated why**, not the closer's kind. The closing entry must say why the target no longer holds. Three closes are refused no matter what the entry says:
+**What makes a close valid is the stated why**, not the closer's kind. The closing entry must say why the target no longer holds. These closes are refused no matter what the entry says:
 
 - a **question, actor, or annotation** closes nothing; it states no findings, so it cannot report that something stopped holding
 - a **decision other than a directive** does not close another decision; `supersedes` records the replacement and links the new decision to the one it replaces
