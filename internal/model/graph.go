@@ -1125,9 +1125,9 @@ func validateIDRefs(e *Entry, g *Graph, field string, ids []string) {
 // entry says (20260820-151100-d-cpt-304): a question, actor, or annotation
 // states no findings and closes nothing; a decision other than a directive
 // closing a decision must use supersedes; a settled directive is retired
-// only by supersession. Every other close is allowed — what makes a close
-// valid is the stated rationale, which pre-flight judges and flags instead
-// of blocking.
+// only by supersession. Every other close is allowed. What makes a close
+// valid is the stated rationale, and pre-flight judges that, flagging a
+// weak one instead of blocking.
 func validateCloses(e *Entry, g *Graph) {
 	for _, id := range e.Closes {
 		target, ok := g.ByID[id]
