@@ -225,7 +225,7 @@ func TestEveryKindHasAQuestion(t *testing.T) {
 func TestOverviewBodyIsSelfContained(t *testing.T) {
 	body := factByID(t, OverviewFactID).Content
 
-	for _, want := range []string{"# The type system", "Signal kinds", "Decision kinds", "force, not completion", "WHAT vs THAT", "Standing constraints are guiding directives", "outside vs here", "Retirement follows the same split", "layer", "This is the map, not the depth"} {
+	for _, want := range []string{"# The type system", "Signal kinds", "Decision kinds", "force, not completion", "WHAT vs THAT", "Standing constraints are guiding directives", "outside vs here", "states no findings and closes nothing", "layer", "This is the map, not the depth"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview body missing %q", want)
 		}
