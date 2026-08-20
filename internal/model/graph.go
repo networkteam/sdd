@@ -1121,12 +1121,13 @@ func validateIDRefs(e *Entry, g *Graph, field string, ids []string) {
 	}
 }
 
-// validateCloses checks type constraints on closes references.
-// Valid: decision closes signal; done-kind signal closes decision or signal;
-// a fact or insight signal closes (dissolves) a question; kind: directive
-// decision closes any decision as retirement without replacement.
-// Invalid: any other non-done signal close; any non-directive decision
-// closing a decision.
+// validateCloses checks the three closes refusals that hold whatever the
+// entry says (20260820-151100-d-cpt-304): a question, actor, or annotation
+// states no findings and closes nothing; a decision other than a directive
+// closing a decision must use supersedes; a settled directive is retired
+// only by supersession. Every other close is allowed — what makes a close
+// valid is the stated rationale, which pre-flight judges and flags instead
+// of blocking.
 func validateCloses(e *Entry, g *Graph) {
 	for _, id := range e.Closes {
 		target, ok := g.ByID[id]
@@ -1147,15 +1148,7 @@ func validateCloses(e *Entry, g *Graph) {
 		}
 
 		switch {
-		case e.Type == TypeSignal && (e.Kind == KindFact || e.Kind == KindInsight) &&
-			target.Type == TypeSignal && target.Kind == KindQuestion:
-			// Dissolution: a fact or insight answers a question into mootness —
-			// the only sanctioned signal-closes-signal path (see retirement
-			// primitives). Pre-flight's dissolution check then verifies dialogue
-			// context. Mirrors the directive→{contract,aspiration} retirement
-			// carve-out below.
-			continue
-		case e.Type == TypeSignal && e.Kind != KindDone:
+		case e.Type == TypeSignal && (e.Kind == KindQuestion || e.Kind == KindActor || e.Kind == KindAnnotation):
 			e.Warnings = append(e.Warnings, Warning{
 				Field:   "closes",
 				Value:   id,

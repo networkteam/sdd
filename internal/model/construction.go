@@ -127,7 +127,7 @@ const DoneAnchorRequirement = "done signal must carry at least one closes or ref
 
 // SignalCloseRule is the closes rule over signal kinds, declared once so the
 // validator and the served kind facts render the same words.
-const SignalCloseRule = "only done-kind signals may close entries, or a fact/insight dissolving a question"
+const SignalCloseRule = "a question, actor, or annotation signal states no findings and closes nothing"
 
 // DirectiveIntentRequirement is the directive kind's structural rule,
 // declared once so the validator and the served kind fact render the same

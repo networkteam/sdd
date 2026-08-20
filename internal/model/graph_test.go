@@ -954,17 +954,40 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 		wantMsg   string
 	}{
 		{
-			name: "non-done signal cannot close",
+			name: "question signal cannot close",
 			entries: []*Entry{
 				entry("20260406-100000-d-stg-aaa"),
+				entry("20260406-100100-s-stg-bbb", withKind(KindQuestion), withCloses("20260406-100000-d-stg-aaa")),
+			},
+			wantWarns: 1,
+			wantMsg:   "states no findings and closes nothing",
+		},
+		{
+			name: "actor signal cannot close",
+			entries: []*Entry{
+				entry("20260406-100000-s-prc-aaa"),
 				func() *Entry {
-					e := entry("20260406-100100-s-stg-bbb")
-					e.Closes = []string{"20260406-100000-d-stg-aaa"}
+					e := entry("20260406-100100-s-prc-act", withKind(KindActor), withCloses("20260406-100000-s-prc-aaa"))
+					e.Canonical = "Someone"
 					return e
 				}(),
 			},
 			wantWarns: 1,
-			wantMsg:   "only done-kind signals may close entries",
+			wantMsg:   "states no findings and closes nothing",
+		},
+		{
+			name: "annotation signal cannot close",
+			entries: []*Entry{
+				entry("20260406-100000-s-prc-aaa"),
+				func() *Entry {
+					e := entry("20260406-100100-s-prc-ann", withKind(KindAnnotation), withCloses("20260406-100000-s-prc-aaa"))
+					e.Refs = refsOf("20260406-100000-s-prc-aaa")
+					e.AnnotationTopics = []AnnotationTopic{{Label: "test-topic"}}
+					return e
+				}(),
+			},
+			wantWarns: 1,
+			wantMsg:   "states no findings and closes nothing",
 		},
 		{
 			name: "done signal may close decision",
@@ -1057,13 +1080,28 @@ func TestLintClosesTypeMismatch(t *testing.T) {
 			wantWarns: 0,
 		},
 		{
-			name: "fact cannot close gap (not dissolution)",
+			name: "valid: fact retires fact (no corrected successor)",
 			entries: []*Entry{
-				entry("20260406-100000-s-tac-gap", withKind(KindGap)),
-				entry("20260406-100100-s-tac-fkg", withKind(KindFact), withCloses("20260406-100000-s-tac-gap")),
+				entry("20260406-100000-s-tac-old", withKind(KindFact)),
+				entry("20260406-100100-s-tac-new", withKind(KindFact), withCloses("20260406-100000-s-tac-old")),
 			},
-			wantWarns: 1,
-			wantMsg:   "only done-kind signals may close entries",
+			wantWarns: 0,
+		},
+		{
+			name: "valid: gap retires stale fact",
+			entries: []*Entry{
+				entry("20260406-100000-s-tac-fct", withKind(KindFact)),
+				entry("20260406-100100-s-tac-gpp", withKind(KindGap), withCloses("20260406-100000-s-tac-fct")),
+			},
+			wantWarns: 0,
+		},
+		{
+			name: "valid: gap closes gap (deviation no longer applies)",
+			entries: []*Entry{
+				entry("20260406-100000-s-tac-ga1", withKind(KindGap)),
+				entry("20260406-100100-s-tac-ga2", withKind(KindGap), withCloses("20260406-100000-s-tac-ga1")),
+			},
+			wantWarns: 0,
 		},
 	}
 
