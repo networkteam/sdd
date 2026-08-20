@@ -37,6 +37,7 @@ func annotationMechanics() string {
 		kinds = append(kinds, string(k))
 	}
 	fmt.Fprintf(&b, "Annotation is a signal kind (the signal kinds: %s).\n\n", strings.Join(kinds, ", "))
+	fmt.Fprintf(&b, "Closing rule over signal kinds: %s.\n\n", model.SignalCloseRule)
 	fmt.Fprintf(&b, "Enforced at capture: %s.\n\n", model.AnnotationRefsRequirement)
 	fmt.Fprintf(&b, "Also enforced: %s.\n", model.AnnotationTopicRequirement)
 	return b.String()

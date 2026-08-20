@@ -87,7 +87,7 @@ Where two kinds compete, these tests settle it:
 - **A done records a past act** and points at what it completes.
 - **An annotation carries structure, not narrative** — metadata laid over the entries it references.
 
-Retirement follows the same split: a **done** closes what completed; a **directive** closes, with its reasoning, what will not be built or no longer holds; a **fact or insight** may close a question by answering it; same-kind supersession replaces.
+Retirement: any entry that states why another no longer holds may close it; a question, actor, or annotation states no findings and closes nothing. A **done** closes what completed; a **directive** closes, with its reasoning, what will not be built; same-kind supersession replaces.
 
 Every entry also names its **layer**, the depth of the thinking:
 
