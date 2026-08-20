@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: 546258a8ce98d5f877ff2a85d9536dc90b7158367fbe0492b0f5e0aeb3049459
+    sdd-content-hash: cfa0401d40eab99bfb2c17cb9400d7d2540984e7c2b1c6250ab9dd860e90b3cf
     sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -161,18 +161,18 @@ Every entry is retireable. Two primitives:
 - **supersedes** — same-kind successor replaces it
 - **closes** — new entry retires it without replacement
 
-**What makes a close valid is the stated why**, not the closer's kind. The closing entry must say why the target no longer holds. Mechanical validation refuses only three cases, whatever the entry says:
+**What makes a close valid is the stated why**, not the closer's kind. The closing entry must say why the target no longer holds. Three closes are refused no matter what the entry says:
 
 - a **question, actor, or annotation** closes nothing; it states no findings, so it cannot report that something stopped holding
-- a **decision other than a directive** does not close another decision; `supersedes` records the replacement with its lineage
-- a **settled directive** is born terminal; only a superseding entry retires it
+- a **decision other than a directive** does not close another decision; `supersedes` records the replacement and links the new decision to the one it replaces
+- a **settled directive** is finished the moment it is written; it can be superseded, never closed
 
 Typical per-kind retirement paths:
 
 | Entry | Supersede path | Close path |
 |---|---|---|
 | gap | refined gap | decision addressing it; done signal (short-loop, see below); or any entry that says why it no longer applies |
-| fact | corrected fact | any entry that says why it stopped holding (often a directive: "no longer true / no longer relevant"; a fact may retire a fact when no corrected version exists) |
+| fact | corrected fact | any entry that says why it stopped holding (often a directive: "no longer true / no longer relevant"; a fact may close a fact when no corrected version exists) |
 | question | refined question | directive: "answered as X" or "won't pursue"; or fact / insight (dissolution) |
 | insight | corrected insight | any entry that says why it no longer holds (directive: "noted, no action needed"; or the done that records the work that made the insight no longer correct) |
 | done | corrective done (rare) | — (terminal — facts of execution) |
