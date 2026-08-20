@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: 478925e29c29223af7c4ae61d64bb3f89a18d17a60f3cd9478bcd749fa666022
+    sdd-content-hash: 617b42e6db3caf2ec2098a6f3bc30ef772e45a9954ac98628da9f1e920cccf40
     sdd-version: dev
 ---
 # SDD Framework Concepts
@@ -161,11 +161,11 @@ Every entry is retireable. Two primitives:
 - **supersedes** — same-kind successor replaces it
 - **closes** — new entry retires it without replacement
 
-**What makes a close valid is the stated why**, not the closer's kind: the closing entry must say why the target no longer holds. Mechanical validation refuses only three shapes, whatever the entry says:
+**What makes a close valid is the stated why**, not the closer's kind. The closing entry must say why the target no longer holds. Mechanical validation refuses only three cases, whatever the entry says:
 
-- a **question, actor, or annotation** closes nothing — they state no findings, so they cannot report that something stopped holding
-- a **decision other than a directive** does not close another decision — `supersedes` records that replacement with its lineage
-- a **settled directive** is born terminal — only a superseding entry retires it
+- a **question, actor, or annotation** closes nothing; it states no findings, so it cannot report that something stopped holding
+- a **decision other than a directive** does not close another decision; `supersedes` records the replacement with its lineage
+- a **settled directive** is born terminal; only a superseding entry retires it
 
 Typical per-kind retirement paths:
 
@@ -174,7 +174,7 @@ Typical per-kind retirement paths:
 | gap | refined gap | decision addressing it; done signal (short-loop, see below); or any entry that says why it no longer applies |
 | fact | corrected fact | any entry that says why it stopped holding (often a directive: "no longer true / no longer relevant"; a fact may retire a fact when no corrected version exists) |
 | question | refined question | directive: "answered as X" or "won't pursue"; or fact / insight (dissolution) |
-| insight | corrected insight | any entry that says why it no longer holds (directive: "noted, no action needed"; or the done that records the work which absorbed it) |
+| insight | corrected insight | any entry that says why it no longer holds (directive: "noted, no action needed"; or the done for the work that absorbed it) |
 | done | corrective done (rare) | — (terminal — facts of execution) |
 | annotation | replacement annotation (rare; usually a new annotation entry instead) | any entry that says why the label is no longer wanted |
 | directive | replacement directive | done signal (standard); directive retiring it |
@@ -185,7 +185,7 @@ Typical per-kind retirement paths:
 | focus | replacement focus (priorities shift mid-cycle) | done signal (cycle ended naturally); directive retiring it |
 | procedure | revised procedure (project customization or shipped successor) | directive retiring the move without replacement |
 
-**Retirement rationale is required** whenever a close retires an entry rather than records its completion. Pre-flight checks that the narrative states *why* — not whether the why is correct — and flags a weak rationale instead of blocking the close. It matters most where a commitment is retired unbuilt: a `done` signal says what was delivered, a retiring directive must say why nothing will be.
+**Retirement rationale is required** whenever a close retires an entry rather than records its completion. Pre-flight checks that the narrative states *why*, not whether the why is correct, and flags a weak rationale instead of blocking the close. It matters most where a commitment is retired unbuilt: a `done` signal says what was delivered, a retiring directive must say why nothing will be.
 
 ## Short-loop closure
 
