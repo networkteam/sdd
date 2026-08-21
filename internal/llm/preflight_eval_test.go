@@ -1464,3 +1464,68 @@ func TestPreflightEval_Settled_Justified_NoFinding(t *testing.T) {
 		t.Logf("Correctly accepted justified settled directive. Findings: %+v", result.Findings)
 	}
 }
+
+// --- Closing-signal rubric (d-tac-4yb): stated-why on non-question signal closures ---
+
+// TestPreflightEval_ClosingSignal_NoStatedWhy_Flagged: a fact closes a fact
+// while the narrative only states the new figure and never says why the old
+// one is retired. Expected: a finding at medium or above (the closing-signal
+// stated-why check, the unusual-close pattern flag, or both).
+func TestPreflightEval_ClosingSignal_NoStatedWhy_Flagged(t *testing.T) {
+	oldFact := &model.Entry{
+		ID:         "20260410-120000-s-tac-old",
+		Type:       model.TypeSignal,
+		Kind:       model.KindFact,
+		Layer:      model.LayerTactical,
+		Confidence: "high",
+		Content:    "The courier ships parcels for 4.50-5.80 EUR per parcel depending on volume tier, per the 2025 rate card.",
+		Time:       time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{oldFact})
+
+	proposed := &model.Entry{
+		Type:       model.TypeSignal,
+		Kind:       model.KindFact,
+		Layer:      model.LayerTactical,
+		Confidence: "high",
+		Closes:     []string{oldFact.ID},
+		Content:    "The courier ships parcels for a flat 4.80 EUR per parcel, per the March 2026 price sheet.",
+	}
+
+	anyMediumOrHigh := func(result *llm.PreflightResult) error {
+		if hasFindingAtSeverity(result.Findings, llm.SeverityMedium, nil) ||
+			hasFindingAtSeverity(result.Findings, llm.SeverityHigh, nil) {
+			return nil
+		}
+		return fmt.Errorf("no finding at medium or above for a closure with no stated why")
+	}
+	runEvalPassRate(t, graph, proposed, advisoryTier, anyMediumOrHigh)
+}
+
+// TestPreflightEval_ClosingSignal_StatedWhy_NoBlocking: a gap closes a gap,
+// carrying why the earlier deviation no longer applies. This is the closure
+// shape the close-validation rework legalized; a spurious high here blocks
+// capture, so the case pins the blocking tier.
+func TestPreflightEval_ClosingSignal_StatedWhy_NoBlocking(t *testing.T) {
+	oldGap := &model.Entry{
+		ID:         "20260410-120000-s-tac-dev",
+		Type:       model.TypeSignal,
+		Kind:       model.KindGap,
+		Layer:      model.LayerTactical,
+		Confidence: "high",
+		Content:    "Deliveries from the timber supplier keep failing the grade check: the framing contract specifies C24, and the last three deliveries measured C16 on receipt.",
+		Time:       time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC),
+	}
+	graph := model.NewGraph([]*model.Entry{oldGap})
+
+	proposed := &model.Entry{
+		Type:       model.TypeSignal,
+		Kind:       model.KindGap,
+		Layer:      model.LayerTactical,
+		Confidence: "high",
+		Closes:     []string{oldGap.ID},
+		Content:    "The timber supplier has ceased trading: the yard confirmed on 2026-04-09 that the business closed at the end of March. Expected per the framing contract: an active C24 supply. Actual: no supplier and no further deliveries. This closes the earlier deviation about failing grade checks, which no longer applies now that there are no deliveries to check; finding a replacement supplier is the deviation this entry carries forward.",
+	}
+
+	runEvalPassRate(t, graph, proposed, blockingTier, noBlocking)
+}
