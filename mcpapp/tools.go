@@ -217,8 +217,8 @@ type ViewResult struct {
 
 type ShowArgs struct {
 	IDs  []string `json:"ids" jsonschema:"entry IDs to show; accepts an unambiguous short ID ({type}-{layer}-{suffix}) and resolves it to the full entry"`
-	Up   int      `json:"up,omitempty" jsonschema:"upstream chain depth; default 2"`
-	Down int      `json:"down,omitempty" jsonschema:"downstream chain depth; default 1"`
+	Up   *int     `json:"up,omitempty" jsonschema:"upstream chain depth; omitted = default 2, 0 = no upstream"`
+	Down *int     `json:"down,omitempty" jsonschema:"downstream chain depth; omitted = default 1, 0 = no downstream"`
 }
 
 type ShowResult struct {
@@ -1056,13 +1056,13 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
 	}
-	up := args.Up
-	if up == 0 {
-		up = sdd.DefaultShowUpDepth
+	up := sdd.DefaultShowUpDepth
+	if args.Up != nil {
+		up = *args.Up
 	}
-	down := args.Down
-	if down == 0 {
-		down = sdd.DefaultShowDownDepth
+	down := sdd.DefaultShowDownDepth
+	if args.Down != nil {
+		down = *args.Down
 	}
 	branch, branchFromSession := s.attachedBranch(req.Session)
 	result, err := s.app.Show(ctx, s.requestIdentity(req), s.project, sdd.ShowRequest{
