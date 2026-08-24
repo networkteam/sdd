@@ -131,6 +131,10 @@ Skills are **source-of-truth as agent-neutral templates in `internal/bundledskil
 - **Scope every manual commit with an explicit `-- <pathspec>`.** `git commit -m …` without a pathspec records the *whole* index, not just what you staged — and with concurrent sessions the index may already hold ambient staged changes. Always `git commit -- path/to/file …` so the commit contains exactly the intended files, the same way `sdd`'s own auto-commits scope themselves.
 - **Trust `sdd`'s auto-commit.** `sdd new`, `sdd summarize`, and `sdd init` make their own `sdd: …` commit. If the command exits without error, the entry and its commit are done — do not re-run `git status` / `git log` to confirm. The only thing worth reading back is the generated summary (for fidelity), not the commit.
 
+## Writing
+
+All dialogue with the user and every graph entry follows the `unslop` skill. Why it binds here: graph entries are read many times, by people and agents far from the moment of writing, so filler, hedging, and AI-typical phrasing multiply their cost at every read; dialogue text is what the user works with directly. SDD's own defined terms (signal, decision, capture, serve, and so on) are fine: the skill targets empty language, not vocabulary (Christopher, 2026-08-24).
+
 ## Memory
 
 **Do not keep a parallel memory store for this project.** This repo dogfoods SDD — we use SDD to develop SDD. A separate agent memory (auto-memory, a side notes file, a scratch store) creates a parallel record that shortcuts what the graph and skill dialogue are supposed to handle, and it contaminates the evaluation of whether SDD itself is guiding the work well. If memory quietly carries the context that SDD should be surfacing through signals, decisions, and skill guidance, we lose the signal about where the framework is falling short.
