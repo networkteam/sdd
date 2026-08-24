@@ -1,28 +1,30 @@
 ---
 name: unslop
-description: Cut AI tells from any writing. Must always apply.
+description: Write the tersest text that carries the meaning exactly and unambiguously. Must always apply.
 ---
 
 # Unslop
 
-Edit text to remove AI patterns and add human voice.
+Find the text that communicates the meaning most clearly and unambiguously, in the tersest way. The patterns below are cut because they work against that: they spend words without adding meaning, or they blur it.
+
+The two places this applies pull slightly differently:
+
+- **Dialogue with the user.** A colleague's voice: direct and specific, with an opinion where you have one. Terse never means clipped or evasive.
+- **Graph entries.** Written once, read for years by people and agents far from the moment of writing. Level-headed and objective; boring is correct. Terms and vocabulary must be exact. A loosely worded entry reduces its meaning. An overlong one dilutes its informational content.
 
 ## Process
 
 1. Scan for the patterns below.
-2. Rewrite. Preserve meaning, match intended tone.
-3. Add soul (see next section).
-4. Self-audit: "What makes this obviously AI generated?" Fix remaining tells.
+2. Rewrite. Preserve the meaning, match the register.
+3. Self-audit: does every word carry meaning? Is any term inexact or ambiguous?
 
-## Adding soul
+## Dialogue voice
 
-Removing patterns is half the job. Sterile, voiceless writing is just as obvious.
+These apply to dialogue and prose for people, never to graph entries.
 
 - **Have opinions.** React to facts instead of neutrally listing pros and cons.
-- **Vary rhythm.** Short sentences. Then longer ones that take their time. Mix it up.
 - **Acknowledge complexity.** "Impressive but also kind of unsettling" beats "impressive."
 - **Use "I" when it fits.** First person isn't unprofessional.
-- **Let some mess in.** Perfect structure looks machine-made.
 - **Be specific.** Not "this is concerning" but "there's something unsettling about agents churning away at 3am."
 
 ## Patterns to detect and fix

@@ -133,7 +133,7 @@ Skills are **source-of-truth as agent-neutral templates in `internal/bundledskil
 
 ## Writing
 
-All dialogue with the user and every graph entry follows the `unslop` skill. Why it binds here: graph entries are read many times, by people and agents far from the moment of writing, so filler, hedging, and AI-typical phrasing multiply their cost at every read; dialogue text is what the user works with directly. SDD's own defined terms (signal, decision, capture, serve, and so on) are fine: the skill targets empty language, not vocabulary (Christopher, 2026-08-24).
+All dialogue with the user and every graph entry follows the `unslop` skill — load it before writing either. It carries the goal (the tersest text that carries the meaning exactly), how the dialogue and graph-entry registers differ, and the pattern catalog (Christopher, 2026-08-24).
 
 ## Memory
 
