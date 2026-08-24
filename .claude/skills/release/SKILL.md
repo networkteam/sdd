@@ -12,8 +12,12 @@ A release = a new git tag (`vX.Y.Z`) on `main`. The tag push triggers `.github/w
 ### 1. Survey what's changed
 
 ```bash
+git fetch --tags
+git describe --tags --abbrev=0
 git log $(git describe --tags --abbrev=0)..HEAD --oneline
 ```
+
+Fetch first, or a tag pushed from another machine stays invisible and the baseline is wrong. If the user named a version, check it against the tag list before drafting anything. Tags are never reused (see Recovery), so a version that already exists means the next number instead, and the notes then cover a different span.
 
 The git log is the authoritative scope of the release. Commit subjects in this project often carry a graph entry ID like `(d-tac-e1s)` or `(s-tac-2b0)`. Collect all relevant IDs from the log, then pull them in one batch call:
 
