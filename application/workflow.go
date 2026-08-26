@@ -74,22 +74,24 @@ type WorkflowChooser struct {
 }
 
 type WorkflowServe struct {
-	Session         SessionID
-	Branch          string
-	Instance        string
-	Procedure       string
-	Status          string
-	Step            string
-	Goal            string
-	Instructions    string
-	Missing         []string
-	ReportSchema    map[string]any
-	PendingChooser  *WorkflowChooser
-	Execution       string
-	Produced        map[string]any
-	Diagnostics     []string
-	InstructionUnit string
-	Base            *WorkflowServe
+	Session        SessionID
+	Branch         string
+	Instance       string
+	Procedure      string
+	Status         string
+	Step           string
+	Goal           string
+	Instructions   string
+	Missing        []string
+	ReportSchema   map[string]any
+	PendingChooser *WorkflowChooser
+	Execution      string
+	Produced       map[string]any
+	Diagnostics    []string
+	// InstructionLanes are the unit's rendered lanes in order — what the MCP
+	// layer dedups independently; Instructions is their join plus diagnostics.
+	InstructionLanes []engine.ServeLane
+	Base             *WorkflowServe
 	// Collected is the instance's already-gathered param and state values,
 	// projected only onto resume serves so a newly attached or reoriented
 	// agent sees what this instance holds — the anchor, chosen scope, and
@@ -109,6 +111,13 @@ func (s *WorkflowServe) ReminderInstructions() string {
 	}
 	reminder := fmt.Sprintf("(step %s instructions were served earlier this session — follow them; goal: %s. Lost them to a context compaction? resume_session with fullReplay:true re-serves this position in full.)", s.Step, s.Goal)
 	return engine.ComposeInstructions(reminder, s.Diagnostics)
+}
+
+// ComposeInstructions joins host-recomposed unit text (e.g. the deduped lane
+// subset) with this serve's diagnostics — the engine's one composition rule
+// applied host-side.
+func (s *WorkflowServe) ComposeInstructions(unitText string) string {
+	return engine.ComposeInstructions(unitText, s.Diagnostics)
 }
 
 type WorkflowInstanceSummary struct {
@@ -1104,7 +1113,8 @@ func (w *WorkflowSession) publicServe(serve *engine.Serve) *WorkflowServe {
 	result := &WorkflowServe{
 		Session: w.ID(), Branch: w.branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: string(serve.Status),
 		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
-		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Diagnostics: append([]string(nil), serve.Diagnostics...), InstructionUnit: serve.UnitText,
+		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Diagnostics: append([]string(nil), serve.Diagnostics...),
+		InstructionLanes: append([]engine.ServeLane(nil), serve.Lanes...),
 	}
 	if serve.Chooser != nil {
 		chooser := &WorkflowChooser{Chooser: serve.Chooser.Chooser, Kind: ChooserKind(serve.Chooser.Kind)}

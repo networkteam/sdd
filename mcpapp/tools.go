@@ -575,11 +575,11 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 		out.Instructions = "The instance holds WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
 	}
 	if result.Base != nil {
-		base, err := s.toRootServeResult(ctx, req, ss, result.Base)
+		base, err := s.toBaseServeResult(ctx, req, ss, result.Base)
 		if err != nil {
 			return nil, AbandonResult{}, err
 		}
-		out.Base = rootBaseServe(base)
+		out.Base = base
 	}
 	return nil, out, nil
 }
@@ -609,11 +609,11 @@ func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkAr
 		Instructions: "The move is parked with its state kept — it stays listed as an open thread and resumes through next. Tell the user it is recorded as open work, not forgotten.",
 	}
 	if result.Base != nil {
-		base, err := s.toRootServeResult(ctx, req, ss, result.Base)
+		base, err := s.toBaseServeResult(ctx, req, ss, result.Base)
 		if err != nil {
 			return nil, ParkResult{}, err
 		}
-		out.Base = rootBaseServe(base)
+		out.Base = base
 	}
 	return nil, out, nil
 }
@@ -648,11 +648,11 @@ func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, a
 			return nil, AbandonResult{}, err
 		}
 		if serve != nil {
-			mapped, err := s.toRootServeResult(ctx, req, current, serve)
+			mapped, err := s.toBaseServeResult(ctx, req, current, serve)
 			if err != nil {
 				return nil, AbandonResult{}, err
 			}
-			out.Base = rootBaseServe(mapped)
+			out.Base = mapped
 		}
 	}
 	return nil, out, nil
@@ -1157,19 +1157,17 @@ func (s *Server) composeFraming(ms *mcp.ServerSession, blocks []string) string {
 	return strings.Join(served, "\n\n")
 }
 
-// toRootServeResult converts an engine serve into the tool response. The shell's
-// open-work block lists this dialogue's own threads only; other dialogues never
-// appear here (the door's one-line count is composed at the start_session call
-// sites, not in this shared converter).
-func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
+// serveResultBody converts the serve fields every landing shares —
+// instructions with per-lane dedup, chooser, framing, open threads. Schema
+// and vocabulary dedup live only in toRootServeResult: a base mapping drops
+// those fields, and recording bytes never delivered would stub them for a
+// later serve that does deliver.
+func (s *Server) serveResultBody(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res := ServeResult{
 		Session: string(serve.Session), Branch: serve.Branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
-		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
+		Step: serve.Step, Goal: serve.Goal, Instructions: s.composeInstructions(req.Session, serve), Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Execution: serve.Execution,
 		Collected: capCollected(serve.Collected),
-	}
-	if serve.InstructionUnit != "" && s.servedBefore(req.Session, serve.InstructionUnit) {
-		res.Instructions = serve.ReminderInstructions()
 	}
 	if serve.PendingChooser != nil {
 		chooser := &ChooserResult{Chooser: serve.PendingChooser.Chooser, Kind: string(serve.PendingChooser.Kind)}
@@ -1186,6 +1184,59 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 	if ss.root.IsShell(serve.Instance) {
 		res.OpenThreads = s.openThreadsRoot(req, ss)
 	}
+	return res, nil
+}
+
+// composeInstructions applies the served-once memory at lane granularity:
+// lanes new to the connection serve in full, already-served lanes collapse
+// into one line naming them, and a serve with no new lane falls back to the
+// whole-step reminder (d-tac-87o).
+func (s *Server) composeInstructions(ms *mcp.ServerSession, serve *sdd.WorkflowServe) string {
+	lanes := serve.InstructionLanes
+	if len(lanes) == 0 {
+		return serve.Instructions
+	}
+	var fresh, withheld []string
+	for _, lane := range lanes {
+		if s.servedBefore(ms, lane.Text) {
+			withheld = append(withheld, lane.Name)
+			continue
+		}
+		fresh = append(fresh, lane.Text)
+	}
+	if len(fresh) == 0 {
+		return serve.ReminderInstructions()
+	}
+	text := strings.Join(fresh, "\n\n")
+	if len(withheld) > 0 {
+		text += fmt.Sprintf("\n\n(lanes served earlier this session: %s — resume_session with fullReplay:true re-serves this position in full)", strings.Join(withheld, ", "))
+	}
+	return serve.ComposeInstructions(text)
+}
+
+// reportSchemaStub replaces a schema this connection already holds.
+func reportSchemaStub(serve *sdd.WorkflowServe) map[string]any {
+	return map[string]any{
+		"served_earlier": fmt.Sprintf("identical to the %s/%s report schema served earlier this session — resume_session with fullReplay:true re-serves it in full", serve.Procedure, serve.Step),
+	}
+}
+
+// toRootServeResult converts an engine serve into the tool response. The shell's
+// open-work block lists this dialogue's own threads only; other dialogues never
+// appear here (the door's one-line count is composed at the start_session call
+// sites, not in this shared converter).
+func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
+	res, err := s.serveResultBody(ctx, req, ss, serve)
+	if err != nil {
+		return ServeResult{}, err
+	}
+	// The schema is a derived lane: generated, static per procedure version,
+	// deduped on its canonical bytes (Go maps marshal with sorted keys).
+	if len(serve.ReportSchema) > 0 {
+		if raw, err := json.Marshal(serve.ReportSchema); err == nil && s.servedBefore(req.Session, "report_schema:"+string(raw)) {
+			res.ReportSchema = reportSchemaStub(serve)
+		}
+	}
 	vocabulary, err := s.app.Vocabulary(ctx, s.requestIdentity(req), s.project)
 	if err != nil {
 		return ServeResult{}, err
@@ -1194,17 +1245,23 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 		res.Vocabulary = vocabulary
 	}
 	if serve.Base != nil {
-		base, err := s.toRootServeResult(ctx, req, ss, serve.Base)
+		base, err := s.toBaseServeResult(ctx, req, ss, serve.Base)
 		if err != nil {
 			return ServeResult{}, err
 		}
-		res.Base = &BaseServe{
-			Session: base.Session, Branch: base.Branch, Instance: base.Instance, Procedure: base.Procedure, Status: base.Status,
-			Step: base.Step, Goal: base.Goal, Instructions: base.Instructions, PendingChooser: base.PendingChooser,
-			Framing: base.Framing, OpenThreads: base.OpenThreads,
-		}
+		res.Base = base
 	}
 	return res, nil
+}
+
+// toBaseServeResult maps a serve onto the base_junction landing, which
+// carries no schema or vocabulary — so neither is recorded as served here.
+func (s *Server) toBaseServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (*BaseServe, error) {
+	body, err := s.serveResultBody(ctx, req, ss, serve)
+	if err != nil {
+		return nil, err
+	}
+	return rootBaseServe(body), nil
 }
 
 func rootBaseServe(result ServeResult) *BaseServe {

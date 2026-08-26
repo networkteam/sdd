@@ -341,11 +341,11 @@ Regular heading.
 	if len(spec.Units) != 2 {
 		t.Fatalf("units = %v, want draft and spare", spec.Units)
 	}
-	if !strings.Contains(spec.Units["draft"], "Do the draft.") {
-		t.Errorf("draft unit = %q", spec.Units["draft"])
+	if got := spec.Units["draft"].Lanes; len(got) != 1 || got[0].Name != "draft" || !strings.Contains(got[0].Text, "Do the draft.") {
+		t.Errorf("draft unit = %+v, want one implicit lane named after the unit", got)
 	}
-	if strings.Contains(spec.Units["spare"], "Not a unit") {
-		t.Errorf("unit must end at the next level-2 heading, got %q", spec.Units["spare"])
+	if got := spec.Units["spare"].Lanes; len(got) != 1 || strings.Contains(got[0].Text, "Not a unit") {
+		t.Errorf("unit must end at the next level-2 heading, got %+v", got)
 	}
 	step := spec.StepByID["draft"]
 	if len(step.Collect) != 2 || step.Collect[0].Optional || !step.Collect[1].Optional {

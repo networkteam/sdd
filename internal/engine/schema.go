@@ -148,6 +148,7 @@ func procedureSpecSchema() map[string]any {
 	inject := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
+			"id":   map[string]any{"type": "string"},
 			"fn":   map[string]any{"type": "string"},
 			"args": map[string]any{"type": "object"},
 		},

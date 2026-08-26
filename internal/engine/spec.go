@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"text/template"
 
 	"gopkg.in/yaml.v3"
 
@@ -39,7 +41,7 @@ type Spec struct {
 	StepByID map[string]*Step
 	// Units are the body's instruction units by name (`## unit: <name>`
 	// sections), rendered as Go templates against the store at serve time.
-	Units map[string]string
+	Units map[string]Unit
 	// Framing declares a shell's session-framing lanes: inject query calls the
 	// shell renders into its serve alongside the engine-supplied info block,
 	// through the same query mechanism a step's inject uses. Empty on moves and
@@ -84,8 +86,34 @@ type CollectField struct {
 // InjectCall is a query op the engine runs before serving a step's unit.
 // Args are literals or Go templates rendered against the store.
 type InjectCall struct {
+	// Id is the stable identifier the unit template references the result
+	// under. Optional — it falls back to Fn — but required to distinguish two
+	// injects of the same fn on one step (d-tac-87o).
+	Id   string
 	Fn   string
 	Args map[string]any
+}
+
+// EffectiveID is the template-context key an inject's result lands under.
+func (c InjectCall) EffectiveID() string {
+	if c.Id != "" {
+		return c.Id
+	}
+	return c.Fn
+}
+
+// Unit is one named instruction unit, as ordered lanes rendered independently
+// so a host can dedup each on its own (d-tac-87o). A unit body without lane
+// markers is one implicit lane named after the unit.
+type Unit struct {
+	Lanes []UnitLane
+}
+
+// UnitLane is one declared slice of a unit's instruction text (`### lane:
+// <name>` sections inside a unit).
+type UnitLane struct {
+	Name string
+	Text string
 }
 
 // Option is one choice on an agent or user chooser step.
@@ -169,6 +197,7 @@ type varDeclYAML struct {
 }
 
 type injectYAML struct {
+	Id   string         `yaml:"id"`
 	Fn   string         `yaml:"fn"`
 	Args map[string]any `yaml:"args"`
 }
@@ -237,6 +266,7 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 	if strings.TrimSpace(entry.Canonical) == "" {
 		return nil, fmt.Errorf("procedure %s: missing canonical", entry.ID)
 	}
+	units, unitProblems := parseUnits(entry.Content)
 	spec := &Spec{
 		EntryID:   entry.ID,
 		Canonical: entry.Canonical,
@@ -244,10 +274,10 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 		Params:    map[string]VarDecl{},
 		State:     map[string]VarDecl{},
 		StepByID:  map[string]*Step{},
-		Units:     parseUnits(entry.Content),
+		Units:     units,
 	}
 
-	var problems []string
+	problems := unitProblems
 	addProblem := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
 	}
@@ -287,7 +317,16 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 			addProblem("framing[%d]: missing fn", i)
 			continue
 		}
-		spec.Framing = append(spec.Framing, InjectCall(iy))
+		call := InjectCall(iy)
+		if call.Id != "" && !isValidFuncName(call.Id) {
+			addProblem("framing[%d]: invalid id %q (identifiers only)", i, call.Id)
+			continue
+		}
+		if slices.ContainsFunc(spec.Framing, func(c InjectCall) bool { return c.EffectiveID() == call.EffectiveID() }) {
+			addProblem("framing[%d]: duplicate lane id %q — give one an explicit id", i, call.EffectiveID())
+			continue
+		}
+		spec.Framing = append(spec.Framing, call)
 	}
 	if len(spec.Framing) > 0 && spec.Class != model.ProcedureClassShell {
 		addProblem("framing: declared on a %s procedure — framing lanes are a session-shell concern, ignored anywhere else", spec.Class)
@@ -386,10 +425,29 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 				addProblem("%s: render names unit %q, but the body has no `## unit: %s` section", prefix, step.Render, step.Render)
 			}
 		}
+		for _, inj := range step.Inject {
+			id := inj.EffectiveID()
+			if _, isParam := spec.Params[id]; isParam {
+				addProblem("%s: inject id %q collides with a declared param — the injected result would shadow it in the unit template", prefix, id)
+			}
+			if _, isState := spec.State[id]; isState {
+				addProblem("%s: inject id %q collides with a declared state field — the injected result would shadow it in the unit template", prefix, id)
+			}
+		}
 		// A task runs in a delegate context with no user present — a user
 		// chooser there would block on a dialogue turn that never comes.
 		if spec.Class == model.ProcedureClassTask && step.Chooser == ChooserUser {
 			addProblem("%s: a task procedure has no user present — user choosers are not allowed (dispatch resolves its inputs as params)", prefix)
+		}
+	}
+
+	// Each lane must parse as a template on its own — a lane marker that
+	// splits a {{if}}…{{end}} pair fails here at load, not mid-serve.
+	for name, unit := range spec.Units {
+		for _, lane := range unit.Lanes {
+			if _, err := template.New(lane.Name).Option("missingkey=zero").Parse(lane.Text); err != nil {
+				addProblem("unit %s: lane %s: %v", name, lane.Name, err)
+			}
 		}
 	}
 
@@ -461,7 +519,16 @@ func parseStep(sy stepYAML, index int) (*Step, []string) {
 			addProblem("%s: inject[%d]: missing fn", prefix, j)
 			continue
 		}
-		step.Inject = append(step.Inject, InjectCall(iy))
+		call := InjectCall(iy)
+		if call.Id != "" && !isValidFuncName(call.Id) {
+			addProblem("%s: inject[%d]: invalid id %q (identifiers only)", prefix, j, call.Id)
+			continue
+		}
+		if slices.ContainsFunc(step.Inject, func(c InjectCall) bool { return c.EffectiveID() == call.EffectiveID() }) {
+			addProblem("%s: inject[%d]: duplicate inject id %q — two injects on one step need distinct ids, or the second silently shadows the first in the unit template", prefix, j, call.EffectiveID())
+			continue
+		}
+		step.Inject = append(step.Inject, call)
 	}
 
 	if sy.Guard != "" {
@@ -577,41 +644,87 @@ func parseCollectField(f string) (CollectField, error) {
 // entry's body.
 var unitHeading = regexp.MustCompile(`(?m)^##\s+unit:\s*(\S+)\s*$`)
 
+// laneHeading matches `### lane: <name>` markers inside a unit — the declared
+// boundaries the served-once memory dedups at (d-tac-87o).
+var laneHeading = regexp.MustCompile(`(?m)^###\s+lane:\s*(\S+)\s*$`)
+
 // parseUnits splits a procedure body into named instruction units. A unit
 // runs from its heading to the next `## ` heading or the end of the body.
 // Headings inside fenced code blocks are unit content, not boundaries — a
 // unit may quote markdown structure (e.g. a briefing template).
-func parseUnits(body string) map[string]string {
-	units := make(map[string]string)
-	var name string
+//
+// Within a unit, `### lane: <name>` markers split the text into ordered,
+// independently rendered lanes. A unit without markers is one implicit lane
+// named after the unit; a unit that uses markers must open with one — prose
+// before the first marker would belong to no declared lane.
+func parseUnits(body string) (map[string]Unit, []string) {
+	units := make(map[string]Unit)
+	var problems []string
+	var unitName, laneName, wholeText string
 	var buf []string
-	inFence := false
-	flush := func() {
-		if name != "" {
-			units[name] = strings.TrimSpace(strings.Join(buf, "\n"))
+	var lanes []UnitLane
+	markerSeen := false
+
+	closeLane := func() {
+		text := strings.TrimSpace(strings.Join(buf, "\n"))
+		buf = nil
+		if laneName == "" {
+			if markerSeen {
+				if text != "" {
+					problems = append(problems, fmt.Sprintf("unit %s: text before the first `### lane:` marker belongs to no lane", unitName))
+				}
+			} else {
+				wholeText = text
+			}
+			return
 		}
-		name, buf = "", nil
+		if slices.ContainsFunc(lanes, func(l UnitLane) bool { return l.Name == laneName }) {
+			problems = append(problems, fmt.Sprintf("unit %s: duplicate lane %q", unitName, laneName))
+		}
+		lanes = append(lanes, UnitLane{Name: laneName, Text: text})
+		laneName = ""
 	}
+	closeUnit := func() {
+		if unitName != "" {
+			closeLane()
+			if markerSeen {
+				units[unitName] = Unit{Lanes: lanes}
+			} else {
+				units[unitName] = Unit{Lanes: []UnitLane{{Name: unitName, Text: wholeText}}}
+			}
+		}
+		unitName, laneName, wholeText, buf, lanes, markerSeen = "", "", "", nil, nil, false
+	}
+
+	inFence := false
 	for line := range strings.SplitSeq(body, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			inFence = !inFence
 		} else if !inFence {
 			if m := unitHeading.FindStringSubmatch(line); m != nil {
-				flush()
-				name = m[1]
+				closeUnit()
+				unitName = m[1]
 				continue
 			}
 			if strings.HasPrefix(line, "## ") {
-				flush()
+				closeUnit()
 				continue
 			}
+			if unitName != "" {
+				if m := laneHeading.FindStringSubmatch(line); m != nil {
+					markerSeen = true
+					closeLane()
+					laneName = m[1]
+					continue
+				}
+			}
 		}
-		if name != "" {
+		if unitName != "" {
 			buf = append(buf, line)
 		}
 	}
-	flush()
-	return units
+	closeUnit()
+	return units, problems
 }
 
 // Validate runs the registry-dependent load checks: every function a spec

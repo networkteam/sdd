@@ -99,6 +99,10 @@ type Serve struct {
 	// UnitText is the rendered unit alone, without diagnostics — what a
 	// shell replaces with a one-line reminder once the unit was served.
 	UnitText string
+	// Lanes are the unit's rendered lanes in declaration order (empty
+	// rendered lanes dropped), the blocks a host dedups independently
+	// (d-tac-87o). UnitText is their join.
+	Lanes []ServeLane
 	// Diagnostics are the stall messages appended to Instructions ("Gate
 	// held" lines), kept separate so shells can recompose around UnitText.
 	Diagnostics []string
@@ -114,6 +118,13 @@ type Serve struct {
 	// Produced carries the engine-written results on completion (e.g. the
 	// created entry ID), excluding internal trust machinery.
 	Produced map[string]any
+}
+
+// ServeLane is one rendered lane of a serve's instruction unit — the unit a
+// host's served-once memory dedups at (d-tac-87o).
+type ServeLane struct {
+	Name string
+	Text string
 }
 
 // evalGuard evaluates a guard against the registry, returning the verdict
@@ -415,10 +426,16 @@ func (s *Session) serve(inst *Instance) (*Serve, error) {
 	if _, ok := inst.Spec.Units[unitName]; ok {
 		sv.Unit = unitName
 	}
-	instructions, err := s.renderUnit(inst, step)
+	lanes, err := s.renderUnit(inst, step)
 	if err != nil {
 		return nil, err
 	}
+	sv.Lanes = lanes
+	texts := make([]string, 0, len(lanes))
+	for _, lane := range lanes {
+		texts = append(texts, lane.Text)
+	}
+	instructions := strings.Join(texts, "\n\n")
 	sv.UnitText = instructions
 
 	var diagnostics []string
@@ -535,53 +552,60 @@ func (s *Session) transitionDiagnostics(inst *Instance, step *Step) []FailedPred
 }
 
 // renderUnit renders the step's instruction unit (its render override or the
-// section named after the step) as a Go template over the store, with inject
-// query results joined into the template context under each fn's name.
-func (s *Session) renderUnit(inst *Instance, step *Step) (string, error) {
+// section named after the step) lane by lane, each lane a Go template over
+// the store, with inject query results in the template context under each
+// call's effective id. Lanes whose rendered text is empty are dropped.
+func (s *Session) renderUnit(inst *Instance, step *Step) ([]ServeLane, error) {
 	unitName := step.ID
 	if step.Render != "" {
 		unitName = step.Render
 	}
 	unit, ok := inst.Spec.Units[unitName]
 	if !ok {
-		return "", nil // gates without prose serve diagnostics and schema only
+		return nil, nil // gates without prose serve diagnostics and schema only
 	}
 
 	tmplCtx, err := s.templateContext(inst)
 	if err != nil {
-		return "", fmt.Errorf("unit %s: %w", unitName, err)
+		return nil, fmt.Errorf("unit %s: %w", unitName, err)
 	}
 	if len(step.Inject) > 0 {
 		fctx, err := s.funcContext(inst)
 		if err != nil {
-			return "", fmt.Errorf("step %s: %w", step.ID, err)
+			return nil, fmt.Errorf("step %s: %w", step.ID, err)
 		}
 		for _, inj := range step.Inject {
 			q, found := s.engine.Registry.Query(inj.Fn)
 			if !found {
-				return "", fmt.Errorf("step %s: inject fn %q is not a registered query", step.ID, inj.Fn)
+				return nil, fmt.Errorf("step %s: inject fn %q is not a registered query", step.ID, inj.Fn)
 			}
 			args, err := s.renderInjectArgs(inst, inj.Args)
 			if err != nil {
-				return "", fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
+				return nil, fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
 			}
 			result, err := q.Fn(fctx, args)
 			if err != nil {
-				return "", fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
+				return nil, fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
 			}
-			tmplCtx[inj.Fn] = result
+			tmplCtx[inj.EffectiveID()] = result
 		}
 	}
 
-	tmpl, err := template.New(unitName).Option("missingkey=zero").Parse(unit)
-	if err != nil {
-		return "", fmt.Errorf("unit %s: %w", unitName, err)
+	lanes := make([]ServeLane, 0, len(unit.Lanes))
+	for _, lane := range unit.Lanes {
+		tmpl, err := template.New(lane.Name).Option("missingkey=zero").Parse(lane.Text)
+		if err != nil {
+			return nil, fmt.Errorf("unit %s: lane %s: %w", unitName, lane.Name, err)
+		}
+		var buf strings.Builder
+		if err := tmpl.Execute(&buf, tmplCtx); err != nil {
+			return nil, fmt.Errorf("unit %s: lane %s: %w", unitName, lane.Name, err)
+		}
+		if text := strings.TrimSpace(buf.String()); text != "" {
+			lanes = append(lanes, ServeLane{Name: lane.Name, Text: text})
+		}
 	}
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, tmplCtx); err != nil {
-		return "", fmt.Errorf("unit %s: %w", unitName, err)
-	}
-	return strings.TrimSpace(buf.String()), nil
+	return lanes, nil
 }
 
 // renderInjectArgs renders string args as Go templates against the store
