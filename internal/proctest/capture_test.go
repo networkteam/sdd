@@ -118,6 +118,29 @@ func TestCapture_OneShotHappyPath(t *testing.T) {
 	}
 }
 
+// TestCapture_TopLevelFieldWithChooserAnswerRefused mirrors the observed gap
+// (20260811-233331-s-tac-bjn): a declared state field reported at playback
+// beside the adjust answer is refused by name, never silently dropped.
+func TestCapture_TopLevelFieldWithChooserAnswerRefused(t *testing.T) {
+	_, session := newCaptureWorld(t, "core-envelope")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	serve = session.Report(t, instance, captureDraft())
+	proctest.RequireStep(t, serve, "playback")
+
+	_, err := session.ReportErr(t, instance, map[string]any{
+		"chooser":     "playback",
+		"choice":      "adjust",
+		"fields":      map[string]any{"body": "An adjusted body."},
+		"userWords":   "fix the body and the involvement",
+		"involvement": []any{map[string]any{"target": captureRefID}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `"involvement"`) {
+		t.Fatalf("top-level field beside a chooser answer must be refused by name, got %v", err)
+	}
+}
+
 func TestCapture_SelectedKindPointsAtItsAuthoringFact(t *testing.T) {
 	_, session := newCaptureWorld(t, "core-kind")
 

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -551,6 +553,17 @@ func (w *WorkflowSession) Advance(ctx context.Context, identity RequestIdentity,
 	chooser, hasChooser := request.Report["chooser"].(string)
 	choice, hasChoice := request.Report["choice"].(string)
 	if hasChooser && hasChoice && chooser != "" && choice != "" {
+		// A chooser answer's envelope is closed: anything else at the top
+		// level would be dropped without reaching the engine, leaving the
+		// sender unable to tell a landed value from a lost one
+		// (20260811-233331-s-tac-bjn). Refuse by name instead.
+		for _, key := range slices.Sorted(maps.Keys(request.Report)) {
+			switch key {
+			case "chooser", "choice", "fields", "userWords":
+			default:
+				return nil, fmt.Errorf("field %q cannot ride a chooser answer at the top level and was not applied — state a chooser answer collects goes inside its fields object", key)
+			}
+		}
 		fields, _ := request.Report["fields"].(map[string]any)
 		words, _ := request.Report["userWords"].(string)
 		serve, err = w.session.Answer(request.Instance, chooser, choice, fields, words)
