@@ -89,6 +89,37 @@ func TestEngage_HappyPath(t *testing.T) {
 	proctest.RequireStatus(t, serve, "completed")
 }
 
+// TestEngage_DispatchedCaptureInheritsAnchor pins the seeded handoff on the
+// shipped procedures (20260814-233547-s-tac-bqt): a capture dispatched from
+// engage's junction starts already anchored, carrying the parent's
+// widenReport, with no start inputs re-supplied by the agent.
+func TestEngage_DispatchedCaptureInheritsAnchor(t *testing.T) {
+	world := engageWorld(t)
+	session := world.Open(t, "engage-dispatch")
+
+	serve := session.Start(t, "engage", nil)
+	instance := serve.Instance
+	session.Report(t, instance, map[string]any{"anchor": engageAnchorID, "goal": "record a decision"})
+	session.Report(t, instance, map[string]any{
+		"brief":       "AC-status: ready to record.",
+		"widenReport": "searched the chain, nothing beyond it",
+	})
+	serve = session.Answer(t, instance, "moves", "move",
+		map[string]any{"selectedMove": "capture the decision"}, "capture it")
+	proctest.RequireStatus(t, serve, "completed")
+
+	capture := session.StartChild(t, "capture", nil, instance)
+	proctest.RequireStep(t, capture, "assemble")
+	if !strings.Contains(capture.Instructions, engageAnchorID) {
+		t.Errorf("dispatched capture should start anchored on %s, got %q", engageAnchorID, capture.Instructions)
+	}
+	for _, m := range capture.Missing {
+		if m == "widenReport" {
+			t.Error("the seeded widenReport should already satisfy assemble's collect")
+		}
+	}
+}
+
 func TestEngage_AnchorMustResolve(t *testing.T) {
 	world := engageWorld(t)
 	session := world.Open(t, "engage-unresolved")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 	"sort"
 	"time"
 
@@ -436,8 +437,10 @@ func (s *Session) Start(spec *Spec, params map[string]any, parent string) (*Serv
 // so a child dispatched on a path that answered no seed-bearing option inherits
 // nothing. When the answered option named a procedure, the seed applies only to
 // a child of that procedure. For each child field ← parent field pair, a seed
-// lands only when the child declares the field as state, has not already set it
-// (a caller override wins), and the parent holds a non-empty source value.
+// lands only when the child has not already set it (a caller override wins) and
+// the parent holds a non-empty source value. A child field the seed cannot land
+// in — undeclared, or declared as a param — fails the start: a declared seed
+// that silently skips is a procedure-authoring bug (20260814-233547-s-tac-bqt).
 func (s *Session) seedFromParent(inst *Instance, parent string) (map[string]any, error) {
 	if parent == "" {
 		return nil, nil
@@ -454,9 +457,14 @@ func (s *Session) seedFromParent(inst *Instance, parent string) (map[string]any,
 	}
 
 	seed := make(map[string]any)
-	for childField, parentField := range p.dispatchSeed {
+	for _, childField := range slices.Sorted(maps.Keys(p.dispatchSeed)) {
+		parentField := p.dispatchSeed[childField]
 		if _, declared := inst.Spec.State[childField]; !declared {
-			continue // the child must declare it as report-writable state to receive it
+			target := "not declared"
+			if _, isParam := inst.Spec.Params[childField]; isParam {
+				target = "declared under params, not state"
+			}
+			return nil, fmt.Errorf("dispatch seed %q ← parent %q cannot land: field %q is %s in %s — a seeded field must be declared state", childField, parentField, childField, target, inst.Spec.Canonical)
 		}
 		if inst.Store.Has(childField) {
 			continue // already set on this instance — never overwrite

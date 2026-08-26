@@ -495,6 +495,7 @@ func TestHandoff_NonDispatchOptionClearsSeed(t *testing.T) {
 // chooser.
 const seedGatedChooserChildFrontmatter = `state:
     widenReport: {type: text, desc: grounding}
+    anchor: {type: entry-id, optional: true, desc: seeded anchor}
 steps:
     - id: ground
       transitions:
@@ -579,6 +580,71 @@ steps:
 	}
 	if sv.Instance != "i_2" {
 		t.Fatalf("instance after rejected start = %q, want i_2", sv.Instance)
+	}
+}
+
+// TestHandoff_SeedIntoParamFailsStart pins the loud half of the dispatch-seed
+// contract (20260814-233547-s-tac-bqt): a declared seed whose child field is a
+// param cannot land and must fail the start naming both fields, publishing no
+// instance — never a silent skip.
+func TestHandoff_SeedIntoParamFailsStart(t *testing.T) {
+	const paramChildFrontmatter = `params:
+    anchor: {type: entry-id, optional: true, desc: start-only anchor}
+state:
+    widenReport: {type: text, desc: grounding evidence}
+steps:
+    - id: draft
+      collect: [widenReport]
+      transitions:
+          - when: hasWidenReport
+            to: end(completed)
+`
+	env := newSeedEnv(t)
+	child, err := LoadSpec(procedureEntry(t, "20260826-100001-d-prc-pch", "paramchild", "", paramChildFrontmatter, "param child"), NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := env.startHeldParent(t, "grounding to inherit")
+	beforeEvents := len(env.sink.events)
+	beforeInstances := len(env.session.Instances())
+	_, err = env.session.Start(child, nil, parent.Instance)
+	if err == nil {
+		t.Fatal("seed into a param field must fail the start")
+	}
+	for _, want := range []string{`"anchor"`, "declared under params", "paramchild"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should contain %q", err.Error(), want)
+		}
+	}
+	if len(env.session.Instances()) != beforeInstances {
+		t.Fatal("failed start published an instance")
+	}
+	if len(env.sink.events) != beforeEvents {
+		t.Fatal("failed start appended an event")
+	}
+}
+
+// TestHandoff_SeedIntoUndeclaredFailsStart: the sibling case — the child does
+// not declare the seeded field at all. Same loud refusal, distinct wording.
+func TestHandoff_SeedIntoUndeclaredFailsStart(t *testing.T) {
+	const bareChildFrontmatter = `state:
+    widenReport: {type: text, desc: grounding evidence}
+steps:
+    - id: draft
+      collect: [widenReport]
+      transitions:
+          - when: hasWidenReport
+            to: end(completed)
+`
+	env := newSeedEnv(t)
+	child, err := LoadSpec(procedureEntry(t, "20260826-100002-d-prc-bch", "barechild", "", bareChildFrontmatter, "bare child"), NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := env.startHeldParent(t, "grounding to inherit")
+	_, err = env.session.Start(child, nil, parent.Instance)
+	if err == nil || !strings.Contains(err.Error(), "not declared") || !strings.Contains(err.Error(), `"anchor"`) {
+		t.Fatalf("undeclared seed target error = %v, want a refusal naming the field", err)
 	}
 }
 

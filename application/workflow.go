@@ -1398,6 +1398,11 @@ func deriveWorkflowSummary(id SessionID, events []engine.Event) WorkflowSessionS
 			if params, ok := event.Data["params"].(map[string]any); ok && result.Anchor == "" {
 				result.Anchor, _ = params["anchor"].(string)
 			}
+			// An anchor can arrive as a dispatch seed instead of a caller param
+			// (engage seeding its capture) — either source names the session's anchor.
+			if seed, ok := event.Data["seed"].(map[string]any); ok && result.Anchor == "" {
+				result.Anchor, _ = seed["anchor"].(string)
+			}
 		case engine.EventTransition:
 			if item := states[event.Instance]; item != nil {
 				if to, ok := event.Data["to"].(string); ok && !engine.IsEndTarget(to) {
