@@ -178,6 +178,97 @@ func TestCapture_AttachmentLinkResolvesOnDisk(t *testing.T) {
 	}
 }
 
+// TestCapture_KindCorrectableAtPlayback pins the widened correctable set
+// (20260826-003953-d-tac-ktg): entry kind and layer are adjustable at playback
+// without abandoning the draft, with the kind change re-entering assemble's
+// ordinary gate.
+func TestCapture_KindCorrectableAtPlayback(t *testing.T) {
+	world, session := newCaptureWorld(t, "core-kind-adjust")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	serve = session.Report(t, instance, captureDraft())
+	proctest.RequireStep(t, serve, "playback")
+
+	// The user spots the wrong kind and layer at playback; both land through
+	// adjust and the draft re-validates at assemble, cascading back.
+	serve = session.Answer(t, instance, "playback", "adjust",
+		map[string]any{"entryKind": "insight", "layer": "process"}, "this is an insight, process layer")
+	proctest.RequireStep(t, serve, "playback")
+
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "verifySummary")
+	serve = session.Answer(t, instance, "verifySummary", "faithful",
+		map[string]any{"fidelityNote": "matches the body"}, "")
+	proctest.RequireStatus(t, serve, "completed")
+
+	entryID, _ := serve.Produced["entryId"].(string)
+	entry := proctest.LoadEntry(t, world.GraphDir, entryID)
+	if entry.Kind != model.KindInsight || entry.Layer != model.LayerProcess {
+		t.Fatalf("persisted kind/layer = %s/%s, want insight/process", entry.Kind, entry.Layer)
+	}
+}
+
+// TestCapture_SupersededKindStateRefusedAtGate pins ktg's guard: state
+// licensed only by the superseded kind (intent, collected while the draft was
+// a directive) is refused at the gate after the kind change, and clears by a
+// null report rather than an abandon.
+func TestCapture_SupersededKindStateRefusedAtGate(t *testing.T) {
+	_, session := newCaptureWorld(t, "core-kind-guard")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	draft := captureDraft()
+	draft["entryKind"] = "directive"
+	draft["intent"] = "guiding"
+	serve = session.Report(t, instance, draft)
+	proctest.RequireStep(t, serve, "playback")
+
+	// Kind changes to gap while intent — licensed only by the directive kind —
+	// stays behind: the assemble gate must hold, naming the stale field.
+	serve = session.Answer(t, instance, "playback", "adjust",
+		map[string]any{"entryKind": "gap"}, "this is a gap, not a directive")
+	proctest.RequireStep(t, serve, "assemble")
+	if !hasDiagnostic(serve, "intent") {
+		t.Fatalf("gate should name the stale intent field, got %v", serve.Diagnostics)
+	}
+
+	// Clearing the stale field by null unblocks the draft.
+	serve = session.Report(t, instance, map[string]any{"intent": nil})
+	proctest.RequireStep(t, serve, "playback")
+}
+
+// TestCapture_AttachmentsCorrectableAtPlayback: a staged file forgotten in the
+// report is repairable at playback instead of forcing a redraft
+// (20260707-175502-s-prc-lgu's second hole).
+func TestCapture_AttachmentsCorrectableAtPlayback(t *testing.T) {
+	world, session := newCaptureWorld(t, "core-attach-adjust")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	handle := session.Stage(t, "record.md", []byte("the record"))
+	serve = session.Report(t, instance, captureDraft())
+	proctest.RequireStep(t, serve, "playback")
+
+	serve = session.Answer(t, instance, "playback", "adjust",
+		map[string]any{"attachments": []any{handle}}, "attach the record")
+	proctest.RequireStep(t, serve, "playback")
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "verifySummary")
+	serve = session.Answer(t, instance, "verifySummary", "faithful",
+		map[string]any{"fidelityNote": "matches the body"}, "")
+	proctest.RequireStatus(t, serve, "completed")
+
+	entryID, _ := serve.Produced["entryId"].(string)
+	attachDir, err := model.AttachDirRelPath(entryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(world.GraphDir, attachDir, "record.md")); err != nil {
+		t.Fatalf("attachment adjusted at playback should materialize: %v", err)
+	}
+}
+
 // TestCapture_TopLevelFieldWithChooserAnswerRefused mirrors the observed gap
 // (20260811-233331-s-tac-bjn): a declared state field reported at playback
 // beside the adjust answer is refused by name, never silently dropped.
