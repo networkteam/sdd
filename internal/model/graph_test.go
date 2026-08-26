@@ -1223,6 +1223,37 @@ func TestLintBrokenAttachmentLink(t *testing.T) {
 	}
 }
 
+// TestLintBrokenPlaceholderAttachmentLink covers the pre-resolution form: a
+// {{attachments}}/ link is the only one authorable before an ID is minted, so
+// the write gate must check it too (20260707-175502-s-prc-lgu).
+func TestLintBrokenPlaceholderAttachmentLink(t *testing.T) {
+	e := entry("20260406-115516-s-stg-beh",
+		withContent("See [design]({{attachments}}/design.md) for details."),
+	)
+	g := NewGraph([]*Entry{e})
+
+	lint := g.Lint()
+	if len(lint) != 1 {
+		t.Fatalf("Lint() = %d entries, want 1", len(lint))
+	}
+	w := lint[0].Warnings[0]
+	if w.Field != "attachments" || !strings.Contains(w.Message, "design.md") {
+		t.Errorf("warning = %+v, want a broken-link warning naming design.md", w)
+	}
+}
+
+func TestLintValidPlaceholderAttachmentLink(t *testing.T) {
+	e := entry("20260406-115516-s-stg-beh",
+		withContent("See [design]({{attachments}}/design.md) for details."),
+		withAttachments("2026/04/06-115516-s-stg-beh/design.md"),
+	)
+	g := NewGraph([]*Entry{e})
+
+	if lint := g.Lint(); len(lint) != 0 {
+		t.Fatalf("Lint() = %d entries, want 0 for a valid placeholder link", len(lint))
+	}
+}
+
 func TestLintValidAttachmentLink(t *testing.T) {
 	e := entry("20260406-115516-s-stg-beh",
 		withContent("See [design](./06-115516-s-stg-beh/design.md) for details."),

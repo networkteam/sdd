@@ -5,6 +5,8 @@
 package proctest_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -115,6 +117,64 @@ func TestCapture_OneShotHappyPath(t *testing.T) {
 	entry := proctest.LoadEntry(t, world.GraphDir, entryID)
 	if !strings.Contains(entry.Content, "the fixture observes something") {
 		t.Fatalf("persisted entry body = %q", entry.Content)
+	}
+}
+
+// TestCapture_BodyAssertingMissingAttachmentBlockedAtGate pins the write-gate
+// consistency check (20260707-175502-s-prc-lgu): a body linking an attachment
+// the entry does not carry is blocked with a named finding, never written.
+func TestCapture_BodyAssertingMissingAttachmentBlockedAtGate(t *testing.T) {
+	_, session := newCaptureWorld(t, "core-attach-claim")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	draft := captureDraft()
+	draft["body"] = "A tactical gap: the fixture observes something. Full record: [review]({{attachments}}/review.md)."
+	serve = session.Report(t, instance, draft)
+	proctest.RequireStep(t, serve, "playback")
+
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "reviseOrOverride")
+	if !strings.Contains(serve.Instructions, "broken attachment link") || !strings.Contains(serve.Instructions, "review.md") {
+		t.Errorf("blocked write should serve the broken-link finding naming the file, got %q", serve.Instructions)
+	}
+}
+
+// TestCapture_AttachmentLinkResolvesOnDisk: the happy half — a staged
+// attachment listed in the report materializes, and the body's
+// {{attachments}} placeholder resolves at write instead of landing literally.
+func TestCapture_AttachmentLinkResolvesOnDisk(t *testing.T) {
+	world, session := newCaptureWorld(t, "core-attach-link")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	handle := session.Stage(t, "review.md", []byte("the full record"))
+	draft := captureDraft()
+	draft["body"] = "A tactical gap: the fixture observes something. Full record: [review]({{attachments}}/review.md)."
+	draft["attachments"] = []any{handle}
+	serve = session.Report(t, instance, draft)
+	proctest.RequireStep(t, serve, "playback")
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "verifySummary")
+	serve = session.Answer(t, instance, "verifySummary", "faithful",
+		map[string]any{"fidelityNote": "matches the body"}, "")
+	proctest.RequireStatus(t, serve, "completed")
+
+	entryID, _ := serve.Produced["entryId"].(string)
+	entry := proctest.LoadEntry(t, world.GraphDir, entryID)
+	if strings.Contains(entry.Content, "{{attachments}}") {
+		t.Errorf("placeholder must resolve at write, body = %q", entry.Content)
+	}
+	if want := "./" + entryID[6:] + "/review.md"; !strings.Contains(entry.Content, want) {
+		t.Errorf("body should carry the resolved link %s, got %q", want, entry.Content)
+	}
+	attachDir, err := model.AttachDirRelPath(entryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(world.GraphDir, attachDir, "review.md"))
+	if err != nil || string(content) != "the full record" {
+		t.Fatalf("materialized attachment = %q, %v", content, err)
 	}
 }
 

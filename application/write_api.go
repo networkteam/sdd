@@ -172,6 +172,28 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 			entry.Participants = []string{principal.Participant}
 		}
 	}
+	// Attachment truth is established before the gate: staged handles resolve
+	// to filenames on the entry and {{attachments}} links resolve against the
+	// minted ID, so ValidateForWrite's link check sees what the entry actually
+	// carries (20260707-175502-s-prc-lgu).
+	owner := SessionRef{Subject: principal.Subject, Session: binding.SessionID}
+	var materializations []AttachmentMaterialization
+	for _, handle := range draft.AttachmentHandles {
+		blob, err := runtime.options.StagedBlobs.Stat(ctx, owner, handle)
+		if err != nil {
+			return CreateEntryResult{}, fmt.Errorf("attachment %q is not staged in this session: %w", handle, err)
+		}
+		attachDir, err := model.AttachDirRelPath(id)
+		if err != nil {
+			return CreateEntryResult{}, err
+		}
+		entry.Attachments = append(entry.Attachments, blob.Filename)
+		materializations = append(materializations, AttachmentMaterialization{
+			BlobID: blob.ID, Digest: blob.Digest, Size: blob.Size, SourceName: blob.Filename,
+			LogicalPath: filepath.ToSlash(filepath.Join(attachDir, blob.Filename)),
+		})
+	}
+	entry.Content = model.ResolveAttachmentLinks(entry.Content, id)
 	if entry.Refs, err = snapshot.graph.ResolveRefIDs(entry.Refs); err != nil {
 		return CreateEntryResult{}, fmt.Errorf("resolving refs: %w", err)
 	}
@@ -238,21 +260,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		ID: "entry-" + id, Changes: []DocumentChange{{LogicalPath: filepath.ToSlash(logicalPath), Document: &document, CanonicalBytes: canonical}},
 		Message: fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72)),
 	}
-	owner := SessionRef{Subject: principal.Subject, Session: binding.SessionID}
-	for _, handle := range draft.AttachmentHandles {
-		blob, err := runtime.options.StagedBlobs.Stat(ctx, owner, handle)
-		if err != nil {
-			return result, fmt.Errorf("attachment %q is not staged in this session: %w", handle, err)
-		}
-		attachDir, err := model.AttachDirRelPath(id)
-		if err != nil {
-			return result, err
-		}
-		batch.Attachments = append(batch.Attachments, AttachmentMaterialization{
-			BlobID: blob.ID, Digest: blob.Digest, Size: blob.Size, SourceName: blob.Filename,
-			LogicalPath: filepath.ToSlash(filepath.Join(attachDir, blob.Filename)),
-		})
-	}
+	batch.Attachments = materializations
 	batch.Digest, err = MutationBatchDigest(batch)
 	if err != nil {
 		return result, err
