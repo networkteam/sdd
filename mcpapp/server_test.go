@@ -875,7 +875,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "06d5f7c50a2489fb778eb02bcc6553209304ef11fdc995addd1e92ca81e35f3e"
+	const want = "dbaa397cfa624ca3338b1acbca59970f50c132a7d68c3c9d44e2cd2676b3e455"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1109,6 +1109,70 @@ Body.
 // TestCaptureProcedureLoop drives the full capture spine over MCP: batch
 // report, playback chooser with served-instruction memory, staged
 // attachment materialized by the write gate, summary verification, and the
+// TestStagedAttachmentEditAndRead pins the staged scratch's two new surfaces
+// (20260826-120330-d-tac-8f8): a staged file edits in place through atomic
+// search-replace pairs addressed by handle, reads back in bounded pages, and
+// a failing pair refuses the edit naming itself with the file unchanged.
+func TestStagedAttachmentEditAndRead(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+
+	var staged mcpserver.StageAttachmentResult
+	call(t, cs, "stage_attachment", map[string]any{
+		"session": session,
+		"name":    "record.md",
+		"content": "alpha beta gamma",
+	}, &staged)
+
+	// Edit in place by handle.
+	call(t, cs, "stage_attachment", map[string]any{
+		"session": session,
+		"name":    "record.md",
+		"patches": []map[string]any{{"old": "beta", "new": "BETA"}},
+	}, &staged)
+	if staged.Handle != "record.md" {
+		t.Fatalf("edit should keep the handle, got %q", staged.Handle)
+	}
+
+	// Read back in bounded pages.
+	var page mcpserver.ReadAttachmentResult
+	call(t, cs, "read_attachment", map[string]any{
+		"session": session, "handle": "record.md", "max_bytes": 6,
+	}, &page)
+	if page.Content != "alpha " || !page.More || page.TotalBytes != 16 {
+		t.Fatalf("first page = %+v", page)
+	}
+	call(t, cs, "read_attachment", map[string]any{
+		"session": session, "handle": "record.md", "offset": page.NextOffset,
+	}, &page)
+	if page.Content != "BETA gamma" || page.More {
+		t.Fatalf("second page = %+v", page)
+	}
+	if len(page.Available) != 1 || page.Available[0] != "record.md" {
+		t.Fatalf("available should list staged handles, got %v", page.Available)
+	}
+
+	// A failing pair refuses the edit by name; the staged bytes stay put.
+	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "stage_attachment", Arguments: map[string]any{
+		"session": session,
+		"name":    "record.md",
+		"patches": []map[string]any{{"old": "absent", "new": "x"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(contentText(res), "pair 1") {
+		t.Fatalf("failing pair should refuse the edit naming itself, got %+v", res)
+	}
+	call(t, cs, "read_attachment", map[string]any{
+		"session": session, "handle": "record.md",
+	}, &page)
+	if page.Content != "alpha BETA gamma" {
+		t.Fatalf("refused edit must leave the staged file unchanged, got %q", page.Content)
+	}
+}
+
 // produced entry ID.
 func TestCaptureProcedureLoop(t *testing.T) {
 	env := newTestServer(t, nil, "", "")

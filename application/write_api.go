@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -127,6 +128,19 @@ func (a *Application) StageBlob(ctx context.Context, identity RequestIdentity, p
 		return StagedBlob{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "staged blobs belong to another principal"}
 	}
 	return runtime.options.StagedBlobs.Stage(ctx, ref, filename, bytes.NewReader(content))
+}
+
+// OpenStagedBlob resolves read access and session ownership, then streams a
+// staged blob's bytes — the read-side counterpart of StageBlob.
+func (a *Application) OpenStagedBlob(ctx context.Context, identity RequestIdentity, project ProjectID, ref SessionRef, blobID string) (io.ReadCloser, error) {
+	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
+	if err != nil {
+		return nil, err
+	}
+	if ref.Subject != principal.Subject {
+		return nil, &ApplicationError{Code: ErrorSessionOwnership, Message: "staged blobs belong to another principal"}
+	}
+	return runtime.options.StagedBlobs.Open(ctx, ref, blobID)
 }
 
 // CreateEntry runs SDD-owned validation and pre-flight, prepares canonical

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"sort"
@@ -19,6 +20,7 @@ import (
 	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/textpatch"
 )
 
 const (
@@ -696,6 +698,69 @@ func (w *WorkflowSession) StageAttachment(ctx context.Context, identity RequestI
 	}
 	w.staged[filename] = blob.ID
 	return filename, nil
+}
+
+// EditStagedAttachment applies ordered exact search-replace pairs to a staged
+// file addressed by its handle and stages the result under the same handle,
+// so a small correction costs neither a full re-stage nor a full re-read
+// (20260826-120330-d-tac-8f8). Atomic: a failing pair names itself and the
+// staged file stays unchanged.
+func (w *WorkflowSession) EditStagedAttachment(ctx context.Context, identity RequestIdentity, handle string, pairs []textpatch.Pair) error {
+	w.setOperation(ctx, identity)
+	current, err := w.readStagedBlob(ctx, identity, handle)
+	if err != nil {
+		return err
+	}
+	patched, err := textpatch.Apply(string(current), pairs)
+	if err != nil {
+		return fmt.Errorf("editing staged %q: %w (nothing applied; the staged file is unchanged)", handle, err)
+	}
+	_, err = w.StageAttachment(ctx, identity, handle, []byte(patched))
+	return err
+}
+
+// ReadStagedAttachment returns one bounded page of a staged file by handle,
+// plus the session's staged handles as the discovery surface.
+func (w *WorkflowSession) ReadStagedAttachment(ctx context.Context, identity RequestIdentity, handle string, offset int64, maxBytes int) (AttachmentPage, []string, error) {
+	w.setOperation(ctx, identity)
+	content, err := w.readStagedBlob(ctx, identity, handle)
+	if err != nil {
+		return AttachmentPage{}, w.StagedHandles(), err
+	}
+	total := int64(len(content))
+	if offset < 0 || offset > total {
+		return AttachmentPage{}, w.StagedHandles(), fmt.Errorf("offset %d out of range (staged %q holds %d bytes)", offset, handle, total)
+	}
+	end := offset + int64(maxBytes)
+	if maxBytes <= 0 || end > total {
+		end = total
+	}
+	return AttachmentPage{
+		Filename: handle, Content: content[offset:end],
+		Offset: offset, NextOffset: end, TotalSize: total, More: end < total,
+	}, w.StagedHandles(), nil
+}
+
+// StagedHandles lists the session's staged file handles, sorted.
+func (w *WorkflowSession) StagedHandles() []string {
+	return slices.Sorted(maps.Keys(w.staged))
+}
+
+func (w *WorkflowSession) readStagedBlob(ctx context.Context, identity RequestIdentity, handle string) ([]byte, error) {
+	blobID, ok := w.staged[handle]
+	if !ok {
+		return nil, fmt.Errorf("no file is staged under handle %q in this session", handle)
+	}
+	ref := SessionRef{Subject: w.binding.Subject, Session: w.binding.SessionID}
+	rc, err := w.app.OpenStagedBlob(ctx, identity, w.project, ref, blobID)
+	if err != nil {
+		return nil, err
+	}
+	content, err := io.ReadAll(rc)
+	if closeErr := rc.Close(); err == nil {
+		err = closeErr
+	}
+	return content, err
 }
 
 type branchBoundEvent struct {

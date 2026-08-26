@@ -16,6 +16,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/basefacts"
+	"github.com/networkteam/sdd/internal/textpatch"
 )
 
 // defaultSearchHits caps search responses when the caller sets no limit —
@@ -174,10 +175,17 @@ type BindBranchResult struct {
 }
 
 type StageAttachmentArgs struct {
-	Session string `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — carry it across context compaction"`
-	Name    string `json:"name" jsonschema:"target filename (plain name, no paths)"`
-	Content string `json:"content,omitempty" jsonschema:"file content to stage (UTF-8 text)"`
-	Path    string `json:"path,omitempty" jsonschema:"local file path to stage instead of inline content"`
+	Session string             `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — carry it across context compaction"`
+	Name    string             `json:"name" jsonschema:"target filename (plain name, no paths)"`
+	Content string             `json:"content,omitempty" jsonschema:"file content to stage (UTF-8 text)"`
+	Path    string             `json:"path,omitempty" jsonschema:"local file path to stage instead of inline content"`
+	Patches []SearchReplaceArg `json:"patches,omitempty" jsonschema:"edit the already-staged file named by name in place: ordered exact search-replace pairs applied atomically — each old must match exactly once, a failing pair refuses the whole edit. Pass instead of content/path"`
+}
+
+// SearchReplaceArg is one exact edit inside a patches list.
+type SearchReplaceArg struct {
+	Old string `json:"old" jsonschema:"exact text to replace — must match exactly once in the file as it stands when this pair applies"`
+	New string `json:"new" jsonschema:"replacement text; empty deletes the old text"`
 }
 
 type StageAttachmentResult struct {
@@ -227,10 +235,12 @@ type ShowResult struct {
 }
 
 type ReadAttachmentArgs struct {
-	ID       string `json:"id" jsonschema:"full ID of the entry whose attachment to read"`
+	ID       string `json:"id,omitempty" jsonschema:"full ID of the entry whose attachment to read; omit when reading a staged file by handle"`
 	Name     string `json:"name,omitempty" jsonschema:"attachment filename; optional when the entry has exactly one"`
 	Offset   int64  `json:"offset,omitempty" jsonschema:"byte position to continue from (next_offset of the previous page)"`
 	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"page size cap; default 65536"`
+	Session  string `json:"session,omitempty" jsonschema:"with handle: the session handle this connection is attached to, whose staged file to read"`
+	Handle   string `json:"handle,omitempty" jsonschema:"read a file staged in this session (before any entry carries it) by its handle, in the same bounded pages; pass with session instead of id"`
 }
 
 type ReadAttachmentResult struct {
@@ -355,8 +365,9 @@ func (s *Server) registerTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "stage_attachment",
 		Description: "Stage a file into the session scratch (session required) and get back a handle to pass " +
-			"in a report's attachments field. Never a graph write — the write gate materializes staged " +
-			"files with the entry.",
+			"in a report's attachments field, or amend what is already staged: with patches, the file named " +
+			"by name is edited in place through atomic search-replace pairs instead of re-staging it whole. " +
+			"Never a graph write — the write gate materializes staged files with the entry.",
 	}, s.stageAttachment)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -379,8 +390,8 @@ func (s *Server) registerTools() {
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "read_attachment",
-		Description: "Read an entry's attachment content, paged. Attachments are resolved by entry ID and " +
-			"filename — never derive storage paths.",
+		Description: "Read an attachment's content, paged: an entry's by ID and filename, or a file staged " +
+			"in the session (before any entry carries it) by session and handle. Never derive storage paths.",
 	}, s.readAttachment)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -791,12 +802,30 @@ func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, 
 	if err := validAttachmentName(args.Name); err != nil {
 		return nil, StageAttachmentResult{}, toolError("name: %v", err)
 	}
-	if (args.Content == "") == (args.Path == "") {
-		return nil, StageAttachmentResult{}, toolError("pass exactly one of content or path")
+	sources := 0
+	for _, present := range []bool{args.Content != "", args.Path != "", len(args.Patches) > 0} {
+		if present {
+			sources++
+		}
+	}
+	if sources != 1 {
+		return nil, StageAttachmentResult{}, toolError("pass exactly one of content, path, or patches")
 	}
 	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, StageAttachmentResult{}, err
+	}
+	identity := s.requestIdentity(req)
+	if len(args.Patches) > 0 {
+		pairs := make([]textpatch.Pair, 0, len(args.Patches))
+		for _, p := range args.Patches {
+			pairs = append(pairs, textpatch.Pair{Old: p.Old, New: p.New})
+		}
+		if err := ss.root.EditStagedAttachment(ctx, identity, args.Name, pairs); err != nil {
+			return nil, StageAttachmentResult{}, err
+		}
+		ss.rootIdentity = identity
+		return nil, StageAttachmentResult{Handle: args.Name}, nil
 	}
 	content := []byte(args.Content)
 	if args.Path != "" {
@@ -805,7 +834,6 @@ func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, 
 			return nil, StageAttachmentResult{}, toolError("reading %s: %v", args.Path, err)
 		}
 	}
-	identity := s.requestIdentity(req)
 	handle, err := ss.root.StageAttachment(ctx, identity, args.Name, content)
 	if err != nil {
 		return nil, StageAttachmentResult{}, err
@@ -1079,12 +1107,29 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 }
 
 func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, args ReadAttachmentArgs) (*mcp.CallToolResult, ReadAttachmentResult, error) {
-	if args.ID == "" {
-		return nil, ReadAttachmentResult{}, toolError("id is required")
-	}
 	maxBytes := args.MaxBytes
 	if maxBytes == 0 {
 		maxBytes = 65536
+	}
+	if args.Handle != "" {
+		if args.ID != "" {
+			return nil, ReadAttachmentResult{}, toolError("pass id or handle, not both")
+		}
+		ss, err := s.attachedSession(ctx, req, args.Session)
+		if err != nil {
+			return nil, ReadAttachmentResult{}, err
+		}
+		page, staged, err := ss.root.ReadStagedAttachment(ctx, s.requestIdentity(req), args.Handle, args.Offset, maxBytes)
+		if err != nil {
+			return nil, ReadAttachmentResult{}, err
+		}
+		return nil, ReadAttachmentResult{
+			Name: page.Filename, Content: string(page.Content), Offset: page.Offset, NextOffset: page.NextOffset,
+			TotalBytes: page.TotalSize, More: page.More, Available: staged,
+		}, nil
+	}
+	if args.ID == "" {
+		return nil, ReadAttachmentResult{}, toolError("id is required (or handle with session, for a staged file)")
 	}
 	result, err := s.app.ReadAttachment(ctx, s.requestIdentity(req), s.project, sdd.ReadAttachmentRequest{EntryID: args.ID, Filename: args.Name, Offset: args.Offset, MaxBytes: maxBytes})
 	if err != nil {
