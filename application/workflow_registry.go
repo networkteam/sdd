@@ -145,6 +145,16 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
+		Doc:       engine.FuncDoc{Name: "topicLabels", Doc: "The distinct topic labels in use across active entries — bare and sorted, one per line. Byte-stable across serves, unlike the count/heat table `as-counts` renders."},
+		ServeSafe: true,
+		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
+			labels := ctx.Graph.TopicLabels(ctx.Graph.Filter(model.GraphFilter{OpenOnly: true}))
+			return strings.Join(labels, "\n"), nil
+		},
+	}); err != nil {
+		return err
+	}
+	if err := registry.RegisterQuery(engine.Query{
 		Doc:       engine.FuncDoc{Name: "procedureList", Doc: "The live playbook moves, one line each: canonical, a compact signature of its accepted start params, and the first sentence of the head entry's summary. Shell-class procedures are excluded — they enter through start_session."},
 		ServeSafe: true,
 		Fn: func(*engine.Context, map[string]any) (any, error) {
