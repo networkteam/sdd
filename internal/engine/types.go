@@ -43,6 +43,10 @@ const (
 	TypeInvolvement       BaseType = "involvement"
 	TypeInvolvementWhen   BaseType = "involvement-when"
 	TypeSearchReplace     BaseType = "search-replace"
+	// TypeProse validates exactly like text; the distinct declaration tells
+	// serve-side rendering to treat changes as content diffs rather than
+	// whole-value re-serves (20260826-120330-d-tac-8f8).
+	TypeProse BaseType = "prose"
 )
 
 // baseTypeOrder is the canonical enumeration of domain types; baseTypes
@@ -51,7 +55,7 @@ var baseTypeOrder = []BaseType{
 	TypeText, TypeBool, TypeEntryID, TypeRef, TypeLabel, TypeParticipant,
 	TypeEntryKind, TypeLayer, TypeConfidence, TypeIntent, TypeAttachmentHandle,
 	TypeProcedureSpec, TypeFactIndex, TypePreflightFindings, TypeGuideFindings,
-	TypeInvolvement, TypeInvolvementWhen, TypeSearchReplace,
+	TypeInvolvement, TypeInvolvementWhen, TypeSearchReplace, TypeProse,
 }
 
 var baseTypes = func() map[BaseType]bool {
@@ -91,6 +95,7 @@ var baseTypeDesc = map[BaseType]string{
 	TypeInvolvement:       "a focus involvement: target entry, optional actors, optional time range",
 	TypeInvolvementWhen:   "a from/to date range",
 	TypeSearchReplace:     "one exact edit: old text that must match exactly once in the target, and the new text replacing it",
+	TypeProse:             "long-form prose — like text, but serves render changes as content diffs instead of re-serving the whole value",
 }
 
 // Description returns the type's served meaning; empty for an unknown type.
@@ -161,7 +166,7 @@ func (t VarType) ValidateValue(v any) (any, error) {
 
 func validateBaseValue(base BaseType, v any) (any, error) {
 	switch base {
-	case TypeText:
+	case TypeText, TypeProse:
 		s, ok := v.(string)
 		if !ok {
 			return nil, fmt.Errorf("expected text (string)")

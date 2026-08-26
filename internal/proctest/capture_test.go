@@ -469,15 +469,15 @@ func TestCapture_FactIndexSetThenCleared(t *testing.T) {
 	draft["index"] = map[string]any{"title": "How to compose graph views", "topic": "cli/ux"}
 	serve = session.Report(t, instance, draft)
 	proctest.RequireStep(t, serve, "playback")
-	const playback = "- index:\n    title: How to compose graph views\n    topic: cli/ux"
+	const playback = `- index: {"title":"How to compose graph views","topic":"cli/ux"}`
 	if !strings.Contains(serve.Instructions, playback) {
-		t.Fatalf("playback missing nested fact index:\n%s", serve.Instructions)
+		t.Fatalf("playback missing fact index in the draft block:\n%s", serve.Instructions)
 	}
 
 	serve = session.Answer(t, instance, "playback", "adjust", map[string]any{"index": nil}, "remove the index")
 	proctest.RequireStep(t, serve, "playback")
-	if strings.Contains(serve.Instructions, "- index:") {
-		t.Fatalf("playback retained cleared fact index:\n%s", serve.Instructions)
+	if !strings.Contains(serve.Instructions, "- index: (cleared)") {
+		t.Fatalf("playback delta should mark the cleared fact index:\n%s", serve.Instructions)
 	}
 }
 

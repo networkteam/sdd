@@ -640,7 +640,9 @@ func (s *Session) Answer(instanceID, chooser, choice string, fields map[string]a
 }
 
 // Serve re-serves the instance's current position without advancing it —
-// shells use it to rehydrate an agent after resume_session.
+// shells use it to rehydrate an agent after resume_session. Draft (serveDelta)
+// fields serve whole here: a rehydrating agent holds no earlier base, and the
+// full serve resets the delta base for the rounds that follow.
 func (s *Session) Serve(instanceID string) (*Serve, error) {
 	if err := s.checkSink(); err != nil {
 		return nil, err
@@ -649,7 +651,7 @@ func (s *Session) Serve(instanceID string) (*Serve, error) {
 	if !ok {
 		return nil, fmt.Errorf("instance %q not found in session", instanceID)
 	}
-	return s.serve(inst)
+	return s.serveWith(inst, true)
 }
 
 // Inject runs one registered query against an instance's live context — the

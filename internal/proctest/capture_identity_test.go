@@ -114,8 +114,8 @@ func TestCapture_RoleGateResolvesBoundActor(t *testing.T) {
 	serve := session.Start(t, "capture", nil)
 	serve = session.Report(t, serve.Instance, roleDraft())
 	proctest.RequireStep(t, serve, "playback")
-	if !strings.Contains(serve.Instructions, "role of: Christopher") {
-		t.Errorf("playback should render the bound actor, got %q", serve.Instructions)
+	if !strings.Contains(serve.Instructions, "roleActor: Christopher") {
+		t.Errorf("playback draft block should carry the bound actor, got %q", serve.Instructions)
 	}
 }
 
