@@ -46,6 +46,11 @@ type Instance struct {
 	// answered option declared one; empty means the seed applies to whatever is
 	// dispatched next (a generic junction like engage's move).
 	dispatchProcedure string
+	// draftServed holds, per step, the serveDelta snapshot last served to this
+	// instance — the engine-owned base later serves diff against. In-memory
+	// only, deliberately: a process restart or resume forgets it, so those
+	// paths serve whole (20260826-120330-d-tac-8f8).
+	draftServed map[string]map[string]string
 }
 
 // currentStep returns the instance's step definition, nil when terminal.
@@ -399,6 +404,12 @@ func (i *Instance) produced() map[string]any {
 // serve builds the Serve for the instance's current position: rendered
 // instructions, report schema, chooser material, and stall diagnostics.
 func (s *Session) serve(inst *Instance) (*Serve, error) {
+	return s.serveWith(inst, false)
+}
+
+// serveWith renders the position; fullDraft forces serveDelta fields whole —
+// the rehydrate path (Serve), where a resuming agent holds no earlier base.
+func (s *Session) serveWith(inst *Instance, fullDraft bool) (*Serve, error) {
 	sv := &Serve{
 		Instance:  inst.ID,
 		Procedure: inst.Spec.Canonical,
@@ -429,6 +440,20 @@ func (s *Session) serve(inst *Instance) (*Serve, error) {
 	lanes, err := s.renderUnit(inst, step)
 	if err != nil {
 		return nil, err
+	}
+	if len(step.ServeDelta) > 0 {
+		cur := draftSnapshot(inst, step.ServeDelta)
+		var prev map[string]string
+		if !fullDraft {
+			prev = inst.draftServed[step.ID]
+		}
+		if block := renderDraft(inst.Spec, step.ServeDelta, prev, cur, fullDraft); block != "" {
+			lanes = append(lanes, ServeLane{Name: "draft", Text: block})
+		}
+		if inst.draftServed == nil {
+			inst.draftServed = map[string]map[string]string{}
+		}
+		inst.draftServed[step.ID] = cur
 	}
 	sv.Lanes = lanes
 	texts := make([]string, 0, len(lanes))

@@ -296,7 +296,7 @@ type Entry struct {
 	// (resolved) when scope.
 	Involvement []Involvement
 	Preflight   string    // "skipped" or "error" annotation from pre-flight validation
-	Attachments []string  // filenames discovered from the co-located attachment directory
+	Attachments []string  // filenames: discovered from the co-located attachment directory on read, declared from staged handles at the write gate
 	Summary     string    // LLM-generated summary: this entry + direct relationships
 	Warnings    []Warning // validation issues found during graph construction
 	// Embedded marks a base entry compiled into the sdd binary (base

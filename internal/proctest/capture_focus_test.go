@@ -29,8 +29,8 @@ func TestCapture_FocusGatePassesWithoutRefsOrTopics(t *testing.T) {
 
 	serve = session.Report(t, instance, focusDraft())
 	proctest.RequireStep(t, serve, "playback")
-	if !strings.Contains(serve.Instructions, "advances:") || !strings.Contains(serve.Instructions, captureRefID) {
-		t.Errorf("playback should render the advances list with the target, got %q", serve.Instructions)
+	if !strings.Contains(serve.Instructions, "involvement:") || !strings.Contains(serve.Instructions, captureRefID) {
+		t.Errorf("playback draft block should carry the involvement with its target, got %q", serve.Instructions)
 	}
 
 	serve = session.Answer(t, instance, "playback", "confirm", nil, "that's the focus")
@@ -84,7 +84,7 @@ func TestCapture_FocusRendersActorsAndWhen(t *testing.T) {
 	draft["focusWhen"] = map[string]any{"from": "2026-01-01"}
 	serve = session.Report(t, serve.Instance, draft)
 	proctest.RequireStep(t, serve, "playback")
-	for _, want := range []string{"Christopher", "2026-01-01", "2026-02-01", "when: 2026-01-01"} {
+	for _, want := range []string{"Christopher", "2026-01-01", "2026-02-01", "focusWhen:"} {
 		if !strings.Contains(serve.Instructions, want) {
 			t.Errorf("playback should render %q, got %q", want, serve.Instructions)
 		}

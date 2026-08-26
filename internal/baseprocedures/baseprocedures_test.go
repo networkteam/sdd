@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/networkteam/sdd/internal/engine"
 )
 
 const validProcedure = `---
@@ -116,20 +118,22 @@ func TestCaptureCarriesFactIndexThroughPlaybackAndWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var capture string
 	for _, entry := range entries {
-		if entry.Canonical == "capture" {
-			capture = entry.Content
+		if entry.Canonical != "capture" {
+			continue
 		}
-	}
-	for _, want := range []string{
-		"{{if .index}}- index:",
-		"title: {{.index.title}}",
-		"topic: {{.index.topic}}",
-		"optionally enrolls a `fact` in the retrieval index",
-	} {
-		if !strings.Contains(capture, want) {
-			t.Errorf("capture procedure missing %q", want)
+		if !strings.Contains(entry.Content, "optionally enrolls a `fact` in the retrieval index") {
+			t.Error("capture procedure lost the fact-index enrollment guidance")
+		}
+		// Playback visibility lives in the engine-rendered draft block: the
+		// step's serveDelta declaration must carry the index field.
+		spec, err := engine.ParseSpec(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		playback := spec.StepByID["playback"]
+		if playback == nil || !slices.Contains(playback.ServeDelta, "index") {
+			t.Errorf("playback serveDelta must carry index, got %v", playback.ServeDelta)
 		}
 	}
 }

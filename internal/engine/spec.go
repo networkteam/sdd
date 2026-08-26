@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -63,6 +64,12 @@ type VarDecl struct {
 	// (bootstrap's recognitionMode flag). Validated against Type at load; nil
 	// means no default. Applied at store start on state only.
 	Default any
+	// PatchOf names a text state field this field edits in place: a reported
+	// value is an ordered list of search-replace pairs applied atomically to
+	// the target, and the target's new value is what lands and logs — the
+	// patch field itself is never stored (20260826-120330-d-tac-8f8). Requires
+	// an optional list<search-replace> declaration; validated at load.
+	PatchOf string
 }
 
 // ChooserKind classifies who advances a step: the engine (gate,
@@ -172,6 +179,11 @@ type Step struct {
 	// wording would misstate (a session shell's junction is "dialogue
 	// freely", not "put the choice to the user").
 	Goal string
+	// ServeDelta names the state fields the engine renders as a draft block
+	// on this step's serves: whole on the first serve (and on resume), only
+	// what changed after — prose fields as content diffs, lists item-level,
+	// scalars whole (20260826-120330-d-tac-8f8).
+	ServeDelta []string
 }
 
 // Terminal transition targets. A procedure ends by transitioning to one of
@@ -194,6 +206,7 @@ type varDeclYAML struct {
 	Optional bool   `yaml:"optional"`
 	Desc     string `yaml:"desc"`
 	Default  any    `yaml:"default"`
+	PatchOf  string `yaml:"patchOf"`
 }
 
 type injectYAML struct {
@@ -232,6 +245,7 @@ type stepYAML struct {
 	Op          string           `yaml:"op"`
 	Transitions []transitionYAML `yaml:"transitions"`
 	Goal        string           `yaml:"goal"`
+	ServeDelta  []string         `yaml:"serveDelta"`
 }
 
 // decodeStrict re-encodes a retained YAML node and decodes it with unknown
@@ -359,6 +373,24 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 		}
 		spec.State[name] = decl
 	}
+	for _, name := range slices.Sorted(maps.Keys(spec.State)) {
+		decl := spec.State[name]
+		if decl.PatchOf == "" {
+			continue
+		}
+		if !decl.Optional || !decl.Type.List || decl.Type.Base != TypeSearchReplace {
+			addProblem("state.%s: patchOf requires an optional list<search-replace> declaration, got %s", name, decl.Type)
+		}
+		target, ok := spec.State[decl.PatchOf]
+		switch {
+		case !ok:
+			addProblem("state.%s: patchOf target %q is not declared in state", name, decl.PatchOf)
+		case target.Type.List || (target.Type.Base != TypeText && target.Type.Base != TypeProse):
+			addProblem("state.%s: patchOf target %q must be a text state field, got %s", name, decl.PatchOf, target.Type)
+		case target.PatchOf != "":
+			addProblem("state.%s: patchOf target %q is itself a patch field", name, decl.PatchOf)
+		}
+	}
 
 	if len(stepsYAML) == 0 {
 		addProblem("steps: a procedure needs at least one step")
@@ -384,6 +416,11 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 		for _, t := range step.Transitions {
 			if !IsEndTarget(t.To) && spec.StepByID[t.To] == nil {
 				addProblem("%s: transition target %q is not a step or end(...)", prefix, t.To)
+			}
+		}
+		for _, f := range step.ServeDelta {
+			if _, ok := spec.State[f]; !ok {
+				addProblem("%s: serveDelta names %q, which is not declared in state", prefix, f)
 			}
 		}
 		for _, o := range step.Options {
@@ -465,7 +502,7 @@ func parseVarDecl(name string, d varDeclYAML) (VarDecl, error) {
 	if err != nil {
 		return VarDecl{}, err
 	}
-	decl := VarDecl{Type: t, Optional: d.Optional, Desc: d.Desc}
+	decl := VarDecl{Type: t, Optional: d.Optional, Desc: d.Desc, PatchOf: d.PatchOf}
 	if d.Default != nil {
 		dv, err := t.ValidateValue(d.Default)
 		if err != nil {
@@ -488,11 +525,12 @@ func parseStep(sy stepYAML, index int) (*Step, []string) {
 	prefix := "steps." + sy.ID
 
 	step := &Step{
-		ID:      sy.ID,
-		Render:  sy.Render,
-		Op:      sy.Op,
-		Chooser: ChooserGate,
-		Goal:    sy.Goal,
+		ID:         sy.ID,
+		Render:     sy.Render,
+		Op:         sy.Op,
+		Chooser:    ChooserGate,
+		Goal:       sy.Goal,
+		ServeDelta: sy.ServeDelta,
 	}
 
 	switch sy.Chooser {

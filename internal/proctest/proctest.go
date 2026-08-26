@@ -311,6 +311,27 @@ func (s *Session) StartErr(t *testing.T, canonical string, params map[string]any
 	return s.WF.Start(t.Context(), s.World.Identity, sdd.WorkflowStartRequest{Canonical: canonical, Params: params})
 }
 
+// Stage places bytes in the session's staged scratch and returns the handle.
+func (s *Session) Stage(t *testing.T, filename string, content []byte) string {
+	t.Helper()
+	handle, err := s.WF.StageAttachment(t.Context(), s.World.Identity, filename, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handle
+}
+
+// StartChild starts a procedure under a spawning parent, so a dispatch seed
+// recorded on the parent's answered junction applies to the new instance.
+func (s *Session) StartChild(t *testing.T, canonical string, params map[string]any, parent string) *sdd.WorkflowServe {
+	t.Helper()
+	serve, err := s.WF.Start(t.Context(), s.World.Identity, sdd.WorkflowStartRequest{Canonical: canonical, Params: params, Parent: parent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return serve
+}
+
 // Report sends state fields to the instance's current step.
 func (s *Session) Report(t *testing.T, instance string, fields map[string]any) *sdd.WorkflowServe {
 	t.Helper()

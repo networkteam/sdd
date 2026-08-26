@@ -276,6 +276,16 @@ func schemaForType(t VarType, desc string) map[string]any {
 		}
 	case TypeInvolvementWhen:
 		schema = involvementWhenSchema()
+	case TypeSearchReplace:
+		schema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"old": map[string]any{"type": "string", "minLength": 1, "description": "exact text to replace — must match exactly once in the target as it stands when this pair applies"},
+				"new": map[string]any{"type": "string", "description": "replacement text; empty deletes the old text"},
+			},
+			"required":             []string{"old", "new"},
+			"additionalProperties": false,
+		}
 	case TypeEntryKind:
 		schema = map[string]any{"type": "string", "enum": []any{
 			"gap", "fact", "question", "insight", "done", "actor", "annotation",

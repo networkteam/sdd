@@ -700,7 +700,7 @@ func draftEntryFromStore(store *Store) (*model.Entry, []model.Finding) {
 		Intent:    model.Intent(str("intent")),
 		Canonical: str("canonical"), Aliases: strs("aliases"), Actor: str("roleActor"),
 		Participants: strs("participants"), Closes: strs("closes"), Supersedes: strs("supersedes"),
-		FocusActors: strs("focusActors"),
+		FocusActors: strs("focusActors"), Attachments: strs("attachments"),
 	}
 	if v, ok := store.Get("refs"); ok {
 		for _, r := range asRefs(v) {

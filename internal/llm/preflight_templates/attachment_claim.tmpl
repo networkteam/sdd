@@ -1,0 +1,17 @@
+{{ define "attachment_claim" }}
+## Attachment claim consistency (apply to every entry)
+
+Cross-check the proposed entry's body against its `Attachments:` line (absent means the entry carries no attachment).
+
+Flag only a body that asserts a record is attached **to this entry** — "the attached review", "attached as `notes.md`", "carries the full transcript as an attachment" — while the `Attachments:` line is absent or names no matching file. Such an entry lies about what it carries: a later reader goes looking for the record and finds nothing.
+
+This check is deliberately narrow. Emit no finding for:
+
+- a body that merely **mentions** a file, path, or document without claiming it is attached to this entry;
+- a reference to an attachment **on another entry** (its ID appears with the mention);
+- markdown links into the attachment directory (`{{"{{attachments}}"}}/...`) — a separate mechanical check owns those;
+- an attachment the entry carries that the body never mentions.
+
+- `high` — The body asserts an attached record and the entry carries no attachment (or none matching the assertion).
+- No finding — everything else.
+{{ end }}

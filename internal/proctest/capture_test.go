@@ -5,6 +5,8 @@
 package proctest_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -115,6 +117,214 @@ func TestCapture_OneShotHappyPath(t *testing.T) {
 	entry := proctest.LoadEntry(t, world.GraphDir, entryID)
 	if !strings.Contains(entry.Content, "the fixture observes something") {
 		t.Fatalf("persisted entry body = %q", entry.Content)
+	}
+}
+
+// TestCapture_BodyAssertingMissingAttachmentBlockedAtGate pins the write-gate
+// consistency check (20260707-175502-s-prc-lgu): a body linking an attachment
+// the entry does not carry is blocked with a named finding, never written.
+func TestCapture_BodyAssertingMissingAttachmentBlockedAtGate(t *testing.T) {
+	_, session := newCaptureWorld(t, "core-attach-claim")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	draft := captureDraft()
+	draft["body"] = "A tactical gap: the fixture observes something. Full record: [review]({{attachments}}/review.md)."
+	serve = session.Report(t, instance, draft)
+	proctest.RequireStep(t, serve, "playback")
+
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "reviseOrOverride")
+	if !strings.Contains(serve.Instructions, "broken attachment link") || !strings.Contains(serve.Instructions, "review.md") {
+		t.Errorf("blocked write should serve the broken-link finding naming the file, got %q", serve.Instructions)
+	}
+}
+
+// TestCapture_AttachmentLinkResolvesOnDisk: the happy half — a staged
+// attachment listed in the report materializes, and the body's
+// {{attachments}} placeholder resolves at write instead of landing literally.
+func TestCapture_AttachmentLinkResolvesOnDisk(t *testing.T) {
+	world, session := newCaptureWorld(t, "core-attach-link")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	handle := session.Stage(t, "review.md", []byte("the full record"))
+	draft := captureDraft()
+	draft["body"] = "A tactical gap: the fixture observes something. Full record: [review]({{attachments}}/review.md)."
+	draft["attachments"] = []any{handle}
+	serve = session.Report(t, instance, draft)
+	proctest.RequireStep(t, serve, "playback")
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "verifySummary")
+	serve = session.Answer(t, instance, "verifySummary", "faithful",
+		map[string]any{"fidelityNote": "matches the body"}, "")
+	proctest.RequireStatus(t, serve, "completed")
+
+	entryID, _ := serve.Produced["entryId"].(string)
+	entry := proctest.LoadEntry(t, world.GraphDir, entryID)
+	if strings.Contains(entry.Content, "{{attachments}}") {
+		t.Errorf("placeholder must resolve at write, body = %q", entry.Content)
+	}
+	if want := "./" + entryID[6:] + "/review.md"; !strings.Contains(entry.Content, want) {
+		t.Errorf("body should carry the resolved link %s, got %q", want, entry.Content)
+	}
+	attachDir, err := model.AttachDirRelPath(entryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(world.GraphDir, attachDir, "review.md"))
+	if err != nil || string(content) != "the full record" {
+		t.Fatalf("materialized attachment = %q, %v", content, err)
+	}
+}
+
+// TestCapture_KindCorrectableAtPlayback pins the widened correctable set
+// (20260826-003953-d-tac-ktg): entry kind and layer are adjustable at playback
+// without abandoning the draft, with the kind change re-entering assemble's
+// ordinary gate.
+func TestCapture_KindCorrectableAtPlayback(t *testing.T) {
+	world, session := newCaptureWorld(t, "core-kind-adjust")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	serve = session.Report(t, instance, captureDraft())
+	proctest.RequireStep(t, serve, "playback")
+
+	// The user spots the wrong kind and layer at playback; both land through
+	// adjust and the draft re-validates at assemble, cascading back.
+	serve = session.Answer(t, instance, "playback", "adjust",
+		map[string]any{"entryKind": "insight", "layer": "process"}, "this is an insight, process layer")
+	proctest.RequireStep(t, serve, "playback")
+
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "verifySummary")
+	serve = session.Answer(t, instance, "verifySummary", "faithful",
+		map[string]any{"fidelityNote": "matches the body"}, "")
+	proctest.RequireStatus(t, serve, "completed")
+
+	entryID, _ := serve.Produced["entryId"].(string)
+	entry := proctest.LoadEntry(t, world.GraphDir, entryID)
+	if entry.Kind != model.KindInsight || entry.Layer != model.LayerProcess {
+		t.Fatalf("persisted kind/layer = %s/%s, want insight/process", entry.Kind, entry.Layer)
+	}
+}
+
+// TestCapture_SupersededKindStateRefusedAtGate pins ktg's guard: state
+// licensed only by the superseded kind (intent, collected while the draft was
+// a directive) is refused at the gate after the kind change, and clears by a
+// null report rather than an abandon.
+func TestCapture_SupersededKindStateRefusedAtGate(t *testing.T) {
+	_, session := newCaptureWorld(t, "core-kind-guard")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	draft := captureDraft()
+	draft["entryKind"] = "directive"
+	draft["intent"] = "guiding"
+	serve = session.Report(t, instance, draft)
+	proctest.RequireStep(t, serve, "playback")
+
+	// Kind changes to gap while intent — licensed only by the directive kind —
+	// stays behind: the assemble gate must hold, naming the stale field.
+	serve = session.Answer(t, instance, "playback", "adjust",
+		map[string]any{"entryKind": "gap"}, "this is a gap, not a directive")
+	proctest.RequireStep(t, serve, "assemble")
+	if !hasDiagnostic(serve, "intent") {
+		t.Fatalf("gate should name the stale intent field, got %v", serve.Diagnostics)
+	}
+
+	// Clearing the stale field by null unblocks the draft.
+	serve = session.Report(t, instance, map[string]any{"intent": nil})
+	proctest.RequireStep(t, serve, "playback")
+}
+
+// TestCapture_AttachmentsCorrectableAtPlayback: a staged file forgotten in the
+// report is repairable at playback instead of forcing a redraft
+// (20260707-175502-s-prc-lgu's second hole).
+func TestCapture_AttachmentsCorrectableAtPlayback(t *testing.T) {
+	world, session := newCaptureWorld(t, "core-attach-adjust")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	handle := session.Stage(t, "record.md", []byte("the record"))
+	serve = session.Report(t, instance, captureDraft())
+	proctest.RequireStep(t, serve, "playback")
+
+	serve = session.Answer(t, instance, "playback", "adjust",
+		map[string]any{"attachments": []any{handle}}, "attach the record")
+	proctest.RequireStep(t, serve, "playback")
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "verifySummary")
+	serve = session.Answer(t, instance, "verifySummary", "faithful",
+		map[string]any{"fidelityNote": "matches the body"}, "")
+	proctest.RequireStatus(t, serve, "completed")
+
+	entryID, _ := serve.Produced["entryId"].(string)
+	attachDir, err := model.AttachDirRelPath(entryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(world.GraphDir, attachDir, "record.md")); err != nil {
+		t.Fatalf("attachment adjusted at playback should materialize: %v", err)
+	}
+}
+
+// TestCapture_BodyPatchAtPlayback pins the patch report on the shipped
+// procedure (20260826-120330-d-tac-8f8): a small edit reports as search-replace
+// pairs at playback adjust instead of re-transmitting the body whole, and a
+// failing pair refuses the answer naming itself.
+func TestCapture_BodyPatchAtPlayback(t *testing.T) {
+	world, session := newCaptureWorld(t, "core-body-patch")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	serve = session.Report(t, instance, captureDraft())
+	proctest.RequireStep(t, serve, "playback")
+
+	_, err := session.AnswerErr(t, instance, "playback", "adjust", map[string]any{
+		"bodyPatch": []any{map[string]any{"old": "not in the body", "new": "x"}},
+	}, "fix the wording")
+	if err == nil || !strings.Contains(err.Error(), "pair 1") {
+		t.Fatalf("failing pair must refuse the answer naming itself, got %v", err)
+	}
+
+	serve = session.Answer(t, instance, "playback", "adjust", map[string]any{
+		"bodyPatch": []any{map[string]any{"old": "observes something", "new": "observes a repetition"}},
+	}, "fix the wording")
+	proctest.RequireStep(t, serve, "playback")
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "verifySummary")
+	serve = session.Answer(t, instance, "verifySummary", "faithful",
+		map[string]any{"fidelityNote": "matches the body"}, "")
+	proctest.RequireStatus(t, serve, "completed")
+
+	entryID, _ := serve.Produced["entryId"].(string)
+	entry := proctest.LoadEntry(t, world.GraphDir, entryID)
+	if !strings.Contains(entry.Content, "observes a repetition") {
+		t.Fatalf("patched body should persist, got %q", entry.Content)
+	}
+}
+
+// TestCapture_TopLevelFieldWithChooserAnswerRefused mirrors the observed gap
+// (20260811-233331-s-tac-bjn): a declared state field reported at playback
+// beside the adjust answer is refused by name, never silently dropped.
+func TestCapture_TopLevelFieldWithChooserAnswerRefused(t *testing.T) {
+	_, session := newCaptureWorld(t, "core-envelope")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	serve = session.Report(t, instance, captureDraft())
+	proctest.RequireStep(t, serve, "playback")
+
+	_, err := session.ReportErr(t, instance, map[string]any{
+		"chooser":     "playback",
+		"choice":      "adjust",
+		"fields":      map[string]any{"body": "An adjusted body."},
+		"userWords":   "fix the body and the involvement",
+		"involvement": []any{map[string]any{"target": captureRefID}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `"involvement"`) {
+		t.Fatalf("top-level field beside a chooser answer must be refused by name, got %v", err)
 	}
 }
 
@@ -259,15 +469,15 @@ func TestCapture_FactIndexSetThenCleared(t *testing.T) {
 	draft["index"] = map[string]any{"title": "How to compose graph views", "topic": "cli/ux"}
 	serve = session.Report(t, instance, draft)
 	proctest.RequireStep(t, serve, "playback")
-	const playback = "- index:\n    title: How to compose graph views\n    topic: cli/ux"
+	const playback = `- index: {"title":"How to compose graph views","topic":"cli/ux"}`
 	if !strings.Contains(serve.Instructions, playback) {
-		t.Fatalf("playback missing nested fact index:\n%s", serve.Instructions)
+		t.Fatalf("playback missing fact index in the draft block:\n%s", serve.Instructions)
 	}
 
 	serve = session.Answer(t, instance, "playback", "adjust", map[string]any{"index": nil}, "remove the index")
 	proctest.RequireStep(t, serve, "playback")
-	if strings.Contains(serve.Instructions, "- index:") {
-		t.Fatalf("playback retained cleared fact index:\n%s", serve.Instructions)
+	if !strings.Contains(serve.Instructions, "- index: (cleared)") {
+		t.Fatalf("playback delta should mark the cleared fact index:\n%s", serve.Instructions)
 	}
 }
 
