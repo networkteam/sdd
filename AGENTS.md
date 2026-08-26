@@ -112,6 +112,7 @@ sdd/
 - Full ID format: `{YYYYMMDD}-{HHmmss}-{type}-{layer}-{suffix}` — full ID used in code/CLI invocations, path derived from it
 - WIP markers live at `.sdd/graph/wip/`
 - **Finding entries: use `sdd search`, not grep.** To locate graph entries (including when delegating to subagents), use `sdd search` (vector or hybrid retrieval) — it matches semantically across summaries and bodies. Reserve `grep`/`ripgrep` for **source code**; `sdd search` only indexes graph entries, not Go source.
+- **A delegate's report is a summary, not a source.** A subagent's research report has the same status as an entry summary: a pointer. Read the entries it names in full (`sdd show`) before reasoning, planning, or dialoguing on them — a report can misstate what an entry settles.
 
 ## Skill source of truth
 
