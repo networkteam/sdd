@@ -42,6 +42,7 @@ const (
 	TypeGuideFindings     BaseType = "guide-findings"
 	TypeInvolvement       BaseType = "involvement"
 	TypeInvolvementWhen   BaseType = "involvement-when"
+	TypeSearchReplace     BaseType = "search-replace"
 )
 
 // baseTypeOrder is the canonical enumeration of domain types; baseTypes
@@ -50,7 +51,7 @@ var baseTypeOrder = []BaseType{
 	TypeText, TypeBool, TypeEntryID, TypeRef, TypeLabel, TypeParticipant,
 	TypeEntryKind, TypeLayer, TypeConfidence, TypeIntent, TypeAttachmentHandle,
 	TypeProcedureSpec, TypeFactIndex, TypePreflightFindings, TypeGuideFindings,
-	TypeInvolvement, TypeInvolvementWhen,
+	TypeInvolvement, TypeInvolvementWhen, TypeSearchReplace,
 }
 
 var baseTypes = func() map[BaseType]bool {
@@ -89,6 +90,7 @@ var baseTypeDesc = map[BaseType]string{
 	TypeGuideFindings:     "the entry-craft findings the capture writing guide returned on the draft — engine-written, never collected by a step",
 	TypeInvolvement:       "a focus involvement: target entry, optional actors, optional time range",
 	TypeInvolvementWhen:   "a from/to date range",
+	TypeSearchReplace:     "one exact edit: old text that must match exactly once in the target, and the new text replacing it",
 }
 
 // Description returns the type's served meaning; empty for an unknown type.
@@ -227,6 +229,27 @@ func validateBaseValue(base BaseType, v any) (any, error) {
 
 	case TypeInvolvementWhen:
 		return whenFromValue(v)
+
+	case TypeSearchReplace:
+		m, ok := v.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("expected edit object {old, new}")
+		}
+		for key := range m {
+			switch key {
+			case "old", "new":
+			default:
+				return nil, fmt.Errorf("unknown edit key %q (old, new)", key)
+			}
+		}
+		old, ok := m["old"].(string)
+		if !ok || old == "" {
+			return nil, fmt.Errorf("old must be a non-empty string")
+		}
+		if _, ok := m["new"].(string); !ok {
+			return nil, fmt.Errorf("new must be a string (empty deletes the old text)")
+		}
+		return m, nil
 
 	case TypeLabel:
 		s, ok := v.(string)

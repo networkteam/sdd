@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/networkteam/sdd/internal/textpatch"
 )
 
 // Provenance classifies who wrote a store value. The split carries the trust
@@ -203,6 +205,7 @@ func (s *Store) writeState(fields map[string]any, validate func(*Store) error) (
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	written := make([]string, 0, len(names))
 	err := s.transact(func(candidate *Store) error {
 		for _, name := range names {
 			raw := fields[name]
@@ -218,17 +221,34 @@ func (s *Store) writeState(fields map[string]any, validate func(*Store) error) (
 					return fmt.Errorf("field %q is required and cannot be cleared", name)
 				}
 				delete(candidate.values, name)
+				written = append(written, name)
 				continue
 			}
 			v, err := decl.Type.ValidateValue(raw)
 			if err != nil {
 				return fmt.Errorf("field %q: %w", name, err)
 			}
+			if decl.PatchOf != "" {
+				// The patch mutates its target; the target's new value is what
+				// lands and logs, so replay re-writes the result, never
+				// re-applies the pairs.
+				if _, direct := fields[decl.PatchOf]; direct {
+					return fmt.Errorf("field %q patches %q — report one or the other, not both", name, decl.PatchOf)
+				}
+				patched, err := applyPatchValue(candidate, decl.PatchOf, v)
+				if err != nil {
+					return fmt.Errorf("field %q: %w (the whole report is refused; no pair applied)", name, err)
+				}
+				candidate.values[decl.PatchOf] = storeValue{Value: patched, Provenance: ProvenanceState}
+				written = append(written, decl.PatchOf)
+				continue
+			}
 			nv, err := normalizeStoreValue(v)
 			if err != nil {
 				return fmt.Errorf("field %q: %w", name, err)
 			}
 			candidate.values[name] = storeValue{Value: nv, Provenance: ProvenanceState}
+			written = append(written, name)
 		}
 		if validate != nil {
 			return validate(candidate)
@@ -238,7 +258,26 @@ func (s *Store) writeState(fields map[string]any, validate func(*Store) error) (
 	if err != nil {
 		return nil, err
 	}
-	return names, nil
+	return written, nil
+}
+
+// applyPatchValue applies a validated list<search-replace> value to the named
+// text field's current value in the candidate store.
+func applyPatchValue(candidate *Store, target string, v any) (string, error) {
+	cur, ok := candidate.values[target]
+	text, _ := cur.Value.(string)
+	if !ok || text == "" {
+		return "", fmt.Errorf("%q is not set — nothing to patch; report %q in full instead", target, target)
+	}
+	items, _ := v.([]any)
+	pairs := make([]textpatch.Pair, 0, len(items))
+	for _, item := range items {
+		m, _ := item.(map[string]any)
+		old, _ := m["old"].(string)
+		repl, _ := m["new"].(string)
+		pairs = append(pairs, textpatch.Pair{Old: old, New: repl})
+	}
+	return textpatch.Apply(text, pairs)
 }
 
 // WriteEngine writes an engine-produced value (an op result or chooser-call

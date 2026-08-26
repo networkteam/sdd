@@ -269,6 +269,42 @@ func TestCapture_AttachmentsCorrectableAtPlayback(t *testing.T) {
 	}
 }
 
+// TestCapture_BodyPatchAtPlayback pins the patch report on the shipped
+// procedure (20260826-120330-d-tac-8f8): a small edit reports as search-replace
+// pairs at playback adjust instead of re-transmitting the body whole, and a
+// failing pair refuses the answer naming itself.
+func TestCapture_BodyPatchAtPlayback(t *testing.T) {
+	world, session := newCaptureWorld(t, "core-body-patch")
+
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	serve = session.Report(t, instance, captureDraft())
+	proctest.RequireStep(t, serve, "playback")
+
+	_, err := session.AnswerErr(t, instance, "playback", "adjust", map[string]any{
+		"bodyPatch": []any{map[string]any{"old": "not in the body", "new": "x"}},
+	}, "fix the wording")
+	if err == nil || !strings.Contains(err.Error(), "pair 1") {
+		t.Fatalf("failing pair must refuse the answer naming itself, got %v", err)
+	}
+
+	serve = session.Answer(t, instance, "playback", "adjust", map[string]any{
+		"bodyPatch": []any{map[string]any{"old": "observes something", "new": "observes a repetition"}},
+	}, "fix the wording")
+	proctest.RequireStep(t, serve, "playback")
+	serve = session.Answer(t, instance, "playback", "confirm", nil, "capture it")
+	proctest.RequireStep(t, serve, "verifySummary")
+	serve = session.Answer(t, instance, "verifySummary", "faithful",
+		map[string]any{"fidelityNote": "matches the body"}, "")
+	proctest.RequireStatus(t, serve, "completed")
+
+	entryID, _ := serve.Produced["entryId"].(string)
+	entry := proctest.LoadEntry(t, world.GraphDir, entryID)
+	if !strings.Contains(entry.Content, "observes a repetition") {
+		t.Fatalf("patched body should persist, got %q", entry.Content)
+	}
+}
+
 // TestCapture_TopLevelFieldWithChooserAnswerRefused mirrors the observed gap
 // (20260811-233331-s-tac-bjn): a declared state field reported at playback
 // beside the adjust answer is refused by name, never silently dropped.
