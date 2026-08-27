@@ -2,7 +2,6 @@ package model
 
 import (
 	"fmt"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -1263,53 +1262,6 @@ func validateProcedureForks(g *Graph) {
 				Value:   h.Canonical,
 				Message: fmt.Sprintf("procedure chain is forked: %d live heads (%s); %s wins for execution (project head over base) — groom to resolve the fork deliberately", len(headIDs), strings.Join(headIDs, ", "), winner),
 			})
-		}
-	}
-}
-
-// validateAttachmentLinks checks that references to the entry's attachment
-// directory point to files that exist in the entry's Attachments list — both
-// the pre-resolution {{attachments}}/ placeholder (the only form authorable
-// before an ID is minted) and the resolved ./<shortname>/ form.
-func validateAttachmentLinks(e *Entry) {
-	prefixes := []string{"{{attachments}}/"}
-	if len(e.ID) >= 8 {
-		prefixes = append(prefixes, "./"+e.ID[6:]+"/") // DD-HHmmss-type-layer-suffix
-	}
-
-	knownFiles := make(map[string]bool)
-	for _, a := range e.Attachments {
-		knownFiles[filepath.Base(a)] = true
-	}
-
-	for _, prefix := range prefixes {
-		// Find all references to the attachment directory in content
-		rest := e.Content
-		for {
-			idx := strings.Index(rest, prefix)
-			if idx < 0 {
-				break
-			}
-			after := rest[idx+len(prefix):]
-			// Extract filename until a markdown/whitespace delimiter
-			end := strings.IndexAny(after, ") \n\t\"'")
-			var filename string
-			if end > 0 {
-				filename = after[:end]
-			} else if end < 0 {
-				filename = after // rest of string
-			}
-			if filename != "" && !knownFiles[filename] {
-				e.Warnings = append(e.Warnings, Warning{
-					Field:   "attachments",
-					Value:   prefix + filename,
-					Message: fmt.Sprintf("broken attachment link: %s%s (file not found in attachment directory)", prefix, filename),
-				})
-			}
-			if end < 0 {
-				break
-			}
-			rest = after[end:]
 		}
 	}
 }
