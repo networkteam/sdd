@@ -673,16 +673,33 @@ func AttachDirRelPath(id string) (string, error) {
 	return strings.TrimSuffix(rel, ".md"), nil
 }
 
-// ResolveAttachmentLinks replaces {{attachments}} placeholders in content with the
-// actual relative directory path for markdown links.
+// ResolveAttachmentLinks replaces {{attachments}} placeholders in content with
+// the actual relative directory path for markdown links. Placeholders inside
+// code regions are documentation of the syntax, not links, and stay literal —
+// the same reading maskCodeRegions gives the link check.
 func ResolveAttachmentLinks(content, id string) string {
 	if len(id) < 8 {
 		return content
 	}
+	const placeholder = "{{attachments}}"
 	// The short filename (without YYYYMM prefix and .md) serves as the directory name
 	// relative to the entry file in the same directory.
-	shortName := id[6:] // DD-HHmmss-type-layer-suffix
-	return strings.ReplaceAll(content, "{{attachments}}", "./"+shortName)
+	resolved := "./" + id[6:] // DD-HHmmss-type-layer-suffix
+
+	masked := maskCodeRegions(content)
+	var b strings.Builder
+	off := 0
+	for {
+		before, _, found := strings.Cut(masked[off:], placeholder)
+		if !found {
+			b.WriteString(content[off:])
+			return b.String()
+		}
+		pos := off + len(before)
+		b.WriteString(content[off:pos])
+		b.WriteString(resolved)
+		off = pos + len(placeholder)
+	}
 }
 
 // parseEntryType resolves a frontmatter type string to a canonical EntryType.

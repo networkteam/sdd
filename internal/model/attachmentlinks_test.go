@@ -168,3 +168,40 @@ func TestAttachmentLinkWriteGateStillBlocksProse(t *testing.T) {
 	}
 	t.Fatal("write gate let a false attachment claim through")
 }
+
+// TestResolveAttachmentLinksSkipsCode pins the resolver to the same
+// code-region reading as the check: a documented example of the placeholder
+// syntax survives the write untouched, while prose links still resolve.
+func TestResolveAttachmentLinksSkipsCode(t *testing.T) {
+	const id = "20260406-115516-d-tac-beh"
+
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			"inline code span survives, prose resolves",
+			"See [design]({{attachments}}/design.md), documented as `{{attachments}}/design.md`.",
+			"See [design](./06-115516-d-tac-beh/design.md), documented as `{{attachments}}/design.md`.",
+		},
+		{
+			"fenced block survives",
+			"Example:\n\n```\n[plan]({{attachments}}/plan.md)\n```\n",
+			"Example:\n\n```\n[plan]({{attachments}}/plan.md)\n```\n",
+		},
+		{
+			"indented code block survives",
+			"Example:\n\n    [plan]({{attachments}}/plan.md)\n\nSee [plan]({{attachments}}/plan.md).",
+			"Example:\n\n    [plan]({{attachments}}/plan.md)\n\nSee [plan](./06-115516-d-tac-beh/plan.md).",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := model.ResolveAttachmentLinks(tt.content, id); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
