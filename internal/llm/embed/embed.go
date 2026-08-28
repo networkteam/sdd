@@ -35,7 +35,7 @@ const (
 // in the package.
 func New(cfg model.EmbeddingConfig) (llm.Embedder, error) {
 	if cfg.Provider == "" {
-		return nil, fmt.Errorf("no embedding provider configured (set embedding.provider in .sdd/config.local.yaml)")
+		return nil, fmt.Errorf("no embedding provider configured — run `sdd config set embedding.provider <provider>` (user-global; .sdd/config.local.yaml overrides per machine)")
 	}
 	if cfg.Model == "" {
 		return nil, fmt.Errorf("embedding.model is required")

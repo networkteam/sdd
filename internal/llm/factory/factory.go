@@ -61,7 +61,7 @@ func New(cfg model.LLMConfig) (llm.Runner, error) {
 // Anthropic tier 1 (shared family limits): Opus 50 RPM, Sonnet 100 RPM,
 // Haiku 200 RPM. OpenAI tier 1 varies per model; cheap mini/nano families
 // get higher throughput than frontier models. Users on higher tiers
-// override via llm.rate_limit_rps in .sdd/config.local.yaml.
+// override via the llm.rate_limit_rps config setting.
 func providerDefaultRPS(provider, modelName string) float64 {
 	name := strings.ToLower(modelName)
 	switch provider {

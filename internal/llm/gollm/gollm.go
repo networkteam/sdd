@@ -1,7 +1,7 @@
 // Package gollm implements llm.Runner on top of github.com/teilomillet/gollm,
 // providing a unified adapter for Anthropic API, OpenAI, Ollama, and other
 // providers supported by gollm. This is the opt-in alternative to the
-// claude-cli bridge; selected via .sdd/config.local.yaml llm.provider.
+// claude-cli bridge; selected via the llm.provider config setting.
 package gollm
 
 import (
@@ -69,7 +69,7 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 	if needsAPIKey(cfg.Provider) {
 		key := cfg.APIKeys[cfg.Provider]
 		if key == "" {
-			return nil, fmt.Errorf("gollm: api key missing for provider %q (set llm.api_keys.%s in .sdd/config.local.yaml)", cfg.Provider, cfg.Provider)
+			return nil, fmt.Errorf("gollm: api key missing for provider %q — run `sdd config set --local llm.api_keys.%s <key>` (machine-local keeps the key out of version control)", cfg.Provider, cfg.Provider)
 		}
 		opts = append(opts, upstream.SetAPIKey(key))
 	}
