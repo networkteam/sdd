@@ -224,10 +224,7 @@ type EmbeddingConfig struct {
 }
 
 // LLMConfig holds settings for LLM provider selection, model choice, and
-// concurrency/rate-limit behavior. API keys and personal defaults live in
-// the uncommitted user-global config (per machine: .sdd/config.local.yaml);
-// defaults (provider, model, timeout, concurrency) are safe to commit in
-// .sdd/config.yaml.
+// concurrency/rate-limit behavior.
 type LLMConfig struct {
 	// Provider selects the runner implementation: "claude-cli" (default, uses
 	// the logged-in Claude Code session) or a gollm-supported provider name
@@ -242,8 +239,8 @@ type LLMConfig struct {
 	Concurrency int `yaml:"concurrency,omitempty"`
 	// OllamaEndpoint overrides the default Ollama URL for the gollm adapter.
 	OllamaEndpoint string `yaml:"ollama_endpoint,omitempty"`
-	// APIKeys maps provider name to API key. Lives in the user-global or
-	// machine-local config, never the committed project file.
+	// APIKeys maps provider name to API key. Never belongs in the
+	// committed .sdd/config.yaml.
 	APIKeys map[string]string `yaml:"api_keys,omitempty"`
 	// RateLimitRPS caps remote-provider requests per second. Zero means
 	// "apply a conservative per-model default safe for Anthropic/OpenAI

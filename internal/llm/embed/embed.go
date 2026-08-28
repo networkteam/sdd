@@ -35,7 +35,7 @@ const (
 // in the package.
 func New(cfg model.EmbeddingConfig) (llm.Embedder, error) {
 	if cfg.Provider == "" {
-		return nil, fmt.Errorf("no embedding provider configured — run `sdd config set embedding.provider <provider>` (user-global, so every project and cross-repo index shares one embedding space)")
+		return nil, fmt.Errorf("no embedding provider configured — run `sdd config set embedding.provider <provider>`")
 	}
 	if cfg.Model == "" {
 		return nil, fmt.Errorf("embedding.model is required")

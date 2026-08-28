@@ -69,7 +69,7 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 	if needsAPIKey(cfg.Provider) {
 		key := cfg.APIKeys[cfg.Provider]
 		if key == "" {
-			return nil, fmt.Errorf("gollm: api key missing for provider %q — run `sdd config set llm.api_keys.%s <key>` (user-global; never the committed project file)", cfg.Provider, cfg.Provider)
+			return nil, fmt.Errorf("gollm: api key missing for provider %q — run `sdd config set llm.api_keys.%s <key>`", cfg.Provider, cfg.Provider)
 		}
 		opts = append(opts, upstream.SetAPIKey(key))
 	}

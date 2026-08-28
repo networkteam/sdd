@@ -358,7 +358,7 @@ sdd config set llm.provider ollama     # write to the user-global file
 sdd config set --local embedding.api_keys.openai sk-...   # write to .sdd/config.local.yaml
 ```
 
-`sdd config set` writes the user-global file by default, or the machine-local file with `--local`. The committed project file is written by `sdd init` (or edited by hand), so a project property change is a reviewed commit. The provider blocks below can live in any of the three files — put shared defaults in the project file and personal defaults (API keys included) global — keys never belong in the committed project file; `--local` covers a genuinely per-machine key.
+`sdd config set` writes the user-global file by default, or the machine-local file with `--local`. The committed project file is written by `sdd init` (or edited by hand), so a project property change is a reviewed commit. The provider blocks below can live in any of the three files — put shared defaults in the project file and personal defaults, API keys included, at the global layer.
 
 ### Re-running `sdd init`
 
