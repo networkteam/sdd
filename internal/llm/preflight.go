@@ -11,7 +11,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/networkteam/sdd/internal/bundledskills"
+	"github.com/networkteam/sdd/internal/basefacts"
+	"github.com/networkteam/sdd/internal/mdcompose"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -67,7 +68,12 @@ func (r *PreflightResult) HasBlocking() bool {
 func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, configuredLanguage string) (*PreflightResult, error) {
 	ct := selectCheckType(entry, graph)
 
+	vocab, err := refKindVocabulary(graph)
+	if err != nil {
+		return nil, err
+	}
 	pctx := assembleContext(entry, graph, ct, configuredLanguage)
+	pctx.RefKindVocabulary = vocab
 
 	req, err := renderPreflightPrompt(ct, pctx)
 	if err != nil {
@@ -181,9 +187,9 @@ type preflightContext struct {
 	ActiveContracts    string
 	ActiveAspirations  string
 	ConfiguredLanguage string
-	// RefKindVocabulary is the canonical ref-kind definitions, read from the
-	// bundled skill reference (references/ref-kinds.md) — the same single source
-	// the skill ships. The ref-meta consistency rubric renders it instead of
+	// RefKindVocabulary is the canonical ref-kind definitions, rendered from
+	// the graph's ref-kind fact (set by Preflight, not assembleContext — the
+	// load is failable). The ref-meta consistency rubric renders it instead of
 	// restating the kinds, so the vocabulary is defined once.
 	RefKindVocabulary string
 }
@@ -276,7 +282,6 @@ func assembleContext(entry *model.Entry, graph *model.Graph, ct checkType, confi
 	pctx := &preflightContext{
 		ProposedEntry:      formatProposedEntryForPreflight(entry),
 		ConfiguredLanguage: configuredLanguage,
-		RefKindVocabulary:  refKindVocabulary(),
 	}
 
 	// Referenced entries. Each carries its derived status (active / closed /
@@ -470,9 +475,6 @@ func derivedStatusForPrompt(s model.Status) string {
 }
 
 var (
-	refKindVocabOnce sync.Once
-	refKindVocabText string
-
 	preflightTmplOnce sync.Once
 	preflightTmpl     *template.Template
 	preflightTmplErr  error
@@ -491,19 +493,17 @@ func parsedPreflightTemplates() (*template.Template, error) {
 	return preflightTmpl, preflightTmplErr
 }
 
-// refKindVocabulary returns the canonical ref-kind vocabulary from the bundled
-// skill reference (references/ref-kinds.md), cached after first read. This is
-// the single source the skill also ships, so the rubric never restates the
-// kinds. The fragment is embedded in the binary, so a read failure is not
-// expected; on error the rubric renders without the injected definitions
-// (degraded, non-fatal) rather than blocking capture.
-func refKindVocabulary() string {
-	refKindVocabOnce.Do(func() {
-		if data, err := bundledskills.ReadReference("sdd", "references/ref-kinds.md"); err == nil {
-			refKindVocabText = strings.TrimSpace(string(data))
-		}
-	})
-	return refKindVocabText
+// refKindVocabulary renders the ref-kind rubric's framework knowledge from the
+// graph's ref-kind fact, resolved to its live head and demoted under the
+// rubric's heading level — the same consumer pattern as the writing guide
+// (d-cpt-x7a). The read fails loud: a graph without a resolvable, non-empty
+// fact blocks the check instead of quietly weakening the rubric (s-tac-7w6).
+func refKindVocabulary(graph *model.Graph) (string, error) {
+	_, body, err := graph.FactBody(basefacts.RefKindsFactID)
+	if err != nil {
+		return "", fmt.Errorf("loading ref-kind vocabulary fact: %w", err)
+	}
+	return mdcompose.DemoteTo(body, 3), nil
 }
 
 // renderPreflightPrompt renders the pre-flight prompt for the given check type

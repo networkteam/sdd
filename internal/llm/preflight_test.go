@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -992,6 +993,24 @@ func Test_renderPreflightPrompt_StructuralChecksKeepLightSystem(t *testing.T) {
 				t.Errorf("%s system block should still carry the verdict output format", ct)
 			}
 		})
+	}
+}
+
+func Test_refKindVocabulary_GraphBacked(t *testing.T) {
+	// Regression for 20260824-165218-s-tac-7w6: the vocabulary renders from
+	// the graph's ref-kind fact and a failed load blocks instead of quietly
+	// weakening the rubric.
+	if _, err := refKindVocabulary(model.NewGraph(nil)); err == nil {
+		t.Fatal("missing ref-kind fact must fail loud, got nil error")
+	}
+
+	fact := entry(basefacts.RefKindsFactID, withKind(model.KindFact), withContent("# Connecting entries — stub\n\nvocabulary body"))
+	vocab, err := refKindVocabulary(model.NewGraph([]*model.Entry{fact}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(vocab, "### Connecting entries") || !strings.Contains(vocab, "vocabulary body") {
+		t.Errorf("vocabulary not rendered from the graph fact with demoted headings:\n%s", vocab)
 	}
 }
 

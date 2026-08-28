@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
@@ -27,9 +28,17 @@ func (m *mockRunner) Run(_ context.Context, req llm.Request) (*llm.RunResult, er
 	return &llm.RunResult{Text: m.response}, nil
 }
 
+// graphWithRefKindFact builds a test graph carrying the ref-kind vocabulary
+// fact every real graph inherits from the base-fact merge — llm.Preflight
+// fails loud without it.
+func graphWithRefKindFact(entries ...*model.Entry) *model.Graph {
+	fact := entry(basefacts.RefKindsFactID, withKind(model.KindFact), withContent("ref-kind vocabulary stub"))
+	return model.NewGraph(append(entries, fact))
+}
+
 func TestRunPreflight_NoFindings(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
-	graph := model.NewGraph([]*model.Entry{sig})
+	graph := graphWithRefKindFact(sig)
 
 	proposed := &model.Entry{
 		Type:    model.TypeSignal,
@@ -56,7 +65,7 @@ func TestRunPreflight_NoFindings(t *testing.T) {
 
 func TestRunPreflight_BlockingFinding(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
-	graph := model.NewGraph([]*model.Entry{sig})
+	graph := graphWithRefKindFact(sig)
 
 	proposed := &model.Entry{
 		Type:    model.TypeDecision,
@@ -91,7 +100,7 @@ func TestRunPreflight_BlockingFinding(t *testing.T) {
 
 func TestRunPreflight_NonBlockingFindings(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("some signal"))
-	graph := model.NewGraph([]*model.Entry{sig})
+	graph := graphWithRefKindFact(sig)
 
 	proposed := &model.Entry{
 		Type:    model.TypeSignal,
@@ -114,7 +123,7 @@ func TestRunPreflight_NonBlockingFindings(t *testing.T) {
 }
 
 func TestRunPreflight_RunnerError(t *testing.T) {
-	graph := model.NewGraph(nil)
+	graph := graphWithRefKindFact()
 
 	proposed := &model.Entry{
 		Type:    model.TypeSignal,
@@ -134,7 +143,7 @@ func TestRunPreflight_RunnerError(t *testing.T) {
 }
 
 func TestRunPreflight_ParseError(t *testing.T) {
-	graph := model.NewGraph(nil)
+	graph := graphWithRefKindFact()
 
 	proposed := &model.Entry{
 		Type:    model.TypeSignal,
@@ -861,7 +870,7 @@ func actorEntry(canonical string, aliases []string) *model.Entry {
 func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("signal"))
 	dec := entry("20260410-130000-d-tac-bbb", withContent("decision"))
-	graph := model.NewGraph([]*model.Entry{sig, dec})
+	graph := graphWithRefKindFact(sig, dec)
 
 	proposed := &model.Entry{
 		Type:    model.TypeSignal,

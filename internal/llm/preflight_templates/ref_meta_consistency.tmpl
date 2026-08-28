@@ -1,7 +1,7 @@
 {{ define "ref_meta_consistency" }}
 ## Reference metadata consistency (apply when the entry has refs)
 
-A ref carries a `kind` — why the pointer exists, chosen from what the entry **body** asserts — and an optional `desc` naming that relationship. Both must read consistently with the body. The canonical ref-kind vocabulary (the single source the skill also ships) follows; judge the chosen kind and desc against it.
+A ref carries a `kind` — why the pointer exists, chosen from what the entry **body** asserts — and an optional `desc` naming that relationship. Both must read consistently with the body. The canonical ref-kind vocabulary follows, rendered from the graph's own ref-kind fact — the same single source agents pull; judge the chosen kind and desc against it.
 
 {{ .RefKindVocabulary }}
 
