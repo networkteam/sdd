@@ -129,6 +129,22 @@ func TestRenderWritingGuidePrompt_SystemByteStableAcrossDrafts(t *testing.T) {
 	}
 }
 
+func TestRenderWritingGuidePrompt_JSONStringRulesShared(t *testing.T) {
+	// Regression for 20260827-224853-s-tac-giv: the output format teaches
+	// standard JSON escaping, never quote avoidance.
+	e := &model.Entry{Type: model.TypeSignal, Kind: model.KindGap, Layer: model.LayerTactical, Content: "Body."}
+	req, err := renderWritingGuidePrompt(e, nil, testReferenceFacts(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(req.SystemPrompt, "**JSON strings.**") || !strings.Contains(req.SystemPrompt, "write a literal `\"` as `\\\"`") {
+		t.Errorf("system prompt missing the shared JSON escaping rule:\n%s", req.SystemPrompt)
+	}
+	if strings.Contains(req.SystemPrompt, "never a literal") {
+		t.Error("system prompt still teaches quote avoidance")
+	}
+}
+
 // TestRenderWritingGuidePrompt_ReferenceFacts pins the framework-knowledge
 // slots: the type-system overview renders into the system block with its
 // headings demoted under the section, and the drafted kind's authoring fact

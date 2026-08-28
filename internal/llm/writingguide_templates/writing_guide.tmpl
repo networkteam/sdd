@@ -56,7 +56,9 @@ Respond with a single JSON object matching this schema — nothing before or aft
 
 All five fields are required on every finding. `severity` is `substantive` when the drafting dialogue should take the finding up, `minor` when folding it in or ignoring it is fine.
 
-**Quoting.** `quote` carries the draft's words verbatim. Inside `reasoning`, cite excerpts in single quotes ('like this') or backticks — never a literal `"`, which terminates the JSON string early and makes the whole response unparseable. Keep every value on a single logical line.
+{{ template "json_string_rules" }}
+
+**Quoting.** `quote` carries the draft's words verbatim, escaped as JSON requires.
 
 ## Calibration
 

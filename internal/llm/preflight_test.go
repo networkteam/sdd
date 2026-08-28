@@ -995,6 +995,26 @@ func Test_renderPreflightPrompt_StructuralChecksKeepLightSystem(t *testing.T) {
 	}
 }
 
+func Test_renderPreflightPrompt_JSONStringRulesShared(t *testing.T) {
+	// Regression for 20260827-224853-s-tac-giv: the output format teaches
+	// standard JSON escaping, never quote avoidance, on every system template.
+	pctx := &preflightContext{ProposedEntry: "ID: test\nType: signal\n\nproposed"}
+	for _, ct := range []checkType{checkSignalCapture, checkAnnotationCapture, checkFocusCapture} {
+		t.Run(ct.String(), func(t *testing.T) {
+			req, err := renderPreflightPrompt(ct, pctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(req.SystemPrompt, "**JSON strings.**") || !strings.Contains(req.SystemPrompt, "write a literal `\"` as `\\\"`") {
+				t.Errorf("%s system block missing the shared JSON escaping rule:\n%s", ct, req.SystemPrompt)
+			}
+			if strings.Contains(req.SystemPrompt, "never a literal") {
+				t.Errorf("%s system block still teaches quote avoidance", ct)
+			}
+		})
+	}
+}
+
 func Test_renderPreflightPrompt_InvalidCheckType(t *testing.T) {
 	pctx := &preflightContext{ProposedEntry: "test"}
 	_, err := renderPreflightPrompt(checkType(99), pctx)

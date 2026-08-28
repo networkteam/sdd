@@ -133,6 +133,9 @@ func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.Closure
 	if err != nil {
 		return Request{}, fmt.Errorf("parsing writing-guide templates: %w", err)
 	}
+	if tmpl, err = tmpl.ParseFS(sharedPromptTemplates, "shared_templates/*.tmpl"); err != nil {
+		return Request{}, fmt.Errorf("parsing shared prompt templates: %w", err)
+	}
 
 	sysData := struct{ TypeSystemFactID string }{TypeSystemFactID: refFacts.TypeSystemFactID}
 	userData := struct{ Draft, Kind, KindFactID string }{
