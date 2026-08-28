@@ -34,11 +34,11 @@ func configCmd() *cli.Command {
 		Commands: []*cli.Command{
 			{
 				Name:      "get",
-				Usage:     "Print one effective config value (e.g. sdd config get llm.model)",
-				ArgsUsage: "<key>",
+				Usage:     "Print effective config values — one key, a subtree (e.g. llm), or everything",
+				ArgsUsage: "[<key-or-prefix>]",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					if cmd.Args().Len() != 1 {
-						return fmt.Errorf("usage: sdd config get <key>")
+					if cmd.Args().Len() > 1 {
+						return fmt.Errorf("usage: sdd config get [<key-or-prefix>]")
 					}
 					return runConfigGet(cmd.Args().First())
 				},
@@ -114,11 +114,7 @@ func runEffectiveConfig(cmd *cli.Command, key string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(result.Entries)
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	for _, e := range result.Entries {
-		fmt.Fprintf(w, "%s\t%s\t(%s)\n", e.Key, e.Value, e.Source)
-	}
-	if err := w.Flush(); err != nil {
+	if err := printConfigEntries(result.Entries); err != nil {
 		return err
 	}
 	// The effective table answers "what will happen", and a setting that does
@@ -158,12 +154,26 @@ func runConfigGet(key string) error {
 		return err
 	}
 	if len(result.Entries) == 0 {
+		if key == "" {
+			return fmt.Errorf("no configuration found")
+		}
 		return fmt.Errorf("no value for %q", key)
 	}
-	for _, e := range result.Entries {
-		fmt.Println(e.Value)
+	// An exact single-key hit prints the bare value (script-friendly);
+	// a subtree or the whole config renders as the provenance table.
+	if len(result.Entries) == 1 && result.Entries[0].Key == key {
+		fmt.Println(result.Entries[0].Value)
+		return nil
 	}
-	return nil
+	return printConfigEntries(result.Entries)
+}
+
+func printConfigEntries(entries []query.ConfigEntry) error {
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	for _, e := range entries {
+		fmt.Fprintf(w, "%s\t%s\t(%s)\n", e.Key, e.Value, e.Source)
+	}
+	return w.Flush()
 }
 
 func runConfigSet(ctx context.Context, target, key, value string) error {

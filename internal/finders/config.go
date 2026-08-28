@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
@@ -36,7 +37,9 @@ func (f *Finder) EffectiveConfig(q query.EffectiveConfigQuery) (*query.Effective
 	values := model.EffectiveConfigValues(global, project, local)
 	result := &query.EffectiveConfigResult{}
 	for _, v := range values {
-		if q.Key != "" && v.Key != q.Key {
+		// Key selects exactly, or as a dotted-path prefix ("llm" matches
+		// llm.provider); empty selects everything.
+		if q.Key != "" && v.Key != q.Key && !strings.HasPrefix(v.Key, q.Key+".") {
 			continue
 		}
 		result.Entries = append(result.Entries, query.ConfigEntry{
