@@ -343,7 +343,7 @@ func searchCmd() *cli.Command {
 			},
 			&cli.IntFlag{
 				Name:  "max-citations",
-				Usage: "Maximum citations per entry (default 3) — 0 for entry headers only (no snippets), 1 for one-line-per-entry, higher to surface multiple matching chunks",
+				Usage: "Maximum citations per entry (default 1: the strongest matching chunk) — 0 for entry headers only (no snippets), higher to surface multiple matching chunks",
 			},
 			&cli.StringSliceFlag{
 				Name:  "repo",

@@ -16,6 +16,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/basefacts"
+	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/textpatch"
 )
 
@@ -202,7 +203,7 @@ type SearchArgs struct {
 	Kind              string   `json:"kind,omitempty" jsonschema:"filter: entry kind"`
 	IncludeSuperseded bool     `json:"include_superseded,omitempty"`
 	Limit             int      `json:"limit,omitempty" jsonschema:"hit cap; default 8"`
-	MaxCitations      *int     `json:"max_citations,omitempty" jsonschema:"citation snippet lines per entry; default 0 = headers only — depth comes from show, not snippets"`
+	MaxCitations      *int     `json:"max_citations,omitempty" jsonschema:"citation snippet lines per entry; omitted = 1 (the strongest matching chunk, the match evidence), 0 = headers only"`
 	Repos             []string `json:"repos,omitempty" jsonschema:"also search these connected repos by repo-id (additive to the local graph)"`
 	AllRepos          bool     `json:"all_repos,omitempty" jsonschema:"also search every connected repo"`
 }
@@ -923,7 +924,9 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	if limit == 0 {
 		limit = defaultSearchHits
 	}
-	maxCitations := 0
+	// Omitted means the shared default, so both surfaces show match evidence;
+	// only an explicit 0 is headers-only (s-tac-rst).
+	maxCitations := query.DefaultMaxCitationsPerEntry
 	if args.MaxCitations != nil {
 		maxCitations = *args.MaxCitations
 	}

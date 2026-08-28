@@ -561,11 +561,12 @@ Downstream fixture.
 	}
 }
 
-// TestSearchDefaults_HeaderOnlyHitCapped pins the drill-serve defaults
-// (d-tac-dbk): no limit and no max_citations means at most 8 hits and zero
-// citation lines — the measured 26.5KB drill was this tool with snippet
-// defaults. Snippets and a higher cap stay one explicit parameter away.
-func TestSearchDefaults_HeaderOnlyHitCapped(t *testing.T) {
+// TestSearchDefaults_EvidenceCitationHitCapped pins the search defaults: no
+// limit means at most 8 hits (d-tac-dbk serve sizes), and no max_citations
+// means one citation per hit — the match evidence, without which a true
+// positive is unreadable as a match (s-tac-rst). Headers-only stays one
+// explicit `max_citations: 0` away.
+func TestSearchDefaults_EvidenceCitationHitCapped(t *testing.T) {
 	graphDir := filepath.Join(t.TempDir(), "graph")
 	for i := range 12 {
 		path := filepath.Join(graphDir, fmt.Sprintf("2026/06/02-1000%02d-s-tac-h%02d.md", i, i))
@@ -590,11 +591,16 @@ Probe entry %02d: the flux capacitor drill needs observing.
 
 	var res mcpserver.SearchResult
 	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}}, &res)
-	if strings.Contains(res.Results, "↳") {
-		t.Fatalf("default search must be header-only, got citations: %q", res.Results)
-	}
 	if hits := strings.Count(res.Results, "-s-tac-h"); hits != 8 {
 		t.Fatalf("default search returned %d hits, want the cap of 8", hits)
+	}
+	if citations := strings.Count(res.Results, "↳"); citations != 8 {
+		t.Fatalf("default search must carry one citation per hit, got %d citation lines:\n%s", citations, res.Results)
+	}
+
+	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}, "max_citations": 0}, &res)
+	if strings.Contains(res.Results, "↳") {
+		t.Fatalf("explicit max_citations 0 must be header-only, got citations: %q", res.Results)
 	}
 
 	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}, "max_citations": 2, "limit": 12}, &res)
@@ -876,7 +882,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "dbaa397cfa624ca3338b1acbca59970f50c132a7d68c3c9d44e2cd2676b3e455"
+	const want = "4b4f4d3e8228d5522520b3d70816dba61ff29a0774c17891af0aa005cb6d0e75"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}

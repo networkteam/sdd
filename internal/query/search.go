@@ -18,11 +18,12 @@ const (
 const DefaultSearchLimit = 10
 
 // DefaultMaxCitationsPerEntry caps the number of citations an entry may
-// contribute to its result row. Three is enough to show "this entry
-// matched on summary, body section X, and attachment section Y" without
-// drowning the output in near-duplicate chunks. Override on a query
-// for terser ("--max-citations 1") or wider scans.
-const DefaultMaxCitationsPerEntry = 3
+// contribute to its result row. One shows the entry's strongest matching
+// chunk — why the hit matched — without drowning the output; override on
+// a query for wider scans ("--max-citations 3") or headers only (0).
+// Both surfaces apply this same default when the caller leaves the cap
+// unset (s-tac-rst).
+const DefaultMaxCitationsPerEntry = 1
 
 // SearchQuery carries the parsed input for the sdd search command. Pure
 // intent: the graph it filters and resolves against is held by the
