@@ -398,6 +398,10 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 	}
 
+	// Transition messaging (d-tac-o2v): reach users who upgrade without
+	// invoking the skill.
+	log.Info("the /sdd skill family is deprecated — work in /sdd-engine; v0.18.0 will remove the legacy skills and rename /sdd-engine to /sdd")
+
 	// Register the SDD MCP server per agent so engine mode works out of the
 	// box (d-tac-wfl). Project scope only for now: the registration files
 	// live in the repo tree; user-scope registration (home-dir config) is a
