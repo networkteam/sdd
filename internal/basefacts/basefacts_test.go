@@ -225,7 +225,7 @@ func TestEveryKindHasAQuestion(t *testing.T) {
 func TestOverviewBodyIsSelfContained(t *testing.T) {
 	body := factByID(t, OverviewFactID).Content
 
-	for _, want := range []string{"# The type system", "Signal kinds", "Decision kinds", "force, not completion", "WHAT vs THAT", "Standing constraints are guiding directives", "outside vs here", "states no findings and closes nothing", "layer", "This is the map, not the depth"} {
+	for _, want := range []string{"# The type system", "Signal kinds", "Decision kinds", "force, not completion", "WHAT vs THAT", "Standing constraints are guiding directives", "outside vs here", "states no findings and closes nothing", "layer", "This is the map, not the depth", "Entries connect", RefKindsFactID} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview body missing %q", want)
 		}
@@ -398,7 +398,7 @@ func TestEveryBaseTypeHasADescription(t *testing.T) {
 // facts whose content renders from the running version's declarations refuse
 // supersession, and the marker — not an ID list — is what the write path reads.
 func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
-	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID, QuestionFactID, PlanFactID, ActorFactID, RoleFactID, ActivityFactID, FocusFactID, AspirationFactID, AnnotationFactID, DiscriminationFactID}
+	closed := []string{OverviewFactID, DoneFactID, ProcedureFactID, ProcedureSpecFactID, GapFactID, DirectiveFactID, InsightFactID, FactFactID, QuestionFactID, PlanFactID, ActorFactID, RoleFactID, ActivityFactID, FocusFactID, AspirationFactID, AnnotationFactID, DiscriminationFactID, RefKindsFactID}
 	for _, id := range closed {
 		if fact := factByID(t, id); fact.Override != model.OverrideClosed {
 			t.Errorf("fact %s: Override = %q, want %q", id, fact.Override, model.OverrideClosed)
@@ -406,6 +406,30 @@ func TestTypeSystemFactsAreOverrideClosed(t *testing.T) {
 	}
 	if fact := factByID(t, PrinciplesFactID); fact.Override != "" {
 		t.Errorf("principles fact must stay project-overridable, got Override = %q", fact.Override)
+	}
+}
+
+// TestEntriesShipRefKindsFact covers the ref-kind vocabulary fact: indexed for
+// retrieval (unlike the authoring facts, it must be findable before a reader
+// knows the word for what they need), with mechanics rendered from the model's
+// ref-kind enumeration.
+func TestEntriesShipRefKindsFact(t *testing.T) {
+	fact := factByID(t, RefKindsFactID)
+	if fact.Index == nil || fact.Index.Topic.String() != "type-system/refs" {
+		t.Errorf("fact index = %+v, want enrollment under type-system/refs", fact.Index)
+	}
+	if fact.Summary == "" {
+		t.Error("refkinds fact has no summary")
+	}
+	for _, want := range []string{"# Connecting entries", "| Kind |", "no status effect", "never a default", "the floor", "A terminal `done` is never", "## Mechanics", "closed set"} {
+		if !strings.Contains(fact.Content, want) {
+			t.Errorf("refkinds body missing %q", want)
+		}
+	}
+	for _, k := range model.RefKindValues() {
+		if !strings.Contains(fact.Content, string(k)) {
+			t.Errorf("refkinds mechanics missing kind %q from the running enumeration", k)
+		}
 	}
 }
 

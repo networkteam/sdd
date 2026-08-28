@@ -212,6 +212,16 @@ func Entries(vocab viewlayout.Vocabulary) ([]*model.Entry, error) {
 	}
 	entries = append(entries, procedureSpecFact)
 
+	refKindsContent, err := refKindsFactContent()
+	if err != nil {
+		return nil, err
+	}
+	refKindsFact, err := buildContent(RefKindsFactID, refKindsContent)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, refKindsFact)
+
 	return entries, nil
 }
 

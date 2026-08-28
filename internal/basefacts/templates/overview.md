@@ -53,6 +53,9 @@ refs:
     - id: 20260818-120000-s-prc-dsc
       kind: related
       desc: the discrimination fact — every test that settles which kind to draft when two compete
+    - id: 20260828-160000-s-prc-rfk
+      kind: related
+      desc: the ref-kind vocabulary — how entries connect, with each kind's direction and when it applies
 index:
     title: 'Understanding the type system: how types, kinds, and layers fit together, which entry to draft when kinds compete, and where each kind''s crafting guide lives'
     topic: type-system/kinds
@@ -88,6 +91,8 @@ Where two kinds compete, these tests settle it:
 - **An annotation carries structure, not narrative** — metadata laid over the entries it references.
 
 Retirement: any entry that states why another no longer holds may close it; a question, actor, or annotation states no findings and closes nothing. A **done** closes what completed; a **directive** closes, with its reasoning, what will not be built; same-kind supersession replaces.
+
+Entries connect: every entry carries typed references naming why it points at prior entries — the basis it reasons from, the gap it answers, the line it extends. The ref-kind vocabulary fact `20260828-160000-s-prc-rfk` defines each kind, its direction, and when it applies over a sharper or weaker neighbor — pull it before drafting any reference.
 
 Every entry also names its **layer**, the depth of the thinking:
 

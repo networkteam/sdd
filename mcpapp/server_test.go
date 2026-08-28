@@ -951,6 +951,23 @@ Project-local reference override.
 	if err := os.WriteFile(overviewPath, []byte(overviewOverride), 0644); err != nil {
 		t.Fatal(err)
 	}
+	refKindsPath := filepath.Join(graphDir, "2026/08/28-160000-s-prc-rfk.md")
+	if err := os.MkdirAll(filepath.Dir(refKindsPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	const refKindsOverride = `---
+type: signal
+layer: process
+kind: fact
+topics: [type-system/refs]
+summary: Project override deliberately leaves the ref-kind vocabulary out of session discovery.
+---
+
+Project-local reference override.
+`
+	if err := os.WriteFile(refKindsPath, []byte(refKindsOverride), 0644); err != nil {
+		t.Fatal(err)
+	}
 	env := newTestServer(t, nil, graphDir, "")
 	serve := openSession(t, connect(t, env.srv))
 	if strings.Contains(serve.Instructions, "Reference facts available") {
