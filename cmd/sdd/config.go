@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/networkteam/sdd/internal/command"
@@ -15,8 +16,8 @@ import (
 
 // configCmd is the CLI surface over the config overlay: the bare command
 // prints the effective merged config with per-value provenance, `get` reads
-// one effective value, and `set` writes a key to the global or local layer
-// with a comment-preserving upsert.
+// effective values (one key, a subtree, or everything), and `set`/`unset`
+// write the global or local layer with comment-preserving patches.
 func configCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "config",
@@ -168,10 +169,14 @@ func runConfigGet(key string) error {
 	return printConfigEntries(result.Entries)
 }
 
+// tableValueEscaper keeps multi-line values on one table row; the bare
+// single-value output stays raw.
+var tableValueEscaper = strings.NewReplacer("\n", `\n`, "\t", `\t`)
+
 func printConfigEntries(entries []query.ConfigEntry) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	for _, e := range entries {
-		fmt.Fprintf(w, "%s\t%s\t(%s)\n", e.Key, e.Value, e.Source)
+		fmt.Fprintf(w, "%s\t%s\t(%s)\n", e.Key, tableValueEscaper.Replace(e.Value), e.Source)
 	}
 	return w.Flush()
 }
