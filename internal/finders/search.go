@@ -76,12 +76,12 @@ func (f *SearchFinder) Search(ctx context.Context, q query.SearchQuery) (*query.
 		return f.textSearch(q)
 	case query.SearchModeVector:
 		if !f.VectorAvailable() {
-			return nil, errors.New("vector search requires an embedding provider — run `sdd config set embedding.provider <provider>` (user-global; .sdd/config.local.yaml overrides per machine)")
+			return nil, errors.New("vector search requires an embedding provider — run `sdd config set embedding.provider <provider>` (user-global, so every project and cross-repo index shares one embedding space)")
 		}
 		return f.vectorSearch(ctx, q)
 	case query.SearchModeHybrid:
 		if !f.VectorAvailable() {
-			return nil, errors.New("hybrid search requires an embedding provider — run `sdd config set embedding.provider <provider>` (user-global; .sdd/config.local.yaml overrides per machine)")
+			return nil, errors.New("hybrid search requires an embedding provider — run `sdd config set embedding.provider <provider>` (user-global, so every project and cross-repo index shares one embedding space)")
 		}
 		return f.hybridSearch(ctx, q)
 	default:
