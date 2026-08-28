@@ -15,3 +15,13 @@ type ConfigSetCmd struct {
 	// written as their YAML scalar types.
 	Value string
 }
+
+// ConfigUnsetCmd removes one config key from a chosen layer file, comments
+// and sibling keys preserved. A key that is not set in that file is an
+// error, never a silent no-op.
+type ConfigUnsetCmd struct {
+	// Target layer: "global" or "local", as in ConfigSetCmd.
+	Target string
+	// Key is the dotted path to remove.
+	Key string
+}

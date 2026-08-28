@@ -64,6 +64,27 @@ func configCmd() *cli.Command {
 					return runConfigSet(ctx, target, cmd.Args().Get(0), cmd.Args().Get(1))
 				},
 			},
+			{
+				Name:      "unset",
+				Usage:     "Remove a config key (user-global by default; --local for .sdd/config.local.yaml)",
+				ArgsUsage: "<key>",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:  "local",
+						Usage: "Remove from .sdd/config.local.yaml instead of the user-global config",
+					},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					if cmd.Args().Len() != 1 {
+						return fmt.Errorf("usage: sdd config unset [--local] <key>")
+					}
+					target := "global"
+					if cmd.Bool("local") {
+						target = "local"
+					}
+					return runConfigUnset(ctx, target, cmd.Args().First())
+				},
+			},
 		},
 	}
 }
@@ -164,5 +185,26 @@ func runConfigSet(ctx context.Context, target, key, value string) error {
 		return err
 	}
 	fmt.Printf("%s = %s (%s)\n", key, value, target)
+	return nil
+}
+
+func runConfigUnset(ctx context.Context, target, key string) error {
+	// sddDir is optional for global writes, exactly as in runConfigSet.
+	sddDir, err := resolveSDDDir()
+	if err != nil {
+		sddDir = ""
+	}
+	_, mgr, err := defaultRepos()
+	if err != nil {
+		return err
+	}
+	h := handlers.New(handlers.Options{
+		SDDDir: sddDir,
+		Repos:  mgr,
+	})
+	if err := h.ConfigUnset(ctx, &command.ConfigUnsetCmd{Target: target, Key: key}); err != nil {
+		return err
+	}
+	fmt.Printf("%s removed (%s)\n", key, target)
 	return nil
 }

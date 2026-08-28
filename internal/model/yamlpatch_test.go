@@ -247,3 +247,35 @@ func TestSetYAMLSequence_EmptyPathRejected(t *testing.T) {
 		t.Error("empty path should be rejected")
 	}
 }
+
+func TestDeleteYAMLField_RemovesNestedKeyKeepsSiblings(t *testing.T) {
+	existing := []byte(`# personal defaults
+llm:
+  provider: anthropic
+  rate_limit_rps: 2
+participant: Christopher
+`)
+	out, err := DeleteYAMLField(existing, "llm.rate_limit_rps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "rate_limit_rps") {
+		t.Errorf("key not removed:\n%s", out)
+	}
+	for _, want := range []string{"# personal defaults", "provider: anthropic", "participant: Christopher"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("expected %q to survive, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestDeleteYAMLField_MissingKeyIsError(t *testing.T) {
+	for _, path := range []string{"participant", "llm.model", "llm.provider.deep"} {
+		if _, err := DeleteYAMLField([]byte("llm:\n  provider: anthropic\n"), path); err == nil {
+			t.Errorf("DeleteYAMLField(%q) on a document without it should error", path)
+		}
+	}
+	if _, err := DeleteYAMLField(nil, "participant"); err == nil {
+		t.Error("DeleteYAMLField on an empty document should error")
+	}
+}

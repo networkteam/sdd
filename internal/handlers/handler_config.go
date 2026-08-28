@@ -50,3 +50,32 @@ func (h *Handler) ConfigSet(ctx context.Context, cmd *command.ConfigSetCmd) erro
 		return patched, nil
 	})
 }
+
+// ConfigUnset removes one key from the chosen config layer. No schema check:
+// removing any key — a known one or a leftover an older version wrote —
+// keeps the document valid.
+func (h *Handler) ConfigUnset(ctx context.Context, cmd *command.ConfigUnsetCmd) error {
+	var (
+		file configFile
+		err  error
+	)
+	switch cmd.Target {
+	case "global":
+		file, err = h.globalConfigFile()
+	case "local":
+		file, err = h.localConfigFile()
+	default:
+		return fmt.Errorf("unknown config target %q (use global or local)", cmd.Target)
+	}
+	if err != nil {
+		return err
+	}
+
+	return file.patch(func(existing []byte) ([]byte, error) {
+		patched, err := model.DeleteYAMLField(existing, cmd.Key)
+		if err != nil {
+			return nil, fmt.Errorf("unsetting %s: %w", cmd.Key, err)
+		}
+		return patched, nil
+	})
+}

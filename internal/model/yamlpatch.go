@@ -80,6 +80,43 @@ func SetYAMLSequence(existing []byte, path string, values []string) ([]byte, err
 	})
 }
 
+// DeleteYAMLField removes the key at dotted path from an existing YAML
+// document, returning new bytes. Comments and sibling order elsewhere are
+// preserved. A path that does not resolve is an error, so a caller can
+// report "not set" truthfully; an emptied parent mapping stays in place.
+func DeleteYAMLField(existing []byte, path string) ([]byte, error) {
+	segments, err := splitYAMLPath(path)
+	if err != nil {
+		return nil, err
+	}
+	root, err := parseYAMLRoot(existing)
+	if err != nil {
+		return nil, err
+	}
+	current := root.Content[0]
+	for i, segment := range segments {
+		if current.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("%q is not set", path)
+		}
+		idx := -1
+		for j := 0; j+1 < len(current.Content); j += 2 {
+			if current.Content[j].Value == segment {
+				idx = j
+				break
+			}
+		}
+		if idx < 0 {
+			return nil, fmt.Errorf("%q is not set", path)
+		}
+		if i == len(segments)-1 {
+			current.Content = append(current.Content[:idx], current.Content[idx+2:]...)
+			return encodeYAML(root)
+		}
+		current = current.Content[idx+1]
+	}
+	return nil, fmt.Errorf("unreachable: path not resolved")
+}
+
 // patchYAML is the single splice every setter runs through, and the reason
 // they all preserve: only the one node mutate is handed gets rewritten.
 func patchYAML(existing []byte, path string, mutate func(target *yaml.Node) error) ([]byte, error) {
