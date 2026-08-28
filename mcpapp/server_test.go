@@ -20,6 +20,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/engine"
+	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	localadapter "github.com/networkteam/sdd/local"
@@ -917,56 +918,43 @@ func TestOpeningServeIncludesDerivedFactIndex(t *testing.T) {
 
 func TestOpeningServeOmitsEmptyDerivedFactIndex(t *testing.T) {
 	graphDir := writeFixtureGraph(t)
-	path := filepath.Join(graphDir, "2026/07/17-110000-s-prc-vwg.md")
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	// Empty the derived index by overriding every indexed embedded fact with an
+	// unindexed project-local copy. The set is derived from what the binary
+	// ships, so adding an indexed base fact cannot silently break this premise.
+	base, err := finders.BaseEntries()
+	if err != nil {
 		t.Fatal(err)
 	}
 	const override = `---
 type: signal
 layer: process
 kind: fact
-topics: [cli/view]
+topics: [engine/base-facts]
 summary: Project override deliberately leaves this fact out of session discovery.
 ---
 
 Project-local reference override.
 `
-	if err := os.WriteFile(path, []byte(override), 0644); err != nil {
-		t.Fatal(err)
+	overridden := 0
+	for _, e := range base {
+		if e.Kind != model.KindFact || e.Index == nil {
+			continue
+		}
+		rel, err := model.IDToRelPath(e.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(graphDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(override), 0644); err != nil {
+			t.Fatal(err)
+		}
+		overridden++
 	}
-	overviewPath := filepath.Join(graphDir, "2026/08/12-180000-s-prc-typ.md")
-	if err := os.MkdirAll(filepath.Dir(overviewPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	const overviewOverride = `---
-type: signal
-layer: process
-kind: fact
-topics: [type-system/kinds]
-summary: Project override deliberately leaves the type-system overview out of session discovery.
----
-
-Project-local reference override.
-`
-	if err := os.WriteFile(overviewPath, []byte(overviewOverride), 0644); err != nil {
-		t.Fatal(err)
-	}
-	refKindsPath := filepath.Join(graphDir, "2026/08/28-160000-s-prc-rfk.md")
-	if err := os.MkdirAll(filepath.Dir(refKindsPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	const refKindsOverride = `---
-type: signal
-layer: process
-kind: fact
-topics: [type-system/refs]
-summary: Project override deliberately leaves the ref-kind vocabulary out of session discovery.
----
-
-Project-local reference override.
-`
-	if err := os.WriteFile(refKindsPath, []byte(refKindsOverride), 0644); err != nil {
-		t.Fatal(err)
+	if overridden == 0 {
+		t.Fatal("no indexed embedded facts found — the empty-index premise needs at least one override")
 	}
 	env := newTestServer(t, nil, graphDir, "")
 	serve := openSession(t, connect(t, env.srv))
