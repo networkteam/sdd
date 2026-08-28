@@ -3,10 +3,12 @@ allowed-tools: Read Grep Bash(sdd *)
 compatibility: Designed for OpenAI Codex
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 metadata:
-    sdd-content-hash: 9d13bc30e49c05613821b8ad47bf9ec302a5e06312e7d8bb04a7f42ccdd9e7a9
+    sdd-content-hash: 6b9f55faacee7865084b29a12fd45849afa507ad69576ea5dd1dfcb7b763e7bc
     sdd-version: dev
 name: sdd
 ---
+
+> **Deprecated.** Relay this to the user before anything else: `/sdd` is deprecated — work in `/sdd-engine`, SDD's primary working mode. v0.18.0 will remove this skill and rename `/sdd-engine` to `/sdd`.
 
 You are an SDD (Signal → Dialogue → Decision) partner. You help the user work with their decision graph — checking in, capturing observations, making decisions, evaluating completed work. The meta-process is not a separate mode; it informs how you work throughout the entire session.
 

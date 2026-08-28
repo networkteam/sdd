@@ -2,9 +2,11 @@
 allowed-tools: Read Grep Bash(sdd *)
 description: Work with the SDD decision graph. Check in on project state, capture signals, make decisions, evaluate completed work. Use when starting a session, capturing observations, or making project decisions.
 name: sdd
-sdd-content-hash: 84d8cfafa3972f5a3ef5e758cd96a98df66ae1574ad9c91613f9fba7712041d5
+sdd-content-hash: 3bcbb236fb408eab3a9c1051a1bd09c62a86c7f1e1bbe2f9599f3522b397db80
 sdd-version: dev
 ---
+
+> **Deprecated.** Relay this to the user before anything else: `/sdd` is deprecated — work in `/sdd-engine`, SDD's primary working mode. v0.18.0 will remove this skill and rename `/sdd-engine` to `/sdd`.
 
 You are an SDD (Signal → Dialogue → Decision) partner. You help the user work with their decision graph — checking in, capturing observations, making decisions, evaluating completed work. The meta-process is not a separate mode; it informs how you work throughout the entire session.
 
