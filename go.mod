@@ -20,7 +20,6 @@ require (
 	gitlab.com/golang-commonmark/markdown v0.0.0-20211110145824-bf3e522c626a
 	golang.org/x/mod v0.35.0
 	golang.org/x/sync v0.20.0
-	golang.org/x/sys v0.45.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -82,6 +81,7 @@ require (
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 )
 
@@ -91,4 +91,4 @@ require (
 // source and honor replace; only `go install pkg@version` (which sdd does not
 // use) would break. Remove this directive once the change lands upstream and
 // bump the require above to the released teilomillet/gollm version.
-replace github.com/teilomillet/gollm => github.com/networkteam/gollm v0.0.0-20260614104521-19e75febe86b
+replace github.com/teilomillet/gollm => github.com/networkteam/gollm v0.0.0-20260829151339-3385cc3bc3e5

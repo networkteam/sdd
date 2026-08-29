@@ -64,8 +64,7 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 		upstream.SetMaxTokens(4096),
 	}
 
-	// API key is required for remote providers. Ollama uses a local endpoint
-	// and does not need one.
+	// API key is required for remote providers.
 	if needsAPIKey(cfg.Provider) {
 		key := cfg.APIKeys[cfg.Provider]
 		if key == "" {
@@ -74,9 +73,16 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 		opts = append(opts, upstream.SetAPIKey(key))
 	}
 
-	// Ollama endpoint override.
-	if cfg.Provider == "ollama" && cfg.OllamaEndpoint != "" {
-		opts = append(opts, upstream.SetOllamaEndpoint(cfg.OllamaEndpoint))
+	// Ollama endpoint override. A key is optional: local deployments run
+	// without one, Ollama Cloud (ollama.com) authenticates with it as a
+	// Bearer token.
+	if cfg.Provider == "ollama" {
+		if cfg.OllamaEndpoint != "" {
+			opts = append(opts, upstream.SetOllamaEndpoint(cfg.OllamaEndpoint))
+		}
+		if key := cfg.APIKeys["ollama"]; key != "" {
+			opts = append(opts, upstream.SetAPIKey(key))
+		}
 	}
 
 	// Enable Anthropic prompt caching — sends the anthropic-beta header so
