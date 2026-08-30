@@ -49,27 +49,41 @@ func logCallResult(ctx context.Context, meta *LLMMetadata, op string, elapsed ti
 	recordCallStat(ctx, meta, op, elapsed)
 }
 
-// recordCallStat hands the call's metrics to a StatsSink when one is set on the
-// context and the provider reported usage. Best-effort: a nil sink, nil meta,
-// or sink error never affects the caller.
+// logCallFailure records a call that returned no result. It is the failure
+// twin of logCallResult: same one line at debug level, same sink, so a timeout
+// or an unparseable response is as countable as a success. The provider and
+// model stay empty — a call that failed never reported them.
+func logCallFailure(ctx context.Context, op string, elapsed time.Duration, cause error) {
+	slogutils.FromContext(ctx).Debug("llm call failed", slog.Group("llm",
+		slog.String("op", op),
+		slog.Duration("duration", elapsed),
+		slog.String("error", cause.Error()),
+	))
+	recordStat(ctx, CallStat{Op: op, DurationMS: elapsed.Milliseconds(), Error: cause.Error()})
+}
+
+// recordCallStat hands the call's metrics to the StatsSink on ctx. A call with
+// no metadata still records — the op and its duration are what make a host
+// executor that reports no usage visible at all.
 func recordCallStat(ctx context.Context, meta *LLMMetadata, op string, elapsed time.Duration) {
-	if meta == nil {
-		return
+	stat := CallStat{Op: op, DurationMS: elapsed.Milliseconds()}
+	if meta != nil {
+		stat.Provider = meta.Provider
+		stat.Model = PrimaryModel(meta)
+		stat.InputTokens = meta.InputTokens
+		stat.OutputTokens = meta.OutputTokens
+		stat.CacheReadTokens = meta.CacheReadTokens
+		stat.CacheCreateTokens = meta.CacheCreateTokens
 	}
-	sink := statsSinkFromContext(ctx)
-	if sink == nil {
-		return
+	recordStat(ctx, stat)
+}
+
+// recordStat is the single sink hand-off. Best-effort: a nil sink is a no-op
+// and a sink error never reaches the caller.
+func recordStat(ctx context.Context, stat CallStat) {
+	if sink := statsSinkFromContext(ctx); sink != nil {
+		sink.RecordCall(stat)
 	}
-	sink.RecordCall(CallStat{
-		Op:                op,
-		Provider:          meta.Provider,
-		Model:             primaryModel(meta),
-		InputTokens:       meta.InputTokens,
-		OutputTokens:      meta.OutputTokens,
-		CacheReadTokens:   meta.CacheReadTokens,
-		CacheCreateTokens: meta.CacheCreateTokens,
-		DurationMS:        elapsed.Milliseconds(),
-	})
 }
 
 // RecordEmbedCall logs one embedding batch at debug level and hands its
@@ -91,14 +105,16 @@ func RecordEmbedCall(ctx context.Context, stat CallStat) {
 		),
 	))
 
-	if sink := statsSinkFromContext(ctx); sink != nil {
-		sink.RecordCall(stat)
-	}
+	recordStat(ctx, stat)
 }
 
-// primaryModel returns a representative model name from the per-model usage map
-// (one entry on the gollm path), or "" when none is recorded.
-func primaryModel(meta *LLMMetadata) string {
+// PrimaryModel returns a representative model name from the per-model usage map
+// (one entry on the gollm path), or "" when none is recorded. Exported for
+// hosts that map metadata across an executor boundary.
+func PrimaryModel(meta *LLMMetadata) string {
+	if meta == nil {
+		return ""
+	}
 	for name := range meta.Models {
 		return name
 	}

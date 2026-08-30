@@ -39,6 +39,12 @@ func TestRenderStatsJSON(t *testing.T) {
 		ByOp []struct {
 			Op          string   `json:"op"`
 			ItemsPerSec *float64 `json:"items_per_s"`
+			Latency     struct {
+				P50MS int64 `json:"p50_ms"`
+				P90MS int64 `json:"p90_ms"`
+				P99MS int64 `json:"p99_ms"`
+				MaxMS int64 `json:"max_ms"`
+			} `json:"latency"`
 		} `json:"by_op"`
 	}
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
@@ -63,6 +69,10 @@ func TestRenderStatsJSON(t *testing.T) {
 		case "embed-documents":
 			if o.ItemsPerSec == nil {
 				t.Errorf("embed op should have a numeric items_per_s")
+			}
+			// One call at 2000ms: every percentile is that call.
+			if o.Latency.P50MS != 2000 || o.Latency.P99MS != 2000 || o.Latency.MaxMS != 2000 {
+				t.Errorf("embed latency = %+v, want 2000ms across the board", o.Latency)
 			}
 		}
 	}

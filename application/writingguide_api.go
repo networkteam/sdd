@@ -3,7 +3,6 @@ package application
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/model"
@@ -73,7 +72,7 @@ func (a *Application) WritingGuideCheck(ctx context.Context, identity RequestIde
 	}
 
 	finder := finders.New(finders.Options{WritingGuideRunner: runtimeLLMRunner{executor: runtime.options.LLM, purpose: "writing-guide"}})
-	guideCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	guideCtx, cancel := context.WithTimeout(ctx, runtime.options.LLMTimeout)
 	defer cancel()
 	result, err := finder.WritingGuide(guideCtx, snapshot.graph, query.WritingGuideQuery{Entry: entry, ClosureTargets: closureTargets})
 	if err != nil {

@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// DefaultLLMTimeout caps an LLM call when the host configures no timeout.
+const DefaultLLMTimeout = 2 * time.Minute
+
 // ProjectRuntime owns the immutable ports and project configuration resolved
 // for one application operation.
 type ProjectRuntime struct {
@@ -28,8 +31,12 @@ type ProjectRuntimeOptions struct {
 	Embeddings    EmbeddingExecutor
 	SearchIndex   SearchIndexStore
 	LLM           LLMExecutor
-	Finalizers    []MutationFinalizer
-	Now           func() time.Time
+	// LLMTimeout caps each individual LLM call. Zero means DefaultLLMTimeout.
+	// One value covers every purpose; a slow provider that needs longer for the
+	// writing guide needs it for pre-flight too.
+	LLMTimeout time.Duration
+	Finalizers []MutationFinalizer
+	Now        func() time.Time
 	// ExcludeEmbeddedFromIndex mirrors the CLI's excludeEmbedded semantics for
 	// the vector index: connected-repo runtimes set it so binary-shipped base
 	// entries embed once per machine (in the base store) rather than once per
@@ -60,6 +67,9 @@ func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
 	}
 	if options.Now == nil {
 		options.Now = time.Now
+	}
+	if options.LLMTimeout <= 0 {
+		options.LLMTimeout = DefaultLLMTimeout
 	}
 	if options.Targets == nil && options.DefaultBranch != "" {
 		options.Targets = FixedTargetAcquirer{

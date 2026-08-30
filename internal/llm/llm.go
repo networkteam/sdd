@@ -39,15 +39,16 @@ func (r Request) Combined() string {
 	return r.SystemPrompt + "\n\n" + r.UserPrompt
 }
 
-// Run executes a pre-rendered Request against the Runner and emits the
-// standard debug log entry. Callers that orchestrate prompt rendering
-// themselves (e.g. the parallel summarize handler) use this instead of
-// Runner.Run directly so logging stays uniform across call sites.
+// Run executes a pre-rendered Request against the Runner, emits the standard
+// debug log entry, and records the call. Every chat call goes through here —
+// the CLI paths directly, the engine path via the host's executor adapter — so
+// that logging and stats collection have exactly one site.
 func Run(ctx context.Context, runner Runner, req Request, op string) (*RunResult, error) {
 	start := time.Now()
 	output, err := runner.Run(ctx, req)
 	elapsed := time.Since(start)
 	if err != nil {
+		logCallFailure(ctx, op, elapsed, err)
 		return nil, err
 	}
 	logCallResult(ctx, output.Meta, op, elapsed)

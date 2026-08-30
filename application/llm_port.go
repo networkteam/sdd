@@ -17,15 +17,21 @@ type LLMRequest struct {
 }
 
 type LLMUsage struct {
-	InputTokens  int64
-	OutputTokens int64
+	InputTokens       int64
+	OutputTokens      int64
+	CacheReadTokens   int64
+	CacheCreateTokens int64
 }
 
 type LLMResult struct {
 	Output              []byte
 	ExecutorFingerprint string
 	FinishReason        string
-	Usage               LLMUsage
+	// Model names the model that served the call, when the executor knows it.
+	// Reported so hosts can attribute usage per model; the fingerprint
+	// identifies the executor, not what ran inside it.
+	Model string
+	Usage LLMUsage
 }
 
 type LLMExecutor interface {

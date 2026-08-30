@@ -20,6 +20,13 @@ type CallStat struct {
 	CacheReadTokens   int
 	CacheCreateTokens int
 	DurationMS        int64
+	// Error is the failure text when the call did not return a result, empty
+	// on success. Failures are recorded because a call that times out or comes
+	// back unparseable is exactly what the sink exists to make countable —
+	// dropping it hides the brittleness it is evidence of. Such a row carries
+	// no tokens, and provider and model only when the failure happened past
+	// the point they were known.
+	Error string
 }
 
 // StatsSink durably records per-call LLM metrics (e.g. to a local JSONL file).

@@ -252,6 +252,10 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
+	llmTimeout, err := configuredLLMTimeout(cmd)
+	if err != nil {
+		return nil, "", sdd.RequestIdentity{}, err
+	}
 	executor := sdd.LLMExecutorFuncs{
 		CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
 		ExecuteFunc: func(ctx context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
@@ -261,8 +265,11 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 			}
 			out := sdd.LLMResult{Output: []byte(result.Text), ExecutorFingerprint: "local", FinishReason: "completed"}
 			if result.Meta != nil {
+				out.Model = llm.PrimaryModel(result.Meta)
 				out.Usage.InputTokens = int64(result.Meta.InputTokens)
 				out.Usage.OutputTokens = int64(result.Meta.OutputTokens)
+				out.Usage.CacheReadTokens = int64(result.Meta.CacheReadTokens)
+				out.Usage.CacheCreateTokens = int64(result.Meta.CacheCreateTokens)
 				if result.Meta.Provider != "" {
 					out.ExecutorFingerprint = result.Meta.Provider
 				}
@@ -307,7 +314,8 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 			}
 			return nil
 		}),
-		Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, baseIndex), LLM: executor,
+		Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, baseIndex),
+		LLM: executor, LLMTimeout: llmTimeout,
 	})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err

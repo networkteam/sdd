@@ -236,7 +236,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	result := CreateEntryResult{Project: runtime.options.Project, Binding: binding, EntryID: id}
 	if !draft.SkipPreflight {
 		finder := finders.New(finders.Options{PreflightRunner: runtimeLLMRunner{executor: runtime.options.LLM, purpose: "preflight"}})
-		preflightCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		preflightCtx, cancel := context.WithTimeout(ctx, runtime.options.LLMTimeout)
 		defer cancel()
 		preflight, err := finder.Preflight(preflightCtx, snapshot.graph, query.PreflightQuery{Entry: entry})
 		if err != nil {
@@ -253,7 +253,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	} else {
 		entry.Preflight = "skipped"
 	}
-	summaryCtx, cancelSummary := context.WithTimeout(ctx, time.Minute)
+	summaryCtx, cancelSummary := context.WithTimeout(ctx, runtime.options.LLMTimeout)
 	defer cancelSummary()
 	summary, err := internalllm.Summarize(summaryCtx, runtimeLLMRunner{executor: runtime.options.LLM, purpose: "summary"}, entry, snapshot.graph)
 	if err != nil {
@@ -495,10 +495,36 @@ type runtimeLLMRunner struct {
 	purpose  string
 }
 
+// Run adapts the host's executor to the internal Runner. The executor's
+// reported usage is lifted back into LLMMetadata so the shared call-logging
+// path records engine-mode calls the same way it records CLI ones; dropping it
+// here is what left the whole engine flow absent from `sdd stats`.
 func (r runtimeLLMRunner) Run(ctx context.Context, request internalllm.Request) (*internalllm.RunResult, error) {
 	result, err := r.executor.Execute(ctx, LLMRequest{Purpose: r.purpose, SystemPrompt: request.SystemPrompt, Prompt: request.UserPrompt})
 	if err != nil {
 		return nil, err
 	}
-	return &internalllm.RunResult{Text: string(result.Output)}, nil
+	return &internalllm.RunResult{Text: string(result.Output), Meta: metaFromLLMResult(result)}, nil
+}
+
+// metaFromLLMResult maps the port's usage report into the agent-neutral
+// metadata shape. Provider falls back to the executor fingerprint, which is
+// what a host without a distinct provider name reports.
+func metaFromLLMResult(result LLMResult) *internalllm.LLMMetadata {
+	meta := &internalllm.LLMMetadata{
+		Provider:          result.ExecutorFingerprint,
+		InputTokens:       int(result.Usage.InputTokens),
+		OutputTokens:      int(result.Usage.OutputTokens),
+		CacheReadTokens:   int(result.Usage.CacheReadTokens),
+		CacheCreateTokens: int(result.Usage.CacheCreateTokens),
+	}
+	if result.Model != "" {
+		meta.Models = map[string]internalllm.ModelUsage{result.Model: {
+			InputTokens:       meta.InputTokens,
+			OutputTokens:      meta.OutputTokens,
+			CacheReadTokens:   meta.CacheReadTokens,
+			CacheCreateTokens: meta.CacheCreateTokens,
+		}}
+	}
+	return meta
 }

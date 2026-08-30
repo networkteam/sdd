@@ -88,9 +88,9 @@ func TestAggregateStats(t *testing.T) {
 		if first.InputTokens != 1500 || first.DurationMS != 1500 {
 			t.Fatalf("sonnet sums wrong: %+v", first)
 		}
-		// sonnet: 1500 in over 1.5s = 1000 tok/s; 1500ms/2 = 750 ms/call
-		if first.TokensPerSec() != 1000 || first.MsPerCall() != 750 {
-			t.Fatalf("sonnet throughput wrong: tok/s %.2f ms/call %.2f", first.TokensPerSec(), first.MsPerCall())
+		// sonnet: 1500 in over 1.5s = 1000 tok/s
+		if first.TokensPerSec() != 1000 {
+			t.Fatalf("sonnet throughput wrong: tok/s %.2f", first.TokensPerSec())
 		}
 		if first.HasItems() {
 			t.Fatalf("chat model should report no items")
@@ -126,7 +126,40 @@ func TestAggregateStats(t *testing.T) {
 
 func TestThroughputZeroGuards(t *testing.T) {
 	var m StatMetrics // all zero
-	if m.TokensPerSec() != 0 || m.MsPerCall() != 0 || m.ItemsPerSec() != 0 {
+	if m.TokensPerSec() != 0 || m.ItemsPerSec() != 0 {
 		t.Fatalf("zero metrics must not divide by zero")
+	}
+	if got := m.Latency(); got != (Latency{}) {
+		t.Fatalf("zero metrics must report an empty distribution, got %+v", got)
+	}
+}
+
+func TestLatencyDistribution(t *testing.T) {
+	var m StatMetrics
+	// 1..100ms, added out of order so the accessor cannot rely on insertion order.
+	for _, ms := range []int64{50, 100, 1, 25, 75} {
+		m.add(StatsRecord{DurationMS: ms})
+	}
+	for i := int64(2); i <= 100; i++ {
+		switch i {
+		case 25, 50, 75, 100:
+		default:
+			m.add(StatsRecord{DurationMS: i})
+		}
+	}
+
+	got := m.Latency()
+	want := Latency{P50: 50, P90: 90, P99: 99, Max: 100}
+	if got != want {
+		t.Fatalf("Latency() = %+v, want %+v", got, want)
+	}
+}
+
+func TestLatencySingleCall(t *testing.T) {
+	var m StatMetrics
+	m.add(StatsRecord{DurationMS: 42})
+	want := Latency{P50: 42, P90: 42, P99: 42, Max: 42}
+	if got := m.Latency(); got != want {
+		t.Fatalf("Latency() = %+v, want %+v", got, want)
 	}
 }

@@ -19,7 +19,10 @@ import (
 )
 
 // RenderStatsTable writes the styled, human-facing usage report: a header and
-// source line, an overall totals block, then per-model and per-op tables. Used
+// source line, a totals block of the counters that genuinely aggregate, then
+// the per-model and per-op tables where the rates and latency distributions
+// live — those cuts group calls that are alike, which is what makes a
+// distribution mean anything. Used
 // on the interactive TTY path. The empty cases (no sink yet, or nothing in the
 // selected range) render a single explanatory line instead of blank tables.
 //
@@ -56,6 +59,9 @@ func renderTotals(w io.Writer, t model.StatMetrics) {
 		humanCount(t.InputTokens), humanCount(t.CacheReadTokens), strconv.Itoa(t.Calls))
 	fmt.Fprintf(w, "   tokens out  %-8s  cache write  %-8s  time   %s\n",
 		humanCount(t.OutputTokens), humanCount(t.CacheCreateTokens), humanDuration(t.DurationMS))
+	if t.Errors > 0 {
+		fmt.Fprintf(w, "   %s\n", clrWarn.Render(fmt.Sprintf("failed      %d of %d calls", t.Errors, t.Calls)))
+	}
 }
 
 func renderModelTable(w io.Writer, rows []model.ModelRollup) {
@@ -63,16 +69,18 @@ func renderModelTable(w io.Writer, rows []model.ModelRollup) {
 	fmt.Fprintln(w)
 	data := make([][]string, 0, len(rows))
 	for _, m := range rows {
+		l := m.Latency()
 		data = append(data, []string{
 			m.Model, m.Provider,
 			strconv.Itoa(m.Calls),
 			humanCount(m.InputTokens), humanCount(m.OutputTokens),
 			humanCount(m.CacheReadTokens), humanCount(m.CacheCreateTokens),
-			humanDuration(m.DurationMS),
+			outRate(m.StatMetrics),
+			humanLatency(l.P50), humanLatency(l.P90), humanLatency(l.Max),
 		})
 	}
 	fmt.Fprintln(w, statsTable(
-		[]string{"MODEL", "PROVIDER", "CALLS", "IN", "OUT", "CACHE R", "CACHE W", "TIME"},
+		[]string{"MODEL", "PROVIDER", "CALLS", "IN", "OUT", "CACHE R", "CACHE W", "OUT/S", "P50", "P90", "MAX"},
 		data, 2))
 }
 
@@ -81,24 +89,40 @@ func renderOpTable(w io.Writer, rows []model.OpRollup) {
 	fmt.Fprintln(w)
 	data := make([][]string, 0, len(rows))
 	for _, o := range rows {
-		itemsCell, itemsPerSec := "—", "—"
+		itemsCell := "—"
 		if o.HasItems() {
 			itemsCell = humanCount(o.Items)
-			itemsPerSec = humanRate(o.ItemsPerSec())
 		}
+		failedCell := "—"
+		if o.Errors > 0 {
+			failedCell = strconv.Itoa(o.Errors)
+		}
+		l := o.Latency()
 		data = append(data, []string{
 			o.Op,
 			strconv.Itoa(o.Calls),
+			failedCell,
 			itemsCell,
 			humanCount(o.InputTokens),
-			humanRate(o.TokensPerSec()),
-			strconv.Itoa(int(math.Round(o.MsPerCall()))),
-			itemsPerSec,
+			humanCount(o.OutputTokens),
+			outRate(o.StatMetrics),
+			humanLatency(l.P50),
+			humanLatency(l.P90),
+			humanLatency(l.Max),
 		})
 	}
 	fmt.Fprintln(w, statsTable(
-		[]string{"OP", "CALLS", "ITEMS", "IN", "TOK/S", "MS/CALL", "ITEMS/S"},
+		[]string{"OP", "CALLS", "FAILED", "ITEMS", "IN", "OUT", "OUT/S", "P50", "P90", "MAX"},
 		data, 1))
+}
+
+// outRate renders the generation rate, blank for the embedding ops that
+// generate nothing rather than printing a misleading zero.
+func outRate(m model.StatMetrics) string {
+	if m.OutputTokens == 0 {
+		return "—"
+	}
+	return humanRate(m.OutputTokensPerSec())
 }
 
 // statsTable builds a header-ruled, borderless table. The first leftCols
@@ -148,8 +172,21 @@ type rangeJSON struct {
 	Until string  `json:"until"`
 }
 
+type latencyJSON struct {
+	P50MS int64 `json:"p50_ms"`
+	P90MS int64 `json:"p90_ms"`
+	P99MS int64 `json:"p99_ms"`
+	MaxMS int64 `json:"max_ms"`
+}
+
+func latencyJSONFrom(m model.StatMetrics) latencyJSON {
+	l := m.Latency()
+	return latencyJSON{P50MS: l.P50, P90MS: l.P90, P99MS: l.P99, MaxMS: l.Max}
+}
+
 type totalsJSON struct {
 	Calls       int   `json:"calls"`
+	Errors      int   `json:"errors"`
 	TokensIn    int   `json:"tokens_in"`
 	TokensOut   int   `json:"tokens_out"`
 	CacheRead   int   `json:"cache_read"`
@@ -158,25 +195,32 @@ type totalsJSON struct {
 }
 
 type modelJSON struct {
-	Model       string `json:"model"`
-	Provider    string `json:"provider"`
-	Calls       int    `json:"calls"`
-	TokensIn    int    `json:"tokens_in"`
-	TokensOut   int    `json:"tokens_out"`
-	CacheRead   int    `json:"cache_read"`
-	CacheCreate int    `json:"cache_create"`
-	DurationMS  int64  `json:"duration_ms"`
+	Model              string      `json:"model"`
+	Provider           string      `json:"provider"`
+	Calls              int         `json:"calls"`
+	Errors             int         `json:"errors"`
+	TokensIn           int         `json:"tokens_in"`
+	TokensOut          int         `json:"tokens_out"`
+	CacheRead          int         `json:"cache_read"`
+	CacheCreate        int         `json:"cache_create"`
+	DurationMS         int64       `json:"duration_ms"`
+	Latency            latencyJSON `json:"latency"`
+	OutputTokensPerSec float64     `json:"output_tokens_per_s"`
 }
 
 type opJSON struct {
-	Op           string   `json:"op"`
-	Calls        int      `json:"calls"`
-	Items        int      `json:"items"`
-	TokensIn     int      `json:"tokens_in"`
-	TokensPerSec float64  `json:"tokens_per_s"`
-	MsPerCall    float64  `json:"ms_per_call"`
-	ItemsPerSec  *float64 `json:"items_per_s"`
-	DurationMS   int64    `json:"duration_ms"`
+	Op           string  `json:"op"`
+	Calls        int     `json:"calls"`
+	Errors       int     `json:"errors"`
+	Items        int     `json:"items"`
+	TokensIn     int     `json:"tokens_in"`
+	TokensOut    int     `json:"tokens_out"`
+	TokensPerSec float64 `json:"tokens_per_s"`
+
+	OutputTokensPerSec float64     `json:"output_tokens_per_s"`
+	ItemsPerSec        *float64    `json:"items_per_s"`
+	DurationMS         int64       `json:"duration_ms"`
+	Latency            latencyJSON `json:"latency"`
 }
 
 // RenderStatsJSON writes the same aggregates as structured JSON on the agent /
@@ -192,10 +236,11 @@ func RenderStatsJSON(w io.Writer, r *query.StatsResult) error {
 	}
 	for _, m := range r.Report.ByModel {
 		out.ByModel = append(out.ByModel, modelJSON{
-			Model: m.Model, Provider: m.Provider, Calls: m.Calls,
+			Model: m.Model, Provider: m.Provider, Calls: m.Calls, Errors: m.Errors,
 			TokensIn: m.InputTokens, TokensOut: m.OutputTokens,
 			CacheRead: m.CacheReadTokens, CacheCreate: m.CacheCreateTokens,
-			DurationMS: m.DurationMS,
+			DurationMS: m.DurationMS, Latency: latencyJSONFrom(m.StatMetrics),
+			OutputTokensPerSec: round1(m.OutputTokensPerSec()),
 		})
 	}
 	for _, o := range r.Report.ByOp {
@@ -205,9 +250,11 @@ func RenderStatsJSON(w io.Writer, r *query.StatsResult) error {
 			itemsPerSec = &v
 		}
 		out.ByOp = append(out.ByOp, opJSON{
-			Op: o.Op, Calls: o.Calls, Items: o.Items, TokensIn: o.InputTokens,
-			TokensPerSec: round1(o.TokensPerSec()), MsPerCall: round1(o.MsPerCall()),
+			Op: o.Op, Calls: o.Calls, Errors: o.Errors, Items: o.Items,
+			TokensIn: o.InputTokens, TokensOut: o.OutputTokens,
+			TokensPerSec: round1(o.TokensPerSec()), OutputTokensPerSec: round1(o.OutputTokensPerSec()),
 			ItemsPerSec: itemsPerSec, DurationMS: o.DurationMS,
+			Latency: latencyJSONFrom(o.StatMetrics),
 		})
 	}
 
@@ -218,7 +265,7 @@ func RenderStatsJSON(w io.Writer, r *query.StatsResult) error {
 
 func totalsJSONFrom(t model.StatMetrics) totalsJSON {
 	return totalsJSON{
-		Calls: t.Calls, TokensIn: t.InputTokens, TokensOut: t.OutputTokens,
+		Calls: t.Calls, Errors: t.Errors, TokensIn: t.InputTokens, TokensOut: t.OutputTokens,
 		CacheRead: t.CacheReadTokens, CacheCreate: t.CacheCreateTokens, DurationMS: t.DurationMS,
 	}
 }
@@ -279,6 +326,22 @@ func humanDuration(ms int64) string {
 		return fmt.Sprintf("%dms", ms)
 	default:
 		return "0s"
+	}
+}
+
+// humanLatency renders one call's wall-clock time. It keeps a decimal in the
+// seconds range where humanDuration rounds to whole seconds — the difference
+// between a 1.2s and a 1.9s median is the point of reporting it at all.
+func humanLatency(ms int64) string {
+	switch d := time.Duration(ms) * time.Millisecond; {
+	case ms <= 0:
+		return "—"
+	case d < time.Second:
+		return fmt.Sprintf("%dms", ms)
+	case d < time.Minute:
+		return trimZero(fmt.Sprintf("%.1f", d.Seconds())) + "s"
+	default:
+		return fmt.Sprintf("%dm %ds", int(d/time.Minute), int((d%time.Minute)/time.Second))
 	}
 }
 

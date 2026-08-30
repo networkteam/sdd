@@ -15,4 +15,5 @@ var (
 	clrQual     = styles.Qualifier
 	clrFaint    = styles.Faint
 	clrInactive = styles.Inactive
+	clrWarn     = styles.Warn
 )

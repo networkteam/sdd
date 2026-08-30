@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
-	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 )
@@ -28,14 +27,10 @@ func Summarize(ctx context.Context, runner Runner, entry *model.Entry, graph *mo
 		return nil, fmt.Errorf("rendering summary prompt: %w", err)
 	}
 
-	start := time.Now()
-	output, err := runner.Run(ctx, req)
-	elapsed := time.Since(start)
+	output, err := Run(ctx, runner, req, "summarize")
 	if err != nil {
 		return nil, fmt.Errorf("running summary generator: %w", err)
 	}
-
-	logCallResult(ctx, output.Meta, "summarize", elapsed)
 
 	summary := strings.TrimSpace(output.Text)
 

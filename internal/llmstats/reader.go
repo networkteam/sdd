@@ -29,6 +29,7 @@ type Record struct {
 	CacheReadTokens   int    `json:"cache_read_tokens"`
 	CacheCreateTokens int    `json:"cache_create_tokens"`
 	DurationMS        int64  `json:"duration_ms"`
+	Error             string `json:"error,omitempty"`
 }
 
 // toStatsRecord parses the timestamp and lifts the record into the pure domain
@@ -49,6 +50,7 @@ func (r Record) toStatsRecord() (model.StatsRecord, error) {
 		CacheReadTokens:   r.CacheReadTokens,
 		CacheCreateTokens: r.CacheCreateTokens,
 		DurationMS:        r.DurationMS,
+		Error:             r.Error,
 	}, nil
 }
 

@@ -47,6 +47,7 @@ func (s *FileSink) RecordCall(stat llm.CallStat) {
 		CacheReadTokens:   stat.CacheReadTokens,
 		CacheCreateTokens: stat.CacheCreateTokens,
 		DurationMS:        stat.DurationMS,
+		Error:             stat.Error,
 	})
 	if err != nil {
 		return

@@ -87,16 +87,32 @@ func resolveTimeout(cmd *cli.Command, flagName string) (time.Duration, error) {
 	if cmd.IsSet(flagName) {
 		return cmd.Duration(flagName), nil
 	}
+	d, err := configuredLLMTimeout(cmd)
+	if err != nil {
+		return 0, err
+	}
+	if d > 0 {
+		return d, nil
+	}
+	return cmd.Duration(flagName), nil
+}
+
+// configuredLLMTimeout returns the llm.timeout field from config, or zero when
+// it is unset or unparseable. Callers with no flag of their own (sdd serve)
+// take it directly and let their own default stand in for zero.
+func configuredLLMTimeout(cmd *cli.Command) (time.Duration, error) {
 	cfg, err := resolveLLMConfig(cmd)
 	if err != nil {
 		return 0, err
 	}
-	if cfg.Timeout != "" {
-		if d, err := time.ParseDuration(cfg.Timeout); err == nil && d > 0 {
-			return d, nil
-		}
+	if cfg.Timeout == "" {
+		return 0, nil
 	}
-	return cmd.Duration(flagName), nil
+	d, err := time.ParseDuration(cfg.Timeout)
+	if err != nil || d <= 0 {
+		return 0, nil
+	}
+	return d, nil
 }
 
 // readOnlyRunner satisfies llm.Runner but always errors on Run. Used by

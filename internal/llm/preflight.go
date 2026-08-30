@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"text/template"
-	"time"
 
 	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/mdcompose"
@@ -80,14 +79,10 @@ func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *mo
 		return nil, fmt.Errorf("rendering pre-flight prompt: %w", err)
 	}
 
-	start := time.Now()
-	output, err := runner.Run(ctx, req)
-	elapsed := time.Since(start)
+	output, err := Run(ctx, runner, req, "preflight")
 	if err != nil {
 		return nil, fmt.Errorf("running pre-flight validator: %w", err)
 	}
-
-	logCallResult(ctx, output.Meta, "preflight", elapsed)
 
 	result, err := parsePreflightResult(output.Text)
 	if err != nil {
