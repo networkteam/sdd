@@ -11,6 +11,9 @@ type CallStat struct {
 	Op       string
 	Provider string
 	Model    string
+	// Variant is the behaviour-affecting model configuration this call ran
+	// under (see Identity.Variant); empty at model defaults.
+	Variant string
 	// Items is the number of inputs in this call. The embedding path sets it
 	// (one batch = N texts) so throughput (items or tokens per second) is
 	// derivable from DurationMS; chat calls are single-prompt and leave it 0.

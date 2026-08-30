@@ -127,6 +127,8 @@ func newRateLimited(inner llm.Runner, rps float64) llm.Runner {
 	}
 }
 
+func (r *rateLimited) Identity() llm.Identity { return r.inner.Identity() }
+
 func (r *rateLimited) Run(ctx context.Context, req llm.Request) (*llm.RunResult, error) {
 	if err := r.limiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limiter: %w", err)

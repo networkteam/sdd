@@ -27,6 +27,11 @@ import (
 	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
 
+// defaultServeLLMTimeout caps an LLM call when `llm.timeout` sets none. It
+// lives here because the composition root is the only layer entitled to a
+// default — every layer below takes the resolved value.
+const defaultServeLLMTimeout = 2 * time.Minute
+
 func serveCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "serve",
@@ -256,8 +261,18 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
+	if llmTimeout <= 0 {
+		llmTimeout = defaultServeLLMTimeout
+	}
+	// "local" is this executor's own name, not the provider's — the runner
+	// answers that through Identity, and mixing the two is what put a host
+	// name in the stats provider column.
 	executor := sdd.LLMExecutorFuncs{
 		CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
+		IdentityFunc: func() sdd.LLMIdentity {
+			id := runner.Identity()
+			return sdd.LLMIdentity{Provider: id.Provider, Model: id.Model}
+		},
 		ExecuteFunc: func(ctx context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
 			result, err := runner.Run(ctx, llm.Request{SystemPrompt: request.SystemPrompt, UserPrompt: request.Prompt})
 			if err != nil {
@@ -265,14 +280,10 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 			}
 			out := sdd.LLMResult{Output: []byte(result.Text), ExecutorFingerprint: "local", FinishReason: "completed"}
 			if result.Meta != nil {
-				out.Model = llm.PrimaryModel(result.Meta)
 				out.Usage.InputTokens = int64(result.Meta.InputTokens)
 				out.Usage.OutputTokens = int64(result.Meta.OutputTokens)
 				out.Usage.CacheReadTokens = int64(result.Meta.CacheReadTokens)
 				out.Usage.CacheCreateTokens = int64(result.Meta.CacheCreateTokens)
-				if result.Meta.Provider != "" {
-					out.ExecutorFingerprint = result.Meta.Provider
-				}
 			}
 			return out, nil
 		},
@@ -338,7 +349,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		memberIndex := localadapter.NewPersistentSearchIndexStore(sdd.ProjectID(dependency), cacheRoot, dependency)
 		member, runtimeErr := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: dependency}, Graph: memberGraph,
-			Sessions: sessions, StagedBlobs: blobs, Embeddings: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: executor,
+			Sessions: sessions, StagedBlobs: blobs, Embeddings: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: executor, LLMTimeout: llmTimeout,
 			ExcludeEmbeddedFromIndex: true,
 		})
 		if runtimeErr != nil {

@@ -20,6 +20,10 @@ type mockRunner struct {
 	lastPrompt string
 }
 
+func (*mockRunner) Identity() llm.Identity {
+	return llm.Identity{Provider: "test", Model: "test-model"}
+}
+
 func (m *mockRunner) Run(_ context.Context, req llm.Request) (*llm.RunResult, error) {
 	m.lastPrompt = req.Combined()
 	if m.err != nil {

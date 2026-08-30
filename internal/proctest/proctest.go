@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/model"
@@ -241,6 +242,8 @@ func NewWorld(t *testing.T, opts ...Option) *World {
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
 			ExecuteFunc:      script.execute,
 		},
+
+		LLMTimeout: time.Minute,
 	}
 	if len(cfg.branchDirs) > 0 {
 		targets := branchTargets{fallback: graph, graphs: map[string]sdd.GraphStore{"main": graph}}

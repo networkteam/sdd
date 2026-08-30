@@ -120,6 +120,8 @@ func configuredLLMTimeout(cmd *cli.Command) (time.Duration, error) {
 // don't need LLM configuration to operate.
 type readOnlyRunner struct{}
 
+func (readOnlyRunner) Identity() llm.Identity { return llm.Identity{} }
+
 func (readOnlyRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) {
 	return nil, fmt.Errorf("no llm runner configured for this command")
 }

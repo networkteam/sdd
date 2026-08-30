@@ -675,6 +675,10 @@ type trippingRunner struct {
 	t *testing.T
 }
 
+func (*trippingRunner) Identity() llm.Identity {
+	return llm.Identity{Provider: "test", Model: "test-model"}
+}
+
 func (r *trippingRunner) Run(_ context.Context, _ llm.Request) (*llm.RunResult, error) {
 	r.t.Error("LLM runner invoked despite a caller-supplied summary")
 	return nil, errors.New("must not be called")

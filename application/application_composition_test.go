@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	localadapter "github.com/networkteam/sdd/local"
@@ -115,14 +116,14 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 	}
 	runtimeA, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "project-a", DisplayName: "Project A"}, Dependencies: []string{"project-b"},
-		Graph: storeA, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
+		Graph: storeA, Sessions: sessions, StagedBlobs: blobs, LLM: llm, LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtimeB, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "project-b", DisplayName: "Project B"},
-		Graph:   storeB, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
+		Graph:   storeB, Sessions: sessions, StagedBlobs: blobs, LLM: llm, LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

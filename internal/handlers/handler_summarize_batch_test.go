@@ -22,6 +22,10 @@ type stubRunner struct {
 	calls int
 }
 
+func (*stubRunner) Identity() llm.Identity {
+	return llm.Identity{Provider: "test", Model: "test-model"}
+}
+
 func (r *stubRunner) Run(_ context.Context, _ llm.Request) (*llm.RunResult, error) {
 	r.mu.Lock()
 	r.calls++

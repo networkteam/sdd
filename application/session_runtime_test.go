@@ -425,6 +425,8 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 				return sdd.LLMResult{Output: []byte("Concrete target resolution is independent of cwd.")}, nil
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -762,7 +764,8 @@ func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *te
 	blobs := &trackingBlobStore{StagedBlobStore: baseBlobs, releaseErr: errors.New("injected release failure")}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs,
-		LLM: sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
+		LLM:        sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -828,6 +831,8 @@ func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.Gra
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: now, Finalizers: finalizers,
 		Recovery: authorizer,
 		LLM:      sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -860,6 +865,8 @@ func newDurableApplicationWithHomeAndTargets(t *testing.T, home sdd.GraphStore, 
 		Sessions: sessions, StagedBlobs: blobs,
 		Recovery: sdd.RecoveryAuthorizerFunc(func(context.Context, sdd.RecoveryAccessRequest) error { return nil }),
 		LLM:      sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

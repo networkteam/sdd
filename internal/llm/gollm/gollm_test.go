@@ -76,7 +76,9 @@ func TestNewRunner_BadTimeout(t *testing.T) {
 }
 
 func TestMetaFromUsage(t *testing.T) {
-	if metaFromUsage(nil, "m", "anthropic") != nil {
+	// No usage reported means no usage figures — never a fabricated one.
+	// Attribution does not travel here at all; it comes from Identity.
+	if metaFromUsage(nil, "glm-5.3-flash:cloud") != nil {
 		t.Error("nil usage should yield nil meta")
 	}
 
@@ -85,23 +87,32 @@ func TestMetaFromUsage(t *testing.T) {
 		InputTokens:          6341,
 		OutputTokens:         8,
 		CacheReadInputTokens: 6163,
-	}, "claude-sonnet-4-6", "anthropic")
+	}, "claude-sonnet-4-6")
 	if m == nil {
 		t.Fatal("expected non-nil meta")
 	}
 	if m.InputTokens != 6341 || m.OutputTokens != 8 || m.CacheReadTokens != 6163 {
 		t.Errorf("anthropic mapping wrong: %+v", m)
 	}
-	if m.Provider != "anthropic" {
-		t.Errorf("provider not propagated: %+v", m)
-	}
 	if mu, ok := m.Models["claude-sonnet-4-6"]; !ok || mu.CacheReadTokens != 6163 {
 		t.Errorf("per-model usage wrong: %+v", m.Models)
 	}
 
 	// OpenAI-style counts fall back to input/output.
-	m2 := metaFromUsage(&upstream.Usage{PromptTokens: 100, CompletionTokens: 20}, "gpt", "openai")
+	m2 := metaFromUsage(&upstream.Usage{PromptTokens: 100, CompletionTokens: 20}, "gpt")
 	if m2.InputTokens != 100 || m2.OutputTokens != 20 {
 		t.Errorf("openai fallback wrong: %+v", m2)
+	}
+}
+
+func TestCanonicalVariant(t *testing.T) {
+	if got := canonicalVariant(nil); got != "" {
+		t.Errorf("no params should yield no variant, got %q", got)
+	}
+	// Sorted by key so the same configuration always groups to the same row,
+	// whatever order the config file listed it in.
+	got := canonicalVariant(map[string]string{"verbosity": "low", "reasoning_effort": "high"})
+	if got != "reasoning_effort=high,verbosity=low" {
+		t.Errorf("variant = %q, want reasoning_effort=high,verbosity=low", got)
 	}
 }

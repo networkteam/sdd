@@ -98,6 +98,8 @@ func readFinderFor(t *testing.T) *finders.Finder {
 
 type noopRunner struct{}
 
+func (noopRunner) Identity() llm.Identity { return llm.Identity{Provider: "test", Model: "test-model"} }
+
 func (noopRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) {
 	return nil, fmt.Errorf("no llm runner configured")
 }

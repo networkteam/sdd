@@ -243,6 +243,8 @@ func TestInterleavedCapturesBothLandWithoutRecovery(t *testing.T) {
 				return sdd.LLMResult{Output: []byte("Interleaved capture summary.")}, nil
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

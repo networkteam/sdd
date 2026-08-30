@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	localadapter "github.com/networkteam/sdd/local"
@@ -145,6 +146,8 @@ func newCounterApp(t *testing.T, graphDir, cacheRoot string, embeddings sdd.Embe
 				return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -393,6 +396,8 @@ func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAc
 				return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

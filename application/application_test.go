@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	localadapter "github.com/networkteam/sdd/local"
@@ -118,6 +119,8 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 				return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

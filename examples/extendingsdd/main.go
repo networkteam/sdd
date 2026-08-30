@@ -60,6 +60,8 @@ func main() {
 				return sdd.LLMResult{}, errors.New("configure an LLM executor for writes")
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	check(err)
 	application, err := sdd.NewApplication(externalAccess{runtime: runtime})

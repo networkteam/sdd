@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/model"
@@ -76,6 +77,8 @@ func runSupersedeCapture(t *testing.T, supersedes []any) *model.Entry {
 				return sdd.LLMResult{Output: []byte("The replacement fact carrying the current reading.")}, nil
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

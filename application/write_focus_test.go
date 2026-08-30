@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/finders"
@@ -191,6 +192,8 @@ func TestWorkflowCaptureFocusPersistsThroughRealNewEntry(t *testing.T) {
 				return sdd.LLMResult{Output: []byte("A focus advancing the target directive this cycle.")}, nil
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

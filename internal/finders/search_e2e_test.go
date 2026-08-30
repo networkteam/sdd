@@ -208,6 +208,10 @@ func (s *e2eSetup) finder(t *testing.T, g *model.Graph) *finders.SearchFinder {
 
 type e2eNoopRunner struct{}
 
+func (e2eNoopRunner) Identity() llm.Identity {
+	return llm.Identity{Provider: "test", Model: "test-model"}
+}
+
 func (e2eNoopRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) {
 	return nil, fmt.Errorf("noop")
 }

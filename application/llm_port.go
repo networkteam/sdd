@@ -24,17 +24,29 @@ type LLMUsage struct {
 }
 
 type LLMResult struct {
-	Output              []byte
+	Output []byte
+	// ExecutorFingerprint identifies the executor that served the call — the
+	// host's own name for itself. It is not the provider: what ran inside the
+	// executor is reported by LLMIdentity, and conflating the two puts a host
+	// name in the provider column.
 	ExecutorFingerprint string
 	FinishReason        string
-	// Model names the model that served the call, when the executor knows it.
-	// Reported so hosts can attribute usage per model; the fingerprint
-	// identifies the executor, not what ran inside it.
-	Model string
-	Usage LLMUsage
+	Usage               LLMUsage
+}
+
+// LLMIdentity names the provider and model an executor routes to. Static
+// configuration, not a property of any one response, so it attributes a failed
+// call as readily as a successful one.
+type LLMIdentity struct {
+	Provider string
+	Model    string
 }
 
 type LLMExecutor interface {
 	Capabilities(context.Context) ([]string, error)
+	// Identity reports what this executor talks to. Required: an executor that
+	// cannot name its provider leaves every record it produces unattributable,
+	// and no layer above it is in a position to supply the answer.
+	Identity() LLMIdentity
 	Execute(context.Context, LLMRequest) (LLMResult, error)
 }

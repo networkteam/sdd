@@ -41,6 +41,7 @@ func (s *FileSink) RecordCall(stat llm.CallStat) {
 		Op:                stat.Op,
 		Provider:          stat.Provider,
 		Model:             stat.Model,
+		Variant:           stat.Variant,
 		Items:             stat.Items,
 		InputTokens:       stat.InputTokens,
 		OutputTokens:      stat.OutputTokens,

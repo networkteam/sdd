@@ -71,7 +71,7 @@ func renderModelTable(w io.Writer, rows []model.ModelRollup) {
 	for _, m := range rows {
 		l := m.Latency()
 		data = append(data, []string{
-			m.Model, m.Provider,
+			m.Label(), m.Provider,
 			strconv.Itoa(m.Calls),
 			humanCount(m.InputTokens), humanCount(m.OutputTokens),
 			humanCount(m.CacheReadTokens), humanCount(m.CacheCreateTokens),
@@ -196,6 +196,7 @@ type totalsJSON struct {
 
 type modelJSON struct {
 	Model              string      `json:"model"`
+	Variant            string      `json:"variant,omitempty"`
 	Provider           string      `json:"provider"`
 	Calls              int         `json:"calls"`
 	Errors             int         `json:"errors"`
@@ -236,7 +237,7 @@ func RenderStatsJSON(w io.Writer, r *query.StatsResult) error {
 	}
 	for _, m := range r.Report.ByModel {
 		out.ByModel = append(out.ByModel, modelJSON{
-			Model: m.Model, Provider: m.Provider, Calls: m.Calls, Errors: m.Errors,
+			Model: m.Model, Variant: m.Variant, Provider: m.Provider, Calls: m.Calls, Errors: m.Errors,
 			TokensIn: m.InputTokens, TokensOut: m.OutputTokens,
 			CacheRead: m.CacheReadTokens, CacheCreate: m.CacheCreateTokens,
 			DurationMS: m.DurationMS, Latency: latencyJSONFrom(m.StatMetrics),

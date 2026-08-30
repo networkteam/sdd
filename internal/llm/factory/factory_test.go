@@ -154,6 +154,10 @@ type fakeRunner struct {
 	calls int
 }
 
+func (f *fakeRunner) Identity() llm.Identity {
+	return llm.Identity{Provider: "fake", Model: "fake-model"}
+}
+
 func (f *fakeRunner) Run(_ context.Context, _ llm.Request) (*llm.RunResult, error) {
 	f.calls++
 	return &llm.RunResult{Text: "ok"}, nil

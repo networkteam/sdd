@@ -8,9 +8,6 @@ import (
 	"time"
 )
 
-// DefaultLLMTimeout caps an LLM call when the host configures no timeout.
-const DefaultLLMTimeout = 2 * time.Minute
-
 // ProjectRuntime owns the immutable ports and project configuration resolved
 // for one application operation.
 type ProjectRuntime struct {
@@ -31,7 +28,9 @@ type ProjectRuntimeOptions struct {
 	Embeddings    EmbeddingExecutor
 	SearchIndex   SearchIndexStore
 	LLM           LLMExecutor
-	// LLMTimeout caps each individual LLM call. Zero means DefaultLLMTimeout.
+	// LLMTimeout caps each individual LLM call. Required, and never defaulted
+	// here: only the composition root knows the operator's tolerance, and a
+	// layer that cannot know a value must ask for it rather than invent one.
 	// One value covers every purpose; a slow provider that needs longer for the
 	// writing guide needs it for pre-flight too.
 	LLMTimeout time.Duration
@@ -69,7 +68,7 @@ func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
 		options.Now = time.Now
 	}
 	if options.LLMTimeout <= 0 {
-		options.LLMTimeout = DefaultLLMTimeout
+		return nil, fmt.Errorf("sdd: LLMTimeout is required")
 	}
 	if options.Targets == nil && options.DefaultBranch != "" {
 		options.Targets = FixedTargetAcquirer{

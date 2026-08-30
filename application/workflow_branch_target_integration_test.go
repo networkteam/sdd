@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/model"
@@ -111,6 +112,8 @@ Branch-targeted workflow reads need to follow the written artifact.
 				}
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -319,6 +322,8 @@ This reference exists only on the bound work branch.
 				}
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

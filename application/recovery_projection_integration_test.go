@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	localadapter "github.com/networkteam/sdd/local"
@@ -75,6 +76,8 @@ func newRecoveryFixtureApplication(t *testing.T, sessionsDir string) *sdd.Applic
 				return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

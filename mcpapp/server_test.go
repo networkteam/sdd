@@ -353,6 +353,8 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 				return sdd.LLMResult{Output: output, ExecutorFingerprint: "test"}, marshalErr
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

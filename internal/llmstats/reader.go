@@ -23,6 +23,7 @@ type Record struct {
 	Op                string `json:"op"`
 	Provider          string `json:"provider,omitempty"`
 	Model             string `json:"model,omitempty"`
+	Variant           string `json:"variant,omitempty"`
 	Items             int    `json:"items,omitempty"`
 	InputTokens       int    `json:"input_tokens"`
 	OutputTokens      int    `json:"output_tokens"`
@@ -44,6 +45,7 @@ func (r Record) toStatsRecord() (model.StatsRecord, error) {
 		Op:                r.Op,
 		Provider:          r.Provider,
 		Model:             r.Model,
+		Variant:           r.Variant,
 		Items:             r.Items,
 		InputTokens:       r.InputTokens,
 		OutputTokens:      r.OutputTokens,

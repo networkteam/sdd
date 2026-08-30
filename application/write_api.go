@@ -495,36 +495,30 @@ type runtimeLLMRunner struct {
 	purpose  string
 }
 
-// Run adapts the host's executor to the internal Runner. The executor's
-// reported usage is lifted back into LLMMetadata so the shared call-logging
-// path records engine-mode calls the same way it records CLI ones; dropping it
-// here is what left the whole engine flow absent from `sdd stats`.
+// Identity passes the executor's own answer through unchanged. This adapter
+// sits behind the port and cannot know what runs on the far side, so it
+// reports rather than derives.
+func (r runtimeLLMRunner) Identity() internalllm.Identity {
+	id := r.executor.Identity()
+	return internalllm.Identity{Provider: id.Provider, Model: id.Model}
+}
+
+// Run adapts the host's executor to the internal Runner, lifting the reported
+// usage back into LLMMetadata so the shared call-recording path covers
+// engine-mode calls exactly as it covers CLI ones; dropping it here is what
+// left the whole engine flow absent from `sdd stats`.
 func (r runtimeLLMRunner) Run(ctx context.Context, request internalllm.Request) (*internalllm.RunResult, error) {
 	result, err := r.executor.Execute(ctx, LLMRequest{Purpose: r.purpose, SystemPrompt: request.SystemPrompt, Prompt: request.UserPrompt})
 	if err != nil {
 		return nil, err
 	}
-	return &internalllm.RunResult{Text: string(result.Output), Meta: metaFromLLMResult(result)}, nil
-}
-
-// metaFromLLMResult maps the port's usage report into the agent-neutral
-// metadata shape. Provider falls back to the executor fingerprint, which is
-// what a host without a distinct provider name reports.
-func metaFromLLMResult(result LLMResult) *internalllm.LLMMetadata {
-	meta := &internalllm.LLMMetadata{
-		Provider:          result.ExecutorFingerprint,
-		InputTokens:       int(result.Usage.InputTokens),
-		OutputTokens:      int(result.Usage.OutputTokens),
-		CacheReadTokens:   int(result.Usage.CacheReadTokens),
-		CacheCreateTokens: int(result.Usage.CacheCreateTokens),
-	}
-	if result.Model != "" {
-		meta.Models = map[string]internalllm.ModelUsage{result.Model: {
-			InputTokens:       meta.InputTokens,
-			OutputTokens:      meta.OutputTokens,
-			CacheReadTokens:   meta.CacheReadTokens,
-			CacheCreateTokens: meta.CacheCreateTokens,
-		}}
-	}
-	return meta
+	return &internalllm.RunResult{
+		Text: string(result.Output),
+		Meta: &internalllm.LLMMetadata{
+			InputTokens:       int(result.Usage.InputTokens),
+			OutputTokens:      int(result.Usage.OutputTokens),
+			CacheReadTokens:   int(result.Usage.CacheReadTokens),
+			CacheCreateTokens: int(result.Usage.CacheCreateTokens),
+		},
+	}, nil
 }

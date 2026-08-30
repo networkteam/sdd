@@ -9,10 +9,45 @@ import (
 	"time"
 )
 
+// Identity names what serves a call. It is fixed at construction from
+// configuration, never derived from a response — a call that fails returns no
+// response at all, and a provider that reports no usage still has a name.
+type Identity struct {
+	Provider string
+	Model    string
+	// Variant distinguishes configurations of the same model that behave
+	// differently enough to measure apart — a reasoning effort, a thinking
+	// budget. Such a setting changes latency and token usage, so folding those
+	// calls into one row averages two populations into a number describing
+	// neither. Canonical form is comma-separated key=value in sorted key order
+	// ("reasoning_effort=high"); empty when the model runs at its defaults.
+	//
+	// The boundary is what the request carries, not what the setting means:
+	// a value sent as its own field is a variant, a value inside the model
+	// identifier is the model. So an Ollama tag ("glm-5.3-flash:cloud") stays
+	// part of Model — it already separates its own rows, and splitting it back
+	// out would mean parsing structure into a string we receive opaquely.
+	Variant string
+}
+
+// String renders the identity for display: model, then variant in parentheses.
+func (i Identity) String() string {
+	if i.Variant == "" {
+		return i.Model
+	}
+	return i.Model + " (" + i.Variant + ")"
+}
+
 // Runner executes a structured LLM request and returns the response with
-// metadata. The implementation decides which model and transport to use.
+// usage metadata. The implementation decides which model and transport to use.
 // Injected so tests can substitute fakes.
+//
+// Identity is part of the contract because the runner is the only layer that
+// knows what it talks to. Every layer below it — the call recorder, the stats
+// sink, the report — must take that answer rather than reconstruct one, and a
+// layer that cannot know a value must require it instead of defaulting it.
 type Runner interface {
+	Identity() Identity
 	Run(ctx context.Context, req Request) (*RunResult, error)
 }
 
@@ -44,14 +79,15 @@ func (r Request) Combined() string {
 // the CLI paths directly, the engine path via the host's executor adapter — so
 // that logging and stats collection have exactly one site.
 func Run(ctx context.Context, runner Runner, req Request, op string) (*RunResult, error) {
+	id := runner.Identity()
 	start := time.Now()
 	output, err := runner.Run(ctx, req)
 	elapsed := time.Since(start)
 	if err != nil {
-		logCallFailure(ctx, op, elapsed, err)
+		logCallFailure(ctx, id, op, elapsed, err)
 		return nil, err
 	}
-	logCallResult(ctx, output.Meta, op, elapsed)
+	logCallResult(ctx, id, output.Meta, op, elapsed)
 	return output, nil
 }
 
@@ -61,11 +97,10 @@ type RunResult struct {
 	Meta *LLMMetadata
 }
 
-// LLMMetadata holds agent-neutral per-call metrics from the LLM provider.
+// LLMMetadata holds agent-neutral per-call usage reported by the provider.
+// It carries no provider or model name: identity comes from the Runner, so a
+// provider that reports nothing here still leaves an attributed record.
 type LLMMetadata struct {
-	// Provider is the configured LLM provider that served the call
-	// (e.g. "anthropic", "ollama", "openai", "claude-cli").
-	Provider          string
 	TotalCostUSD      float64
 	InputTokens       int
 	OutputTokens      int

@@ -11,10 +11,14 @@ import (
 // carries a parsed timestamp and no JSON concerns (those live at the I/O
 // boundary in internal/llmstats).
 type StatsRecord struct {
-	Timestamp         time.Time
-	Op                string
-	Provider          string
-	Model             string
+	Timestamp time.Time
+	Op        string
+	Provider  string
+	Model     string
+	// Variant is the behaviour-affecting model configuration (a reasoning
+	// effort, a thinking budget); it groups separately from the bare model
+	// because it moves latency and token usage.
+	Variant           string
 	Items             int
 	InputTokens       int
 	OutputTokens      int
@@ -157,7 +161,16 @@ func (m StatMetrics) ItemsPerSec() float64 {
 type ModelRollup struct {
 	Model    string
 	Provider string
+	Variant  string
 	StatMetrics
+}
+
+// Label renders the rollup's model with its variant, the form the report shows.
+func (m ModelRollup) Label() string {
+	if m.Variant == "" {
+		return m.Model
+	}
+	return m.Model + " (" + m.Variant + ")"
 }
 
 // OpRollup aggregates calls for one operation.
@@ -201,6 +214,7 @@ func FilterStats(records []StatsRecord, since *time.Time, op, provider, model st
 type modelKey struct {
 	model    string
 	provider string
+	variant  string
 }
 
 // AggregateStats rolls records up into totals, by-model, and by-op groups.
@@ -212,10 +226,10 @@ func AggregateStats(records []StatsRecord) StatsReport {
 	for _, r := range records {
 		report.Totals.add(r)
 
-		mk := modelKey{model: r.Model, provider: r.Provider}
+		mk := modelKey{model: r.Model, provider: r.Provider, variant: r.Variant}
 		mr, ok := byModel[mk]
 		if !ok {
-			mr = &ModelRollup{Model: r.Model, Provider: r.Provider}
+			mr = &ModelRollup{Model: r.Model, Provider: r.Provider, Variant: r.Variant}
 			byModel[mk] = mr
 		}
 		mr.add(r)
@@ -240,7 +254,10 @@ func AggregateStats(records []StatsRecord) StatsReport {
 		if a.Model != b.Model {
 			return a.Model < b.Model
 		}
-		return a.Provider < b.Provider
+		if a.Provider != b.Provider {
+			return a.Provider < b.Provider
+		}
+		return a.Variant < b.Variant
 	})
 
 	report.ByOp = make([]OpRollup, 0, len(byOp))

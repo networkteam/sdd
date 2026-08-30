@@ -96,7 +96,8 @@ func newStampWorkflowApp(t *testing.T, graphDir, sessionsDir string, now func() 
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Sessions: store, StagedBlobs: blobs, Now: now,
-		LLM: sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
+		LLM:        sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

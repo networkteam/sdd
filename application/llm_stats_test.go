@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/llm"
@@ -51,8 +52,11 @@ func newGuideApp(t *testing.T, execute func(context.Context, sdd.LLMRequest) (sd
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs,
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
+			IdentityFunc:     func() sdd.LLMIdentity { return sdd.LLMIdentity{Provider: "ollama", Model: "glm-5.3-flash:cloud"} },
 			ExecuteFunc:      execute,
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -80,8 +84,7 @@ func TestWritingGuideCheckRecordsCallStats(t *testing.T) {
 		}
 		return sdd.LLMResult{
 			Output:              []byte(`{"findings":[]}`),
-			ExecutorFingerprint: "ollama",
-			Model:               "glm-5.3-flash:cloud",
+			ExecutorFingerprint: "local",
 			Usage:               sdd.LLMUsage{InputTokens: 4200, OutputTokens: 90, CacheReadTokens: 3000, CacheCreateTokens: 12},
 		}, nil
 	})

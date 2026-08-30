@@ -7,6 +7,7 @@ package gollm
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ type Runner struct {
 	client   upstream.LLM
 	provider string
 	model    string
+	variant  string
 	useCache bool
 }
 
@@ -116,12 +118,48 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 		return nil, fmt.Errorf("gollm: creating client: %w", err)
 	}
 
+	// Behaviour-affecting params go to the provider verbatim; gollm forwards
+	// unknown option keys straight into the request body.
+	for _, k := range sortedKeys(cfg.Params) {
+		client.SetOption(k, cfg.Params[k])
+	}
+
 	return &Runner{
 		client:   client,
 		provider: cfg.Provider,
 		model:    cfg.Model,
+		variant:  canonicalVariant(cfg.Params),
 		useCache: useCache,
 	}, nil
+}
+
+// canonicalVariant renders the behaviour-affecting params as a stable label —
+// sorted key=value pairs — so the same configuration always groups to the same
+// row across runs and machines.
+func canonicalVariant(params map[string]string) string {
+	if len(params) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(params))
+	for _, k := range sortedKeys(params) {
+		parts = append(parts, k+"="+params[k])
+	}
+	return strings.Join(parts, ",")
+}
+
+func sortedKeys(params map[string]string) []string {
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// Identity reports the configured provider and model. Both are known at
+// construction, so they attribute a call whatever the response turns out to be.
+func (r *Runner) Identity() llm.Identity {
+	return llm.Identity{Provider: r.provider, Model: r.model, Variant: r.variant}
 }
 
 // Run sends the request to the underlying gollm client. When caching is
@@ -149,17 +187,19 @@ func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, erro
 	}
 
 	// The fork surfaces per-call usage (tokens + prompt-cache read/creation)
-	// via GenerateWithUsage; map it into the agent-neutral LLMMetadata so the
-	// gollm path stops returning nil Meta. Cost is not reported by the
-	// provider APIs (it was a claude-cli extra), so it is left zero.
-	return &llm.RunResult{Text: resp.Content, Meta: metaFromUsage(resp.Usage, r.model, r.provider)}, nil
+	// via GenerateWithUsage; map it into the agent-neutral LLMMetadata. Cost is
+	// not reported by the provider APIs (it was a claude-cli extra), so it is
+	// left zero.
+	return &llm.RunResult{Text: resp.Content, Meta: metaFromUsage(resp.Usage, r.model)}, nil
 }
 
 // metaFromUsage maps a gollm Response.Usage into the agent-neutral
 // llm.LLMMetadata. It prefers the Anthropic-style input/output counts and falls
-// back to the OpenAI-style prompt/completion counts. Returns nil when the
-// provider reported no usage (so logging and the stats sink skip the call).
-func metaFromUsage(u *upstream.Usage, model, provider string) *llm.LLMMetadata {
+// back to the OpenAI-style prompt/completion counts. Nil when the provider
+// reported no usage — Ollama reports its counts as prompt_eval_count and
+// eval_count, outside the usage object the fork's parser reads — which costs
+// only the token figures now that identity travels separately.
+func metaFromUsage(u *upstream.Usage, model string) *llm.LLMMetadata {
 	if u == nil {
 		return nil
 	}
@@ -178,7 +218,6 @@ func metaFromUsage(u *upstream.Usage, model, provider string) *llm.LLMMetadata {
 		CacheCreateTokens: u.CacheCreationInputTokens,
 	}
 	return &llm.LLMMetadata{
-		Provider:          provider,
 		InputTokens:       in,
 		OutputTokens:      out,
 		CacheReadTokens:   u.CacheReadInputTokens,

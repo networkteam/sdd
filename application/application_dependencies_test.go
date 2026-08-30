@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 )
@@ -120,14 +121,14 @@ func TestApplicationLoadsDependencyPartiallyWithUnreadableEntry(t *testing.T) {
 	}
 	dependency, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example.org/dep"}, Graph: staticGraphStore{snapshot: foreignSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm, LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []string{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm, LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -165,14 +166,14 @@ func TestApplicationResolvesAuthorizedDependenciesWithoutLeakingDenials(t *testi
 	}
 	dependency, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example.org/dep"}, Graph: staticGraphStore{snapshot: foreignSnapshot, attachment: "foreign attachment"},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm, LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []string{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm, LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -54,6 +54,8 @@ func newCollectFixture(t *testing.T) collectFixture {
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
 			ExecuteFunc:      func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil },
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

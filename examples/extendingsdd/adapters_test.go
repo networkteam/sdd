@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/mcpapp"
@@ -88,7 +89,7 @@ func TestExternalCompositionCompilesAgainstPublicPorts(t *testing.T) {
 		StagedBlobs: newMemoryStagedBlobStore(nil),
 		Embeddings:  embeddingExecutor{},
 		SearchIndex: indexStore{},
-		LLM:         llmExecutor{},
+		LLM:         llmExecutor{}, LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

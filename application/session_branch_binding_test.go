@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/application"
 	localadapter "github.com/networkteam/sdd/local"
@@ -45,6 +46,8 @@ func newBranchBindingApplicationWithStore(t *testing.T, validator sdd.BranchVali
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
 			ExecuteFunc:      func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil },
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

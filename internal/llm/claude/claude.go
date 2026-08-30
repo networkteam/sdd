@@ -23,6 +23,11 @@ func NewRunner(model string) llm.Runner {
 	return &Runner{model: model}
 }
 
+// Identity reports the claude CLI transport and the configured model.
+func (r *Runner) Identity() llm.Identity {
+	return llm.Identity{Provider: "claude-cli", Model: r.model}
+}
+
 // Run executes claude -p --output-format json and parses the JSON response.
 // The claude CLI accepts a single stdin payload, so SystemPrompt and
 // UserPrompt are concatenated — prompt caching is not available through this
@@ -44,7 +49,6 @@ func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, erro
 	}
 
 	meta := &llm.LLMMetadata{
-		Provider:          "claude-cli",
 		TotalCostUSD:      resp.TotalCostUSD,
 		InputTokens:       resp.Usage.InputTokens,
 		OutputTokens:      resp.Usage.OutputTokens,

@@ -45,6 +45,8 @@ func newIdentityWriteApp(t *testing.T) (*sdd.Application, sdd.RequestIdentity, s
 				return sdd.LLMResult{Output: []byte("An identity captured for the project record.")}, nil
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

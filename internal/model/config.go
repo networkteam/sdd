@@ -234,6 +234,12 @@ type LLMConfig struct {
 	Model string `yaml:"model,omitempty"`
 	// Timeout is a Go duration string (e.g. "2m") applied per LLM call.
 	Timeout string `yaml:"timeout,omitempty"`
+	// Params carries behaviour-affecting, provider-specific model settings —
+	// a reasoning effort, a thinking budget — forwarded verbatim into the
+	// provider request. They also form the call's recorded variant, because a
+	// setting that moves latency and token usage makes a different population
+	// of calls that must not be averaged with the defaults.
+	Params map[string]string `yaml:"params,omitempty"`
 	// Concurrency bounds the worker pool for batch operations. Zero means
 	// "use DefaultLLMConcurrency".
 	Concurrency int `yaml:"concurrency,omitempty"`

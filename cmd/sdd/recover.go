@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -164,6 +165,8 @@ func buildLocalRecoveryApplication(ctx context.Context, cmd *cli.Command) (*sdd.
 				return sdd.LLMResult{}, fmt.Errorf("recovery does not execute language models")
 			},
 		},
+
+		LLMTimeout: time.Minute,
 	})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
