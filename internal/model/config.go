@@ -180,7 +180,7 @@ type EmbeddingConfig struct {
 	// APIKeys maps provider name to API key. Defaults to LLMConfig.APIKeys
 	// if empty so a single key value can serve both axes; explicit values
 	// here override that.
-	APIKeys map[string]string `yaml:"api_keys,omitempty"`
+	APIKeys map[string]string `yaml:"api_keys,omitempty" sdd:"secret"`
 	// RateLimitRPS caps remote-provider requests per second. Zero means
 	// "apply a conservative per-provider default safe for tier-1 limits".
 	// Local providers (ollama) ignore this field.
@@ -247,7 +247,7 @@ type LLMConfig struct {
 	OllamaEndpoint string `yaml:"ollama_endpoint,omitempty"`
 	// APIKeys maps provider name to API key. Never belongs in the
 	// committed .sdd/config.yaml.
-	APIKeys map[string]string `yaml:"api_keys,omitempty"`
+	APIKeys map[string]string `yaml:"api_keys,omitempty" sdd:"secret"`
 	// RateLimitRPS caps remote-provider requests per second. Zero means
 	// "apply a conservative per-model default safe for Anthropic/OpenAI
 	// tier 1"; set an explicit positive value (e.g. a high number like

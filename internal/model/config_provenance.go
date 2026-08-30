@@ -100,6 +100,10 @@ type configLeaf struct {
 	path  string
 	index []int // field index chain from the root struct
 	kind  configLeafKind
+	// secret marks a field whose values must never be rendered. Declared on the
+	// field with `sdd:"secret"`, never inferred from its shape: api_keys and
+	// params are both maps and only one holds credentials.
+	secret bool
 }
 
 // collectConfigLeaves walks a config struct type and returns its leaf fields
@@ -121,7 +125,7 @@ func collectConfigLeaves(t reflect.Type, prefix []string, index []int) []configL
 		case f.Type.Kind() == reflect.Struct:
 			leaves = append(leaves, collectConfigLeaves(f.Type, append(append([]string{}, prefix...), tag), idx)...)
 		case f.Type.Kind() == reflect.Map:
-			leaves = append(leaves, configLeaf{path: joinPath(prefix, tag), index: idx, kind: leafMap})
+			leaves = append(leaves, configLeaf{path: joinPath(prefix, tag), index: idx, kind: leafMap, secret: isSecretField(f)})
 		case f.Type.Kind() == reflect.Slice:
 			leaves = append(leaves, configLeaf{path: joinPath(prefix, tag), index: idx, kind: leafSlice})
 		default:
@@ -129,6 +133,16 @@ func collectConfigLeaves(t reflect.Type, prefix []string, index []int) []configL
 		}
 	}
 	return leaves
+}
+
+// isSecretField reports whether a field carries the `sdd:"secret"` marker.
+func isSecretField(f reflect.StructField) bool {
+	for _, part := range strings.Split(f.Tag.Get("sdd"), ",") {
+		if strings.TrimSpace(part) == "secret" {
+			return true
+		}
+	}
+	return false
 }
 
 func joinPath(prefix []string, tag string) string {
@@ -146,15 +160,16 @@ func leafValue(root reflect.Value, index []int) reflect.Value {
 	return v
 }
 
-// effectiveMapEntries expands a map-valued leaf (api_keys) into per-key
-// entries with per-key provenance — the same key-by-key overlay MergeConfig
-// applies. Map values are secrets by definition here and marked for masking.
+// effectiveMapEntries expands a map-valued leaf into per-key entries with
+// per-key provenance — the same key-by-key overlay MergeConfig applies. Only a
+// leaf the field marked secret is masked.
 func effectiveMapEntries(leaf configLeaf, layers []struct {
 	cfg    *PerRepoConfig
 	source ConfigValueSource
 }) []ConfigValue {
 	type hit struct {
 		source ConfigValueSource
+		value  string
 	}
 	merged := map[string]hit{}
 	var order []string
@@ -170,16 +185,20 @@ func effectiveMapEntries(leaf configLeaf, layers []struct {
 			if _, seen := merged[key]; !seen {
 				order = append(order, key)
 			}
-			merged[key] = hit{source: layer.source}
+			merged[key] = hit{source: layer.source, value: fmt.Sprintf("%v", v.MapIndex(k).Interface())}
 		}
 	}
 	out := make([]ConfigValue, 0, len(order))
 	for _, k := range order {
+		value := "••••••"
+		if !leaf.secret {
+			value = merged[k].value
+		}
 		out = append(out, ConfigValue{
 			Key:    leaf.path + "." + k,
-			Value:  "••••••",
+			Value:  value,
 			Source: merged[k].source,
-			Secret: true,
+			Secret: leaf.secret,
 		})
 	}
 	return out

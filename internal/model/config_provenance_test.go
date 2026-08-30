@@ -73,6 +73,29 @@ func TestEffectiveConfigValues_APIKeysMaskedPerKey(t *testing.T) {
 	}
 }
 
+// Both api_keys and params are maps; only the one the field marks secret is
+// masked. Inferring secrecy from the map shape hid a behaviour-affecting
+// setting the operator needs to read back.
+func TestEffectiveConfigValues_NonSecretMapRendersItsValues(t *testing.T) {
+	global := BaseConfig{LLM: LLMConfig{
+		APIKeys: map[string]string{"ollama": "global-secret"},
+		Params:  map[string]string{"think": "high"},
+	}}
+	values := EffectiveConfigValues(global, nil, nil)
+
+	think := findValue(t, values, "llm.params.think")
+	if think.Secret {
+		t.Errorf("params must not be marked secret: %+v", think)
+	}
+	if think.Value != "high" {
+		t.Errorf("params value = %q, want high", think.Value)
+	}
+	key := findValue(t, values, "llm.api_keys.ollama")
+	if !key.Secret || key.Value == "global-secret" {
+		t.Errorf("api key must stay masked: %+v", key)
+	}
+}
+
 func TestEffectiveConfigValues_SlicesRender(t *testing.T) {
 	project := &PerRepoConfig{
 		SupportedAgents: []AgentTarget{"claude", "codex"},
