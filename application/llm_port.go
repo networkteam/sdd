@@ -40,6 +40,10 @@ type LLMResult struct {
 type LLMIdentity struct {
 	Provider string
 	Model    string
+	// Variant is the behaviour-affecting configuration the provider runs
+	// under — a reasoning effort, a thinking budget — carried so calls at
+	// different settings measure apart.
+	Variant string
 }
 
 type LLMExecutor interface {

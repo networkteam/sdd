@@ -500,7 +500,7 @@ type runtimeLLMRunner struct {
 // reports rather than derives.
 func (r runtimeLLMRunner) Identity() internalllm.Identity {
 	id := r.executor.Identity()
-	return internalllm.Identity{Provider: id.Provider, Model: id.Model}
+	return internalllm.Identity{Provider: id.Provider, Model: id.Model, Variant: id.Variant}
 }
 
 // Run adapts the host's executor to the internal Runner, lifting the reported

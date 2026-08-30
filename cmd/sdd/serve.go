@@ -271,7 +271,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
 		IdentityFunc: func() sdd.LLMIdentity {
 			id := runner.Identity()
-			return sdd.LLMIdentity{Provider: id.Provider, Model: id.Model}
+			return sdd.LLMIdentity{Provider: id.Provider, Model: id.Model, Variant: id.Variant}
 		},
 		ExecuteFunc: func(ctx context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
 			result, err := runner.Run(ctx, llm.Request{SystemPrompt: request.SystemPrompt, UserPrompt: request.Prompt})
