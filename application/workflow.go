@@ -95,7 +95,10 @@ type WorkflowServe struct {
 	// InstructionLanes are the unit's rendered lanes in order — what the MCP
 	// layer dedups independently; Instructions is their join plus diagnostics.
 	InstructionLanes []engine.ServeLane
-	Base             *WorkflowServe
+	// Sizes is the engine's per-part byte accounting for this serve, read by
+	// the serve-budget measurement (d-tac-qwc).
+	Sizes []engine.PartSize
+	Base  *WorkflowServe
 	// Collected is the instance's already-gathered param and state values,
 	// projected only onto resume serves so a newly attached or reoriented
 	// agent sees what this instance holds — the anchor, chosen scope, and
@@ -1193,6 +1196,7 @@ func (w *WorkflowSession) publicServe(serve *engine.Serve) *WorkflowServe {
 		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Diagnostics: append([]string(nil), serve.Diagnostics...),
 		InstructionLanes: append([]engine.ServeLane(nil), serve.Lanes...),
+		Sizes:            append([]engine.PartSize(nil), serve.Sizes...),
 	}
 	if serve.Chooser != nil {
 		chooser := &WorkflowChooser{Chooser: serve.Chooser.Chooser, Kind: ChooserKind(serve.Chooser.Kind)}
