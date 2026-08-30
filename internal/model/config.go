@@ -471,6 +471,23 @@ func mergeLLMConfig(base, overlay LLMConfig) LLMConfig {
 			out.APIKeys[k] = v
 		}
 	}
+	out.Params = mergeStringMap(out.Params, overlay.Params)
+	return out
+}
+
+// mergeStringMap overlays one string map onto another key by key, copying on
+// write so the merge never mutates the base layer.
+func mergeStringMap(base, overlay map[string]string) map[string]string {
+	if len(overlay) == 0 {
+		return base
+	}
+	out := make(map[string]string, len(base)+len(overlay))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range overlay {
+		out[k] = v
+	}
 	return out
 }
 
