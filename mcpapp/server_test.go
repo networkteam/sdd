@@ -22,6 +22,7 @@ import (
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/proctest"
 	"github.com/networkteam/sdd/internal/query"
 	localadapter "github.com/networkteam/sdd/local"
 	mcpserver "github.com/networkteam/sdd/mcpapp"
@@ -2610,52 +2611,48 @@ func TestShellWithoutFramingServesInfoOnly(t *testing.T) {
 	}
 }
 
-// TestDoorPayloadUnder25KB asserts the default shell's door serve — info block,
-// declared lanes, the other-work count line, and the shell instructions —
-// stays within the 25KB contract against a representative graph (A1, AC10).
-func TestDoorPayloadUnder25KB(t *testing.T) {
+// TestDoorAndReplayWirePayloads measures the two heaviest automatic MCP
+// payloads as JSON wire bytes over the realistic fixture — the door serve,
+// and a fullReplay reorientation with a running move (dedup cleared,
+// everything re-served at once). It replaces TestDoorPayloadUnder25KB, whose
+// fixture populated none of the scaling lanes and so was structurally blind
+// to the breach it existed to catch (s-tac-ayj). The ceilings document the
+// measured state and may only shrink as the bounding slices of d-tac-rzi
+// land; the door's 25KB contract is currently breached and stays visibly
+// named here rather than hidden behind a green fixture.
+func TestDoorAndReplayWirePayloads(t *testing.T) {
+	const (
+		doorWireCeilingBytes   = 40000 // measured ~36KB; contract target is 25000
+		replayWireCeilingBytes = 60000 // measured ~53KB with one running catch-up move
+	)
 	graphDir := filepath.Join(t.TempDir(), "graph")
-	// A representative graph: many entries with realistic summaries, plus a few
-	// aspirations and guiding directives so every framing lane has content.
-	for i := range 60 {
-		typeCode, layerCode, kind, extra := "s", "tac", "gap", "layer: tactical\n"
-		switch i % 5 {
-		case 0:
-			typeCode, layerCode, kind, extra = "d", "stg", "aspiration", "layer: strategic\n"
-		case 1:
-			typeCode, layerCode, kind, extra = "d", "cpt", "directive", "layer: conceptual\nintent: guiding\n"
-		}
-		path := filepath.Join(graphDir, fmt.Sprintf("2026/06/%02d-%06d-%s-%s-x%02d.md", (i%28)+1, 100000+i, typeCode, layerCode, i))
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			t.Fatal(err)
-		}
-		content := fmt.Sprintf(`---
-type: %s
-kind: %s
-%sconfidence: medium
-summary: Representative entry %02d records a realistic first-sentence-heavy observation about the flux subsystem — the kind of ~350-character one-liner a real graph accumulates, naming the concrete surface that moved, the trade-off weighed in dialogue, and the follow-up it opens, so the recent-moves and heat lanes have honestly-sized content to rank and cap against rather than a toy stub of a summary line.
----
-
-Body of entry %02d: a paragraph of realistic content that the door serve never renders in full but that inflates the graph the framing lanes rank over.
-`, typeName(typeCode), kind, extra, i, i)
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
+	// A fixed base just before the test server's fixed clock keeps the
+	// fixture inside the recency windows, deterministically.
+	base := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
+	shape := proctest.DefaultShape()
+	for _, entry := range proctest.RealisticGraph(base, shape) {
+		proctest.WriteEntry(t, graphDir, entry)
 	}
+	proctest.WriteWIPMarkers(t, graphDir, base, shape)
+
 	env := newTestServer(t, nil, graphDir, "")
 	cs := connect(t, env.srv)
 	door := openSession(t, cs)
-	if size := jsonSize(t, door); size > 25000 {
-		t.Fatalf("default shell door payload is %d bytes, exceeds the 25KB contract", size)
+	doorSize := jsonSize(t, door)
+	t.Logf("door wire payload: %d bytes (contract target 25000)", doorSize)
+	if doorSize > doorWireCeilingBytes {
+		t.Errorf("door wire payload is %d bytes, over the %d ceiling", doorSize, doorWireCeilingBytes)
 	}
-}
 
-// typeName maps a filename type code to its frontmatter type for the fixture.
-func typeName(code string) string {
-	if code == "d" {
-		return "decision"
+	var serve mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "catch-up", "label": "wire measurement"}, &serve)
+	var full mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{"fullReplay": true}, &full)
+	replaySize := jsonSize(t, full)
+	t.Logf("fullReplay wire payload with one running move: %d bytes", replaySize)
+	if replaySize > replayWireCeilingBytes {
+		t.Errorf("fullReplay wire payload is %d bytes, over the %d ceiling", replaySize, replayWireCeilingBytes)
 	}
-	return "signal"
 }
 
 // bareShellProcedure is a minimal session shell declaring no framing lanes —

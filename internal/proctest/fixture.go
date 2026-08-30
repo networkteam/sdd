@@ -62,16 +62,18 @@ func DefaultShape() GraphShape {
 	}
 }
 
-// HubID returns the generated hub plan's entry ID — the anchor for
-// chain-expansion worst-case walks.
-func (s GraphShape) HubID() string {
-	return fixtureID(fixtureBase(), "d", "tac", "hub")
+// HubID returns the generated hub plan's entry ID for a base — the anchor
+// for chain-expansion worst-case walks.
+func HubID(base time.Time) string {
+	return fixtureID(base, "d", "tac", "hub")
 }
 
-// fixtureBase anchors generated timestamps: entries spread backwards from
-// here, so recency windows (heat exp-14d, by(date)) see a live graph.
-func fixtureBase() time.Time {
-	return time.Now().Add(-2 * time.Hour)
+// DefaultBase anchors generated timestamps near the real clock: entries
+// spread backwards from here, so recency windows (heat exp-14d, by(date))
+// see a live graph. Capture it once per fixture — every generating call must
+// share one base or IDs drift across a second boundary.
+func DefaultBase() time.Time {
+	return time.Now().Add(-2 * time.Hour).Truncate(time.Second)
 }
 
 func fixtureID(ts time.Time, typ, layer, suffix string) string {
@@ -88,12 +90,11 @@ func prose(subject string, n int) string {
 	return strings.TrimSpace(b.String())
 }
 
-// RealisticGraph generates the fixture entries for a shape. Every reference
-// resolves inside the generated set, so the graph loads warning-clean and the
-// health framing lane stays quiet — measured serves reflect content, not
-// fixture damage.
-func RealisticGraph(shape GraphShape) []*model.Entry {
-	base := fixtureBase()
+// RealisticGraph generates the fixture entries for a shape, timestamped
+// backwards from base. Every reference resolves inside the generated set, so
+// the graph loads warning-clean and the health framing lane stays quiet —
+// measured serves reflect content, not fixture damage.
+func RealisticGraph(base time.Time, shape GraphShape) []*model.Entry {
 	var entries []*model.Entry
 	add := func(e *model.Entry) { entries = append(entries, e) }
 
@@ -260,11 +261,10 @@ func RealisticGraph(shape GraphShape) []*model.Entry {
 	return entries
 }
 
-// WriteWIPMarkers writes n WIP marker files into the graph's wip/ directory,
-// each pointing at a generated fixture entry.
-func WriteWIPMarkers(t *testing.T, graphDir string, shape GraphShape) {
+// WriteWIPMarkers writes the shape's WIP marker files into the graph's wip/
+// directory, each pointing at the base's generated hub entry.
+func WriteWIPMarkers(t *testing.T, graphDir string, base time.Time, shape GraphShape) {
 	t.Helper()
-	base := fixtureBase()
 	for i := range shape.WIPMarkers {
 		ts := base.Add(-time.Duration(i+1) * 26 * time.Hour)
 		marker := &model.WIPMarker{
@@ -285,10 +285,12 @@ func WriteWIPMarkers(t *testing.T, graphDir string, shape GraphShape) {
 	}
 }
 
-// NewRealisticWorld builds a world over a generated realistic graph.
-func NewRealisticWorld(t *testing.T, shape GraphShape) *World {
+// NewRealisticWorld builds a world over a generated realistic graph and
+// returns it with the hub entry's ID.
+func NewRealisticWorld(t *testing.T, shape GraphShape) (*World, string) {
 	t.Helper()
-	world := NewWorld(t, WithEntries(RealisticGraph(shape)...))
-	WriteWIPMarkers(t, world.GraphDir, shape)
-	return world
+	base := DefaultBase()
+	world := NewWorld(t, WithEntries(RealisticGraph(base, shape)...))
+	WriteWIPMarkers(t, world.GraphDir, base, shape)
+	return world, HubID(base)
 }

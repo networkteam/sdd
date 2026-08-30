@@ -201,10 +201,9 @@ func walkAll(t *testing.T, world *proctest.World, rec *recorder, anchor string) 
 }
 
 func TestServeSizesShippedProcedures(t *testing.T) {
-	shape := proctest.DefaultShape()
-	world := proctest.NewRealisticWorld(t, shape)
+	world, hub := proctest.NewRealisticWorld(t, proctest.DefaultShape())
 	rec := &recorder{}
-	walkAll(t, world, rec, shape.HubID())
+	walkAll(t, world, rec, hub)
 	rec.report(t)
 	rec.logCoverage(t)
 	rec.assertBudget(t)
