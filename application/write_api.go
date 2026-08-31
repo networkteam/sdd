@@ -235,13 +235,13 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 
 	result := CreateEntryResult{Project: runtime.options.Project, Binding: binding, EntryID: id}
 	if !draft.SkipPreflight {
-		resolver, err := ProcedureQueryResolver()
+		registry, err := ProcedureRegistry()
 		if err != nil {
 			return result, fmt.Errorf("pre-flight: %w", err)
 		}
 		finder := finders.New(finders.Options{
 			PreflightRunner:   runtimeLLMRunner{executor: runtime.options.LLM, purpose: "preflight"},
-			ProcedureResolver: resolver,
+			ProcedureRegistry: registry,
 		})
 		preflightCtx, cancel := context.WithTimeout(ctx, runtime.options.LLMTimeout)
 		defer cancel()

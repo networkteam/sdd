@@ -3,17 +3,21 @@ package finders
 import (
 	"fmt"
 
+	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/llm/embed"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
+	"github.com/networkteam/sdd/internal/serveview"
 )
 
-// Lint returns every entry in the graph that has at least one warning,
-// alongside the total warning count. Pure read — graph validation runs at
-// graph-construction time, this just collects the results. Also flags entries
-// that are missing a summary.
+// Lint runs the categorized graph-side lint providers (d-cpt-xc3): graph
+// integrity (load errors, entry warnings, missing summaries) as error
+// findings, and the procedure runtime (spec load, then the serve-budget
+// arithmetic) — a spec that fails to load is an error, an overshooting one an
+// advisory, because it still runs (d-tac-rzi). Index findings are filled in
+// separately by IndexLint, whose inputs the shell resolves.
 func (gf *GraphFinder) Lint(_ query.LintQuery) (*query.LintResult, error) {
 	if gf.graph == nil {
 		return nil, fmt.Errorf("graph is required")
@@ -22,20 +26,68 @@ func (gf *GraphFinder) Lint(_ query.LintQuery) (*query.LintResult, error) {
 	validateSummaries(gf.graph)
 	gf.finder.validateCrossRepoDeps(gf.graph)
 
-	entries := gf.graph.Lint()
-	total := len(gf.graph.LoadIssues)
-	for _, e := range entries {
-		total += len(e.Warnings)
+	result := &query.LintResult{}
+	for _, issue := range gf.graph.LoadIssues {
+		result.Findings = append(result.Findings, query.LintFinding{
+			Category: "graph", Code: "load-error", Severity: query.LintError,
+			EntryID: issue.Ref, Message: issue.Message,
+		})
 	}
-	return &query.LintResult{Entries: entries, TotalIssues: total, LoadErrors: gf.graph.LoadIssues}, nil
+	for _, e := range gf.graph.Lint() {
+		for _, warning := range e.Warnings {
+			result.Findings = append(result.Findings, query.LintFinding{
+				Category: "graph", Code: "warning", Severity: query.LintError,
+				EntryID: e.ID, Message: warning.Message,
+			})
+		}
+	}
+	result.Findings = append(result.Findings, gf.procedureRuntimeFindings()...)
+	return result, nil
 }
 
-// IndexLint fills the index-side fields on a LintResult when an embedding
-// provider is configured. Loading the manifest and building an embedder are
-// both pure operations against config — no graph mutation, no embedding
-// calls (only the fingerprint is read). Errors degrade silently to "index
-// not configured" so a missing dependency in lint doesn't block graph-side
-// validation.
+// procedureRuntimeFindings is the procedure-runtime lint provider: every
+// procedure entry in the graph loads against the registry first — lint never
+// parsed specs before, so a broken graph-resident spec surfaced only when the
+// engine served it — then the loaded spec runs the worst-case authoring
+// arithmetic. Skipped without a registry (read-only shells that cannot
+// compose one).
+func (gf *GraphFinder) procedureRuntimeFindings() []query.LintFinding {
+	registry := gf.finder.procedureRegistry
+	if registry == nil {
+		return nil
+	}
+	var findings []query.LintFinding
+	budget := serveview.Default()
+	for _, entry := range gf.graph.Entries {
+		if !entry.IsProcedure() || len(gf.graph.SupersededBy[entry.ID]) > 0 {
+			continue
+		}
+		spec, err := engine.LoadSpec(entry, registry)
+		if err != nil {
+			findings = append(findings, query.LintFinding{
+				Category: "procedure-runtime", Code: "spec-load", Severity: query.LintError,
+				EntryID: entry.ID, Message: err.Error(),
+			})
+			continue
+		}
+		for _, size := range spec.OverBudget(budget, registry) {
+			findings = append(findings, query.LintFinding{
+				Category: "procedure-runtime", Code: "serve-budget", Severity: query.LintAdvisory,
+				EntryID: entry.ID,
+				Message: fmt.Sprintf("step %q sizes to a worst-case %d bytes against the %d-byte serve budget — tighten caps, or declare `serveBudget: %d` on the spec to record the trade",
+					size.Step, size.Bytes, spec.EffectiveTotal(budget), size.Bytes),
+			})
+		}
+	}
+	return findings
+}
+
+// IndexLint appends index-health findings when an embedding provider is
+// configured. Loading the manifest and building an embedder are both pure
+// operations against config — no graph mutation, no embedding calls (only
+// the fingerprint is read). Errors degrade silently to "index not
+// configured" so a missing dependency in lint doesn't block graph-side
+// validation. Drift is advisory: the next index run or search converges it.
 func (f *Finder) IndexLint(q query.IndexLintQuery, result *query.LintResult) {
 	if q.Embedding.Provider == "" || q.IndexDir == "" {
 		return
@@ -48,20 +100,21 @@ func (f *Finder) IndexLint(q query.IndexLintQuery, result *query.LintResult) {
 	if err != nil {
 		return
 	}
-	result.IndexConfigured = true
-	result.IndexFingerprint = emb.Fingerprint()
-	result.IndexEntryCount = len(manifest.Entries)
-	result.IndexDriftCount = manifest.MismatchCount(emb.Fingerprint())
+	if drift := manifest.MismatchCount(emb.Fingerprint()); drift > 0 {
+		result.Findings = append(result.Findings, query.LintFinding{
+			Category: "index", Code: "fingerprint-drift", Severity: query.LintAdvisory,
+			Message: fmt.Sprintf("%d of %d indexed entries carry a different fingerprint than the configured embedder (%s) — run `sdd index --force` to re-embed (or let `sdd search` lazy-fill)",
+				drift, len(manifest.Entries), emb.Fingerprint()),
+		})
+	}
 
 	f.repoIndexLint(result)
 }
 
 // repoIndexLint reports connected repos whose cache index was built under a
 // fingerprint other than the shared (global) embedder — a drifted repo
-// re-embeds on the next cross-graph search, and lint makes that pending
-// cost visible. Degrades silently like the local index section: lint never
-// blocks on cross-repo machinery being absent (including a Finder built
-// without the Registry).
+// re-embeds on the next cross-graph search; lint surfaces it so the cost
+// isn't a surprise.
 func (f *Finder) repoIndexLint(result *query.LintResult) {
 	if f.repos == nil {
 		return
@@ -85,10 +138,11 @@ func (f *Finder) repoIndexLint(result *query.LintResult) {
 			continue
 		}
 		if drift := manifest.MismatchCount(fingerprint); drift > 0 {
-			result.RepoIndexDrift = append(result.RepoIndexDrift, query.RepoIndexDriftInfo{
-				RepoID:     r.RepoID,
-				DriftCount: drift,
-				EntryCount: len(manifest.Entries),
+			result.Findings = append(result.Findings, query.LintFinding{
+				Category: "index", Code: "repo-fingerprint-drift", Severity: query.LintAdvisory,
+				EntryID: r.RepoID,
+				Message: fmt.Sprintf("%d of %d cached entries indexed under a different fingerprint than the global embedder — the next cross-graph search re-embeds them",
+					drift, len(manifest.Entries)),
 			})
 		}
 	}

@@ -5,34 +5,43 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// TestRenderLintReportsLoadErrors pins that unreadable entries render in their
-// own section — they carry no per-entry warning, so this is the only place
-// they surface — and that a graph with only a load error is not reported clean.
-func TestRenderLintReportsLoadErrors(t *testing.T) {
-	g := model.NewGraphWithLoadIssues(nil, []model.LoadIssue{
-		{Ref: "20260101-120001-s-prc-bad", Message: "parsing frontmatter: unexpected token"},
-	})
-	result := &query.LintResult{
-		TotalIssues: len(g.LoadIssues),
-		LoadErrors:  g.LoadIssues,
-	}
+// TestRenderLintGroupsByCategory pins the categorized report: findings render
+// under their category, errors and advisories are marked apart, and a result
+// with findings is never reported clean.
+func TestRenderLintGroupsByCategory(t *testing.T) {
+	result := &query.LintResult{Findings: []query.LintFinding{
+		{Category: "graph", Code: "load-error", Severity: query.LintError,
+			EntryID: "20260101-120001-s-prc-bad", Message: "parsing frontmatter: unexpected token"},
+		{Category: "procedure-runtime", Code: "serve-budget", Severity: query.LintAdvisory,
+			EntryID: "20260101-120002-d-prc-big", Message: "step \"draft\" sizes past the budget"},
+	}}
 
 	var buf bytes.Buffer
-	presenters.RenderLint(&buf, result, g)
+	presenters.RenderLint(&buf, result)
 	out := buf.String()
 
 	if strings.Contains(out, "No issues found") {
-		t.Fatalf("reported clean despite a load error:\n%s", out)
+		t.Fatalf("reported clean despite findings:\n%s", out)
 	}
-	if !strings.Contains(out, "unreadable") {
-		t.Fatalf("missing unreadable-entries section:\n%s", out)
+	if !strings.Contains(out, "graph:") || !strings.Contains(out, "procedure-runtime:") {
+		t.Fatalf("missing category sections:\n%s", out)
 	}
 	if !strings.Contains(out, "20260101-120001-s-prc-bad") || !strings.Contains(out, "unexpected token") {
-		t.Fatalf("load-error section missing ref/message:\n%s", out)
+		t.Fatalf("finding missing entry/message:\n%s", out)
+	}
+	if !strings.Contains(out, "1 error(s), 1 advisory") {
+		t.Fatalf("missing severity counts:\n%s", out)
+	}
+}
+
+func TestRenderLintClean(t *testing.T) {
+	var buf bytes.Buffer
+	presenters.RenderLint(&buf, &query.LintResult{})
+	if !strings.Contains(buf.String(), "No issues found") {
+		t.Fatalf("empty result should report clean, got:\n%s", buf.String())
 	}
 }

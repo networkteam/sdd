@@ -22,7 +22,7 @@ type Finder struct {
 	cfg                *model.PerRepoConfig
 	gitSyncer          GitSyncer
 	repos              *repos.Registry
-	procedureResolver  engine.QueryResolver
+	procedureRegistry  *engine.Registry
 }
 
 // Options configures a new Finder. Zero-valued fields mean "not available"
@@ -37,10 +37,10 @@ type Options struct {
 	// cross-repo capability a finder holds (no clone, no pull). Nil means no
 	// connected-repos support: cross-repo refs stay unresolved.
 	Repos *repos.Registry
-	// ProcedureResolver is the engine query registration the authoring
-	// arithmetic sizes procedure specs against (d-tac-rzi). Nil skips the
-	// serve-budget pre-flight finding; `sdd lint` still catches the spec.
-	ProcedureResolver engine.QueryResolver
+	// ProcedureRegistry is the engine registration procedure specs load and
+	// size against (d-tac-rzi): pre-flight's serve-budget arithmetic and
+	// lint's procedure-runtime provider. Nil skips both checks.
+	ProcedureRegistry *engine.Registry
 }
 
 // New constructs a Finder with the given options.
@@ -51,7 +51,7 @@ func New(opts Options) *Finder {
 		cfg:                opts.Config,
 		gitSyncer:          opts.GitSyncer,
 		repos:              opts.Repos,
-		procedureResolver:  opts.ProcedureResolver,
+		procedureRegistry:  opts.ProcedureRegistry,
 	}
 }
 

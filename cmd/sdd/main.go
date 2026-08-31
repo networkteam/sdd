@@ -808,7 +808,7 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			resolver, err := sddapp.ProcedureQueryResolver()
+			registry, err := sddapp.ProcedureRegistry()
 			if err != nil {
 				return err
 			}
@@ -819,7 +819,7 @@ func newCmd() *cli.Command {
 					PreflightRunner:   runner,
 					Config:            cfg,
 					Repos:             reg,
-					ProcedureResolver: resolver,
+					ProcedureRegistry: registry,
 				}),
 				LLMRunner: runner,
 				Committer: git.CLI{},
@@ -960,10 +960,24 @@ func lintCmd() *cli.Command {
 				return err
 			}
 
-			f, err := newReadFinder()
+			cfg, err := loadConfig()
 			if err != nil {
 				return err
 			}
+			repoReg, _, err := defaultRepos()
+			if err != nil {
+				return err
+			}
+			registry, err := sddapp.ProcedureRegistry()
+			if err != nil {
+				return err
+			}
+			f := finders.New(finders.Options{
+				PreflightRunner:   readOnlyRunner{},
+				Config:            cfg,
+				Repos:             repoReg,
+				ProcedureRegistry: registry,
+			})
 			result, err := f.OnGraph(g).Lint(query.LintQuery{})
 			if err != nil {
 				return err
@@ -986,9 +1000,12 @@ func lintCmd() *cli.Command {
 				Embedding: embCfg,
 				IndexDir:  idxDir,
 			}, result)
-			presenters.RenderLint(os.Stdout, result, g)
-			if result.TotalIssues > 0 {
-				return fmt.Errorf("lint found %d issue(s)", result.TotalIssues)
+			presenters.RenderLint(os.Stdout, result)
+			// Advisories never flip the exit code (d-cpt-xc3): an
+			// overshooting spec still runs; only errors are integrity
+			// failures.
+			if errs := result.Errors(); errs > 0 {
+				return fmt.Errorf("lint found %d error(s)", errs)
 			}
 			return nil
 		},

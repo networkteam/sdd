@@ -78,6 +78,32 @@ func (a *Application) Vocabulary(ctx context.Context, identity RequestIdentity, 
 	return fmt.Sprintf("(configured graph language %q has no bundled vocabulary reference — render user-facing terms in English canonical form; adding references/vocabulary-%s.md is a framework-level contribution)", info.Language, base), nil
 }
 
+// Lint runs the categorized lint providers over the project's graph — the
+// composition-root lint query (d-cpt-xc3): shells render the findings by
+// category and derive their exit state from LintResult.Errors alone. Index
+// findings need shell-resolved inputs (IndexLintQuery) and stay a shell
+// concern.
+func (a *Application) Lint(ctx context.Context, identity RequestIdentity, project ProjectID, request query.LintQuery) (result *query.LintResult, err error) {
+	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
+	if err != nil {
+		return nil, err
+	}
+	selected, err := acquireSnapshotForReadBranch(ctx, runtime, "")
+	if err != nil {
+		return nil, err
+	}
+	defer selected.releaseInto(&err)
+	registry, err := ProcedureRegistry()
+	if err != nil {
+		return nil, err
+	}
+	finder := finders.New(finders.Options{
+		Config:            &model.PerRepoConfig{Dependencies: runtime.options.Dependencies},
+		ProcedureRegistry: registry,
+	})
+	return finder.OnGraph(selected.snapshot.graph).Lint(request)
+}
+
 func (a *Application) View(ctx context.Context, identity RequestIdentity, project ProjectID, request ViewRequest) (result ViewResult, err error) {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {

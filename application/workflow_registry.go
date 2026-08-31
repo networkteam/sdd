@@ -688,11 +688,11 @@ func workflowIntArg(args map[string]any, name string, fallback int) int {
 	}
 }
 
-// ProcedureQueryResolver returns the engine query registration the authoring
-// arithmetic sizes procedure specs against — the same bounds the runtime
-// serves with (d-tac-rzi). Composition helper for the transitional CLI write
-// path; the application's own flows wire it internally.
-func ProcedureQueryResolver() (engine.QueryResolver, error) {
+// ProcedureRegistry returns the engine registration procedure specs load and
+// size against — the same bounds the runtime serves with (d-tac-rzi).
+// Composition helper for the transitional CLI write path and `sdd lint`; the
+// application's own flows wire it internally.
+func ProcedureRegistry() (*engine.Registry, error) {
 	return (&WorkflowSession{}).buildRegistry()
 }
 
