@@ -16,6 +16,7 @@ import (
 	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/serveview"
 	"github.com/networkteam/sdd/internal/textpatch"
 	"github.com/networkteam/sdd/internal/truncate"
 )
@@ -108,7 +109,7 @@ type ServeResult struct {
 	ReportSchema   map[string]any    `json:"report_schema,omitempty" jsonschema:"JSON Schema for the current step's report"`
 	PendingChooser *ChooserResult    `json:"pending_chooser,omitempty"`
 	Execution      string            `json:"execution,omitempty" jsonschema:"execution hint for this instance; fork-preferred means the procedure is a task best run in a disposable forked context"`
-	Produced       map[string]any    `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
+	Produced       map[string]string `json:"produced,omitempty" jsonschema:"engine-written results on completion (e.g. the created entry ID)"`
 	Framing        string            `json:"framing,omitempty" jsonschema:"session framing (aspirations, directives, focus, participants); served when its content is new to this connection, omitted while unchanged"`
 	Vocabulary     string            `json:"vocabulary,omitempty" jsonschema:"translation table for non-English graphs: canonical tokens stay English, user-facing narration renders in the configured language; served once per connection"`
 	OpenThreads    string            `json:"open_threads,omitempty" jsonschema:"this dialogue's own open threads, carried on the session shell's serves; at session entry a one-line count of OTHER open dialogues points at list_sessions. Other dialogues are never listed here"`
@@ -445,7 +446,12 @@ func (s *Server) noHandleError(ctx context.Context, req *mcp.CallToolRequest) er
 		lines = append(lines, line)
 	}
 	if len(lines) > 0 {
-		msg += "; sessions with open work (resume_session attaches): " + strings.Join(lines, ", ")
+		bounded := truncate.Items(lines, func(s string) int { return len(s) + 2 }, maxLineListBytes, "")
+		listing := strings.Join(bounded.Items, ", ")
+		if bounded.Cut.Dropped > 0 {
+			listing += fmt.Sprintf(", +%d more (list_sessions lists all)", bounded.Cut.Dropped)
+		}
+		msg += "; sessions with open work (resume_session attaches): " + listing
 	}
 	return toolError("%s", msg)
 }
@@ -647,10 +653,11 @@ func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, a
 	if err != nil {
 		return nil, AbandonResult{}, err
 	}
-	out := AbandonResult{Abandoned: true, Session: string(result.Session), Label: result.Label, HeldMarkers: result.HeldMarkers}
+	out := AbandonResult{Abandoned: true, Session: string(result.Session), Label: result.Label, HeldMarkers: boundList(result.HeldMarkers, "held markers")}
 	for _, instance := range result.Discarded {
 		out.DiscardedThreads = append(out.DiscardedThreads, instance.Procedure+" at "+instance.Step)
 	}
+	out.DiscardedThreads = boundList(out.DiscardedThreads, "discarded threads")
 	if len(out.HeldMarkers) > 0 {
 		out.Instructions = "The discarded threads hold WIP markers, left standing by design. Tell the user: resume the work later or close the markers through grooming."
 	}
@@ -1006,29 +1013,50 @@ func guardViewSize(s string) string {
 	return fmt.Sprintf("%s\n\n[view output truncated at %d of %d bytes — narrow with n(K), tighter filters, or fewer sections]", bounded.Text, bounded.Cut.KeptBytes, bounded.Cut.TotalBytes)
 }
 
-// maxCollectedValueBytes caps a single projected collected value in a resume
-// response. The values persist in full in the session store; the cap only
-// bounds what the re-entry serve carries so a large reported judgment cannot
-// blow the client's token budget.
-const maxCollectedValueBytes = 2000
+// Value-projection caps, derived from the calibrated serveview budget so the
+// wire surface and the engine share one upgrade knob (d-tac-qwc). Collected
+// and produced values are the session store projected onto a serve, so the
+// per-value cap is the store-value cap and the per-instance block cap is the
+// engine-written values cap.
+var (
+	// maxCollectedValueBytes caps a single projected collected or produced
+	// value. The values persist in full in the session store; the cap only
+	// bounds what the serve carries so a large reported judgment cannot blow
+	// the client's token budget.
+	maxCollectedValueBytes = serveview.Default().Cap(serveview.PartStoreValue).MaxBytes
 
-// maxCollectedInstanceBytes caps the total collected projection for one
-// instance. Per-value capping alone lets a field-heavy instance stack many
-// near-cap values into a payload that, across several resumed instances, can
-// reach the ~10K-token output ceiling where Codex CLI truncates a tool result
-// (s-tac-jom, s-tac-40d) — a silent cut is exactly what d-cpt-0tm forbids. The
-// budget keeps whole, high-signal values in sorted-key order and replaces the
-// rest with a labeled omission, so the resume serve stays comfortably under the
-// host ceiling while every dropped value is named, never silently gone.
-const maxCollectedInstanceBytes = 8000
+	// maxCollectedInstanceBytes caps the total value projection for one
+	// instance. Per-value capping alone lets a field-heavy instance stack many
+	// near-cap values into a payload that, across several resumed instances, can
+	// reach the ~10K-token output ceiling where Codex CLI truncates a tool result
+	// (s-tac-jom, s-tac-40d) — a silent cut is exactly what d-cpt-0tm forbids. The
+	// budget keeps whole, high-signal values in sorted-key order and replaces the
+	// rest with a labeled omission, so the resume serve stays comfortably under the
+	// host ceiling while every dropped value is named, never silently gone.
+	maxCollectedInstanceBytes = serveview.Default().Cap(serveview.PartProduced).MaxBytes
 
-// capCollected renders each collected value to a display string, truncates any
-// over-cap value, and enforces a per-instance total budget by spending it on
-// whole values in sorted-key order — anything past the budget is replaced with
-// an explicit omission notice, so a resuming agent sees the compression rather
-// than losing a field silently (d-cpt-0tm). Returns nil for an empty projection
-// so the field is omitted (non-resume serves).
-func capCollected(values map[string]any) map[string]string {
+	// maxLineListBytes caps the whole-line lists MCP responses carry (open
+	// threads, discarded threads, session rejections); cuts keep whole lines
+	// and name the remainder.
+	maxLineListBytes = serveview.Default().Cap(serveview.PartLineList).MaxBytes
+
+	// resumeOpenBudgetBytes is the aggregate byte budget across a resume
+	// projection's open instances — fullReplay is the worst case, and
+	// whole-instance omission is the only legitimate cut (d-tac-qwc).
+	resumeOpenBudgetBytes = serveview.Default().Total
+)
+
+// maxResumeOpenInstances caps how many open instances a resume projection
+// serves in full; the rest are named, each reachable through next.
+const maxResumeOpenInstances = 8
+
+// capValues renders each collected or produced value to a display string,
+// truncates any over-cap value, and enforces a per-instance total budget by
+// spending it on whole values in sorted-key order — anything past the budget
+// is replaced with an explicit omission notice, so a resuming agent sees the
+// compression rather than losing a field silently (d-cpt-0tm). Returns nil for
+// an empty projection so the field is omitted.
+func capValues(values map[string]any) map[string]string {
 	if len(values) == 0 {
 		return nil
 	}
@@ -1041,7 +1069,7 @@ func capCollected(values map[string]any) map[string]string {
 	out := make(map[string]string, len(values))
 	spent := 0
 	for _, name := range names {
-		value := capCollectedValue(collectedString(values[name]))
+		value := capValue(collectedString(values[name]))
 		if spent+len(value) > maxCollectedInstanceBytes {
 			out[name] = "[collected value omitted here for size — persisted in full in the session store]"
 			continue
@@ -1067,9 +1095,9 @@ func collectedString(v any) string {
 	return string(b)
 }
 
-// capCollectedValue truncates an over-cap value on a rune boundary and appends
+// capValue truncates an over-cap value on a rune boundary and appends
 // a notice naming the cap, mirroring guardViewSize.
-func capCollectedValue(s string) string {
+func capValue(s string) string {
 	bounded := truncate.Bytes(s, maxCollectedValueBytes, "")
 	if bounded.Cut.Clean() {
 		return s
@@ -1208,8 +1236,8 @@ func (s *Server) serveResultBody(ctx context.Context, req *mcp.CallToolRequest, 
 	res := ServeResult{
 		Session: string(serve.Session), Branch: serve.Branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
 		Step: serve.Step, Goal: serve.Goal, Instructions: s.composeInstructions(req.Session, serve), Missing: serve.Missing,
-		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Execution: serve.Execution,
-		Collected: capCollected(serve.Collected),
+		ReportSchema: serve.ReportSchema, Produced: capValues(serve.Produced), Execution: serve.Execution,
+		Collected: capValues(serve.Collected),
 	}
 	if serve.PendingChooser != nil {
 		chooser := &ChooserResult{Chooser: serve.PendingChooser.Chooser, Kind: string(serve.PendingChooser.Kind)}
@@ -1339,15 +1367,50 @@ func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss
 		return ResumeSessionResult{}, err
 	}
 	result.Framing = s.composeFraming(req.Session, framing)
+	// Whole-instance granularity is the only legitimate cut on a resume
+	// projection (d-tac-qwc): budget and count decisions run on the source
+	// serve, before mapping, because mapping records served-once blocks and an
+	// omitted instance must leave that ledger untouched for the serve that
+	// does deliver it.
+	var omitted []string
+	spent := 0
 	for i := range source.Open {
-		mapped, err := s.toRootServeResult(ctx, req, ss, &source.Open[i])
+		serve := &source.Open[i]
+		size := resumeServeBytes(serve)
+		if len(result.Open) >= maxResumeOpenInstances || (len(result.Open) > 0 && spent+size > resumeOpenBudgetBytes) {
+			omitted = append(omitted, fmt.Sprintf("%s (%s at %s)", serve.Instance, serve.Procedure, serve.Step))
+			continue
+		}
+		mapped, err := s.toRootServeResult(ctx, req, ss, serve)
 		if err != nil {
 			return ResumeSessionResult{}, err
 		}
 		mapped.Framing = ""
+		spent += size
 		result.Open = append(result.Open, mapped)
 	}
+	if len(omitted) > 0 {
+		result.Instructions += fmt.Sprintf("\n\n%d open moves omitted here for size — each resumes at its current step through next: %s", len(omitted), strings.Join(omitted, "; "))
+	}
 	return result, nil
+}
+
+// resumeServeBytes estimates one open serve's projection weight from the
+// fields the mapping actually carries (never InstructionLanes, which duplicate
+// Instructions). Dedup can only shrink the mapped result, so the estimate errs
+// toward omitting — never toward an oversized projection.
+func resumeServeBytes(serve *sdd.WorkflowServe) int {
+	n := len(serve.Instructions) + len(serve.Goal)
+	if b, err := json.Marshal(serve.ReportSchema); err == nil {
+		n += len(b)
+	}
+	for _, v := range capValues(serve.Collected) {
+		n += len(v)
+	}
+	for _, v := range capValues(serve.Produced) {
+		n += len(v)
+	}
+	return n
 }
 
 // openThreadsRoot renders the session shell's open-work block: this dialogue's
@@ -1363,16 +1426,38 @@ func (s *Server) openThreadsRoot(req *mcp.CallToolRequest, ss *shellSession) str
 	if len(lines) == 0 {
 		return ""
 	}
+	body := boundLines(lines, "open threads — list_sessions lists them all")
 	// The one serve that reports dropped work states it in full — never stubbed by
 	// served-once dedup, and never framed as continuations it no longer offers.
 	if ss.root.Finished() {
-		return concludedThreadsIntro + "\n" + strings.Join(lines, "\n")
+		return concludedThreadsIntro + "\n" + body
 	}
 	header := openThreadsReminder
 	if !s.servedBefore(req.Session, openThreadsIntro) {
 		header = openThreadsIntro
 	}
-	return header + "\n" + strings.Join(lines, "\n")
+	return header + "\n" + body
+}
+
+// boundList cuts a whole-item string list at the line-list cap, appending a
+// remainder item naming the drop.
+func boundList(items []string, what string) []string {
+	bounded := truncate.Items(items, func(s string) int { return len(s) + 1 }, maxLineListBytes, "")
+	if bounded.Cut.Dropped > 0 {
+		return append(bounded.Items, fmt.Sprintf("+%d more %s", bounded.Cut.Dropped, what))
+	}
+	return items
+}
+
+// boundLines cuts a whole-line list at the line-list cap and names the
+// remainder — the shared shape for every line list an MCP response carries.
+func boundLines(lines []string, remainder string) string {
+	bounded := truncate.Items(lines, func(s string) int { return len(s) + 1 }, maxLineListBytes, "")
+	body := strings.Join(bounded.Items, "\n")
+	if bounded.Cut.Dropped > 0 {
+		body += fmt.Sprintf("\n(+%d more %s)", bounded.Cut.Dropped, remainder)
+	}
+	return body
 }
 
 // addDoorCount appends the session-entry one-line count of OTHER open dialogues

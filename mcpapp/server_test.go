@@ -24,6 +24,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/serveview"
 	localadapter "github.com/networkteam/sdd/local"
 	mcpserver "github.com/networkteam/sdd/mcpapp"
 )
@@ -885,7 +886,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "4b4f4d3e8228d5522520b3d70816dba61ff29a0774c17891af0aa005cb6d0e75"
+	const want = "b5213dc77e174104d4df1ead8008f35653fede6e5a0d4df4987af8e5dbec5885"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1273,7 +1274,7 @@ func TestCaptureProcedureLoop(t *testing.T) {
 	if serve.Status != "completed" {
 		t.Fatalf("expected completion, got %s at %q", serve.Status, serve.Step)
 	}
-	entryID, _ := serve.Produced["entryId"].(string)
+	entryID := serve.Produced["entryId"]
 	if entryID == "" {
 		t.Fatalf("completion should produce the created entry ID, got %v", serve.Produced)
 	}
@@ -1364,7 +1365,7 @@ func TestEmbeddedCaptureProcedure(t *testing.T) {
 	if serve.Status != "completed" {
 		t.Fatalf("expected completion, got %s at %q", serve.Status, serve.Step)
 	}
-	if entryID, _ := serve.Produced["entryId"].(string); entryID == "" {
+	if entryID := serve.Produced["entryId"]; entryID == "" {
 		t.Fatalf("completion should produce the created entry ID, got %v", serve.Produced)
 	}
 }
@@ -1770,9 +1771,8 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 // does not render them — while internal trust machinery stays hidden and an
 // oversized value is truncated with an explicit notice rather than dropped.
 func TestResumeProjectsCollectedState(t *testing.T) {
-	// Mirrors the production per-value cap; the test package can't see the
-	// unexported constant.
-	const collectedCap = 2000
+	// The production per-value cap derives from the serveview budget.
+	collectedCap := serveview.Default().Cap(serveview.PartStoreValue).MaxBytes
 
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
@@ -1880,11 +1880,9 @@ func TestResumeProjectsCollectedState(t *testing.T) {
 // spent; anything past it carries an explicit omission notice, never silently
 // vanishing (d-cpt-0tm).
 func TestResumeCollectedRespectsInstanceBudget(t *testing.T) {
-	// Mirrors the production constants; the test package can't see them.
-	const (
-		valueCap    = 2000
-		instanceCap = 8000
-	)
+	// The production caps derive from the serveview budget.
+	valueCap := serveview.Default().Cap(serveview.PartStoreValue).MaxBytes
+	instanceCap := serveview.Default().Cap(serveview.PartProduced).MaxBytes
 
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
@@ -1957,6 +1955,55 @@ func TestResumeCollectedRespectsInstanceBudget(t *testing.T) {
 	// The anchor and the small enum fields are never the ones dropped.
 	if capture.Collected["anchor"] != fixtureGapID {
 		t.Fatalf("anchor must survive the budget, got %q", capture.Collected["anchor"])
+	}
+}
+
+// TestResumeOmitsWholeInstancesPastTheBudget pins the resume projection's only
+// legitimate cut (d-tac-qwc): open instances past the aggregate budget are
+// omitted whole — never partially served — and each omission names handle,
+// procedure, and step so the pointer to next stays free.
+func TestResumeOmitsWholeInstancesPastTheBudget(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+
+	var last mcpserver.ServeResult
+	for range 10 {
+		call(t, cs, "start_procedure", map[string]any{
+			"session":   session,
+			"canonical": "capture",
+			"params":    map[string]any{"anchor": fixtureGapID},
+		}, &last)
+	}
+	sessionID := last.Session
+
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	openSession(t, cs2)
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs2, "resume_session", map[string]any{"session": sessionID, "userWords": "pick the captures back up"}, &resumed)
+
+	// Eleven open instances (shell + ten captures) cannot all fit: the count
+	// cap alone guarantees omission.
+	if len(resumed.Open) > 8 {
+		t.Fatalf("resume projected %d instances, want at most the count cap", len(resumed.Open))
+	}
+	if len(resumed.Open) == 0 {
+		t.Fatal("whole-instance omission must never empty the projection")
+	}
+	if !strings.Contains(resumed.Instructions, "omitted here for size") {
+		t.Fatalf("omission must be named, got %q", resumed.Instructions)
+	}
+	if !strings.Contains(resumed.Instructions, "capture at ") {
+		t.Fatalf("omitted instances must be named by handle, procedure, and step, got %q", resumed.Instructions)
+	}
+	// Every served instance is whole: its schema is either full or an explicit
+	// served-earlier stub, never a truncated fragment.
+	for _, open := range resumed.Open {
+		if open.Instance == "" || open.Procedure == "" {
+			t.Fatalf("served instance must be whole, got %+v", open)
+		}
 	}
 }
 
@@ -2699,7 +2746,7 @@ func runCaptureToCompletion(t *testing.T, cs *mcp.ClientSession, session, label 
 	if serve.Status != "completed" {
 		t.Fatalf("capture did not complete, got %s at %q", serve.Status, serve.Step)
 	}
-	id, _ := serve.Produced["entryId"].(string)
+	id := serve.Produced["entryId"]
 	return id
 }
 

@@ -115,7 +115,7 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 	if capture.Status != "completed" {
 		t.Fatalf("root capture did not complete: %+v", capture)
 	}
-	entryID, _ := capture.Produced["entryId"].(string)
+	entryID := capture.Produced["entryId"]
 	rel, err := model.IDToRelPath(entryID)
 	if err != nil {
 		t.Fatal(err)
