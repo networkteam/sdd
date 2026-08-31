@@ -12,9 +12,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/repos"
-	localadapter "github.com/networkteam/sdd/local"
+	sdd "github.com/networkteam/sdd/pkg/application"
+	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
 func recoverCmd() *cli.Command {

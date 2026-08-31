@@ -15,7 +15,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	sdd "github.com/networkteam/sdd/application"
+	sdd "github.com/networkteam/sdd/pkg/application"
 	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/git"
@@ -23,8 +23,8 @@ import (
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
-	localadapter "github.com/networkteam/sdd/local"
-	mcpserver "github.com/networkteam/sdd/mcpapp"
+	localadapter "github.com/networkteam/sdd/pkg/local"
+	mcpserver "github.com/networkteam/sdd/pkg/mcpapp"
 )
 
 // defaultServeLLMTimeout caps an LLM call when `llm.timeout` sets none. It

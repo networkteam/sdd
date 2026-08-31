@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/proctest"
+	sdd "github.com/networkteam/sdd/pkg/application"
 )
 
 // provisionalServeBudgetBytes is the byte budget one automatic serve targets

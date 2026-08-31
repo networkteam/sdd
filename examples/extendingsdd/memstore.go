@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	sdd "github.com/networkteam/sdd/application"
+	sdd "github.com/networkteam/sdd/pkg/application"
 )
 
 // The stores below are what an external composition owning its own storage has

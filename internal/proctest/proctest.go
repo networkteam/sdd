@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/model"
-	localadapter "github.com/networkteam/sdd/local"
+	sdd "github.com/networkteam/sdd/pkg/application"
+	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
 // PreflightFinding is a scripted pre-flight finding, marshaled in the shape

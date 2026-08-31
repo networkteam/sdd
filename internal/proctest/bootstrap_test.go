@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
+	sdd "github.com/networkteam/sdd/pkg/application"
 )
 
 const bootstrapAspirationID = "20260601-090000-d-stg-asp"

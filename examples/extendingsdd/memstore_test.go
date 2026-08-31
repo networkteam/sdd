@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	sdd "github.com/networkteam/sdd/application"
-	"github.com/networkteam/sdd/sddtest"
+	sdd "github.com/networkteam/sdd/pkg/application"
+	"github.com/networkteam/sdd/pkg/sddtest"
 )
 
 // The conformance suites are the parity mechanism between local and external

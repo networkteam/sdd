@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	sdd "github.com/networkteam/sdd/application"
+	sdd "github.com/networkteam/sdd/pkg/application"
 )
 
 func TestRecoveryInteractiveSelectionReconcilesUnknownBeforeOfferingVerbs(t *testing.T) {

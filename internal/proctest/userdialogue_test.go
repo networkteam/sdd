@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/baseprocedures"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/proctest"
+	sdd "github.com/networkteam/sdd/pkg/application"
 )
 
 // openShell opens the session through the real door and keeps the opening

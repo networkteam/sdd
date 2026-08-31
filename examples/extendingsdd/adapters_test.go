@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	sdd "github.com/networkteam/sdd/application"
-	"github.com/networkteam/sdd/mcpapp"
+	sdd "github.com/networkteam/sdd/pkg/application"
+	"github.com/networkteam/sdd/pkg/mcpapp"
 )
 
 type graphStore struct{}

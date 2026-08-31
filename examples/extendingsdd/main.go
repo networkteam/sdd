@@ -15,9 +15,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 
-	sdd "github.com/networkteam/sdd/application"
-	localadapter "github.com/networkteam/sdd/local"
-	"github.com/networkteam/sdd/mcpapp"
+	sdd "github.com/networkteam/sdd/pkg/application"
+	localadapter "github.com/networkteam/sdd/pkg/local"
+	"github.com/networkteam/sdd/pkg/mcpapp"
 )
 
 type externalAccess struct{ runtime *sdd.ProjectRuntime }

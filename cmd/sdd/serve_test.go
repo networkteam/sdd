@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	sdd "github.com/networkteam/sdd/application"
-	localadapter "github.com/networkteam/sdd/local"
+	sdd "github.com/networkteam/sdd/pkg/application"
+	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
 const (

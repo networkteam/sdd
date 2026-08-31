@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
-	sddapp "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/cliout"
 	"github.com/networkteam/sdd/internal/cliout/tui"
 	"github.com/networkteam/sdd/internal/command"
@@ -29,6 +28,7 @@ import (
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
+	sddapp "github.com/networkteam/sdd/pkg/application"
 	"github.com/networkteam/slogutils"
 	"github.com/urfave/cli/v3"
 )

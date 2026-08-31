@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"path/filepath"
 
-	sdd "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
-	localadapter "github.com/networkteam/sdd/local"
+	sdd "github.com/networkteam/sdd/pkg/application"
+	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
 func sessionStoreProject(cfg *model.PerRepoConfig) sdd.ProjectID {
