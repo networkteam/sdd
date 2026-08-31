@@ -1,5 +1,5 @@
 ---
-sdd-content-hash: ec90a8de7debe193b7a5e00f865e7397f3b8523244088f3e2dc7c80b1b1a3e44
+sdd-content-hash: 4dd2428cb5c296fbc730919be8ef768b66c6886a9373dc5eeceae72bbd7a0300
 sdd-version: dev
 ---
 # SDD CLI Reference
@@ -86,6 +86,7 @@ Args use parens: `kind(plan)`, `n(10)`. Multi-arg disjunction: `kind(plan,direct
 |---|---|
 | `rank(<algorithm>)` | Sort by computed score, descending. Adds `{score: X.XXX}` to rendered entries |
 | `n(N)` | Take first N entries (after filtering and ranking) |
+| `skip(N)` | Drop first N entries (after filtering and ranking, before `n(N)`) — pages through what a bounded list cut |
 | `name(<string>)` | Final section header — overrides any prefix and any rank-based auto-derive. Last call wins; `name("")` clears any prior name |
 | `name-prefix(<string>)` | Prefix the auto-derive composer extends with the rank suffix. Macros bake this so `top(N)` reads "Top by heat (exp-14d)" by default and "Top by in-degree" after `:rank(in-degree)` — the prefix stays, the suffix tracks rank |
 | `expand(involvement)` | Per row, explode involvement triples into focus-block sub-rows (focus-block only) |
