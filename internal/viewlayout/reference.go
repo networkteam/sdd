@@ -51,6 +51,7 @@ var functionReference = map[string]referenceItem{
 	"not":         {"Filters", "not(<filter>)", "Exclude matches of kind, intent, layer, or topic filters."},
 	"rank":        {"Rank", "rank(<algorithm>)", "Sort by a live ranking algorithm, descending unless the algorithm defines otherwise."},
 	"n":           {"Page", "n(N)", "Take the first N entries after filtering and ranking."},
+	"skip":        {"Page", "skip(N)", "Drop the first N entries after filtering and ranking, before n(N) — pages through what a bounded list cut."},
 	"group":       {"Aggregate", "group(by(<field>))", "Group by kind, layer, type, or participant; render with as-grouped."},
 	"expand":      {"Transform", "expand(involvement|refs)", "Expand focus involvement or outgoing references; refs(inactive) narrows ref rows."},
 	"name":        {"Output", "name(\"title\")", "Set the final section heading; the last call wins."},

@@ -88,7 +88,10 @@ func expandSection(section model.Section) (model.Section, error) {
 	// non-filter modifiers and intersection for filter() calls happens
 	// downstream in the executor.
 	expanded = append(expanded, section.Functions[1:]...)
-	return model.Section{Functions: expanded}, nil
+	// The user's source survives expansion: a pull expression built from
+	// this section stays as terse as what was typed (macros re-expand on
+	// every parse, so the source is runnable as written).
+	return model.Section{Functions: expanded, Source: section.Source}, nil
 }
 
 // macros maps macro names to their expand function. A macro consumes its

@@ -270,6 +270,11 @@ func TestParseLayout_Valid(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseLayout(%q): unexpected error: %v", tc.input, err)
 			}
+			// This table asserts function structure; the captured raw source
+			// has its own test (TestSectionSourceCapturedAndPreservedThroughMacros).
+			for i := range got.Sections {
+				got.Sections[i].Source = ""
+			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("ParseLayout(%q):\n  got:  %#v\n  want: %#v", tc.input, got, tc.want)
 			}

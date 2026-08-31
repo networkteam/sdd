@@ -2153,3 +2153,48 @@ func equalIDs(a, b []string) bool {
 	}
 	return true
 }
+
+func TestView_SkipComposesWithN(t *testing.T) {
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	b := entry("20260101-110000-d-tac-bbb", withKind(model.KindDirective))
+	c := entry("20260101-120000-d-tac-ccc", withKind(model.KindDirective))
+	d := entry("20260101-130000-d-tac-ddd", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a, b, c, d})
+
+	layout := mustParseLayout(t, "skip(1):n(2):as-list")
+	f := New(Options{})
+	result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	flat := result.Sections[0].Data.(model.FlatList)
+	got := idsOf(flat.Entries)
+	want := []string{b.ID, c.ID}
+	if !equalIDs(got, want) {
+		t.Errorf("entries:\n  got:  %v\n  want: %v", got, want)
+	}
+}
+
+func TestView_SkipPastEndIsEmpty(t *testing.T) {
+	a := entry("20260101-100000-d-tac-aaa", withKind(model.KindDirective))
+	g := model.NewGraph([]*model.Entry{a})
+
+	layout := mustParseLayout(t, "skip(5):as-list")
+	f := New(Options{})
+	result, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	if n := result.Sections[0].Data.Count(); n != 0 {
+		t.Errorf("skip past the end must yield an empty section, got %d entries", n)
+	}
+}
+
+func TestView_SkipRejectedForParticipantsBlock(t *testing.T) {
+	g := model.NewGraph(nil)
+	layout := mustParseLayout(t, "active:kind(actor):skip(2):as-participants-block")
+	f := New(Options{})
+	if _, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout}); err == nil {
+		t.Fatal("skip over the participants block must be rejected")
+	}
+}

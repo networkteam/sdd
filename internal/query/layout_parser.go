@@ -82,16 +82,15 @@ func (p *parser) parseLayout() (model.Layout, error) {
 // will report).
 func (p *parser) parseSection() (model.Section, error) {
 	var section model.Section
+	start := p.pos
 	for {
 		fn, err := p.parseFunction()
 		if err != nil {
 			return model.Section{}, err
 		}
 		section.Functions = append(section.Functions, fn)
-		if p.pos == len(p.src) {
-			return section, nil
-		}
-		if p.src[p.pos] != ':' {
+		if p.pos == len(p.src) || p.src[p.pos] != ':' {
+			section.Source = p.src[start:p.pos]
 			return section, nil
 		}
 		p.pos++ // consume ':'

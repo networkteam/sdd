@@ -108,7 +108,7 @@ var renderFunctions = map[string]model.RenderShape{
 
 // knownFunctions lists every function name the executor recognizes. Used
 // in the unknown-function error message so users see what's available.
-var knownFunctions = []string{"source", "active", "indexed", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list", "as-bodies"}
+var knownFunctions = []string{"source", "active", "indexed", "kind", "intent", "type", "layer", "since", "topic", "participant", "untagged", "id", "not", "n", "skip", "rank", "group", "expand", "name", "name-prefix", "stalled", "brief", "as-list", "as-grouped", "as-counts", "as-focus-block", "as-participants-block", "as-wip-list", "as-bodies"}
 
 // ViewFunctionNames returns the function names accepted by the layout
 // executor. Reference surfaces use this instead of maintaining their own
@@ -297,6 +297,16 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 		// scores the entry's own age, so ranking and the focus-block scorer
 		// below must share one instant within a single View call.
 		entries, scores = applyRanking(g, entries, spec.rank, now)
+	}
+	if spec.skipN > 0 {
+		if spec.skipN >= len(entries) {
+			entries, scores = nil, nil
+		} else {
+			entries = entries[spec.skipN:]
+			if scores != nil {
+				scores = scores[spec.skipN:]
+			}
+		}
 	}
 	if spec.pageN >= 0 && len(entries) > spec.pageN {
 		entries = entries[:spec.pageN]
@@ -526,6 +536,13 @@ func parseSectionFunction(spec *sectionSpec, fn model.Function) error {
 			return err
 		}
 		spec.pageN = page
+
+	case fn.Name == "skip":
+		skip, err := parseIntegerArg("skip", fn.Args)
+		if err != nil {
+			return err
+		}
+		spec.skipN = skip
 
 	case fn.Name == "group":
 		field, err := parseGroupArgs(fn.Args)
