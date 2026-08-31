@@ -129,12 +129,14 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 		fmt.Fprintf(&rendered, "\n── repo: %s ──\n", repoID)
 		presenters.RenderView(&rendered, memberResult)
 	}
-	recoveries, err := listRecoveriesRuntime(ctx, runtime, false)
-	if err != nil {
-		return ViewResult{}, err
-	}
-	if notices := renderRecoveryNotices(recoveries.Items); notices != "" {
-		fmt.Fprintf(&rendered, "\n%s\n", notices)
+	if !request.OmitRecovery {
+		recoveries, err := listRecoveriesRuntime(ctx, runtime, false)
+		if err != nil {
+			return ViewResult{}, err
+		}
+		if notices := renderRecoveryNotices(recoveries.Items); notices != "" {
+			fmt.Fprintf(&rendered, "\n%s\n", notices)
+		}
 	}
 	// When a participant filter matched nothing, name the participants the
 	// local graph knows: participant() is an exact canonical match, so an

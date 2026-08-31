@@ -9,6 +9,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/serveview"
+	"github.com/networkteam/sdd/internal/truncate"
 )
 
 // serveChainBudget bounds each direction of a served entry chain: the
@@ -91,16 +92,27 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
-		Doc:       engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store. The engine bounds the result at the inject's declared maxBytes (line-boundary cut, honest notice)."},
+		Doc:       engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store. Arg recovery: false skips the appended recovery notices (for lanes whose session serves them via sessionInfo). The engine bounds the result at the inject's declared maxBytes (line-boundary cut, honest notice; the cut's pull is the lane's own layout)."},
 		ServeSafe: true,
-		Bound:     engine.QueryBound{Part: serveview.PartText, Cap: serveview.Default().Cap(serveview.PartText)},
+		Bound: engine.QueryBound{
+			Part: serveview.PartText,
+			Cap:  serveview.Default().Cap(serveview.PartText),
+			Pull: func(args map[string]any, _ truncate.Cut) string {
+				layout, _ := args["layout"].(string)
+				return layout
+			},
+		},
 		Fn: func(ctx *engine.Context, args map[string]any) (any, error) {
 			layout, _ := args["layout"].(string)
 			if strings.TrimSpace(layout) == "" {
 				return nil, fmt.Errorf("viewLayout needs arg layout")
 			}
+			omitRecovery := false
+			if rec, ok := args["recovery"].(bool); ok && !rec {
+				omitRecovery = true
+			}
 			target, fromBinding := w.effectiveTarget(ctx.Store)
-			result, err := w.app.View(w.ctx, w.identity, w.project, ViewRequest{Layout: layout, Branch: target.Branch, Budget: servedViewBudget})
+			result, err := w.app.View(w.ctx, w.identity, w.project, ViewRequest{Layout: layout, Branch: target.Branch, Budget: servedViewBudget, OmitRecovery: omitRecovery})
 			if err != nil {
 				return nil, w.withSessionBindingTargetError(err, fromBinding)
 			}
