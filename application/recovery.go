@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/serveview"
+	"github.com/networkteam/sdd/internal/truncate"
 )
 
 const (
@@ -191,16 +193,20 @@ func renderRecoveryNotices(items []RecoveryItem) string {
 	if len(items) == 0 {
 		return ""
 	}
-	var rendered strings.Builder
-	rendered.WriteString("Recovery\n\n")
+	lines := make([]string, 0, len(items))
 	for _, item := range items {
 		target := item.Target.Branch
 		if item.LegacyUnroutable {
 			target = "target binding required"
 		}
-		fmt.Fprintf(&rendered, "  a pending write awaits explicit recovery: %s · %s · %s\n", item.MutationID, item.Reason, target)
+		lines = append(lines, fmt.Sprintf("  a pending write awaits explicit recovery: %s · %s · %s", item.MutationID, item.Reason, target))
 	}
-	return strings.TrimRight(rendered.String(), "\n")
+	bounded := truncate.Items(lines, func(s string) int { return len(s) + 1 }, serveview.Default().Cap(serveview.PartLineList).MaxBytes, "")
+	rendered := "Recovery\n\n" + strings.Join(bounded.Items, "\n")
+	if bounded.Cut.Dropped > 0 {
+		rendered += fmt.Sprintf("\n  (+%d more pending writes await recovery)", bounded.Cut.Dropped)
+	}
+	return rendered
 }
 
 // ReconcileMutation refreshes one actionable recovery projection without
