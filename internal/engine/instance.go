@@ -2,6 +2,8 @@ package engine
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -458,8 +460,10 @@ func (s *Session) serveWith(inst *Instance, fullDraft bool) (*Serve, error) {
 		if !fullDraft {
 			prev = inst.draftServed[step.ID]
 		}
-		if block := renderDraft(inst.Spec, step.ServeDelta, prev, cur, fullDraft); block != "" {
+		draftCap := serveview.Default().Cap(serveview.PartDraft).MaxBytes
+		if block, draftCuts := renderDraft(inst.Spec, step.ServeDelta, prev, cur, fullDraft, draftCap); block != "" {
 			lanes = append(lanes, ServeLane{Name: "draft", Text: block})
+			cuts = append(cuts, draftCuts...)
 		}
 		if inst.draftServed == nil {
 			inst.draftServed = map[string]map[string]string{}
@@ -621,6 +625,21 @@ func (s *Session) renderUnit(inst *Instance, step *Step) ([]ServeLane, []PartSiz
 	}
 	var sizes []PartSize
 	var cuts []truncate.Cut
+	// Store values interpolate into served text uncapped otherwise; the bound
+	// applies only here, on the unit context — inject args render against the
+	// raw store (renderInjectArgs), and the draft lane carries its own bound.
+	storeCap := serveview.Default().Cap(serveview.PartStoreValue)
+	for _, name := range slices.Sorted(maps.Keys(tmplCtx)) {
+		if !inst.Store.Has(name) {
+			continue
+		}
+		bounded, cut := serveview.BoundValue(tmplCtx[name], storeCap)
+		if cut != nil {
+			cut.Part = "store:" + name
+			cuts = append(cuts, *cut)
+		}
+		tmplCtx[name] = bounded
+	}
 	if len(step.Inject) > 0 {
 		fctx, err := s.funcContext(inst)
 		if err != nil {

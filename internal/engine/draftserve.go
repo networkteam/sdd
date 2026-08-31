@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/networkteam/sdd/internal/textdiff"
+	"github.com/networkteam/sdd/internal/truncate"
 )
 
 // Draft serving renders a step's serveDelta fields as an engine-owned block:
@@ -41,8 +42,12 @@ func draftSnapshot(inst *Instance, fields []string) map[string]string {
 
 // renderDraft renders the draft block. prev nil means first serve (or a full
 // re-serve); full additionally serves prose whole instead of head-and-tail.
-func renderDraft(spec *Spec, fields []string, prev, cur map[string]string, full bool) string {
+// maxPieceBytes bounds each scaling piece — the adjust-round diff and the two
+// list renders — with the cut routed out of band; whole prose (rehydrate) and
+// the head/tail acknowledgment stay unbounded (d-tac-qwc).
+func renderDraft(spec *Spec, fields []string, prev, cur map[string]string, full bool, maxPieceBytes int) (string, []truncate.Cut) {
 	var sb strings.Builder
+	var cuts []truncate.Cut
 	if prev == nil {
 		sb.WriteString("Draft as it stands (engine-rendered — what you confirm is this):\n")
 		for _, name := range fields {
@@ -50,9 +55,13 @@ func renderDraft(spec *Spec, fields []string, prev, cur map[string]string, full 
 			if !ok {
 				continue
 			}
-			sb.WriteString(renderDraftField(spec, name, raw, full))
+			piece, cut := renderDraftField(spec, name, raw, full, maxPieceBytes)
+			sb.WriteString(piece)
+			if cut != nil {
+				cuts = append(cuts, *cut)
+			}
 		}
-		return strings.TrimSuffix(sb.String(), "\n")
+		return strings.TrimSuffix(sb.String(), "\n"), cuts
 	}
 
 	var changed, cleared, unchanged []string
@@ -71,7 +80,7 @@ func renderDraft(spec *Spec, fields []string, prev, cur map[string]string, full 
 		}
 	}
 	if len(changed) == 0 && len(cleared) == 0 {
-		return "Draft unchanged since last served — nothing new to re-read."
+		return "Draft unchanged since last served — nothing new to re-read.", nil
 	}
 	sb.WriteString("Draft delta since last served (engine-rendered):\n")
 	for _, name := range fields {
@@ -81,12 +90,20 @@ func renderDraft(spec *Spec, fields []string, prev, cur map[string]string, full 
 		case slices.Contains(changed, name):
 			if isProse(spec, name) {
 				if diff := textdiff.Unified(jsonToText(prev[name]), jsonToText(cur[name])); diff != "" {
-					sb.WriteString("- " + name + " (diff against what was last served):\n" + diff + "\n")
+					bounded := truncate.Bytes(diff, maxPieceBytes, "")
+					sb.WriteString("- " + name + " (diff against what was last served):\n" + bounded.Text + "\n")
+					if cut := draftCut(bounded.Cut, name); cut != nil {
+						cuts = append(cuts, *cut)
+					}
 				}
 				continue
 			}
 			if isList(spec, name) {
-				sb.WriteString(renderListDelta(name, prev[name], cur[name]))
+				piece, cut := renderListDelta(name, prev[name], cur[name], maxPieceBytes)
+				sb.WriteString(piece)
+				if cut != nil {
+					cuts = append(cuts, *cut)
+				}
 				continue
 			}
 			sb.WriteString("- " + name + ": " + jsonToText(cur[name]) + "\n")
@@ -95,16 +112,25 @@ func renderDraft(spec *Spec, fields []string, prev, cur map[string]string, full 
 	if len(unchanged) > 0 {
 		sb.WriteString("(unchanged: " + strings.Join(unchanged, ", ") + ")\n")
 	}
-	return strings.TrimSuffix(sb.String(), "\n")
+	return strings.TrimSuffix(sb.String(), "\n"), cuts
 }
 
-func renderDraftField(spec *Spec, name, raw string, full bool) string {
+// draftCut stamps a non-clean cut with its draft part name; nil when clean.
+func draftCut(cut truncate.Cut, field string) *truncate.Cut {
+	if cut.Clean() {
+		return nil
+	}
+	cut.Part = "draft:" + field
+	return &cut
+}
+
+func renderDraftField(spec *Spec, name, raw string, full bool, maxPieceBytes int) (string, *truncate.Cut) {
 	if isProse(spec, name) {
 		text := jsonToText(raw)
 		if !full {
 			text = textdiff.HeadTail(text, proseAckHead, proseAckTail)
 		}
-		return "- " + name + ":\n" + text + "\n"
+		return "- " + name + ":\n" + text + "\n", nil
 	}
 	if isList(spec, name) {
 		var items []any
@@ -113,15 +139,16 @@ func renderDraftField(spec *Spec, name, raw string, full bool) string {
 			for _, item := range items {
 				parts = append(parts, compactJSON(item))
 			}
-			return "- " + name + ": " + strings.Join(parts, " · ") + "\n"
+			bounded := truncate.Items(parts, func(s string) int { return len(s) + len(" · ") }, maxPieceBytes, "")
+			return "- " + name + ": " + strings.Join(bounded.Items, " · ") + "\n", draftCut(bounded.Cut, name)
 		}
 	}
-	return "- " + name + ": " + jsonToText(raw) + "\n"
+	return "- " + name + ": " + jsonToText(raw) + "\n", nil
 }
 
 // renderListDelta renders an item-level list change: items are compared by
 // canonical bytes, additions marked +, removals -.
-func renderListDelta(name, prevRaw, curRaw string) string {
+func renderListDelta(name, prevRaw, curRaw string, maxPieceBytes int) (string, *truncate.Cut) {
 	prevItems := listItems(prevRaw)
 	curItems := listItems(curRaw)
 	prevSet := make(map[string]int, len(prevItems))
@@ -132,21 +159,21 @@ func renderListDelta(name, prevRaw, curRaw string) string {
 	for _, item := range curItems {
 		curSet[item]++
 	}
-	var sb strings.Builder
-	sb.WriteString("- " + name + " (item delta):\n")
+	var lines []string
 	for _, item := range curItems {
 		if curSet[item] > prevSet[item] {
-			sb.WriteString("  + " + item + "\n")
+			lines = append(lines, "  + "+item+"\n")
 			curSet[item]--
 		}
 	}
 	for _, item := range prevItems {
 		if prevSet[item] > curSet[item] {
-			sb.WriteString("  - " + item + "\n")
+			lines = append(lines, "  - "+item+"\n")
 			prevSet[item]--
 		}
 	}
-	return sb.String()
+	bounded := truncate.Items(lines, func(s string) int { return len(s) }, maxPieceBytes, "")
+	return "- " + name + " (item delta):\n" + strings.Join(bounded.Items, ""), draftCut(bounded.Cut, name)
 }
 
 func listItems(raw string) []string {
