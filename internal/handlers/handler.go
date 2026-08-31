@@ -85,6 +85,7 @@ type Handler struct {
 	repos     *repos.Manager
 	stderr    io.Writer
 	now       func() time.Time
+	language  string
 }
 
 // Options configures a new Handler. Zero-valued fields get sensible defaults.
@@ -103,6 +104,10 @@ type Options struct {
 	Repos  *repos.Manager
 	Stderr io.Writer
 	Now    func() time.Time
+	// Language is the graph's configured authoring language locale code
+	// (config `language`, empty = English default). Summaries are written
+	// in it regardless of the source material's language.
+	Language string
 }
 
 // New constructs a Handler with the given options.
@@ -119,6 +124,7 @@ func New(opts Options) *Handler {
 		repos:     opts.Repos,
 		stderr:    opts.Stderr,
 		now:       opts.Now,
+		language:  opts.Language,
 	}
 	if h.stderr == nil {
 		h.stderr = os.Stderr

@@ -141,7 +141,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	// A caller-supplied summary is taken verbatim — no LLM call at all.
 	if !cmd.DryRun && h.llmRunner != nil && cmd.Summary == "" {
 		g.Go(func() error {
-			result, err := llmops.Summarize(gctx, h.llmRunner, entry, graph)
+			result, err := llmops.Summarize(gctx, h.llmRunner, entry, graph, h.language)
 			if err != nil {
 				slogutils.FromContext(gctx).Warn("summary generation failed", "err", err)
 				return nil // non-fatal: entry is valid without a summary

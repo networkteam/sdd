@@ -22,8 +22,11 @@ type SummarizeResult struct {
 // Summarize generates a summary for a single entry using the LLM runner.
 // Summaries are derived on demand with no staleness tracking (d-cpt-4qi), so
 // this always regenerates — the caller decides when to invoke it.
-func Summarize(ctx context.Context, runner llm.Runner, entry *model.Entry, graph *model.Graph) (*SummarizeResult, error) {
-	req, err := RenderSummaryPrompt(entry, graph)
+// configuredLanguage is the graph's authoring language locale code from config
+// (empty = English default); the summary is written in it regardless of the
+// source material's language.
+func Summarize(ctx context.Context, runner llm.Runner, entry *model.Entry, graph *model.Graph, configuredLanguage string) (*SummarizeResult, error) {
+	req, err := RenderSummaryPrompt(entry, graph, configuredLanguage)
 	if err != nil {
 		return nil, fmt.Errorf("rendering summary prompt: %w", err)
 	}
@@ -44,14 +47,19 @@ func Summarize(ctx context.Context, runner llm.Runner, entry *model.Entry, graph
 type summaryContext struct {
 	EntryContent   string
 	RelatedEntries string
+	// ConfiguredLanguage is the graph authoring language locale code from
+	// config (empty = English default). Stable per repo, so the system-prompt
+	// prefix stays byte-stable across a graph's captures.
+	ConfiguredLanguage string
 }
 
 // RenderSummaryPrompt renders the summary prompt for an entry. Returns a
 // Request with the full rendered prompt in UserPrompt; the system/user split
 // is introduced when templates are refactored (see the plan decision).
-func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (llm.Request, error) {
+func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph, configuredLanguage string) (llm.Request, error) {
 	sctx := &summaryContext{
-		EntryContent: FormatEntryForPrompt(entry),
+		EntryContent:       FormatEntryForPrompt(entry),
+		ConfiguredLanguage: configuredLanguage,
 	}
 
 	// Collect direct refs, closes, and supersedes entries.

@@ -569,7 +569,7 @@ func Test_RenderSummaryPrompt_OmitsDerivedStatus(t *testing.T) {
 	}
 	graph := model.NewGraph([]*model.Entry{sig, dec})
 
-	req, err := RenderSummaryPrompt(dec, graph)
+	req, err := RenderSummaryPrompt(dec, graph, "")
 	if err != nil {
 		t.Fatalf("RenderSummaryPrompt: %v", err)
 	}
@@ -616,7 +616,7 @@ func Test_RenderSummaryPrompt_OmitsIntent(t *testing.T) {
 		Kind: model.KindDirective, Intent: model.IntentSettled, Content: "decision content",
 	}
 	graph := model.NewGraph([]*model.Entry{dec})
-	req, err := RenderSummaryPrompt(dec, graph)
+	req, err := RenderSummaryPrompt(dec, graph, "")
 	if err != nil {
 		t.Fatalf("RenderSummaryPrompt: %v", err)
 	}

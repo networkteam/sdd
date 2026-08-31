@@ -56,7 +56,7 @@ func summarizeCases() []summarizeCase {
 				},
 				Closes:     []string{"20260810-100000-d-tac-ev2"},
 				Confidence: "high",
-				Content: "The import pipeline now batches writes: rows accumulate per source file and flush in groups of 500, cutting a full import of the reference dataset from 41 minutes to 6. Delivered in commits 4f2a91c and 8823b0d; the per-row fsync that dominated the profile is gone, and the failure path now reports the failing batch's file and offset instead of a bare row number.",
+				Content:    "The import pipeline now batches writes: rows accumulate per source file and flush in groups of 500, cutting a full import of the reference dataset from 41 minutes to 6. Delivered in commits 4f2a91c and 8823b0d; the per-row fsync that dominated the profile is gone, and the failure path now reports the failing batch's file and offset instead of a bare row number.",
 			},
 			related: []*model.Entry{
 				{
@@ -82,7 +82,7 @@ func summarizeCases() []summarizeCase {
 					{ID: "20260813-150000-d-cpt-ev5", Kind: model.RefKindRelated, Desc: "the storage layout this composes with"},
 				},
 				Confidence: "high",
-				Content: "Validation rules live in one schema module and are compiled into both the form layer and the API layer; neither layer may define a rule of its own. The duplication survey found nine rules implemented twice with four semantic drifts between the copies, and each drift is a class of bug users hit as inconsistent behavior between the UI and the API.",
+				Content:    "Validation rules live in one schema module and are compiled into both the form layer and the API layer; neither layer may define a rule of its own. The duplication survey found nine rules implemented twice with four semantic drifts between the copies, and each drift is a class of bug users hit as inconsistent behavior between the UI and the API.",
 			},
 			related: []*model.Entry{
 				{
@@ -112,20 +112,24 @@ func summarizeCases() []summarizeCase {
 				Kind:       model.KindGap,
 				Layer:      model.LayerOperational,
 				Confidence: "medium",
-				Content: "The nightly backup job logs success even when the upload step is skipped: the skip branch for an unreachable bucket returns nil, so the run counts as green while no artifact left the machine. Expected per the runbook: an unreachable bucket fails the run. Three of the last thirty runs took this branch.",
+				Content:    "The nightly backup job logs success even when the upload step is skipped: the skip branch for an unreachable bucket returns nil, so the run counts as green while no artifact left the machine. Expected per the runbook: an unreachable bucket fails the run. Three of the last thirty runs took this branch.",
 			},
 			wantRelationships: false,
 		},
 	}
 }
 
-// judgeVerdict is the JSON shape the judge must answer with.
+// judgeVerdict is the JSON shape the judge must answer with. The criteria
+// mirror the summary prompt's own contract (summary_templates/summary.tmpl)
+// so candidates are judged against the task as specified, not a paraphrase.
 type judgeVerdict struct {
-	LanguageOK    bool     `json:"language_ok"`
-	Grounded      bool     `json:"grounded"`
-	Relationships bool     `json:"relationships_covered"`
-	Verdict       string   `json:"verdict"`
-	Problems      []string `json:"problems"`
+	LanguageOK        bool     `json:"language_ok"`
+	Grounded          bool     `json:"grounded"`
+	Relationships     bool     `json:"relationships_covered"`
+	FirstSentenceLede bool     `json:"first_sentence_standalone"`
+	Terse             bool     `json:"terse"`
+	Verdict           string   `json:"verdict"`
+	Problems          []string `json:"problems"`
 }
 
 // judgeRunner builds the fixed judge configuration — independent of the
@@ -158,12 +162,23 @@ func judgeSummary(t *testing.T, judge llm.Runner, sourceMaterial, summary string
 	}
 	req := llm.Request{
 		Purpose: llm.Purpose("eval-judge"),
-		SystemPrompt: `You judge one-entry summaries for a decision-graph tool. A good summary is 2-3 sentences,
-written in the same language as the source entry, states what the entry records or commits to,
-stays strictly within the source material (no invented facts, numbers, or intentions), and
-reflects the entry's relationships to referenced entries when the source carries them.
+		SystemPrompt: `You judge one-entry summaries for a decision-graph tool against the summarizer's contract:
+
+1. language_ok — the summary is written in the graph's configured authoring language — English for
+   these cases — regardless of the language the source material appears in.
+2. grounded — it stays strictly within the source material: no invented facts, numbers, intentions,
+   or transitive context beyond the entry and its directly referenced entries.
+3. relationships_covered — the remaining sentences reflect what the entry does to or with its direct
+   refs/closes entries, citing them as parenthetical ID handles.
+4. first_sentence_standalone — the FIRST sentence alone states what the entry observes, commits to,
+   or did, leading with the entry's own substance (never bookkeeping like "supersedes X" or a list of
+   references), is readable at a glance rather than a wall of clauses, and works standalone —
+   overview lists display exactly this sentence.
+5. terse — 2-3 sentences, roughly 50-100 words, no filler, no meta-prose ("This summary...",
+   labels, markdown, quotation marks), every clause carrying information.
+
 Answer with a single JSON object and nothing else:
-{"language_ok": bool, "grounded": bool, "relationships_covered": bool, "verdict": "pass"|"fail", "problems": ["..."]}
+{"language_ok": bool, "grounded": bool, "relationships_covered": bool, "first_sentence_standalone": bool, "terse": bool, "verdict": "pass"|"fail", "problems": ["..."]}
 Set verdict to "fail" when any check fails, and name each problem concretely.`,
 		UserPrompt: fmt.Sprintf("SOURCE MATERIAL (what the summarizer saw):\n%s\n\nNOTE: %s\n\nSUMMARY UNDER JUDGMENT:\n%s", sourceMaterial, relLine, summary),
 	}
@@ -198,16 +213,28 @@ Set verdict to "fail" when any check fails, and name each problem concretely.`,
 // whitespace output, runaway or degenerate length, and the self-ID bug.
 func checkSummaryMechanics(entryID, summary string) []string {
 	var problems []string
+	words := len(strings.Fields(summary))
 	switch {
 	case strings.TrimSpace(summary) == "":
 		problems = append(problems, "summary is empty")
-	case len(summary) < 40:
-		problems = append(problems, fmt.Sprintf("summary degenerately short (%d chars)", len(summary)))
-	case len(summary) > 1200:
-		problems = append(problems, fmt.Sprintf("summary runaway length (%d chars)", len(summary)))
+	case words < 25:
+		problems = append(problems, fmt.Sprintf("summary degenerately short (%d words; contract says 50-100)", words))
+	case words > 140:
+		problems = append(problems, fmt.Sprintf("summary runaway length (%d words; contract says 50-100)", words))
 	}
 	if strings.Contains(summary, entryID) {
 		problems = append(problems, "summary refers to the entry's own ID (self-ID bug, s-cpt-ed2)")
+	}
+	// The contract demands raw summary text: no labels, markdown, or quotes.
+	trimmed := strings.TrimSpace(summary)
+	switch {
+	case strings.HasPrefix(trimmed, "\""), strings.HasPrefix(trimmed, "“"):
+		problems = append(problems, "summary wrapped in quotation marks")
+	case strings.HasPrefix(strings.ToLower(trimmed), "summary"):
+		problems = append(problems, "summary carries a label prefix")
+	}
+	if strings.Contains(summary, "**") || strings.Contains(summary, "\n#") || strings.HasPrefix(trimmed, "#") {
+		problems = append(problems, "summary contains markdown formatting")
 	}
 	return problems
 }
@@ -219,7 +246,7 @@ func TestSummarizeJudgeCalibration(t *testing.T) {
 	judge := judgeRunner(t)
 	tc := summarizeCases()[0]
 	graph := model.NewGraph(append([]*model.Entry{tc.entry}, tc.related...))
-	req, err := llmops.RenderSummaryPrompt(tc.entry, graph)
+	req, err := llmops.RenderSummaryPrompt(tc.entry, graph, "")
 	if err != nil {
 		t.Fatalf("rendering source material: %v", err)
 	}
@@ -235,6 +262,10 @@ func TestSummarizeJudgeCalibration(t *testing.T) {
 		{
 			name:    "invented facts",
 			summary: "The import pipeline now batches writes in groups of 2000 rows using a new Kafka-based queue, cutting imports from 41 to 2 minutes and reducing cloud spend by 40%. The team plans to extend this to the export path next quarter.",
+		},
+		{
+			name:    "buried lede, wall-of-text first sentence",
+			summary: "Referencing the batching directive (20260810-100000-d-tac-ev2), which it also closes, and delivered in commits 4f2a91c and 8823b0d, while additionally changing the failure path so that it now reports the failing batch's file and offset instead of a bare row number, this done signal, concerning the import pipeline and its write behavior, reports that rows now accumulate per source file and flush in groups of 500, which cut the reference dataset import from 41 minutes to 6.",
 		},
 	}
 
@@ -262,7 +293,7 @@ func TestSummarizeEval(t *testing.T) {
 
 			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 			defer cancel()
-			result, err := llmops.Summarize(ctx, candidate, tc.entry, graph)
+			result, err := llmops.Summarize(ctx, candidate, tc.entry, graph, "")
 			if err != nil {
 				t.Fatalf("Summarize failed: %v", err)
 			}
@@ -273,7 +304,7 @@ func TestSummarizeEval(t *testing.T) {
 			}
 
 			// The judge sees exactly what the candidate saw.
-			req, err := llmops.RenderSummaryPrompt(tc.entry, graph)
+			req, err := llmops.RenderSummaryPrompt(tc.entry, graph, "")
 			if err != nil {
 				t.Fatalf("rendering source material for judge: %v", err)
 			}
@@ -282,8 +313,9 @@ func TestSummarizeEval(t *testing.T) {
 				t.Fatalf("judge unavailable: %v", err)
 			}
 			if verdict.Verdict != "pass" {
-				t.Errorf("judge verdict: %s — language_ok=%v grounded=%v relationships_covered=%v problems: %s",
+				t.Errorf("judge verdict: %s — language_ok=%v grounded=%v relationships_covered=%v first_sentence_standalone=%v terse=%v problems: %s",
 					verdict.Verdict, verdict.LanguageOK, verdict.Grounded, verdict.Relationships,
+					verdict.FirstSentenceLede, verdict.Terse,
 					strings.Join(verdict.Problems, "; "))
 			}
 		})

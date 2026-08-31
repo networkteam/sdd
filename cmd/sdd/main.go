@@ -190,6 +190,15 @@ func defaultRepos() (*repos.Registry, *repos.Manager, error) {
 // and no global settings; both are legitimate "no config" states. Returns
 // (nil, err) when any layer fails to parse, so callers fail hard on broken
 // config instead of silently running on defaults.
+// configLanguage returns the configured graph language, tolerating the nil
+// config loadConfig yields outside an sdd repo.
+func configLanguage(cfg *model.PerRepoConfig) string {
+	if cfg == nil {
+		return ""
+	}
+	return cfg.Language
+}
+
 func loadConfig() (*model.PerRepoConfig, error) {
 	loc, err := repos.DefaultLocations()
 	if err != nil {
@@ -840,6 +849,7 @@ func newCmd() *cli.Command {
 				LLMRunner: runner,
 				Committer: git.CLI{},
 				Repos:     mgr,
+				Language:  configLanguage(cfg),
 			})
 
 			return handler.NewEntry(ctx, ncmd)
@@ -1130,6 +1140,7 @@ func summarizeCmd() *cli.Command {
 				}),
 				LLMRunner: runner,
 				Committer: git.CLI{},
+				Language:  configLanguage(cfg),
 			})
 			return handler.Summarize(ctx, sumCmd)
 		}),

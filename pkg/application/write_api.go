@@ -258,7 +258,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	} else {
 		entry.Preflight = "skipped"
 	}
-	summary, err := llmops.Summarize(ctx, runtime.options.LLM, entry, snapshot.graph)
+	summary, err := llmops.Summarize(ctx, runtime.options.LLM, entry, snapshot.graph, runtime.options.Language)
 	if err != nil {
 		return result, fmt.Errorf("generating summary: %w", err)
 	}

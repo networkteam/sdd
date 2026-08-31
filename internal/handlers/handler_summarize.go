@@ -110,7 +110,7 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			// their own entries' summaries concurrently, and those feed
 			// neighbor prose into this prompt.
 			graphMu.RLock()
-			req, renderErr := llmops.RenderSummaryPrompt(entry, graph)
+			req, renderErr := llmops.RenderSummaryPrompt(entry, graph, h.language)
 			graphMu.RUnlock()
 			if renderErr != nil {
 				return fmt.Errorf("rendering summary for %s: %w", entry.ID, renderErr)
