@@ -15,6 +15,7 @@
       "docs:dev":        "cd website && pnpm dev",
       "gen-installer":   "binst gen -o install.sh",
       "lint":            "bash scripts/lint.sh",
+      "test":            "go test ./... && go test -C examples/extendingsdd ./...",
       "validate-skills": "rc=0; for d in .agents/skills/*/; do [ -f \"$d/SKILL.md\" ] || continue; uvx --from skills-ref@0.1.1 agentskills validate \"$d\" || rc=1; done; exit $rc"
     }
   },

@@ -56,6 +56,7 @@ func main() {
 		Project: sdd.ProjectRef{ID: "example", DisplayName: "External example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs,
 		LLM: sdd.LLMExecutorFuncs{
 			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
+			IdentityFunc:     func() sdd.LLMIdentity { return sdd.LLMIdentity{Provider: "example", Model: "stub"} },
 			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
 				return sdd.LLMResult{}, errors.New("configure an LLM executor for writes")
 			},

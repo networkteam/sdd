@@ -22,7 +22,7 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 
 - `devbox run build` — build the local `bin/sdd` dev binary (git hooks also run this after pull/rebase/checkout)
 - `go vet ./...` — compilation + correctness check (never use `go build` just to verify compilation — it produces no output on success)
-- `go test ./...` — run all tests
+- `devbox run test` — run all tests: the root module and the separate `examples/extendingsdd` module. Never `go test ./...` alone — `./...` prunes the nested example module (a `go.work` does not change that), so its drift surfaces only in CI.
 - `go test -tags=eval -run TestPreflightEval ./internal/llm/...` — pre-flight prompt calibration eval (live `claude` CLI, slow + paid; model via `SDD_EVAL_MODEL`, default `sonnet`). Capture full output to a file and grep the file — `… -v 2>&1 | tee /tmp/eval.log` — never filter the live stream, or a failure shows no findings and forces a costly re-run.
 - `go fmt ./...` — format code
 - `devbox run lint` — lint (must be clean; CI enforces). Convention findings print as warnings without failing the run — see `scripts/lint.sh` for the mechanism. Use the wrapper, not bare `golangci-lint run`, which fails on warnings too.

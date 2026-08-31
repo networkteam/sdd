@@ -46,6 +46,9 @@ func (indexStore) Nearest(context.Context, []sdd.IndexNamespace, []float32, int)
 type llmExecutor struct{}
 
 func (llmExecutor) Capabilities(context.Context) ([]string, error) { return nil, nil }
+func (llmExecutor) Identity() sdd.LLMIdentity {
+	return sdd.LLMIdentity{Provider: "example", Model: "stub"}
+}
 func (llmExecutor) Execute(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
 	return sdd.LLMResult{ExecutorFingerprint: "example"}, nil
 }
