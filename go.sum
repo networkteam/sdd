@@ -107,8 +107,8 @@ github.com/modelcontextprotocol/go-sdk v1.6.1 h1:0zOSupjKUxPKSocPT1Wtago+mUHU2/u
 github.com/modelcontextprotocol/go-sdk v1.6.1/go.mod h1:kzm3kzFL1/+AziGOE0nUs3gvPoNxMCvkxokMkuFapXQ=
 github.com/muesli/cancelreader v0.2.2 h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=
 github.com/muesli/cancelreader v0.2.2/go.mod h1:3XuTXfFS2VjM+HTLZY9Ak0l6eUKfijIfMUZ4EgX0QYo=
-github.com/networkteam/gollm v0.0.0-20260830094121-5391cca33596 h1:9Y+rgElKyJr1gOHtBPoBX4N5bD45io+BZ3foUi1o4oM=
-github.com/networkteam/gollm v0.0.0-20260830094121-5391cca33596/go.mod h1:ba4KWPPrYoc7PbPkcjTD6uMi2s5yXVWVsE5uzP+mvCg=
+github.com/networkteam/gollm v0.0.0-20260831211605-bc442341cd97 h1:dzt9pCU274wC3Js8l8Li+o9soF+GlUU6H8sn6TZcLbU=
+github.com/networkteam/gollm v0.0.0-20260831211605-bc442341cd97/go.mod h1:ba4KWPPrYoc7PbPkcjTD6uMi2s5yXVWVsE5uzP+mvCg=
 github.com/networkteam/slogutils v0.4.0 h1:tf6Gf//H/a3EUmNszWEw8fhQkscrDdKt7HEdb2wBUhM=
 github.com/networkteam/slogutils v0.4.0/go.mod h1:j6siLHGfAkUpfhNUXw43EUdZv/HBaGd/RW7ToPwiJZo=
 github.com/philippgille/chromem-go v0.7.0 h1:4jfvfyKymjKNfGxBUhHUcj1kp7B17NL/I1P+vGh1RvY=
