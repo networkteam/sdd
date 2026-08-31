@@ -250,12 +250,12 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 	}
 
 	if len(item.Truncated) > 0 {
-		ids := make([]string, len(item.Truncated))
-		for i, tr := range item.Truncated {
-			ids[i] = tr.ID
+		reason := fmt.Sprintf("depth %d", item.Depth)
+		if item.TruncatedReason != "" {
+			reason = item.TruncatedReason
 		}
-		trunc := fmt.Sprintf("+%d more refs truncated (depth %d): %s",
-			len(item.Truncated), item.Depth, strings.Join(ids, ", "))
+		trunc := fmt.Sprintf("+%d more refs truncated (%s): %s",
+			len(item.Truncated), reason, truncatedIDs(item.Truncated))
 		fmt.Fprintf(w, "%s%s\n", subGuide, clrFaint.Render(trunc))
 	}
 }

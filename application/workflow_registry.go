@@ -11,6 +11,15 @@ import (
 	"github.com/networkteam/sdd/internal/serveview"
 )
 
+// serveChainBudget bounds each direction of a served entry chain: the
+// entry-list default from the serve budget caps nodes, and the fan-out cap
+// keeps one hub entry from spending the whole node budget on its own edges.
+// Explicit pulls (sdd show, the MCP show tool) never pass a budget.
+var serveChainBudget = model.ShowTreeBudget{
+	MaxNodes:    serveview.Default().Cap(serveview.PartEntryList).MaxItems,
+	MaxChildren: 8,
+}
+
 func (w *WorkflowSession) buildRegistry() (*engine.Registry, error) {
 	registry := engine.NewRegistry()
 	for _, register := range []func(*engine.Registry) error{
@@ -95,7 +104,8 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		// Not serve-safe: it calls LogRead, so it writes a read event. It may
 		// inject into a step unit, but never as a framing lane (a serve must not
 		// write — I7); the spec loader enforces that.
-		Doc: engine.FuncDoc{Name: "entryChains", Doc: "Entries with upstream/downstream chains for an explicit id arg or the store's anchor/targets. Args up, down: expansion depths; onceFull: serve nothing when every entry was already served in full this session; requireBody: fail when a primary resolves to an empty body. An explicit id resolves to its live supersession head before serving, so a project override wins and the read logs under the same ID the dedup checks.", Reads: []string{"anchor", "targets"}},
+		Doc:   engine.FuncDoc{Name: "entryChains", Doc: "Entries with upstream/downstream chains for an explicit id arg or the store's anchor/targets. Args up, down: expansion depths; onceFull: serve nothing when every entry was already served in full this session; requireBody: fail when a primary resolves to an empty body. An explicit id resolves to its live supersession head before serving, so a project override wins and the read logs under the same ID the dedup checks. Chains are bounded per direction by the engine's entry-list budget; the cut renders as the same honest frontier the depth limit uses.", Reads: []string{"anchor", "targets"}},
+		Bound: engine.QueryBound{Part: serveview.PartEntryList},
 		Fn: func(ctx *engine.Context, args map[string]any) (any, error) {
 			var ids []string
 			if id, _ := args["id"].(string); strings.TrimSpace(id) != "" {
@@ -135,6 +145,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 			result, err := w.app.Show(w.ctx, w.identity, w.project, ShowRequest{
 				IDs: ids, UpDepth: workflowIntArg(args, "up", query.DefaultUpDepth), DownDepth: workflowIntArg(args, "down", query.DefaultDownDepth),
 				Branch: target.Branch,
+				Budget: serveChainBudget,
 			})
 			if err != nil {
 				return nil, w.withSessionBindingTargetError(err, fromBinding)

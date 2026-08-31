@@ -35,7 +35,7 @@ func (gf *GraphFinder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 
 	groups := make([]query.ShowGroup, 0, len(resolved))
 	for _, id := range resolved {
-		tree := gf.graph.BuildShowTree(id, q.UpDepth, q.DownDepth, rendered, primaries)
+		tree := gf.graph.BuildShowTreeBounded(id, q.UpDepth, q.DownDepth, q.Budget, rendered, primaries)
 		if tree == nil {
 			return nil, fmt.Errorf("entry not found: %s", id)
 		}
@@ -48,6 +48,8 @@ func (gf *GraphFinder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 			PrimaryTopics:        tree.PrimaryTopics,
 			Upstream:             tree.Upstream,
 			Downstream:           tree.Downstream,
+			UpstreamTruncated:    tree.UpstreamTruncated,
+			DownstreamTruncated:  tree.DownstreamTruncated,
 		})
 	}
 

@@ -1,6 +1,9 @@
 package application
 
-import "github.com/networkteam/sdd/internal/query"
+import (
+	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/query"
+)
 
 // Default show expansion depths favor grounding context while keeping the
 // typically wider consumer side shallow.
@@ -48,6 +51,9 @@ type ShowRequest struct {
 	DownDepth         int
 	Branch            string
 	BranchFromSession bool
+	// Budget bounds each direction's chain expansion on the serve path; the
+	// zero value is unbounded — explicit pulls arrive complete (d-tac-rzi).
+	Budget model.ShowTreeBudget
 }
 
 type ShowResult struct {

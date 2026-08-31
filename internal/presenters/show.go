@@ -56,23 +56,34 @@ func renderShowGroup(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, mdcompose.DemoteTo(g.Primary.Content, bodyHeadingLevel))
 
-	if len(g.Upstream) > 0 {
+	if len(g.Upstream) > 0 || len(g.UpstreamTruncated) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "# upstream")
 		fmt.Fprintln(w)
 		for _, item := range g.Upstream {
 			renderTreeItem(w, item, primaryDisplayID(g))
 		}
+		renderDirectionCut(w, g.UpstreamTruncated)
 	}
 
-	if len(g.Downstream) > 0 {
+	if len(g.Downstream) > 0 || len(g.DownstreamTruncated) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "# downstream")
 		fmt.Fprintln(w)
 		for _, item := range g.Downstream {
 			renderTreeItem(w, item, primaryDisplayID(g))
 		}
+		renderDirectionCut(w, g.DownstreamTruncated)
 	}
+}
+
+// renderDirectionCut names the primary's own children a chain budget kept out
+// of the direction entirely — the direction-level honest frontier.
+func renderDirectionCut(w io.Writer, refs []model.TruncatedRef) {
+	if len(refs) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "+%d more entries truncated (chain budget): %s\n", len(refs), truncatedIDs(refs))
 }
 
 // primaryDisplayID is the primary's display identity — the repo-prefixed
@@ -189,13 +200,21 @@ func renderTreeItem(w io.Writer, item model.ShowTreeItem, primaryID string) {
 	}
 
 	if len(item.Truncated) > 0 {
-		ids := make([]string, len(item.Truncated))
-		for i, tr := range item.Truncated {
-			ids[i] = tr.ID
+		reason := fmt.Sprintf("depth %d", item.Depth)
+		if item.TruncatedReason != "" {
+			reason = item.TruncatedReason
 		}
-		fmt.Fprintf(w, "%s+%d more refs truncated (depth %d): %s\n",
-			subIndent, len(item.Truncated), item.Depth, strings.Join(ids, ", "))
+		fmt.Fprintf(w, "%s+%d more refs truncated (%s): %s\n",
+			subIndent, len(item.Truncated), reason, truncatedIDs(item.Truncated))
 	}
+}
+
+func truncatedIDs(refs []model.TruncatedRef) string {
+	ids := make([]string, len(refs))
+	for i, tr := range refs {
+		ids[i] = tr.ID
+	}
+	return strings.Join(ids, ", ")
 }
 
 // treeQualifier is the parenthesized `(<kind>, <status>)` slot for a tree

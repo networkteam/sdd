@@ -365,3 +365,65 @@ func assertRelations(t *testing.T, item ShowTreeItem, expected ...string) {
 		}
 	}
 }
+
+func TestBuildShowTreeBounded_FanOutCap(t *testing.T) {
+	hub := entry("20260410-100000-d-tac-hub")
+	var entries []*Entry
+	entries = append(entries, hub)
+	for i := range 6 {
+		entries = append(entries, entry(
+			timestampedID("20260410-10010", i, "s-tac-f"),
+			withRefs(hub.ID),
+		))
+	}
+	g := NewGraph(entries)
+	tree := g.BuildShowTreeBounded(hub.ID, 0, 2, ShowTreeBudget{MaxChildren: 2}, make(map[string]bool), make(map[string]bool))
+
+	if len(tree.Downstream) != 2 {
+		t.Fatalf("Downstream = %d items, want 2 under the fan-out cap", len(tree.Downstream))
+	}
+	if len(tree.DownstreamTruncated) != 4 {
+		t.Fatalf("DownstreamTruncated = %d, want the 4 capped children named", len(tree.DownstreamTruncated))
+	}
+}
+
+func TestBuildShowTreeBounded_NodeBudget(t *testing.T) {
+	a := entry("20260410-100000-s-stg-aaa")
+	b := entry("20260410-100100-s-cpt-bbb", withRefs("20260410-100000-s-stg-aaa"))
+	c := entry("20260410-100200-d-tac-ccc", withRefs("20260410-100100-s-cpt-bbb"))
+	d := entry("20260410-100300-d-tac-ddd", withRefs("20260410-100200-d-tac-ccc"))
+
+	g := NewGraph([]*Entry{a, b, c, d})
+	tree := g.BuildShowTreeBounded(d.ID, 4, 0, ShowTreeBudget{MaxNodes: 2}, make(map[string]bool), make(map[string]bool))
+
+	if len(tree.Upstream) != 2 {
+		t.Fatalf("Upstream = %d items, want 2 under the node budget", len(tree.Upstream))
+	}
+	last := tree.Upstream[len(tree.Upstream)-1]
+	if len(last.Truncated) != 1 || last.TruncatedReason != "chain budget" {
+		t.Fatalf("the budget frontier must name the unexpanded child: %+v (reason %q)", last.Truncated, last.TruncatedReason)
+	}
+}
+
+func TestBuildShowTreeZeroBudgetIsUnbounded(t *testing.T) {
+	hub := entry("20260410-100000-d-tac-hub")
+	var entries []*Entry
+	entries = append(entries, hub)
+	for i := range 6 {
+		entries = append(entries, entry(
+			timestampedID("20260410-10010", i, "s-tac-f"),
+			withRefs(hub.ID),
+		))
+	}
+	g := NewGraph(entries)
+	tree := g.BuildShowTree(hub.ID, 0, 2, make(map[string]bool), make(map[string]bool))
+	if len(tree.Downstream) != 6 || len(tree.DownstreamTruncated) != 0 {
+		t.Fatalf("explicit pulls must arrive complete: %d items, %d truncated", len(tree.Downstream), len(tree.DownstreamTruncated))
+	}
+}
+
+// timestampedID builds a unique valid ID from a 13-char timestamp prefix and
+// an index digit: prefix+i must yield YYYYMMDD-HHmmss.
+func timestampedID(prefix13 string, i int, tail string) string {
+	return prefix13 + string(rune('0'+i)) + "-" + tail + string(rune('a'+i))
+}

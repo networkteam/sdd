@@ -174,7 +174,7 @@ func (a *Application) Show(ctx context.Context, identity RequestIdentity, projec
 	if up < 0 || down < 0 {
 		return ShowResult{}, fmt.Errorf("sdd: show depths cannot be negative")
 	}
-	showResult, err := snapshot.finder.Show(query.ShowQuery{IDs: request.IDs, UpDepth: up, DownDepth: down})
+	showResult, err := snapshot.finder.Show(query.ShowQuery{IDs: request.IDs, UpDepth: up, DownDepth: down, Budget: request.Budget})
 	if err != nil {
 		return ShowResult{}, err
 	}

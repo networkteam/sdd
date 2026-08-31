@@ -11,17 +11,20 @@ type ShowTreeItem struct {
 	// locally, Entry stays nil and the node renders unresolved; a resolved
 	// remote node carries both — the remote Entry plus the prefixed ID the
 	// renderer displays.
-	CrossRepoID   string
-	Depth         int
-	Relations     []string       // e.g. ["refs"], ["refs", "closes"], ["refd-by"]
-	RefKind       RefKind        // kind of the refs edge linking parent to this entry (empty when no refs relation or no kind metadata)
-	RefDesc       string         // desc of the refs edge (when present)
-	ShownAbove    bool           // already rendered earlier — "(see above)" marker
-	ShownBelow    bool           // future primary — "(see below)" marker
-	SummaryOnly   bool           // true for depth > 0
-	Truncated     []TruncatedRef // children hidden at depth boundary
-	Status        Status         // derived lifecycle status, computed at build so renderers stay pure
-	SupersedePath []string       // resolved origin→head trail when superseded; nil otherwise
+	CrossRepoID string
+	Depth       int
+	Relations   []string       // e.g. ["refs"], ["refs", "closes"], ["refd-by"]
+	RefKind     RefKind        // kind of the refs edge linking parent to this entry (empty when no refs relation or no kind metadata)
+	RefDesc     string         // desc of the refs edge (when present)
+	ShownAbove  bool           // already rendered earlier — "(see above)" marker
+	ShownBelow  bool           // future primary — "(see below)" marker
+	SummaryOnly bool           // true for depth > 0
+	Truncated   []TruncatedRef // children hidden at a frontier (depth, fan-out cap, or chain budget)
+	// TruncatedReason names the frontier that hid Truncated when it is not
+	// the depth limit ("fan-out cap", "chain budget"); empty means depth.
+	TruncatedReason string
+	Status          Status   // derived lifecycle status, computed at build so renderers stay pure
+	SupersedePath   []string // resolved origin→head trail when superseded; nil otherwise
 }
 
 // NodeID is the identifier a renderer displays and dedup keys on: the
@@ -61,6 +64,40 @@ type ShowTree struct {
 	PrimaryTopics        []TopicPath
 	Upstream             []ShowTreeItem
 	Downstream           []ShowTreeItem
+	// UpstreamTruncated and DownstreamTruncated name the primary's own
+	// children a chain budget or fan-out cap kept out of the direction
+	// entirely — the direction-level honest frontier.
+	UpstreamTruncated   []TruncatedRef
+	DownstreamTruncated []TruncatedRef
+}
+
+// ShowTreeBudget bounds a tree's expansion per direction: MaxNodes caps how
+// many whole-entry nodes one direction may carry, MaxChildren caps one
+// node's fan-out. Children past a bound land as TruncatedRefs — the same
+// honest frontier the depth limit renders — never silently dropped. Zero
+// values are unbounded: explicit pulls (sdd show, the MCP show tool) pass no
+// budget and arrive complete (d-tac-rzi).
+type ShowTreeBudget struct {
+	MaxNodes    int
+	MaxChildren int
+}
+
+// treeWalk carries one direction's budget accounting through the recursion.
+type treeWalk struct {
+	budget ShowTreeBudget
+	nodes  int
+}
+
+func (w *treeWalk) exhausted() bool {
+	return w.budget.MaxNodes > 0 && w.nodes >= w.budget.MaxNodes
+}
+
+// childCap returns how many of n children may expand under the fan-out cap.
+func (w *treeWalk) childCap(n int) int {
+	if w.budget.MaxChildren > 0 && n > w.budget.MaxChildren {
+		return w.budget.MaxChildren
+	}
+	return n
 }
 
 // BuildShowTree constructs the upstream and downstream traversal trees for a
@@ -76,6 +113,12 @@ type ShowTree struct {
 // colon form — except embedded entries, which dedup by bare ID so exactly
 // one copy ever surfaces.
 func (g *Graph) BuildShowTree(id string, upDepth, downDepth int, rendered, primaries map[string]bool) *ShowTree {
+	return g.BuildShowTreeBounded(id, upDepth, downDepth, ShowTreeBudget{}, rendered, primaries)
+}
+
+// BuildShowTreeBounded is BuildShowTree under a per-direction budget — the
+// serve path's entry point, where chains must stay within their part cap.
+func (g *Graph) BuildShowTreeBounded(id string, upDepth, downDepth int, budget ShowTreeBudget, rendered, primaries map[string]bool) *ShowTree {
 	e, owner, ok := g.ResolveAcross(id)
 	if !ok {
 		return nil
@@ -85,19 +128,23 @@ func (g *Graph) BuildShowTree(id string, upDepth, downDepth int, rendered, prima
 	// Upstream: expand primary's children (refs/closes/supersedes) directly.
 	// The primary itself is rendered separately by the presenter.
 	var upstream []ShowTreeItem
+	var upstreamCut []TruncatedRef
 	if upDepth > 0 {
+		w := &treeWalk{budget: budget}
 		upVisited := map[string]bool{key: true} // mark primary visited to prevent cycles back to it
-		for _, child := range upstreamChildren(e) {
-			upstream = append(upstream, owner.buildUpstream(child.id, 1, child.relations, child.refKind, child.refDesc, upDepth, upVisited, rendered, primaries)...)
-		}
+		upstream, upstreamCut = owner.expandDirection(upstreamChildren(e), w, upVisited, rendered, func(child childEdge, visited map[string]bool) []ShowTreeItem {
+			return owner.buildUpstream(child.id, 1, child.relations, child.refKind, child.refDesc, upDepth, w, visited, rendered, primaries)
+		})
 	}
 
 	var downstream []ShowTreeItem
+	var downstreamCut []TruncatedRef
 	if downDepth > 0 {
+		w := &treeWalk{budget: budget}
 		downVisited := map[string]bool{key: true}
-		for _, child := range owner.downstreamChildren(e.ID) {
-			downstream = append(downstream, owner.buildDownstream(child.id, 1, child.relations, child.refKind, child.refDesc, downDepth, downVisited, rendered, primaries)...)
-		}
+		downstream, downstreamCut = owner.expandDirection(owner.downstreamChildren(e.ID), w, downVisited, rendered, func(child childEdge, visited map[string]bool) []ShowTreeItem {
+			return owner.buildDownstream(child.id, 1, child.relations, child.refKind, child.refDesc, downDepth, w, visited, rendered, primaries)
+		})
 	}
 
 	// Mark items from this tree as rendered for cross-group dedup.
@@ -114,7 +161,26 @@ func (g *Graph) BuildShowTree(id string, upDepth, downDepth int, rendered, prima
 		PrimaryTopics:        owner.EffectiveTopics(e),
 		Upstream:             upstream,
 		Downstream:           downstream,
+		UpstreamTruncated:    upstreamCut,
+		DownstreamTruncated:  downstreamCut,
 	}
+}
+
+// expandDirection walks the primary's children of one direction under the
+// walk's budget: children past the fan-out cap or the node budget land in
+// the direction-level truncated set instead of expanding.
+func (g *Graph) expandDirection(children []childEdge, w *treeWalk, visited, rendered map[string]bool, expand func(childEdge, map[string]bool) []ShowTreeItem) ([]ShowTreeItem, []TruncatedRef) {
+	var items []ShowTreeItem
+	var cut []TruncatedRef
+	limit := w.childCap(len(children))
+	for i, child := range children {
+		if i >= limit || w.exhausted() {
+			cut = append(cut, g.unvisitedRefs(children[i:], visited, rendered)...)
+			break
+		}
+		items = append(items, expand(child, visited)...)
+	}
+	return items, cut
 }
 
 func markRendered(items []ShowTreeItem, rendered map[string]bool) {
@@ -277,7 +343,7 @@ func (g *Graph) QualifiedItemStatus(e *Entry) (Status, []string) {
 // recursion continues there, so remote chains traverse fully with each
 // node qualified by its graph's repo prefix. An unresolvable cross-repo
 // edge (repo not connected or entry absent) renders as an unresolved leaf.
-func (g *Graph) buildUpstream(edgeID string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
+func (g *Graph) buildUpstream(edgeID string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, w *treeWalk, visited, rendered, primaries map[string]bool) []ShowTreeItem {
 	e, owner, ok := g.ResolveAcross(edgeID)
 	if !ok {
 		if IsCrossRepoID(edgeID) {
@@ -326,6 +392,7 @@ func (g *Graph) buildUpstream(edgeID string, depth int, relations []string, refK
 		return []ShowTreeItem{item}
 	}
 	visited[key] = true
+	w.nodes++
 
 	children := upstreamChildren(e)
 	if depth >= maxDepth && len(children) > 0 {
@@ -333,9 +400,20 @@ func (g *Graph) buildUpstream(edgeID string, depth int, relations []string, refK
 		return []ShowTreeItem{item}
 	}
 
+	limit := w.childCap(len(children))
+	if limit < len(children) {
+		item.Truncated = owner.unvisitedRefs(children[limit:], visited, rendered)
+		item.TruncatedReason = "fan-out cap"
+		children = children[:limit]
+	}
 	result := []ShowTreeItem{item}
-	for _, child := range children {
-		result = append(result, owner.buildUpstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, visited, rendered, primaries)...)
+	for i, child := range children {
+		if w.exhausted() {
+			result[0].Truncated = append(result[0].Truncated, owner.unvisitedRefs(children[i:], visited, rendered)...)
+			result[0].TruncatedReason = "chain budget"
+			break
+		}
+		result = append(result, owner.buildUpstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, w, visited, rendered, primaries)...)
 	}
 	return result
 }
@@ -345,7 +423,7 @@ func (g *Graph) buildUpstream(edgeID string, depth int, relations []string, refK
 // hold cross-repo IDs (cross-graph backlinks are out of scope) — but a
 // remote primary's within-graph downstream traverses its member graph the
 // same way upstream does.
-func (g *Graph) buildDownstream(edgeID string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, visited, rendered, primaries map[string]bool) []ShowTreeItem {
+func (g *Graph) buildDownstream(edgeID string, depth int, relations []string, refKind RefKind, refDesc string, maxDepth int, w *treeWalk, visited, rendered, primaries map[string]bool) []ShowTreeItem {
 	e, owner, ok := g.ResolveAcross(edgeID)
 	if !ok {
 		return nil
@@ -378,6 +456,7 @@ func (g *Graph) buildDownstream(edgeID string, depth int, relations []string, re
 		return []ShowTreeItem{item}
 	}
 	visited[key] = true
+	w.nodes++
 
 	children := owner.downstreamChildren(e.ID)
 	if depth >= maxDepth && len(children) > 0 {
@@ -385,9 +464,20 @@ func (g *Graph) buildDownstream(edgeID string, depth int, relations []string, re
 		return []ShowTreeItem{item}
 	}
 
+	limit := w.childCap(len(children))
+	if limit < len(children) {
+		item.Truncated = owner.unvisitedRefs(children[limit:], visited, rendered)
+		item.TruncatedReason = "fan-out cap"
+		children = children[:limit]
+	}
 	result := []ShowTreeItem{item}
-	for _, child := range children {
-		result = append(result, owner.buildDownstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, visited, rendered, primaries)...)
+	for i, child := range children {
+		if w.exhausted() {
+			result[0].Truncated = append(result[0].Truncated, owner.unvisitedRefs(children[i:], visited, rendered)...)
+			result[0].TruncatedReason = "chain budget"
+			break
+		}
+		result = append(result, owner.buildDownstream(child.id, depth+1, child.relations, child.refKind, child.refDesc, maxDepth, w, visited, rendered, primaries)...)
 	}
 	return result
 }
