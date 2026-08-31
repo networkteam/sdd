@@ -32,6 +32,12 @@ const (
 	PartProduced PartKind = "produced"
 )
 
+// ItemAllowanceBytes is the default per-item byte allowance for count-capped
+// typed rows whose rendered size is unknowable before templating; byte safety
+// comes from the serve-size regression harness, which fails when template
+// growth breaks the fit (d-tac-qwc).
+const ItemAllowanceBytes = 150
+
 // Cap bounds one part: MaxBytes for rendered text, MaxItems for typed data.
 // The zero value means unbounded.
 type Cap struct {

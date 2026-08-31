@@ -39,6 +39,10 @@ type Spec struct {
 	// Steps is the state graph, in declaration order. The first step is the
 	// entry step.
 	Steps []*Step
+	// ServeBudget is the spec's declared worst-case serve total in bytes;
+	// zero defers to the engine's default budget. Read only by the advisory
+	// authoring arithmetic (WorstCaseServeBytes) — never at load or runtime.
+	ServeBudget int
 	// StepByID indexes Steps.
 	StepByID map[string]*Step
 	// Units are the body's instruction units by name (`## unit: <name>`
@@ -342,6 +346,10 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 	if raw == nil {
 		return nil, fmt.Errorf("procedure %s (%s): no params/state/steps frontmatter — nothing to execute", entry.Canonical, entry.ID)
 	}
+	if raw.ServeBudget < 0 {
+		addProblem("serveBudget: must be non-negative, got %d", raw.ServeBudget)
+	}
+	spec.ServeBudget = raw.ServeBudget
 
 	var paramsYAML, stateYAML map[string]varDeclYAML
 	if err := decodeStrict(&raw.Params, &paramsYAML); err != nil {

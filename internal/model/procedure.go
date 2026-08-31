@@ -19,14 +19,20 @@ type ProcedureSpecRaw struct {
 	State   yaml.Node
 	Steps   yaml.Node
 	Framing yaml.Node
+	// ServeBudget is the spec's declared worst-case serve total in bytes.
+	// Zero means the engine's default budget applies; a larger declaration
+	// silences the authoring-arithmetic finding and records the trade
+	// (d-tac-rzi). Advisory only — never enforced at load or runtime.
+	ServeBudget int
 }
 
 // ProcedureSpecFromDocument converts a workflow declaration reported as one
-// structured value — {params?, state?, steps, framing?}, as the report schema
-// advertises it — into the raw spec the entry carries. The write-side
-// counterpart of the frontmatter routing in ParseEntry: unknown sections are
-// rejected so a typo'd key fails the capture instead of being silently
-// dropped, and interpretation stays with the engine (see ProcedureSpecRaw).
+// structured value — {params?, state?, steps, framing?, serveBudget?}, as the
+// report schema advertises it — into the raw spec the entry carries. The
+// write-side counterpart of the frontmatter routing in ParseEntry: unknown
+// sections are rejected so a typo'd key fails the capture instead of being
+// silently dropped, and interpretation stays with the engine (see
+// ProcedureSpecRaw).
 func ProcedureSpecFromDocument(doc map[string]any) (*ProcedureSpecRaw, error) {
 	spec := &ProcedureSpecRaw{}
 	sections := map[string]*yaml.Node{
@@ -36,9 +42,22 @@ func ProcedureSpecFromDocument(doc map[string]any) (*ProcedureSpecRaw, error) {
 		"framing": &spec.Framing,
 	}
 	for key, value := range doc {
+		if key == "serveBudget" {
+			n, ok := value.(int)
+			if !ok {
+				if f, isFloat := value.(float64); isFloat && f == float64(int(f)) {
+					n, ok = int(f), true
+				}
+			}
+			if !ok || n < 0 {
+				return nil, fmt.Errorf("serveBudget must be a non-negative integer, got %v", value)
+			}
+			spec.ServeBudget = n
+			continue
+		}
 		node, ok := sections[key]
 		if !ok {
-			return nil, fmt.Errorf("unknown workflow section %q (params, state, steps, framing)", key)
+			return nil, fmt.Errorf("unknown workflow section %q (params, state, steps, framing, serveBudget)", key)
 		}
 		if value == nil {
 			continue

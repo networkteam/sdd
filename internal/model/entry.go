@@ -447,6 +447,7 @@ type frontmatter struct {
 	State        yaml.Node         `yaml:"state,omitempty"`
 	Steps        yaml.Node         `yaml:"steps,omitempty"`
 	Framing      yaml.Node         `yaml:"framing,omitempty"`
+	ServeBudget  int               `yaml:"serveBudget,omitempty"`
 	Preflight    string            `yaml:"preflight,omitempty"`
 	Summary      string            `yaml:"summary,omitempty"`
 }
@@ -574,10 +575,11 @@ func ParseEntry(filename, content string) (*Entry, error) {
 	// keys are ignored, matching how unknown frontmatter keys behave.
 	if e.IsProcedure() && (!fm.Params.IsZero() || !fm.State.IsZero() || !fm.Steps.IsZero() || !fm.Framing.IsZero()) {
 		e.ProcedureSpec = &ProcedureSpecRaw{
-			Params:  fm.Params,
-			State:   fm.State,
-			Steps:   fm.Steps,
-			Framing: fm.Framing,
+			Params:      fm.Params,
+			State:       fm.State,
+			Steps:       fm.Steps,
+			Framing:     fm.Framing,
+			ServeBudget: fm.ServeBudget,
 		}
 	}
 
@@ -801,6 +803,7 @@ func FormatFrontmatter(e *Entry) string {
 		fm.State = e.ProcedureSpec.State
 		fm.Steps = e.ProcedureSpec.Steps
 		fm.Framing = e.ProcedureSpec.Framing
+		fm.ServeBudget = e.ProcedureSpec.ServeBudget
 	}
 
 	data, _ := yaml.Marshal(&fm)

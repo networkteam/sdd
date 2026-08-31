@@ -199,6 +199,7 @@ func procedureSpecSchema() map[string]any {
 			"op":          map[string]any{"type": "string"},
 			"transitions": map[string]any{"type": "array", "items": transition},
 			"goal":        map[string]any{"type": "string"},
+			"serveDelta":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 		},
 		"required":             []string{"id"},
 		"additionalProperties": false,
@@ -210,6 +211,10 @@ func procedureSpecSchema() map[string]any {
 			"state":   declBlock,
 			"steps":   map[string]any{"type": "array", "items": step},
 			"framing": map[string]any{"type": "array", "items": inject},
+			"serveBudget": map[string]any{
+				"type": "integer", "minimum": 0,
+				"description": "declared worst-case serve total in bytes; a larger total than the engine default silences the authoring-arithmetic finding and records the trade",
+			},
 		},
 		"required":             []string{"steps"},
 		"additionalProperties": false,
