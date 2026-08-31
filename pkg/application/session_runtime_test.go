@@ -13,6 +13,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/model"
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -412,21 +413,17 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Targets: targets,
 		Sessions: sessions, StagedBlobs: blobs,
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
-				if targets.isActive() {
-					return sdd.LLMResult{}, errors.New("LLM executed while mutation target was acquired")
-				}
-				llmCalls++
-				if request.Purpose == "preflight" {
-					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
-				}
-				return sdd.LLMResult{Output: []byte("Concrete target resolution is independent of cwd.")}, nil
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
+			identity := pkgllm.Identity{Provider: "test", Model: "test"}
+			if targets.isActive() {
+				return pkgllm.Result{}, errors.New("LLM executed while mutation target was acquired")
+			}
+			llmCalls++
+			if request.Purpose == pkgllm.PurposePreflight {
+				return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
+			}
+			return pkgllm.Result{Text: "Concrete target resolution is independent of cwd.", Identity: identity}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -764,8 +761,9 @@ func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *te
 	blobs := &trackingBlobStore{StagedBlobStore: baseBlobs, releaseErr: errors.New("injected release failure")}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs,
-		LLM:        sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -830,9 +828,9 @@ func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.Gra
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: now, Finalizers: finalizers,
 		Recovery: authorizer,
-		LLM:      sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -864,9 +862,9 @@ func newDurableApplicationWithHomeAndTargets(t *testing.T, home sdd.GraphStore, 
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: home, Targets: targets,
 		Sessions: sessions, StagedBlobs: blobs,
 		Recovery: sdd.RecoveryAuthorizerFunc(func(context.Context, sdd.RecoveryAccessRequest) error { return nil }),
-		LLM:      sdd.LLMExecutorFuncs{CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil }, ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) { return sdd.LLMResult{}, nil }},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)

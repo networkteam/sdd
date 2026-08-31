@@ -3,8 +3,6 @@
 package query
 
 import (
-	"time"
-
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -12,9 +10,8 @@ import (
 // the pre-flight LLM validator. Pure read — no side effects of its own; the
 // runner dependency injected into the finder handles the LLM call.
 type PreflightQuery struct {
-	Entry   *model.Entry
-	Model   string        // LLM model identifier (e.g. "claude-sonnet-4-6")
-	Timeout time.Duration // hard timeout for the validator call
+	Entry *model.Entry
+	Model string // LLM model identifier (e.g. "claude-sonnet-4-6")
 }
 
 // Severity classifies a pre-flight finding. The tooling layer decides what

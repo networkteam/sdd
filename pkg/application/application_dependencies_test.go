@@ -5,9 +5,9 @@ import (
 	"io"
 	"strings"
 	"testing"
-	"time"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 type staticGraphStore struct {
@@ -113,22 +113,19 @@ func TestApplicationLoadsDependencyPartiallyWithUnreadableEntry(t *testing.T) {
 		t.Fatalf("dependency snapshot Health should report 1 load error, got %+v", health)
 	}
 
-	llm := sdd.LLMExecutorFuncs{
-		CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-		ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-			return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
-		},
-	}
+	llm := pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+		return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+	})
 	dependency, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example.org/dep"}, Graph: staticGraphStore{snapshot: foreignSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm, LLMTimeout: time.Minute,
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []string{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm, LLMTimeout: time.Minute,
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -158,22 +155,19 @@ func TestApplicationResolvesAuthorizedDependenciesWithoutLeakingDenials(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	llm := sdd.LLMExecutorFuncs{
-		CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-		ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-			return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
-		},
-	}
+	llm := pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+		return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+	})
 	dependency, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example.org/dep"}, Graph: staticGraphStore{snapshot: foreignSnapshot, attachment: "foreign attachment"},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm, LLMTimeout: time.Minute,
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []string{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm, LLMTimeout: time.Minute,
+		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)

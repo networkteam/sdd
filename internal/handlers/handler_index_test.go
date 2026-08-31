@@ -13,8 +13,8 @@ import (
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/index"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // withoutEmbedded filters the embedded base-procedure IDs out of a callback
@@ -98,10 +98,8 @@ func readFinderFor(t *testing.T) *finders.Finder {
 
 type noopRunner struct{}
 
-func (noopRunner) Identity() llm.Identity { return llm.Identity{Provider: "test", Model: "test-model"} }
-
-func (noopRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) {
-	return nil, fmt.Errorf("no llm runner configured")
+func (noopRunner) Run(context.Context, llm.Request) (llm.Result, error) {
+	return llm.Result{}, fmt.Errorf("no llm runner configured")
 }
 
 func writeEntry(t *testing.T, graphDir, id, body, summary string) {

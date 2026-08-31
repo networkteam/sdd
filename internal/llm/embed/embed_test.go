@@ -150,20 +150,20 @@ func TestOpenAIEmbedder_RecordsStat(t *testing.T) {
 		t.Fatalf("recorded %d calls, want 1", len(sink.calls))
 	}
 	got := sink.calls[0]
-	if got.Op != "embed-documents" {
-		t.Errorf("op: got %q, want embed-documents", got.Op)
+	if got.Purpose != "embed-documents" {
+		t.Errorf("op: got %q, want embed-documents", got.Purpose)
 	}
-	if got.Provider != "openai" {
-		t.Errorf("provider: got %q, want openai", got.Provider)
+	if got.Identity.Provider != "openai" {
+		t.Errorf("provider: got %q, want openai", got.Identity.Provider)
 	}
-	if got.Model != "text-embedding-3-small" {
-		t.Errorf("model: got %q", got.Model)
+	if got.Identity.Model != "text-embedding-3-small" {
+		t.Errorf("model: got %q", got.Identity.Model)
 	}
 	if got.Items != 2 {
 		t.Errorf("items: got %d, want 2", got.Items)
 	}
-	if got.InputTokens != 42 {
-		t.Errorf("input tokens: got %d, want 42 (from usage.prompt_tokens)", got.InputTokens)
+	if got.Usage.InputTokens != 42 {
+		t.Errorf("input tokens: got %d, want 42 (from usage.prompt_tokens)", got.Usage.InputTokens)
 	}
 }
 
@@ -198,17 +198,17 @@ func TestOllamaEmbedder_RecordsStat(t *testing.T) {
 		t.Fatalf("recorded %d calls, want 1", len(sink.calls))
 	}
 	got := sink.calls[0]
-	if got.Op != "embed-queries" {
-		t.Errorf("op: got %q, want embed-queries", got.Op)
+	if got.Purpose != "embed-queries" {
+		t.Errorf("op: got %q, want embed-queries", got.Purpose)
 	}
-	if got.Provider != "ollama" {
-		t.Errorf("provider: got %q, want ollama", got.Provider)
+	if got.Identity.Provider != "ollama" {
+		t.Errorf("provider: got %q, want ollama", got.Identity.Provider)
 	}
 	if got.Items != 1 {
 		t.Errorf("items: got %d, want 1", got.Items)
 	}
-	if got.InputTokens != 17 {
-		t.Errorf("input tokens: got %d, want 17 (from prompt_eval_count)", got.InputTokens)
+	if got.Usage.InputTokens != 17 {
+		t.Errorf("input tokens: got %d, want 17 (from prompt_eval_count)", got.Usage.InputTokens)
 	}
 }
 

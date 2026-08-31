@@ -11,6 +11,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 const defaultOpenAIEndpoint = "https://api.openai.com"
@@ -153,12 +154,11 @@ func (e *openaiEmbedder) embedBatch(ctx context.Context, op string, texts []stri
 	// when a server omits it, tokens.in is 0 but items + duration still
 	// give the throughput comparison.
 	llm.RecordEmbedCall(ctx, llm.CallStat{
-		Op:          op,
-		Provider:    "openai",
-		Model:       e.model,
-		Items:       len(texts),
-		InputTokens: decoded.Usage.PromptTokens,
-		DurationMS:  time.Since(start).Milliseconds(),
+		Purpose:    op,
+		Identity:   pkgllm.Identity{Provider: "openai", Model: e.model},
+		Items:      len(texts),
+		Usage:      pkgllm.Usage{InputTokens: decoded.Usage.PromptTokens},
+		DurationMS: time.Since(start).Milliseconds(),
 	})
 
 	out := make([][]float32, len(decoded.Data))

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 func TestNew_ClaudeCLIDefault(t *testing.T) {
@@ -59,14 +59,14 @@ func TestNew_RemoteProviderWithRateLimit(t *testing.T) {
 	// Remote provider with rate_limit_rps set → wrapped in rateLimited.
 	// gollm validates the API key format at construction time: anthropic
 	// keys need sk-ant- prefix and length > 20.
-	r, err := New(model.LLMConfig{
+	r, err := compose(model.LLMConfig{
 		Provider:     "anthropic",
 		Model:        "claude-3-5-sonnet",
 		APIKeys:      map[string]string{"anthropic": "sk-ant-testkey-aaaaaaaaaaaaaaaaaaaa"},
 		RateLimitRPS: 4,
 	})
 	if err != nil {
-		t.Fatalf("New(anthropic): %v", err)
+		t.Fatalf("compose(anthropic): %v", err)
 	}
 	if _, ok := r.(*rateLimited); !ok {
 		t.Errorf("expected *rateLimited wrapper for remote provider with RateLimitRPS > 0, got %T", r)
@@ -76,13 +76,13 @@ func TestNew_RemoteProviderWithRateLimit(t *testing.T) {
 func TestNew_RemoteProviderAppliesDefaultRateLimit(t *testing.T) {
 	// No explicit RateLimitRPS → conservative per-model default should apply
 	// so tier-1 users on Anthropic/OpenAI don't immediately hit 429s.
-	r, err := New(model.LLMConfig{
+	r, err := compose(model.LLMConfig{
 		Provider: "anthropic",
 		Model:    "claude-3-5-sonnet",
 		APIKeys:  map[string]string{"anthropic": "sk-ant-testkey-aaaaaaaaaaaaaaaaaaaa"},
 	})
 	if err != nil {
-		t.Fatalf("New(anthropic): %v", err)
+		t.Fatalf("compose(anthropic): %v", err)
 	}
 	if _, ok := r.(*rateLimited); !ok {
 		t.Errorf("remote runner with RateLimitRPS=0 must be wrapped with provider default, got %T", r)
@@ -128,14 +128,14 @@ func TestProviderDefaultRPS(t *testing.T) {
 func TestNew_RemoteProviderExplicitOverridesDefault(t *testing.T) {
 	// Explicit RateLimitRPS takes precedence over the per-model default —
 	// higher-tier users can dial up throughput.
-	r, err := New(model.LLMConfig{
+	r, err := compose(model.LLMConfig{
 		Provider:     "anthropic",
 		Model:        "claude-opus-4-7", // default would be 0.5
 		APIKeys:      map[string]string{"anthropic": "sk-ant-testkey-aaaaaaaaaaaaaaaaaaaa"},
 		RateLimitRPS: 10,
 	})
 	if err != nil {
-		t.Fatalf("New(anthropic): %v", err)
+		t.Fatalf("compose(anthropic): %v", err)
 	}
 	wrapped, ok := r.(*rateLimited)
 	if !ok {
@@ -154,13 +154,9 @@ type fakeRunner struct {
 	calls int
 }
 
-func (f *fakeRunner) Identity() llm.Identity {
-	return llm.Identity{Provider: "fake", Model: "fake-model"}
-}
-
-func (f *fakeRunner) Run(_ context.Context, _ llm.Request) (*llm.RunResult, error) {
+func (f *fakeRunner) Run(_ context.Context, _ llm.Request) (llm.Result, error) {
 	f.calls++
-	return &llm.RunResult{Text: "ok"}, nil
+	return llm.Result{Text: "ok", Identity: llm.Identity{Provider: "fake", Model: "fake-model"}}, nil
 }
 
 func TestRateLimited_CallsInner(t *testing.T) {

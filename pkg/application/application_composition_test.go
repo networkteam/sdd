@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -108,22 +108,19 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 	if err != nil {
 		t.Fatal(err)
 	}
-	llm := sdd.LLMExecutorFuncs{
-		CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-		ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-			return sdd.LLMResult{Output: []byte(`{"findings":[]}`), ExecutorFingerprint: "test"}, nil
-		},
-	}
+	llm := pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+		return pkgllm.Result{Text: `{"findings":[]}`, Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+	})
 	runtimeA, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "project-a", DisplayName: "Project A"}, Dependencies: []string{"project-b"},
-		Graph: storeA, Sessions: sessions, StagedBlobs: blobs, LLM: llm, LLMTimeout: time.Minute,
+		Graph: storeA, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtimeB, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "project-b", DisplayName: "Project B"},
-		Graph:   storeB, Sessions: sessions, StagedBlobs: blobs, LLM: llm, LLMTimeout: time.Minute,
+		Graph:   storeB, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)

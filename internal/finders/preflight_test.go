@@ -8,9 +8,9 @@ import (
 
 	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/engine"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // mockRunner implements llm.Runner for testing.
@@ -21,16 +21,12 @@ type mockRunner struct {
 	lastPrompt string
 }
 
-func (*mockRunner) Identity() llm.Identity {
-	return llm.Identity{Provider: "test", Model: "test-model"}
-}
-
-func (m *mockRunner) Run(_ context.Context, req llm.Request) (*llm.RunResult, error) {
+func (m *mockRunner) Run(_ context.Context, req llm.Request) (llm.Result, error) {
 	m.lastPrompt = req.Combined()
 	if m.err != nil {
-		return nil, m.err
+		return llm.Result{}, m.err
 	}
-	return &llm.RunResult{Text: m.response}, nil
+	return llm.Result{Text: m.response, Identity: llm.Identity{Provider: "test", Model: "test-model"}}, nil
 }
 
 // graphWithRefKindFact builds a test graph carrying the ref-kind vocabulary

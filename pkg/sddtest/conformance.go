@@ -453,31 +453,6 @@ func RunSearchIndexStoreTests(t *testing.T, factory func(*testing.T) SearchIndex
 	}
 }
 
-type LLMExecutorFixture struct {
-	Executor           sdd.LLMExecutor
-	Request            sdd.LLMRequest
-	RequiredCapability string
-}
-
-func RunLLMExecutorTests(t *testing.T, factory func(*testing.T) LLMExecutorFixture) {
-	t.Helper()
-	fixture := factory(t)
-	capabilities, err := fixture.Executor.Capabilities(t.Context())
-	if err != nil {
-		t.Fatalf("Capabilities: %v", err)
-	}
-	if fixture.RequiredCapability != "" && !slices.Contains(capabilities, fixture.RequiredCapability) {
-		t.Fatalf("Capabilities %v do not contain %q", capabilities, fixture.RequiredCapability)
-	}
-	result, err := fixture.Executor.Execute(t.Context(), fixture.Request)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if result.ExecutorFingerprint == "" {
-		t.Fatal("Execute returned an empty executor fingerprint")
-	}
-}
-
 type MutationFinalizerFixture struct {
 	Finalizer sdd.MutationFinalizer
 	Applied   sdd.AppliedMutation

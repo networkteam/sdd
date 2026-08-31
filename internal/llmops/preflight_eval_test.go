@@ -3,7 +3,7 @@
 // This file contains evaluation tests for pre-flight prompt template accuracy.
 // Run manually when tuning templates (costs real LLM calls):
 //
-//	go test -tags=eval -run TestPreflightEval ./internal/llm/... -v
+//	go test -tags=eval -run TestPreflightEval ./internal/llmops/... -v
 //
 // The suite is an EXTERNAL test package (llm_test) so it drives the real
 // pre-flight pipeline through the exported llm.Preflight orchestrator with a
@@ -17,7 +17,7 @@
 // Expectations match the severity-scored output format: HasBlocking() == true
 // means at least one `high` finding was reported (the blocking threshold).
 
-package llm_test
+package llmops_test
 
 import (
 	"context"
@@ -28,9 +28,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llm/factory"
+	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // capturingRunner wraps a real llm.Runner and records the last raw response.
@@ -42,9 +43,9 @@ type capturingRunner struct {
 	lastText string
 }
 
-func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, error) {
+func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (llm.Result, error) {
 	res, err := r.inner.Run(ctx, req)
-	if res != nil {
+	if res.Text != "" {
 		r.lastText = res.Text
 	}
 	return res, err
@@ -102,7 +103,7 @@ func getenvOr(key, def string) string {
 // runEval runs the real pre-flight pipeline (llm.Preflight) against the proposed
 // entry and returns the parsed result plus the raw model output for logging on
 // failure.
-func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llm.PreflightResult, string) {
+func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llmops.PreflightResult, string) {
 	t.Helper()
 	result, raw, err := runEvalOnce(t, graph, proposed)
 	if err != nil {
@@ -115,7 +116,7 @@ func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llm.Pref
 // infrastructure error (runner failure, malformed JSON) is returned instead of
 // aborting the test, so a single flaky response counts as a failed run rather
 // than killing the whole measurement (s-prc-vvd's run 5 was exactly that).
-func runEvalOnce(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llm.PreflightResult, string, error) {
+func runEvalOnce(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llmops.PreflightResult, string, error) {
 	t.Helper()
 	runner := evalRunner(t)
 
@@ -126,7 +127,7 @@ func runEvalOnce(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llm.
 	defer cancel()
 
 	// English default — the language-drift rubric only fires for non-empty locales.
-	result, err := llm.Preflight(ctx, runner, proposed, graph, "")
+	result, err := llmops.Preflight(ctx, runner, proposed, graph, "")
 	return result, runner.lastText, err
 }
 
@@ -166,7 +167,7 @@ func (p passRate) withRunsOverride() passRate {
 // runEvalPassRate runs the real pre-flight pipeline Runs times and requires at
 // least MinPasses runs where check returns nil. Infrastructure errors count as
 // failed runs (logged), not aborts.
-func runEvalPassRate(t *testing.T, graph *model.Graph, proposed *model.Entry, rate passRate, check func(*llm.PreflightResult) error) {
+func runEvalPassRate(t *testing.T, graph *model.Graph, proposed *model.Entry, rate passRate, check func(*llmops.PreflightResult) error) {
 	t.Helper()
 	rate = rate.withRunsOverride()
 	passes := 0
@@ -192,8 +193,8 @@ func runEvalPassRate(t *testing.T, graph *model.Graph, proposed *model.Entry, ra
 
 // noHighRefMeta fails when a high-severity ref-meta finding fired — the
 // blocking-tier leak the applicable-never-high rule (d-prc-v0h) forbids.
-func noHighRefMeta(result *llm.PreflightResult) error {
-	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+func noHighRefMeta(result *llmops.PreflightResult) error {
+	if hasFindingAtSeverity(result.Findings, llmops.SeverityHigh, mentionsRefMetaPredicate) {
 		return fmt.Errorf("high ref-meta finding fired on an applicable kind")
 	}
 	return nil
@@ -202,18 +203,18 @@ func noHighRefMeta(result *llm.PreflightResult) error {
 // noMediumOrHighRefMeta fails when any ref-meta finding above low fired — the
 // advisory-precision bar: a defensible kind with no body support for a
 // different admissible kind stays at low.
-func noMediumOrHighRefMeta(result *llm.PreflightResult) error {
-	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+func noMediumOrHighRefMeta(result *llmops.PreflightResult) error {
+	if hasFindingAtSeverity(result.Findings, llmops.SeverityHigh, mentionsRefMetaPredicate) {
 		return fmt.Errorf("high ref-meta finding fired on a defensible kind")
 	}
-	if hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsRefMetaPredicate) {
+	if hasFindingAtSeverity(result.Findings, llmops.SeverityMedium, mentionsRefMetaPredicate) {
 		return fmt.Errorf("medium ref-meta finding fired on a defensible kind without body evidence")
 	}
 	return nil
 }
 
 // noBlocking fails when any high finding fired, regardless of category.
-func noBlocking(result *llm.PreflightResult) error {
+func noBlocking(result *llmops.PreflightResult) error {
 	if result.HasBlocking() {
 		return fmt.Errorf("blocking high finding fired")
 	}
@@ -692,7 +693,7 @@ func TestPreflightEval_AugmentingDirective_GenuineSupersessionFlagged(t *testing
 // caught a replacement-shaped directive that should belong in a supersedes
 // operation rather than an augmentation. Used by the augmenting-directive
 // negative case to allow medium-or-high severity calibration.
-func mentionsSupersession(findings []llm.Finding) bool {
+func mentionsSupersession(findings []llmops.Finding) bool {
 	for _, f := range findings {
 		blob := strings.ToLower(f.Category + " " + f.Observation)
 		if strings.Contains(blob, "supersede") ||
@@ -756,7 +757,7 @@ func TestPreflightEval_AugmentingDirective_TopicFilterReconstruction(t *testing.
 // than scanning the observation prose avoids false positives when an unrelated
 // finding's prose happens to mention "ref" or "kind" — e.g. a low ac-specificity
 // note about "each ref by a per-kind weight" is not a ref-meta finding.
-func mentionsRefMeta(findings []llm.Finding) bool {
+func mentionsRefMeta(findings []llmops.Finding) bool {
 	for _, f := range findings {
 		cat := strings.ToLower(f.Category)
 		if strings.Contains(cat, "ref-kind") ||
@@ -771,7 +772,7 @@ func mentionsRefMeta(findings []llm.Finding) bool {
 
 // hasFindingAtSeverity reports whether any finding matches the predicate at
 // the given severity.
-func hasFindingAtSeverity(findings []llm.Finding, sev llm.Severity, predicate func(llm.Finding) bool) bool {
+func hasFindingAtSeverity(findings []llmops.Finding, sev llmops.Severity, predicate func(llmops.Finding) bool) bool {
 	for _, f := range findings {
 		if f.Severity != sev {
 			continue
@@ -845,7 +846,7 @@ func TestPreflightEval_RefMeta_DescContradicts_High(t *testing.T) {
 
 	result, raw := runEval(t, graph, proposed)
 	// Direct contradiction (desc "extends" vs body "retires") should be high.
-	if !hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+	if !hasFindingAtSeverity(result.Findings, llmops.SeverityHigh, mentionsRefMetaPredicate) {
 		t.Errorf("Expected a high finding mentioning the contradicting desc, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Correctly flagged desc contradiction as high. Findings: %+v", result.Findings)
@@ -892,11 +893,11 @@ func TestPreflightEval_RefMeta_WrongKind_EvidenceMedium(t *testing.T) {
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+	if hasFindingAtSeverity(result.Findings, llmops.SeverityHigh, mentionsRefMetaPredicate) {
 		t.Errorf("Expected no high (kind questions are never high — applicability is mechanical), got: %+v\nRaw output:\n%s", result.Findings, raw)
 	}
-	if !hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsRefMetaPredicate) &&
-		!hasFindingAtSeverity(result.Findings, llm.SeverityLow, mentionsRefMetaPredicate) {
+	if !hasFindingAtSeverity(result.Findings, llmops.SeverityMedium, mentionsRefMetaPredicate) &&
+		!hasFindingAtSeverity(result.Findings, llmops.SeverityLow, mentionsRefMetaPredicate) {
 		t.Errorf("Expected a medium (evidence-backed) or low ref-meta finding for the kind mismatch, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Caught the kind mismatch without blocking. Findings: %+v", result.Findings)
@@ -943,7 +944,7 @@ func TestPreflightEval_RefMeta_TopicalDrift_NotHigh(t *testing.T) {
 	result, raw := runEval(t, graph, proposed)
 	// A correct kind with mild desc drift sits below the contradiction
 	// threshold — the validator must not block on metadata here.
-	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+	if hasFindingAtSeverity(result.Findings, llmops.SeverityHigh, mentionsRefMetaPredicate) {
 		t.Errorf("Expected no high ref-metadata finding for topical desc drift with a correct kind, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Topical-drift case did not produce a high ref-metadata finding. Findings: %+v", result.Findings)
@@ -952,8 +953,8 @@ func TestPreflightEval_RefMeta_TopicalDrift_NotHigh(t *testing.T) {
 
 // mentionsRefMetaPredicate is the predicate form of mentionsRefMeta for use
 // with hasFindingAtSeverity.
-func mentionsRefMetaPredicate(f llm.Finding) bool {
-	return mentionsRefMeta([]llm.Finding{f})
+func mentionsRefMetaPredicate(f llmops.Finding) bool {
+	return mentionsRefMeta([]llmops.Finding{f})
 }
 
 // The scenarios below pin the principle-based ref-kind calibration. Correct or
@@ -1031,11 +1032,11 @@ func TestPreflightEval_RefMeta_BuildsOnActiveSharpened_EvidenceMedium(t *testing
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+	if hasFindingAtSeverity(result.Findings, llmops.SeverityHigh, mentionsRefMetaPredicate) {
 		t.Errorf("Expected no high (kind questions are never high — applicability is mechanical), got: %+v\nRaw:\n%s", result.Findings, raw)
 	}
-	if !hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsRefMetaPredicate) &&
-		!hasFindingAtSeverity(result.Findings, llm.SeverityLow, mentionsRefMetaPredicate) {
+	if !hasFindingAtSeverity(result.Findings, llmops.SeverityMedium, mentionsRefMetaPredicate) &&
+		!hasFindingAtSeverity(result.Findings, llmops.SeverityLow, mentionsRefMetaPredicate) {
 		t.Errorf("Expected a medium (evidence-backed) or low ref-meta finding — the body quotes itself sharpening in place. Got: %+v\nRaw:\n%s", result.Findings, raw)
 	}
 }
@@ -1159,7 +1160,7 @@ func TestPreflightEval_RefMeta_BuildsOnTerminalDoneFollowup_NotHigh(t *testing.T
 	}
 
 	result, raw := runEval(t, graph, proposed)
-	if hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsRefMetaPredicate) {
+	if hasFindingAtSeverity(result.Findings, llmops.SeverityHigh, mentionsRefMetaPredicate) {
 		t.Errorf("Expected no high ref-meta finding — builds-on on a terminal done (taking up a flagged follow-up) is applicable; the ceiling is low. Got: %+v\nRaw:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Correctly did not block builds-on on a terminal done. Findings: %+v", result.Findings)
@@ -1419,7 +1420,7 @@ Role-status derivation stays in a role-status finder (pure read), conforming to 
 }
 
 // mentionsSettled matches the settled-justification rubric's finding category.
-func mentionsSettled(f llm.Finding) bool {
+func mentionsSettled(f llmops.Finding) bool {
 	return strings.Contains(strings.ToLower(f.Category), "settled")
 }
 
@@ -1437,7 +1438,7 @@ func TestPreflightEval_Settled_Unjustified_Medium(t *testing.T) {
 	}
 	graph := model.NewGraph(nil)
 	result, raw := runEval(t, graph, proposed)
-	if !hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsSettled) {
+	if !hasFindingAtSeverity(result.Findings, llmops.SeverityMedium, mentionsSettled) {
 		t.Errorf("Expected a medium settled-unjustified finding, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Correctly flagged unjustified settled directive. Findings: %+v", result.Findings)
@@ -1457,8 +1458,8 @@ func TestPreflightEval_Settled_Justified_NoFinding(t *testing.T) {
 	}
 	graph := model.NewGraph(nil)
 	result, raw := runEval(t, graph, proposed)
-	if hasFindingAtSeverity(result.Findings, llm.SeverityMedium, mentionsSettled) ||
-		hasFindingAtSeverity(result.Findings, llm.SeverityHigh, mentionsSettled) {
+	if hasFindingAtSeverity(result.Findings, llmops.SeverityMedium, mentionsSettled) ||
+		hasFindingAtSeverity(result.Findings, llmops.SeverityHigh, mentionsSettled) {
 		t.Errorf("Expected no settled finding for a justified settled directive, got: %+v\nRaw output:\n%s", result.Findings, raw)
 	} else {
 		t.Logf("Correctly accepted justified settled directive. Findings: %+v", result.Findings)
@@ -1492,9 +1493,9 @@ func TestPreflightEval_ClosingSignal_NoStatedWhy_Flagged(t *testing.T) {
 		Content:    "The courier ships parcels for a flat 4.80 EUR per parcel, per the March 2026 price sheet.",
 	}
 
-	anyMediumOrHigh := func(result *llm.PreflightResult) error {
-		if hasFindingAtSeverity(result.Findings, llm.SeverityMedium, nil) ||
-			hasFindingAtSeverity(result.Findings, llm.SeverityHigh, nil) {
+	anyMediumOrHigh := func(result *llmops.PreflightResult) error {
+		if hasFindingAtSeverity(result.Findings, llmops.SeverityMedium, nil) ||
+			hasFindingAtSeverity(result.Findings, llmops.SeverityHigh, nil) {
 			return nil
 		}
 		return fmt.Errorf("no finding at medium or above for a closure with no stated why")

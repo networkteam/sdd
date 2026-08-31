@@ -10,8 +10,8 @@ import (
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // stubRunner returns a fixed summary for every call and counts invocations. It
@@ -22,15 +22,11 @@ type stubRunner struct {
 	calls int
 }
 
-func (*stubRunner) Identity() llm.Identity {
-	return llm.Identity{Provider: "test", Model: "test-model"}
-}
-
-func (r *stubRunner) Run(_ context.Context, _ llm.Request) (*llm.RunResult, error) {
+func (r *stubRunner) Run(_ context.Context, _ llm.Request) (llm.Result, error) {
 	r.mu.Lock()
 	r.calls++
 	r.mu.Unlock()
-	return &llm.RunResult{Text: r.text}, nil
+	return llm.Result{Text: r.text, Identity: llm.Identity{Provider: "test", Model: "test-model"}}, nil
 }
 
 func (r *stubRunner) callCount() int {

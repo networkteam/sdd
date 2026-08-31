@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -68,17 +68,13 @@ func runSupersedeCapture(t *testing.T, supersedes []any) *model.Entry {
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs,
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
-				if request.Purpose == "preflight" || request.Purpose == "writing-guide" {
-					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
-				}
-				return sdd.LLMResult{Output: []byte("The replacement fact carrying the current reading.")}, nil
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
+			identity := pkgllm.Identity{Provider: "test", Model: "test"}
+			if request.Purpose == pkgllm.PurposePreflight || request.Purpose == pkgllm.PurposeWritingGuide {
+				return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
+			}
+			return pkgllm.Result{Text: "The replacement fact carrying the current reading.", Identity: identity}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)

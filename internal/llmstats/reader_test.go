@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/networkteam/sdd/internal/llm"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 func TestReaderAbsentSink(t *testing.T) {
@@ -51,12 +52,12 @@ func TestWriterReaderRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	sink.RecordCall(llm.CallStat{
-		Op: "preflight", Provider: "anthropic", Model: "claude-sonnet-4-6",
-		InputTokens: 6341, OutputTokens: 12, CacheReadTokens: 6163, CacheCreateTokens: 0, DurationMS: 5000,
+		Purpose: "preflight", Identity: pkgllm.Identity{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+		Usage: pkgllm.Usage{InputTokens: 6341, OutputTokens: 12, CacheReadTokens: 6163}, DurationMS: 5000,
 	})
 	sink.RecordCall(llm.CallStat{
-		Op: "embed-documents", Provider: "ollama", Model: "qwen3-embedding:8b",
-		Items: 8, InputTokens: 1200, DurationMS: 900,
+		Purpose: "embed-documents", Identity: pkgllm.Identity{Provider: "ollama", Model: "qwen3-embedding:8b"},
+		Items: 8, Usage: pkgllm.Usage{InputTokens: 1200}, DurationMS: 900,
 	})
 
 	recs, err := NewReader(dir).Read()

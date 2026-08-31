@@ -17,6 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -223,14 +224,9 @@ The HTTP identity test anchors its real mutation here.
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "identity-test", DisplayName: "Identity test"}, DefaultBranch: "main",
 		Graph: graph, Sessions: sessions, StagedBlobs: blobs,
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-				return sdd.LLMResult{Output: []byte(`{"findings":[]}`), ExecutorFingerprint: "test"}, nil
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+			return pkgllm.Result{Text: `{"findings":[]}`, Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"testing"
-	"time"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	"github.com/networkteam/sdd/pkg/llm"
 	"github.com/networkteam/sdd/pkg/mcpapp"
 )
 
@@ -43,14 +43,10 @@ func (indexStore) Nearest(context.Context, []sdd.IndexNamespace, []float32, int)
 	return nil, nil
 }
 
-type llmExecutor struct{}
+type llmRunner struct{}
 
-func (llmExecutor) Capabilities(context.Context) ([]string, error) { return nil, nil }
-func (llmExecutor) Identity() sdd.LLMIdentity {
-	return sdd.LLMIdentity{Provider: "example", Model: "stub"}
-}
-func (llmExecutor) Execute(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-	return sdd.LLMResult{ExecutorFingerprint: "example"}, nil
+func (llmRunner) Run(context.Context, llm.Request) (llm.Result, error) {
+	return llm.Result{Identity: llm.Identity{Provider: "example", Model: "stub"}}, nil
 }
 
 type accessResolver struct{ runtime *sdd.ProjectRuntime }
@@ -79,7 +75,7 @@ var (
 	_ sdd.StagedBlobStore   = (*memoryStagedBlobStore)(nil)
 	_ sdd.EmbeddingExecutor = embeddingExecutor{}
 	_ sdd.SearchIndexStore  = indexStore{}
-	_ sdd.LLMExecutor       = llmExecutor{}
+	_ llm.Runner            = llmRunner{}
 	_ sdd.AccessResolver    = accessResolver{}
 	_ sdd.MutationFinalizer = finalizer{}
 )
@@ -92,7 +88,7 @@ func TestExternalCompositionCompilesAgainstPublicPorts(t *testing.T) {
 		StagedBlobs: newMemoryStagedBlobStore(nil),
 		Embeddings:  embeddingExecutor{},
 		SearchIndex: indexStore{},
-		LLM:         llmExecutor{}, LLMTimeout: time.Minute,
+		LLM:         llmRunner{},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -38,15 +38,15 @@ func NewFileSink(dir string) (*FileSink, error) {
 func (s *FileSink) RecordCall(stat llm.CallStat) {
 	line, err := json.Marshal(Record{
 		Timestamp:         s.now().UTC().Format(time.RFC3339),
-		Op:                stat.Op,
-		Provider:          stat.Provider,
-		Model:             stat.Model,
-		Variant:           stat.Variant,
+		Op:                stat.Purpose,
+		Provider:          stat.Identity.Provider,
+		Model:             stat.Identity.Model,
+		Variant:           stat.Identity.Variant,
 		Items:             stat.Items,
-		InputTokens:       stat.InputTokens,
-		OutputTokens:      stat.OutputTokens,
-		CacheReadTokens:   stat.CacheReadTokens,
-		CacheCreateTokens: stat.CacheCreateTokens,
+		InputTokens:       stat.Usage.InputTokens,
+		OutputTokens:      stat.Usage.OutputTokens,
+		CacheReadTokens:   stat.Usage.CacheReadTokens,
+		CacheCreateTokens: stat.Usage.CacheCreateTokens,
 		DurationMS:        stat.DurationMS,
 		Error:             stat.Error,
 	})

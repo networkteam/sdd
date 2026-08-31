@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -113,14 +113,9 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 		Project: sdd.ProjectRef{ID: "example", DisplayName: "Example"},
 		Graph:   graph, Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings,
 		SearchIndex: localadapter.NewMemorySearchIndexStore(),
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-				return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)

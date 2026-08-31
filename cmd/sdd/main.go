@@ -19,7 +19,7 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
-	"github.com/networkteam/sdd/internal/llm"
+	internalllm "github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llm/embed"
 	"github.com/networkteam/sdd/internal/llm/factory"
 	"github.com/networkteam/sdd/internal/llmstats"
@@ -29,6 +29,7 @@ import (
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
 	sddapp "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	"github.com/networkteam/slogutils"
 	"github.com/urfave/cli/v3"
 )
@@ -70,15 +71,39 @@ func resolveLLMConfig(cmd *cli.Command) (model.LLMConfig, error) {
 	return cfg, nil
 }
 
-// newRunner builds a llm.Runner from the resolved LLMConfig. Errors surface
+// newRunner builds the composed llm.Runner this host injects everywhere: the
+// factory's provider + rate-limit + timeout stack, wrapped in the observing
+// decorator that writes the stats rows `sdd stats` reads. Errors surface
 // misconfiguration (unknown provider, missing API key, broken config file)
 // at CLI entry so failures are visible before graph work begins.
-func newRunner(cmd *cli.Command) (llm.Runner, error) {
+// timeoutFlag optionally names a per-command duration flag that overrides the
+// configured llm.timeout ("" means config or the factory default).
+func newRunner(cmd *cli.Command, timeoutFlag string) (pkgllm.Runner, error) {
 	cfg, err := resolveLLMConfig(cmd)
 	if err != nil {
 		return nil, err
 	}
-	return factory.New(cfg)
+	if timeoutFlag != "" {
+		d, err := resolveTimeout(cmd, timeoutFlag)
+		if err != nil {
+			return nil, err
+		}
+		if d > 0 {
+			cfg.Timeout = d.String()
+		}
+	}
+	runner, err := factory.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	// Best-effort sink: outside an sdd repo the runner simply records nothing.
+	var sink internalllm.StatsSink
+	if sddDir, err := resolveSDDDir(); err == nil {
+		if fileSink, err := llmstats.NewFileSink(filepath.Join(sddDir, "stats")); err == nil {
+			sink = fileSink
+		}
+	}
+	return internalllm.Observed(runner, sink), nil
 }
 
 // resolveTimeout returns the per-call LLM timeout for the given flag name,
@@ -119,12 +144,8 @@ func configuredLLMTimeout(cmd *cli.Command) (time.Duration, error) {
 // readOnlyRunner satisfies llm.Runner but always errors on Run. Used by
 // read-only CLI commands (status, list, show, lint, wip list) so they
 // don't need LLM configuration to operate.
-type readOnlyRunner struct{}
-
-func (readOnlyRunner) Identity() llm.Identity { return llm.Identity{} }
-
-func (readOnlyRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) {
-	return nil, fmt.Errorf("no llm runner configured for this command")
+var readOnlyRunner pkgllm.RunnerFunc = func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+	return pkgllm.Result{}, fmt.Errorf("no llm runner configured for this command")
 }
 
 // newReadFinder builds a Finder suitable for read-only operations. The
@@ -143,7 +164,7 @@ func newReadFinder() (*finders.Finder, error) {
 		return nil, err
 	}
 	return finders.New(finders.Options{
-		PreflightRunner: readOnlyRunner{},
+		PreflightRunner: readOnlyRunner,
 		Config:          cfg,
 		Repos:           reg,
 	}), nil
@@ -299,13 +320,14 @@ func main() {
 
 			warnUnknownConfigKeys(ctx)
 
-			// Attach a stats sink so LLM calls (pre-flight, summarize) record
-			// token + prompt-cache metrics to .sdd/stats/llm.jsonl. Best-effort:
-			// if .sdd/ isn't discoverable or the sink can't be created, LLM
-			// calls simply record nothing.
+			// Attach a stats sink for the embedding paths, which still record
+			// through the context (chat calls record via the observing
+			// decorator composed in newRunner). Best-effort: if .sdd/ isn't
+			// discoverable or the sink can't be created, embedding calls
+			// simply record nothing.
 			if sddDir, err := resolveSDDDir(); err == nil {
 				if sink, err := llmstats.NewFileSink(filepath.Join(sddDir, "stats")); err == nil {
-					ctx = llm.WithStatsSink(ctx, sink)
+					ctx = internalllm.WithStatsSink(ctx, sink)
 				}
 			}
 
@@ -753,11 +775,6 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			preflightTimeout, err := resolveTimeout(cmd, "preflight-timeout")
-			if err != nil {
-				return err
-			}
-
 			ncmd := &command.NewEntryCmd{
 				Type:             typ,
 				Layer:            layer,
@@ -784,7 +801,6 @@ func newCmd() *cli.Command {
 				Summary:          strings.TrimSpace(cmd.String("summary")),
 				DryRun:           cmd.Bool("dry-run"),
 				PreflightModel:   cmd.String("preflight-model"),
-				PreflightTimeout: preflightTimeout,
 				OnNewEntry: func(id, summary string) {
 					fmt.Println(id + ".md")
 					if rel, err := model.IDToRelPath(id); err == nil {
@@ -796,7 +812,7 @@ func newCmd() *cli.Command {
 				},
 			}
 
-			runner, err := newRunner(cmd)
+			runner, err := newRunner(cmd, "preflight-timeout")
 			if err != nil {
 				return err
 			}
@@ -973,7 +989,7 @@ func lintCmd() *cli.Command {
 				return err
 			}
 			f := finders.New(finders.Options{
-				PreflightRunner:   readOnlyRunner{},
+				PreflightRunner:   readOnlyRunner,
 				Config:            cfg,
 				Repos:             repoReg,
 				ProcedureRegistry: registry,
@@ -1075,15 +1091,10 @@ func summarizeCmd() *cli.Command {
 				explicitText = &value
 			}
 
-			summarizeTimeout, err := resolveTimeout(cmd, "timeout")
-			if err != nil {
-				return err
-			}
 			sumCmd := &command.SummarizeCmd{
 				EntryIDs:     ids,
 				Force:        cmd.Bool("force"),
 				Model:        cmd.String("model"),
-				Timeout:      summarizeTimeout,
 				Concurrency:  int(cmd.Int("concurrency")),
 				ExplicitText: explicitText,
 				OnSummarized: func(id, summary string) {
@@ -1098,7 +1109,7 @@ func summarizeCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			runner, err := newRunner(cmd)
+			runner, err := newRunner(cmd, "timeout")
 			if err != nil {
 				return err
 			}

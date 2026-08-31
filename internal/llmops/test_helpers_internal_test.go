@@ -1,4 +1,4 @@
-package llm
+package llmops
 
 import (
 	"fmt"
@@ -47,18 +47,10 @@ func withSupersedes(ids ...string) entryOpt {
 	return func(e *model.Entry) { e.Supersedes = ids }
 }
 
-func withCloses(ids ...string) entryOpt {
-	return func(e *model.Entry) { e.Closes = ids }
-}
-
 func withKind(k model.Kind) entryOpt {
 	return func(e *model.Entry) { e.Kind = k }
 }
 
 func withContent(c string) entryOpt {
 	return func(e *model.Entry) { e.Content = c }
-}
-
-func withAttachments(paths ...string) entryOpt {
-	return func(e *model.Entry) { e.Attachments = paths }
 }

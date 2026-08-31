@@ -11,6 +11,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 const defaultOllamaEndpoint = "http://localhost:11434"
@@ -137,12 +138,11 @@ func (e *ollamaEmbedder) embedBatch(ctx context.Context, op string, texts []stri
 
 	// One stat per HTTP call, mirroring the openai path.
 	llm.RecordEmbedCall(ctx, llm.CallStat{
-		Op:          op,
-		Provider:    "ollama",
-		Model:       e.model,
-		Items:       len(texts),
-		InputTokens: decoded.PromptEvalCount,
-		DurationMS:  time.Since(start).Milliseconds(),
+		Purpose:    op,
+		Identity:   pkgllm.Identity{Provider: "ollama", Model: e.model},
+		Items:      len(texts),
+		Usage:      pkgllm.Usage{InputTokens: decoded.PromptEvalCount},
+		DurationMS: time.Since(start).Milliseconds(),
 	})
 
 	return decoded.Embeddings, nil

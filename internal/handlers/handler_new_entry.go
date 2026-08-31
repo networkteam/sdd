@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/command"
-	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
@@ -125,16 +124,9 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		entry.Preflight = "skipped"
 	} else {
 		g.Go(func() error {
-			timeout := cmd.PreflightTimeout
-			if timeout == 0 {
-				timeout = 120 * time.Second
-			}
-			pctx, cancel := context.WithTimeout(gctx, timeout)
-			defer cancel()
-			result, err := h.reader.Preflight(pctx, graph, query.PreflightQuery{
-				Entry:   entry,
-				Model:   cmd.PreflightModel,
-				Timeout: timeout,
+			result, err := h.reader.Preflight(gctx, graph, query.PreflightQuery{
+				Entry: entry,
+				Model: cmd.PreflightModel,
 			})
 			pfResult = result
 			pfErr = err
@@ -144,14 +136,12 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		})
 	}
 
-	var sumResult *llm.SummarizeResult
+	var sumResult *llmops.SummarizeResult
 
 	// A caller-supplied summary is taken verbatim — no LLM call at all.
 	if !cmd.DryRun && h.llmRunner != nil && cmd.Summary == "" {
 		g.Go(func() error {
-			sctx, scancel := context.WithTimeout(gctx, 60*time.Second)
-			defer scancel()
-			result, err := llm.Summarize(sctx, h.llmRunner, entry, graph)
+			result, err := llmops.Summarize(gctx, h.llmRunner, entry, graph)
 			if err != nil {
 				slogutils.FromContext(gctx).Warn("summary generation failed", "err", err)
 				return nil // non-fatal: entry is valid without a summary

@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -99,21 +99,17 @@ Branch-targeted workflow reads need to follow the written artifact.
 		}),
 		Sessions:    sessions,
 		StagedBlobs: blobs,
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
-				switch request.Purpose {
-				case "preflight", "writing-guide":
-					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
-				case "summary":
-					return sdd.LLMResult{Output: []byte("Work branch done summary.")}, nil
-				default:
-					return sdd.LLMResult{}, fmt.Errorf("unexpected LLM purpose %q", request.Purpose)
-				}
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
+			identity := pkgllm.Identity{Provider: "test", Model: "test"}
+			switch request.Purpose {
+			case pkgllm.PurposePreflight, pkgllm.PurposeWritingGuide:
+				return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
+			case pkgllm.PurposeSummarize:
+				return pkgllm.Result{Text: "Work branch done summary.", Identity: identity}, nil
+			default:
+				return pkgllm.Result{}, fmt.Errorf("unexpected LLM purpose %q", request.Purpose)
+			}
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -303,27 +299,23 @@ This reference exists only on the bound work branch.
 			return nil
 		}),
 		Sessions: sessions, StagedBlobs: blobs,
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
-				switch request.Purpose {
-				case "preflight":
-					if rejectNextPreflight {
-						rejectNextPreflight = false
-						return sdd.LLMResult{Output: []byte(`{"findings":[{"severity":"high","category":"retry-route","observation":"reject this first attempt"}]}`)}, nil
-					}
-					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
-				case "writing-guide":
-					return sdd.LLMResult{Output: []byte(`{"findings":[]}`)}, nil
-				case "summary":
-					return sdd.LLMResult{Output: []byte("Generated routing summary.")}, nil
-				default:
-					return sdd.LLMResult{}, fmt.Errorf("unexpected LLM purpose %q", request.Purpose)
+		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
+			identity := pkgllm.Identity{Provider: "test", Model: "test"}
+			switch request.Purpose {
+			case pkgllm.PurposePreflight:
+				if rejectNextPreflight {
+					rejectNextPreflight = false
+					return pkgllm.Result{Text: `{"findings":[{"severity":"high","category":"retry-route","observation":"reject this first attempt"}]}`, Identity: identity}, nil
 				}
-			},
-		},
-
-		LLMTimeout: time.Minute,
+				return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
+			case pkgllm.PurposeWritingGuide:
+				return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
+			case pkgllm.PurposeSummarize:
+				return pkgllm.Result{Text: "Generated routing summary.", Identity: identity}, nil
+			default:
+				return pkgllm.Result{}, fmt.Errorf("unexpected LLM purpose %q", request.Purpose)
+			}
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -3,7 +3,7 @@ package finders
 import (
 	"context"
 
-	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
@@ -26,7 +26,7 @@ func (gf *GraphFinder) Preflight(ctx context.Context, q query.PreflightQuery) (*
 	f := gf.finder
 	findings := mechanicalPreflight(q.Entry, gf.graph, f.declaredDependencies(), f.procedureRegistry)
 
-	llmResult, err := llm.Preflight(ctx, f.preflightRunner, q.Entry, gf.graph, f.language())
+	llmResult, err := llmops.Preflight(ctx, f.preflightRunner, q.Entry, gf.graph, f.language())
 	if err != nil {
 		return nil, err
 	}

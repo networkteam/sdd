@@ -3,7 +3,7 @@
 // Seed evaluation cases for the writing guide (d-tac-rvu). Run manually when
 // tuning the guide text (costs real LLM calls):
 //
-//	go test -tags=eval -run TestWritingGuideEval ./internal/llm/... -v
+//	go test -tags=eval -run TestWritingGuideEval ./internal/llmops/... -v
 //
 // Deliberately small: the guide's calibration ground truth is developed
 // against dialogue-judged specimens (the sweeps d-tac-rvu commits), and every
@@ -14,7 +14,7 @@
 // guide exists to run (d-cpt-20r). Provider/model selection, pass-rate tiers,
 // and the runner all reuse the pre-flight eval's machinery in this package.
 
-package llm_test
+package llmops_test
 
 import (
 	"context"
@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/networkteam/sdd/internal/basefacts"
-	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/viewlayout"
 )
@@ -40,7 +40,7 @@ func (s evalFactSource) FactBody(id string) (string, error) {
 	return body, nil
 }
 
-func evalReferenceFacts(t *testing.T, kind model.Kind) llm.ReferenceFacts {
+func evalReferenceFacts(t *testing.T, kind model.Kind) llmops.ReferenceFacts {
 	t.Helper()
 	entries, err := basefacts.Entries(viewlayout.Vocabulary{})
 	if err != nil {
@@ -50,7 +50,7 @@ func evalReferenceFacts(t *testing.T, kind model.Kind) llm.ReferenceFacts {
 	for _, e := range entries {
 		source[e.ID] = e.Content
 	}
-	return llm.ReferenceFacts{
+	return llmops.ReferenceFacts{
 		Source:           source,
 		TypeSystemFactID: basefacts.OverviewFactID,
 		KindFactID:       basefacts.AuthoringFactID(kind),
@@ -59,17 +59,17 @@ func evalReferenceFacts(t *testing.T, kind model.Kind) llm.ReferenceFacts {
 
 // runGuideEvalOnce runs the real writing-guide pipeline once; infrastructure
 // errors are returned, not fatal, so pass-rate cases count them as failed runs.
-func runGuideEvalOnce(t *testing.T, draft *model.Entry, closure ...model.ClosureTarget) (*llm.WritingGuideResult, string, error) {
+func runGuideEvalOnce(t *testing.T, draft *model.Entry, closure ...model.ClosureTarget) (*llmops.WritingGuideResult, string, error) {
 	t.Helper()
 	runner := evalRunner(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
-	result, err := llm.WritingGuide(ctx, runner, draft, closure, evalReferenceFacts(t, draft.Kind))
+	result, err := llmops.WritingGuide(ctx, runner, draft, closure, evalReferenceFacts(t, draft.Kind))
 	return result, runner.lastText, err
 }
 
 // runGuideEvalPassRate mirrors runEvalPassRate for the writing guide.
-func runGuideEvalPassRate(t *testing.T, draft *model.Entry, rate passRate, check func(*llm.WritingGuideResult) error) {
+func runGuideEvalPassRate(t *testing.T, draft *model.Entry, rate passRate, check func(*llmops.WritingGuideResult) error) {
 	t.Helper()
 	rate = rate.withRunsOverride()
 	passes := 0
@@ -93,7 +93,7 @@ func runGuideEvalPassRate(t *testing.T, draft *model.Entry, rate passRate, check
 	}
 }
 
-func hasAxis(result *llm.WritingGuideResult, axis string) error {
+func hasAxis(result *llmops.WritingGuideResult, axis string) error {
 	for _, f := range result.Findings {
 		if f.Axis == axis {
 			return nil
@@ -102,7 +102,7 @@ func hasAxis(result *llm.WritingGuideResult, axis string) error {
 	return fmt.Errorf("no %s finding fired", axis)
 }
 
-func noFindings(result *llm.WritingGuideResult) error {
+func noFindings(result *llmops.WritingGuideResult) error {
 	if len(result.Findings) > 0 {
 		return fmt.Errorf("findings fired on a clean draft: %+v", result.Findings)
 	}
@@ -133,7 +133,7 @@ func TestWritingGuideEval_StrandedDraftYieldsStranding(t *testing.T) {
 		Intent:  model.IntentPending,
 		Content: "Switch the sync path over to the approach we discussed. The earlier attempt failed for the reasons Christopher noted in the call, so this run uses the second option instead. This also unblocks the migration.",
 	}
-	runGuideEvalPassRate(t, draft, advisoryTier, func(r *llm.WritingGuideResult) error {
+	runGuideEvalPassRate(t, draft, advisoryTier, func(r *llmops.WritingGuideResult) error {
 		return hasAxis(r, "stranding")
 	})
 }
@@ -146,7 +146,7 @@ func TestWritingGuideEval_ConflatedDraftYieldsConflation(t *testing.T) {
 		Intent:  model.IntentPending,
 		Content: "All handlers adopt structured logging through slog, replacing direct stderr prints, so log level and shape are uniform across commands. Additionally, the next release drops the 32-bit ARM builds from the artifact matrix, since no installation on that platform was reported and each release currently spends CI time cross-compiling for it.",
 	}
-	runGuideEvalPassRate(t, draft, advisoryTier, func(r *llm.WritingGuideResult) error {
+	runGuideEvalPassRate(t, draft, advisoryTier, func(r *llmops.WritingGuideResult) error {
 		return hasAxis(r, "conflation")
 	})
 }

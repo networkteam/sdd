@@ -7,12 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/networkteam/sdd/internal/command"
-	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -74,10 +73,6 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 		}
 	}
 
-	timeout := cmd.Timeout
-	if timeout == 0 {
-		timeout = 60 * time.Second
-	}
 	concurrency := cmd.Concurrency
 	if concurrency < 1 {
 		concurrency = model.DefaultLLMConcurrency
@@ -115,16 +110,14 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			// their own entries' summaries concurrently, and those feed
 			// neighbor prose into this prompt.
 			graphMu.RLock()
-			req, renderErr := llm.RenderSummaryPrompt(entry, graph)
+			req, renderErr := llmops.RenderSummaryPrompt(entry, graph)
 			graphMu.RUnlock()
 			if renderErr != nil {
 				return fmt.Errorf("rendering summary for %s: %w", entry.ID, renderErr)
 			}
 
-			// LLM call without the graph lock.
-			ectx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			output, err := llm.Run(ectx, h.llmRunner, req, "summarize")
+			// LLM call without the graph lock; the injected runner bounds it.
+			output, err := h.llmRunner.Run(ctx, req)
 			if err != nil {
 				return fmt.Errorf("summarizing %s: %w", entry.ID, err)
 			}

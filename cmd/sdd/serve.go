@@ -23,14 +23,10 @@ import (
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 	mcpserver "github.com/networkteam/sdd/pkg/mcpapp"
 )
-
-// defaultServeLLMTimeout caps an LLM call when `llm.timeout` sets none. It
-// lives here because the composition root is the only layer entitled to a
-// default — every layer below takes the resolved value.
-const defaultServeLLMTimeout = 2 * time.Minute
 
 func serveCmd() *cli.Command {
 	return &cli.Command{
@@ -66,7 +62,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			runner, err := newRunner(cmd)
+			runner, err := newRunner(cmd, "")
 			if err != nil {
 				return err
 			}
@@ -227,7 +223,7 @@ func (a *localRuntimeAccess) ResolveDependency(_ context.Context, _ sdd.Principa
 	return runtime, nil
 }
 
-func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddDir string, cfg *model.PerRepoConfig, registry *repos.Registry, runner llm.Runner) (*sdd.Application, sdd.ProjectID, sdd.RequestIdentity, error) {
+func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddDir string, cfg *model.PerRepoConfig, registry *repos.Registry, runner pkgllm.Runner) (*sdd.Application, sdd.ProjectID, sdd.RequestIdentity, error) {
 	displayName := filepath.Base(filepath.Dir(sddDir))
 	participant := ""
 	language := ""
@@ -261,37 +257,6 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	blobs, err := localadapter.NewFilesystemStagedBlobStore(storeLocations...)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
-	}
-	llmTimeout, err := configuredLLMTimeout(cmd)
-	if err != nil {
-		return nil, "", sdd.RequestIdentity{}, err
-	}
-	if llmTimeout <= 0 {
-		llmTimeout = defaultServeLLMTimeout
-	}
-	// "local" is this executor's own name, not the provider's — the runner
-	// answers that through Identity, and mixing the two is what put a host
-	// name in the stats provider column.
-	executor := sdd.LLMExecutorFuncs{
-		CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
-		IdentityFunc: func() sdd.LLMIdentity {
-			id := runner.Identity()
-			return sdd.LLMIdentity{Provider: id.Provider, Model: id.Model, Variant: id.Variant}
-		},
-		ExecuteFunc: func(ctx context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
-			result, err := runner.Run(ctx, llm.Request{SystemPrompt: request.SystemPrompt, UserPrompt: request.Prompt})
-			if err != nil {
-				return sdd.LLMResult{}, err
-			}
-			out := sdd.LLMResult{Output: []byte(result.Text), ExecutorFingerprint: "local", FinishReason: "completed"}
-			if result.Meta != nil {
-				out.Usage.InputTokens = int64(result.Meta.InputTokens)
-				out.Usage.OutputTokens = int64(result.Meta.OutputTokens)
-				out.Usage.CacheReadTokens = int64(result.Meta.CacheReadTokens)
-				out.Usage.CacheCreateTokens = int64(result.Meta.CacheCreateTokens)
-			}
-			return out, nil
-		},
 	}
 	localEmbedder, err := buildEmbedder(cmd)
 	if err != nil {
@@ -331,7 +296,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 			return nil
 		}),
 		Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, baseIndex),
-		LLM: executor, LLMTimeout: llmTimeout,
+		LLM: runner,
 	})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
@@ -354,7 +319,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		memberIndex := localadapter.NewPersistentSearchIndexStore(sdd.ProjectID(dependency), cacheRoot, dependency)
 		member, runtimeErr := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: dependency}, Graph: memberGraph,
-			Sessions: sessions, StagedBlobs: blobs, Embeddings: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: executor, LLMTimeout: llmTimeout,
+			Sessions: sessions, StagedBlobs: blobs, Embeddings: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: runner,
 			ExcludeEmbeddedFromIndex: true,
 		})
 		if runtimeErr != nil {

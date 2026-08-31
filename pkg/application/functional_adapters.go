@@ -36,29 +36,3 @@ func (f SearchIndexStoreFuncs) Reconcile(ctx context.Context, namespace IndexNam
 func (f SearchIndexStoreFuncs) Nearest(ctx context.Context, namespaces []IndexNamespace, vector []float32, limit int) ([]ScoredChunkHit, error) {
 	return f.NearestFunc(ctx, namespaces, vector, limit)
 }
-
-// LLMExecutorFuncs adapts a raw model executor without moving prompt,
-// parsing, validation, or gate semantics out of SDD.
-type LLMExecutorFuncs struct {
-	CapabilitiesFunc func(context.Context) ([]string, error)
-	IdentityFunc     func() LLMIdentity
-	ExecuteFunc      func(context.Context, LLMRequest) (LLMResult, error)
-}
-
-func (f LLMExecutorFuncs) Capabilities(ctx context.Context) ([]string, error) {
-	return f.CapabilitiesFunc(ctx)
-}
-
-// Identity reports an unnamed executor as such. A test double that never set
-// IdentityFunc records blank attribution — visibly absent, which is the point:
-// nothing here invents a plausible name to fill the hole.
-func (f LLMExecutorFuncs) Identity() LLMIdentity {
-	if f.IdentityFunc == nil {
-		return LLMIdentity{}
-	}
-	return f.IdentityFunc()
-}
-
-func (f LLMExecutorFuncs) Execute(ctx context.Context, request LLMRequest) (LLMResult, error) {
-	return f.ExecuteFunc(ctx, request)
-}

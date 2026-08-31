@@ -119,16 +119,6 @@ func TestFunctionalMechanicalAdaptersConform(t *testing.T) {
 	sddtest.RunSearchIndexStoreTests(t, func(*testing.T) sddtest.SearchIndexStoreFixture {
 		return sddtest.SearchIndexStoreFixture{Store: memIndex, Namespace: namespace, Chunks: chunks, Query: queryVec}
 	})
-
-	executor := sdd.LLMExecutorFuncs{
-		CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
-		ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-			return sdd.LLMResult{Output: []byte(`{}`), ExecutorFingerprint: "fixture"}, nil
-		},
-	}
-	sddtest.RunLLMExecutorTests(t, func(*testing.T) sddtest.LLMExecutorFixture {
-		return sddtest.LLMExecutorFixture{Executor: executor, RequiredCapability: "json-schema"}
-	})
 }
 
 func TestMemorySearchIndexStoreConforms(t *testing.T) {

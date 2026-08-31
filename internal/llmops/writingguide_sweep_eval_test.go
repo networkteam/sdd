@@ -7,9 +7,9 @@
 // Not a pass-rate gate: it asserts nothing and is deleted once the sweep's
 // proven discriminators land as real cases in writingguide_eval_test.go.
 //
-//	go test -tags=eval -run TestWritingGuideSweep ./internal/llm/... -v
+//	go test -tags=eval -run TestWritingGuideSweep ./internal/llmops/... -v
 
-package llm_test
+package llmops_test
 
 import (
 	"os"

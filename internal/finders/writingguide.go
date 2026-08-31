@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/networkteam/sdd/internal/basefacts"
-	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
@@ -22,12 +22,12 @@ func (f *Finder) WritingGuide(ctx context.Context, graph *model.Graph, q query.W
 	if f.writingGuideRunner == nil {
 		return nil, fmt.Errorf("writing guide: no LLM runner configured")
 	}
-	refFacts := llm.ReferenceFacts{
+	refFacts := llmops.ReferenceFacts{
 		Source:           graphFactSource{graph: graph},
 		TypeSystemFactID: basefacts.OverviewFactID,
 		KindFactID:       basefacts.AuthoringFactID(q.Entry.Kind),
 	}
-	result, err := llm.WritingGuide(ctx, f.writingGuideRunner, q.Entry, q.ClosureTargets, refFacts)
+	result, err := llmops.WritingGuide(ctx, f.writingGuideRunner, q.Entry, q.ClosureTargets, refFacts)
 	if err != nil {
 		return nil, err
 	}

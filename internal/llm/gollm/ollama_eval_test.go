@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 func TestOllamaEval_RoundTrip(t *testing.T) {

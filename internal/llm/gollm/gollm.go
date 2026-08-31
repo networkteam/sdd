@@ -13,8 +13,8 @@ import (
 
 	upstream "github.com/teilomillet/gollm"
 
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // Runner wraps a gollm client and adapts it to llm.Runner. When the provider
@@ -156,17 +156,18 @@ func sortedKeys(params map[string]string) []string {
 	return keys
 }
 
-// Identity reports the configured provider and model. Both are known at
+// identity names the configured provider and model. Both are known at
 // construction, so they attribute a call whatever the response turns out to be.
-func (r *Runner) Identity() llm.Identity {
+func (r *Runner) identity() llm.Identity {
 	return llm.Identity{Provider: r.provider, Model: r.model, Variant: r.variant}
 }
 
 // Run sends the request to the underlying gollm client. When caching is
 // enabled (Anthropic), the SystemPrompt is tagged ephemeral so the server
 // caches the prefix. Other providers ignore the cache hint but still see
-// the split system/user message pair.
-func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, error) {
+// the split system/user message pair. Failures carry the identity through the
+// typed llm.Error so they measure like successes.
+func (r *Runner) Run(ctx context.Context, req llm.Request) (llm.Result, error) {
 	var opts []upstream.PromptOption
 	if req.SystemPrompt != "" {
 		cacheType := upstream.CacheType("")
@@ -181,27 +182,25 @@ func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, erro
 	resp, err := r.client.GenerateWithUsage(ctx, prompt)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("gollm %s: timed out", r.provider)
+			err = fmt.Errorf("gollm %s: timed out", r.provider)
+		} else {
+			err = fmt.Errorf("gollm %s: %w", r.provider, err)
 		}
-		return nil, fmt.Errorf("gollm %s: %w", r.provider, err)
+		return llm.Result{}, &llm.Error{Identity: r.identity(), Err: err}
 	}
 
-	// The fork surfaces per-call usage (tokens + prompt-cache read/creation)
-	// via GenerateWithUsage; map it into the agent-neutral LLMMetadata. Cost is
-	// not reported by the provider APIs (it was a claude-cli extra), so it is
-	// left zero.
-	return &llm.RunResult{Text: resp.Content, Meta: metaFromUsage(resp.Usage, r.model)}, nil
+	return llm.Result{Text: resp.Content, Identity: r.identity(), Usage: usageFromResponse(resp.Usage)}, nil
 }
 
-// metaFromUsage maps a gollm Response.Usage into the agent-neutral
-// llm.LLMMetadata. It prefers the Anthropic-style input/output counts and falls
-// back to the OpenAI-style prompt/completion counts. Nil when the provider
-// reported no usage — Ollama reports its counts as prompt_eval_count and
-// eval_count, outside the usage object the fork's parser reads — which costs
-// only the token figures now that identity travels separately.
-func metaFromUsage(u *upstream.Usage, model string) *llm.LLMMetadata {
+// usageFromResponse maps a gollm Response.Usage into the common llm.Usage.
+// It prefers the Anthropic-style input/output counts and falls back to the
+// OpenAI-style prompt/completion counts. Zero when the provider reported no
+// usage — Ollama reports its counts as prompt_eval_count and eval_count,
+// outside the usage object the fork's parser reads — which costs only the
+// token figures now that identity travels on the Result.
+func usageFromResponse(u *upstream.Usage) llm.Usage {
 	if u == nil {
-		return nil
+		return llm.Usage{}
 	}
 	in := u.InputTokens
 	if in == 0 {
@@ -211,18 +210,11 @@ func metaFromUsage(u *upstream.Usage, model string) *llm.LLMMetadata {
 	if out == 0 {
 		out = u.CompletionTokens
 	}
-	mu := llm.ModelUsage{
+	return llm.Usage{
 		InputTokens:       in,
 		OutputTokens:      out,
 		CacheReadTokens:   u.CacheReadInputTokens,
 		CacheCreateTokens: u.CacheCreationInputTokens,
-	}
-	return &llm.LLMMetadata{
-		InputTokens:       in,
-		OutputTokens:      out,
-		CacheReadTokens:   u.CacheReadInputTokens,
-		CacheCreateTokens: u.CacheCreationInputTokens,
-		Models:            map[string]llm.ModelUsage{model: mu},
 	}
 }
 

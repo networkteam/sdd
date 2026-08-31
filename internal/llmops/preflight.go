@@ -1,4 +1,4 @@
-package llm
+package llmops
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/mdcompose"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 //go:embed preflight_templates/*.tmpl
@@ -64,7 +65,7 @@ func (r *PreflightResult) HasBlocking() bool {
 // `.sdd/config.yaml` (empty string when unset — English default). It feeds
 // the language-drift check which flags entries whose description prose does
 // not match the configured language.
-func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph, configuredLanguage string) (*PreflightResult, error) {
+func Preflight(ctx context.Context, runner llm.Runner, entry *model.Entry, graph *model.Graph, configuredLanguage string) (*PreflightResult, error) {
 	ct := selectCheckType(entry, graph)
 
 	vocab, err := refKindVocabulary(graph)
@@ -79,7 +80,7 @@ func Preflight(ctx context.Context, runner Runner, entry *model.Entry, graph *mo
 		return nil, fmt.Errorf("rendering pre-flight prompt: %w", err)
 	}
 
-	output, err := Run(ctx, runner, req, "preflight")
+	output, err := runner.Run(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("running pre-flight validator: %w", err)
 	}
@@ -513,15 +514,15 @@ func refKindVocabulary(graph *model.Graph) (string, error) {
 // universal partials on them risks false positives (e.g. unrelated_refs flagging
 // an annotation's membership refs). All templates are parsed together so partials
 // are available.
-func renderPreflightPrompt(ct checkType, pctx *preflightContext) (Request, error) {
+func renderPreflightPrompt(ct checkType, pctx *preflightContext) (llm.Request, error) {
 	base, ok := checkTypeTemplates[ct]
 	if !ok {
-		return Request{}, fmt.Errorf("no template for check type %s", ct)
+		return llm.Request{}, fmt.Errorf("no template for check type %s", ct)
 	}
 
 	tmpl, err := parsedPreflightTemplates()
 	if err != nil {
-		return Request{}, fmt.Errorf("parsing templates: %w", err)
+		return llm.Request{}, fmt.Errorf("parsing templates: %w", err)
 	}
 
 	// Substantive checks share the universal preamble; the structural checks
@@ -533,13 +534,14 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (Request, error
 
 	var sysB, userB strings.Builder
 	if err := tmpl.ExecuteTemplate(&sysB, systemTmpl, pctx); err != nil {
-		return Request{}, fmt.Errorf("executing template %s: %w", systemTmpl, err)
+		return llm.Request{}, fmt.Errorf("executing template %s: %w", systemTmpl, err)
 	}
 	if err := tmpl.ExecuteTemplate(&userB, base+"_user", pctx); err != nil {
-		return Request{}, fmt.Errorf("executing template %s_user: %w", base, err)
+		return llm.Request{}, fmt.Errorf("executing template %s_user: %w", base, err)
 	}
 
-	return Request{
+	return llm.Request{
+		Purpose:      llm.PurposePreflight,
 		SystemPrompt: strings.TrimSpace(sysB.String()),
 		UserPrompt:   strings.TrimSpace(userB.String()),
 	}, nil

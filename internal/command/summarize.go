@@ -1,7 +1,5 @@
 package command
 
-import "time"
-
 // SummarizeCmd captures intent to generate or regenerate entry summaries.
 type SummarizeCmd struct {
 	// EntryIDs lists specific entries to summarize. Empty means --all.
@@ -12,8 +10,6 @@ type SummarizeCmd struct {
 	Force bool
 	// Model is the LLM model to use for summary generation.
 	Model string
-	// Timeout per entry for the LLM call.
-	Timeout time.Duration
 	// Concurrency bounds the worker pool for batch summarize. Zero falls
 	// back to model.DefaultLLMConcurrency.
 	Concurrency int

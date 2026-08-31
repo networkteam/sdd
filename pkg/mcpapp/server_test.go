@@ -25,6 +25,7 @@ import (
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/serveview"
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 	mcpserver "github.com/networkteam/sdd/pkg/mcpapp"
 )
@@ -341,22 +342,18 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 			}
 			return nil
 		}),
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
-			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
-				if request.Purpose == "summary" {
-					return sdd.LLMResult{Output: []byte("Test capture entry summary."), ExecutorFingerprint: "test"}, nil
-				}
-				items := make([]map[string]string, 0, len(findings))
-				for _, finding := range findings {
-					items = append(items, map[string]string{"severity": string(finding.Severity), "category": finding.Category, "observation": finding.Observation})
-				}
-				output, marshalErr := json.Marshal(map[string]any{"findings": items})
-				return sdd.LLMResult{Output: output, ExecutorFingerprint: "test"}, marshalErr
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
+			identity := pkgllm.Identity{Provider: "test", Model: "test"}
+			if request.Purpose == pkgllm.PurposeSummarize {
+				return pkgllm.Result{Text: "Test capture entry summary.", Identity: identity}, nil
+			}
+			items := make([]map[string]string, 0, len(findings))
+			for _, finding := range findings {
+				items = append(items, map[string]string{"severity": string(finding.Severity), "category": finding.Category, "observation": finding.Observation})
+			}
+			output, marshalErr := json.Marshal(map[string]any{"findings": items})
+			return pkgllm.Result{Text: string(output), Identity: identity}, marshalErr
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)

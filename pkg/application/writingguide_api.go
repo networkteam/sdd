@@ -71,10 +71,8 @@ func (a *Application) WritingGuideCheck(ctx context.Context, identity RequestIde
 		closureTargets = snapshot.graph.ClosureTargets(entry)
 	}
 
-	finder := finders.New(finders.Options{WritingGuideRunner: runtimeLLMRunner{executor: runtime.options.LLM, purpose: "writing-guide"}})
-	guideCtx, cancel := context.WithTimeout(ctx, runtime.options.LLMTimeout)
-	defer cancel()
-	result, err := finder.WritingGuide(guideCtx, snapshot.graph, query.WritingGuideQuery{Entry: entry, ClosureTargets: closureTargets})
+	finder := finders.New(finders.Options{WritingGuideRunner: runtime.options.LLM})
+	result, err := finder.WritingGuide(ctx, snapshot.graph, query.WritingGuideQuery{Entry: entry, ClosureTargets: closureTargets})
 	if err != nil {
 		return nil, fmt.Errorf("writing guide: %w", err)
 	}

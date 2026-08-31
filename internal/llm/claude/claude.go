@@ -5,26 +5,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
-	"time"
 
-	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/slogutils"
+
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
-// Runner invokes the claude CLI with --output-format json and parses the
-// response into agent-neutral LLMMetadata.
+// Runner invokes the claude CLI with --output-format json and maps the
+// response into the common llm.Result.
 type Runner struct {
 	model string
 }
 
 // NewRunner returns an llm.Runner backed by the claude CLI.
-func NewRunner(model string) llm.Runner {
+func NewRunner(model string) *Runner {
 	return &Runner{model: model}
 }
 
-// Identity reports the claude CLI transport and the configured model.
-func (r *Runner) Identity() llm.Identity {
+func (r *Runner) identity() llm.Identity {
 	return llm.Identity{Provider: "claude-cli", Model: r.model}
 }
 
@@ -32,47 +33,51 @@ func (r *Runner) Identity() llm.Identity {
 // The claude CLI accepts a single stdin payload, so SystemPrompt and
 // UserPrompt are concatenated — prompt caching is not available through this
 // transport.
-func (r *Runner) Run(ctx context.Context, req llm.Request) (*llm.RunResult, error) {
+func (r *Runner) Run(ctx context.Context, req llm.Request) (llm.Result, error) {
 	cmd := exec.CommandContext(ctx, "claude", "-p", "--model", r.model, "--output-format", "json")
 	cmd.Stdin = strings.NewReader(req.Combined())
 	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("claude -p timed out (increase with --preflight-timeout)")
+			err = fmt.Errorf("claude -p timed out (increase with --preflight-timeout)")
+		} else {
+			err = fmt.Errorf("claude -p: %w", err)
 		}
-		return nil, fmt.Errorf("claude -p: %w", err)
+		return llm.Result{}, &llm.Error{Identity: r.identity(), Err: err}
 	}
 
 	var resp claudeResponse
 	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, fmt.Errorf("parsing claude JSON response: %w", err)
+		return llm.Result{}, &llm.Error{Identity: r.identity(), Err: fmt.Errorf("parsing claude JSON response: %w", err)}
 	}
 
-	meta := &llm.LLMMetadata{
-		TotalCostUSD:      resp.TotalCostUSD,
-		InputTokens:       resp.Usage.InputTokens,
-		OutputTokens:      resp.Usage.OutputTokens,
-		CacheReadTokens:   resp.Usage.CacheReadInputTokens,
-		CacheCreateTokens: resp.Usage.CacheCreationInputTokens,
-		NumTurns:          resp.NumTurns,
-		Duration:          time.Duration(resp.DurationMs) * time.Millisecond,
-		DurationAPI:       time.Duration(resp.DurationAPIMs) * time.Millisecond,
-		Models:            make(map[string]llm.ModelUsage, len(resp.ModelUsage)),
-	}
-
-	for name, mu := range resp.ModelUsage {
-		meta.Models[name] = llm.ModelUsage{
-			InputTokens:       mu.InputTokens,
-			OutputTokens:      mu.OutputTokens,
-			CacheReadTokens:   mu.CacheReadInputTokens,
-			CacheCreateTokens: mu.CacheCreationInputTokens,
-			CostUSD:           mu.CostUSD,
+	// The CLI is the one transport reporting per-model usage (a call may span
+	// e.g. a haiku sub-model); the common Usage carries the aggregate, so the
+	// per-model detail is this runner's own debug logging.
+	if len(resp.ModelUsage) > 0 {
+		attrs := make([]any, 0, len(resp.ModelUsage))
+		for name, mu := range resp.ModelUsage {
+			attrs = append(attrs, slog.Group(name,
+				slog.Int("tokens.in", mu.InputTokens),
+				slog.Int("tokens.out", mu.OutputTokens),
+				slog.Int("cache.read", mu.CacheReadInputTokens),
+				slog.Int("cache.create", mu.CacheCreationInputTokens),
+				slog.Float64("cost", mu.CostUSD),
+			))
 		}
+		slogutils.FromContext(ctx).Debug("claude-cli model usage", slog.Group("llm", attrs...))
 	}
 
-	return &llm.RunResult{
-		Text: resp.Result,
-		Meta: meta,
+	return llm.Result{
+		Text:     resp.Result,
+		Identity: r.identity(),
+		Usage: llm.Usage{
+			InputTokens:       resp.Usage.InputTokens,
+			OutputTokens:      resp.Usage.OutputTokens,
+			CacheReadTokens:   resp.Usage.CacheReadInputTokens,
+			CacheCreateTokens: resp.Usage.CacheCreationInputTokens,
+			CostUSD:           resp.TotalCostUSD,
+		},
 	}, nil
 }
 

@@ -17,10 +17,10 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 	sdd "github.com/networkteam/sdd/pkg/application"
+	"github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -42,50 +42,52 @@ type GuideFinding struct {
 	Severity  string `json:"severity"`
 }
 
-// LLMScript scripts the runtime's LLM executor per purpose and counts calls,
-// so "the guide ran once" is asserted on real executor invocations instead of
+// LLMScript scripts the runtime's LLM runner per purpose and counts calls,
+// so "the guide ran once" is asserted on real runner invocations instead of
 // a faked op. Fields may be changed between calls; a nil findings slice
 // scripts a clean pass.
 type LLMScript struct {
 	mu                sync.Mutex
-	calls             map[string]int
+	calls             map[llm.Purpose]int
 	PreflightFindings []PreflightFinding
 	GuideFindings     []GuideFinding
 	Summary           string
 }
 
-// Calls returns how often the executor ran for the purpose.
-func (s *LLMScript) Calls(purpose string) int {
+// Calls returns how often the runner ran for the purpose.
+func (s *LLMScript) Calls(purpose llm.Purpose) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.calls[purpose]
 }
 
-func (s *LLMScript) execute(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
+var scriptIdentity = llm.Identity{Provider: "proctest", Model: "scripted"}
+
+func (s *LLMScript) Run(_ context.Context, request llm.Request) (llm.Result, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.calls == nil {
-		s.calls = map[string]int{}
+		s.calls = map[llm.Purpose]int{}
 	}
 	s.calls[request.Purpose]++
 	switch request.Purpose {
-	case "summary":
-		return sdd.LLMResult{Output: []byte(s.Summary), ExecutorFingerprint: "proctest"}, nil
-	case "preflight":
+	case llm.PurposeSummarize:
+		return llm.Result{Text: s.Summary, Identity: scriptIdentity}, nil
+	case llm.PurposePreflight:
 		return marshalFindings(s.PreflightFindings)
-	case "writing-guide":
+	case llm.PurposeWritingGuide:
 		return marshalFindings(s.GuideFindings)
 	default:
-		return sdd.LLMResult{}, fmt.Errorf("proctest: unscripted LLM purpose %q", request.Purpose)
+		return llm.Result{}, fmt.Errorf("proctest: unscripted LLM purpose %q", request.Purpose)
 	}
 }
 
-func marshalFindings[F any](findings []F) (sdd.LLMResult, error) {
+func marshalFindings[F any](findings []F) (llm.Result, error) {
 	if findings == nil {
 		findings = []F{}
 	}
 	output, err := json.Marshal(map[string]any{"findings": findings})
-	return sdd.LLMResult{Output: output, ExecutorFingerprint: "proctest"}, err
+	return llm.Result{Text: string(output), Identity: scriptIdentity}, err
 }
 
 // MustTopics parses topic labels into the typed paths a fixture entry
@@ -238,12 +240,7 @@ func NewWorld(t *testing.T, opts ...Option) *World {
 	options := sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "proctest"}, DefaultBranch: "main",
 		Graph: graph, Sessions: sessions, StagedBlobs: blobs,
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc:      script.execute,
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: script,
 	}
 	if len(cfg.branchDirs) > 0 {
 		targets := branchTargets{fallback: graph, graphs: map[string]sdd.GraphStore{"main": graph}}

@@ -1,4 +1,4 @@
-package llm
+package llmops
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 //go:embed summary_templates/*.tmpl
@@ -21,13 +22,13 @@ type SummarizeResult struct {
 // Summarize generates a summary for a single entry using the LLM runner.
 // Summaries are derived on demand with no staleness tracking (d-cpt-4qi), so
 // this always regenerates — the caller decides when to invoke it.
-func Summarize(ctx context.Context, runner Runner, entry *model.Entry, graph *model.Graph) (*SummarizeResult, error) {
+func Summarize(ctx context.Context, runner llm.Runner, entry *model.Entry, graph *model.Graph) (*SummarizeResult, error) {
 	req, err := RenderSummaryPrompt(entry, graph)
 	if err != nil {
 		return nil, fmt.Errorf("rendering summary prompt: %w", err)
 	}
 
-	output, err := Run(ctx, runner, req, "summarize")
+	output, err := runner.Run(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("running summary generator: %w", err)
 	}
@@ -48,7 +49,7 @@ type summaryContext struct {
 // RenderSummaryPrompt renders the summary prompt for an entry. Returns a
 // Request with the full rendered prompt in UserPrompt; the system/user split
 // is introduced when templates are refactored (see the plan decision).
-func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error) {
+func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (llm.Request, error) {
 	sctx := &summaryContext{
 		EntryContent: FormatEntryForPrompt(entry),
 	}
@@ -94,18 +95,19 @@ func RenderSummaryPrompt(entry *model.Entry, graph *model.Graph) (Request, error
 
 	tmpl, err := template.ParseFS(summaryTemplates, "summary_templates/*.tmpl")
 	if err != nil {
-		return Request{}, fmt.Errorf("parsing summary templates: %w", err)
+		return llm.Request{}, fmt.Errorf("parsing summary templates: %w", err)
 	}
 
 	var sysB, userB strings.Builder
 	if err := tmpl.ExecuteTemplate(&sysB, "summary_system", sctx); err != nil {
-		return Request{}, fmt.Errorf("executing summary_system template: %w", err)
+		return llm.Request{}, fmt.Errorf("executing summary_system template: %w", err)
 	}
 	if err := tmpl.ExecuteTemplate(&userB, "summary_user", sctx); err != nil {
-		return Request{}, fmt.Errorf("executing summary_user template: %w", err)
+		return llm.Request{}, fmt.Errorf("executing summary_user template: %w", err)
 	}
 
-	return Request{
+	return llm.Request{
+		Purpose:      llm.PurposeSummarize,
 		SystemPrompt: strings.TrimSpace(sysB.String()),
 		UserPrompt:   strings.TrimSpace(userB.String()),
 	}, nil

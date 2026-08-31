@@ -68,7 +68,7 @@ func newCollectFixture(t *testing.T) collectFixture {
 		Sessions:    sessions,
 		StagedBlobs: blobs,
 		Now:         func() time.Time { return now },
-		LLM:         llmExecutor{}, LLMTimeout: time.Minute,
+		LLM:         llmRunner{},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llmstats"
 	"github.com/networkteam/sdd/internal/query"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 func TestStatsEmptySink(t *testing.T) {
@@ -29,8 +30,8 @@ func TestStatsReadsAndFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sink.RecordCall(llm.CallStat{Op: "preflight", Provider: "anthropic", Model: "m", InputTokens: 100, DurationMS: 100})
-	sink.RecordCall(llm.CallStat{Op: "embed-documents", Provider: "ollama", Model: "q", Items: 4, InputTokens: 40, DurationMS: 200})
+	sink.RecordCall(llm.CallStat{Purpose: "preflight", Identity: pkgllm.Identity{Provider: "anthropic", Model: "m"}, Usage: pkgllm.Usage{InputTokens: 100}, DurationMS: 100})
+	sink.RecordCall(llm.CallStat{Purpose: "embed-documents", Identity: pkgllm.Identity{Provider: "ollama", Model: "q"}, Items: 4, Usage: pkgllm.Usage{InputTokens: 40}, DurationMS: 200})
 
 	f := finders.New(finders.Options{})
 

@@ -23,7 +23,7 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 - `devbox run build` — build the local `bin/sdd` dev binary (git hooks also run this after pull/rebase/checkout)
 - `go vet ./...` — compilation + correctness check (never use `go build` just to verify compilation — it produces no output on success)
 - `devbox run test` — run all tests: the root module and the separate `examples/extendingsdd` module. Never `go test ./...` alone — `./...` prunes the nested example module (a `go.work` does not change that), so its drift surfaces only in CI.
-- `go test -tags=eval -run TestPreflightEval ./internal/llm/...` — pre-flight prompt calibration eval (live `claude` CLI, slow + paid; model via `SDD_EVAL_MODEL`, default `sonnet`). Capture full output to a file and grep the file — `… -v 2>&1 | tee /tmp/eval.log` — never filter the live stream, or a failure shows no findings and forces a costly re-run.
+- `go test -tags=eval -run TestPreflightEval ./internal/llmops/...` — pre-flight prompt calibration eval (live `claude` CLI, slow + paid; model via `SDD_EVAL_MODEL`, default `sonnet`). Capture full output to a file and grep the file — `… -v 2>&1 | tee /tmp/eval.log` — never filter the live stream, or a failure shows no findings and forces a costly re-run.
 - `go fmt ./...` — format code
 - `devbox run lint` — lint (must be clean; CI enforces). Convention findings print as warnings without failing the run — see `scripts/lint.sh` for the mechanism. Use the wrapper, not bare `golangci-lint run`, which fails on warnings too.
 - `devbox run validate-skills` — validate the rendered Codex skills under `.agents/skills/` against the Agent Skills standard (`uvx skills-ref@0.1.1 agentskills validate`, managed via the devbox `uv` package). Requires a Codex render present (i.e. `codex` in `supported_agents`).
@@ -83,7 +83,9 @@ sdd/
 │   ├── finders/            # Query execution — pure reads, no side effects
 │   ├── model/              # Pure domain types (no I/O, no deps)
 │   ├── presenters/         # View rendering of query results
-│   ├── llm/                # Pre-flight + summarization via LLM
+│   ├── llm/                # LLM client machinery: observing + timeout decorators, CallStat/StatsSink, embed plumbing; provider adapters (claude, gollm) and the factory beneath it
+│   ├── llmops/             # The LLM operations: pre-flight, summarize, writing guide, with their prompts
+│   ├── llmstats/           # FileSink/Reader for .sdd/stats/llm.jsonl (owns the wire shape)
 │   ├── git/                # Git adapter: exec-based implementations of the consumer-defined git interfaces (handlers.Committer/…, finders.GitSyncer, repos.Git)
 │   ├── repos/              # Connected repos for cross-repo refs: Locations (explicit paths), Registry (pure reads → finders), Manager (clone/pull/config writes → handlers)
 │   ├── meta/               # Config resolution
@@ -91,6 +93,12 @@ sdd/
 │   ├── proctest/           # Integration harness + per-procedure behavior suites over the real application
 │   └── bundledskills/      # Skill source of truth (agent-neutral templates), embedded via //go:embed
 │       └── templates/      # Neutral *.md.tmpl skill tree, rendered per agent (sdd, sdd-catchup, sdd-explore, sdd-groom)
+├── pkg/                    # Exported packages — the only public Go surface (d-tac-zhc)
+│   ├── llm/                # Public LLM contract: Runner over Request/Result/Identity/Usage (d-cpt-q6n)
+│   ├── application/        # Protocol-neutral runtime + composition root (CLI and MCP are shells over it)
+│   ├── local/              # Filesystem and in-memory adapters
+│   ├── mcpapp/             # Shared MCP handler surface
+│   └── sddtest/            # Reusable adapter conformance suites
 ├── .claude/skills/         # Installed Claude render for this repo (rebuilt from internal/bundledskills/templates)
 ├── .agents/skills/         # Installed Codex render for this repo (Agent Skills standard; same template source)
 ├── .sdd/

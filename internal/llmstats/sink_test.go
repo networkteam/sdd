@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/networkteam/sdd/internal/llm"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 func TestFileSinkRecordCall(t *testing.T) {
@@ -18,21 +19,20 @@ func TestFileSinkRecordCall(t *testing.T) {
 	}
 
 	sink.RecordCall(llm.CallStat{
-		Op:                "preflight",
-		Provider:          "anthropic",
-		Model:             "claude-sonnet-4-6",
-		InputTokens:       6341,
-		OutputTokens:      8,
-		CacheReadTokens:   6163,
-		CacheCreateTokens: 0,
-		DurationMS:        1245,
+		Purpose:  "preflight",
+		Identity: pkgllm.Identity{Provider: "anthropic", Model: "claude-sonnet-4-6"},
+		Usage: pkgllm.Usage{
+			InputTokens:     6341,
+			OutputTokens:    8,
+			CacheReadTokens: 6163,
+		},
+		DurationMS: 1245,
 	})
 	sink.RecordCall(llm.CallStat{
-		Op:           "summarize",
-		Model:        "claude-sonnet-4-6",
-		InputTokens:  1865,
-		OutputTokens: 139,
-		DurationMS:   3373,
+		Purpose:    "summarize",
+		Identity:   pkgllm.Identity{Model: "claude-sonnet-4-6"},
+		Usage:      pkgllm.Usage{InputTokens: 1865, OutputTokens: 139},
+		DurationMS: 3373,
 	})
 
 	f, err := os.Open(filepath.Join(dir, "llm.jsonl"))

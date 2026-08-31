@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 	mcpserver "github.com/networkteam/sdd/pkg/mcpapp"
 )
@@ -48,17 +48,13 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "root-test", DisplayName: "Root test"}, DefaultBranch: "main",
 		Graph: graph, Sessions: sessions, StagedBlobs: blobs,
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return []string{"json-schema"}, nil },
-			ExecuteFunc: func(_ context.Context, request sdd.LLMRequest) (sdd.LLMResult, error) {
-				if request.Purpose == "preflight" {
-					return sdd.LLMResult{Output: []byte(`{"findings":[]}`), ExecutorFingerprint: "test"}, nil
-				}
-				return sdd.LLMResult{Output: []byte("Root runtime generated summary."), ExecutorFingerprint: "test"}, nil
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
+			identity := pkgllm.Identity{Provider: "test", Model: "test"}
+			if request.Purpose == pkgllm.PurposePreflight {
+				return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
+			}
+			return pkgllm.Result{Text: "Root runtime generated summary.", Identity: identity}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)

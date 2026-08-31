@@ -16,6 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	"github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 	"github.com/networkteam/sdd/pkg/mcpapp"
 )
@@ -54,15 +55,12 @@ func main() {
 	check(err)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example", DisplayName: "External example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs,
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			IdentityFunc:     func() sdd.LLMIdentity { return sdd.LLMIdentity{Provider: "example", Model: "stub"} },
-			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-				return sdd.LLMResult{}, errors.New("configure an LLM executor for writes")
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: llm.RunnerFunc(func(context.Context, llm.Request) (llm.Result, error) {
+			return llm.Result{}, &llm.Error{
+				Identity: llm.Identity{Provider: "example", Model: "stub"},
+				Err:      errors.New("configure an LLM runner for writes"),
+			}
+		}),
 	})
 	check(err)
 	application, err := sdd.NewApplication(externalAccess{runtime: runtime})

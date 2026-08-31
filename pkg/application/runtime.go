@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // ProjectRuntime owns the immutable ports and project configuration resolved
@@ -27,13 +29,12 @@ type ProjectRuntimeOptions struct {
 	StagedBlobs   StagedBlobStore
 	Embeddings    EmbeddingExecutor
 	SearchIndex   SearchIndexStore
-	LLM           LLMExecutor
-	// LLMTimeout caps each individual LLM call. Required, and never defaulted
-	// here: only the composition root knows the operator's tolerance, and a
-	// layer that cannot know a value must ask for it rather than invent one.
-	// One value covers every purpose; a slow provider that needs longer for the
-	// writing guide needs it for pre-flight too.
-	LLMTimeout time.Duration
+	// LLM is the single LLM dependency: a pkg/llm Runner, injected as an
+	// instance that arrives already composed — observed and bounded by the
+	// host's decorators. Routing, deadlines, and recording are the host's
+	// composition duty (20260830-234501-d-cpt-q6n); application contributes
+	// only the facts it alone holds, the Purpose and the prompts.
+	LLM        llm.Runner
 	Finalizers []MutationFinalizer
 	Now        func() time.Time
 	// ExcludeEmbeddedFromIndex mirrors the CLI's excludeEmbedded semantics for
@@ -62,13 +63,10 @@ func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
 		return nil, fmt.Errorf("sdd: EmbeddingExecutor and SearchIndexStore must be configured together")
 	}
 	if options.LLM == nil {
-		return nil, fmt.Errorf("sdd: LLMExecutor is required")
+		return nil, fmt.Errorf("sdd: LLM runner is required")
 	}
 	if options.Now == nil {
 		options.Now = time.Now
-	}
-	if options.LLMTimeout <= 0 {
-		return nil, fmt.Errorf("sdd: LLMTimeout is required")
 	}
 	if options.Targets == nil && options.DefaultBranch != "" {
 		options.Targets = FixedTargetAcquirer{

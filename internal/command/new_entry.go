@@ -7,7 +7,6 @@ package command
 import (
 	"fmt"
 	"path/filepath"
-	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
@@ -88,10 +87,9 @@ type NewEntryCmd struct {
 	// decision. Each --involvement flag parses into one entry here.
 	Involvement []model.Involvement
 
-	SkipPreflight    bool
-	DryRun           bool
-	PreflightTimeout time.Duration
-	PreflightModel   string
+	SkipPreflight  bool
+	DryRun         bool
+	PreflightModel string
 
 	// Summary supplies the entry's stored summary verbatim, skipping LLM
 	// generation entirely. For callers that already hold a faithful

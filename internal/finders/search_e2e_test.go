@@ -24,6 +24,7 @@ import (
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 // e2eEmbedder produces deterministic 4-dim vectors. Inputs containing
@@ -208,12 +209,8 @@ func (s *e2eSetup) finder(t *testing.T, g *model.Graph) *finders.SearchFinder {
 
 type e2eNoopRunner struct{}
 
-func (e2eNoopRunner) Identity() llm.Identity {
-	return llm.Identity{Provider: "test", Model: "test-model"}
-}
-
-func (e2eNoopRunner) Run(context.Context, llm.Request) (*llm.RunResult, error) {
-	return nil, fmt.Errorf("noop")
+func (e2eNoopRunner) Run(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+	return pkgllm.Result{}, fmt.Errorf("noop")
 }
 
 func TestE2E_BuildAndVectorSearch(t *testing.T) {

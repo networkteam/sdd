@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/networkteam/sdd/internal/finders"
-	internalllm "github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
@@ -240,12 +240,10 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 			return result, fmt.Errorf("pre-flight: %w", err)
 		}
 		finder := finders.New(finders.Options{
-			PreflightRunner:   runtimeLLMRunner{executor: runtime.options.LLM, purpose: "preflight"},
+			PreflightRunner:   runtime.options.LLM,
 			ProcedureRegistry: registry,
 		})
-		preflightCtx, cancel := context.WithTimeout(ctx, runtime.options.LLMTimeout)
-		defer cancel()
-		preflight, err := finder.Preflight(preflightCtx, snapshot.graph, query.PreflightQuery{Entry: entry})
+		preflight, err := finder.Preflight(ctx, snapshot.graph, query.PreflightQuery{Entry: entry})
 		if err != nil {
 			return result, fmt.Errorf("pre-flight: %w", err)
 		}
@@ -260,9 +258,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	} else {
 		entry.Preflight = "skipped"
 	}
-	summaryCtx, cancelSummary := context.WithTimeout(ctx, runtime.options.LLMTimeout)
-	defer cancelSummary()
-	summary, err := internalllm.Summarize(summaryCtx, runtimeLLMRunner{executor: runtime.options.LLM, purpose: "summary"}, entry, snapshot.graph)
+	summary, err := llmops.Summarize(ctx, runtime.options.LLM, entry, snapshot.graph)
 	if err != nil {
 		return result, fmt.Errorf("generating summary: %w", err)
 	}
@@ -495,37 +491,4 @@ func entryTypeForKind(kind model.Kind) (model.EntryType, error) {
 	default:
 		return "", fmt.Errorf("unknown entry kind %q", kind)
 	}
-}
-
-type runtimeLLMRunner struct {
-	executor LLMExecutor
-	purpose  string
-}
-
-// Identity passes the executor's own answer through unchanged. This adapter
-// sits behind the port and cannot know what runs on the far side, so it
-// reports rather than derives.
-func (r runtimeLLMRunner) Identity() internalllm.Identity {
-	id := r.executor.Identity()
-	return internalllm.Identity{Provider: id.Provider, Model: id.Model, Variant: id.Variant}
-}
-
-// Run adapts the host's executor to the internal Runner, lifting the reported
-// usage back into LLMMetadata so the shared call-recording path covers
-// engine-mode calls exactly as it covers CLI ones; dropping it here is what
-// left the whole engine flow absent from `sdd stats`.
-func (r runtimeLLMRunner) Run(ctx context.Context, request internalllm.Request) (*internalllm.RunResult, error) {
-	result, err := r.executor.Execute(ctx, LLMRequest{Purpose: r.purpose, SystemPrompt: request.SystemPrompt, Prompt: request.UserPrompt})
-	if err != nil {
-		return nil, err
-	}
-	return &internalllm.RunResult{
-		Text: string(result.Output),
-		Meta: &internalllm.LLMMetadata{
-			InputTokens:       int(result.Usage.InputTokens),
-			OutputTokens:      int(result.Usage.OutputTokens),
-			CacheReadTokens:   int(result.Usage.CacheReadTokens),
-			CacheCreateTokens: int(result.Usage.CacheCreateTokens),
-		},
-	}, nil
 }

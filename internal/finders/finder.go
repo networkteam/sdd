@@ -6,9 +6,9 @@ package finders
 
 import (
 	"github.com/networkteam/sdd/internal/engine"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // Finder holds dependencies and config shared across query methods.

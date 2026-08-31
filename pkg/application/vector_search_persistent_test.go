@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -140,14 +140,9 @@ func newCounterApp(t *testing.T, graphDir, cacheRoot string, embeddings sdd.Embe
 		StagedBlobs: blobs,
 		Embeddings:  embeddings,
 		SearchIndex: localadapter.NewPersistentSearchIndexStore(counterProject, cacheRoot, "counter/repo"),
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-				return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -390,14 +385,9 @@ func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAc
 		Graph: base, Targets: targets, Sessions: sessions, StagedBlobs: blobs,
 		Embeddings:  embeddings,
 		SearchIndex: localadapter.NewPersistentSearchIndexStore(counterProject, cacheRoot, "counter/branch"),
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-				return sdd.LLMResult{ExecutorFingerprint: "test"}, nil
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)

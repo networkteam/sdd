@@ -1,4 +1,4 @@
-package llm
+package llmops
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/mdcompose"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 //go:embed writingguide_templates/*.tmpl
@@ -91,13 +92,13 @@ type ReferenceFacts struct {
 // reader outside the dialogue can run the stands-alone test, and the
 // reference facts tell that reader what the draft's kind means (s-tac-fu8).
 // Returns an error only for infrastructure failures.
-func WritingGuide(ctx context.Context, runner Runner, entry *model.Entry, closureTargets []model.ClosureTarget, refFacts ReferenceFacts) (*WritingGuideResult, error) {
+func WritingGuide(ctx context.Context, runner llm.Runner, entry *model.Entry, closureTargets []model.ClosureTarget, refFacts ReferenceFacts) (*WritingGuideResult, error) {
 	req, err := renderWritingGuidePrompt(entry, closureTargets, refFacts)
 	if err != nil {
 		return nil, fmt.Errorf("rendering writing-guide prompt: %w", err)
 	}
 
-	output, err := Run(ctx, runner, req, "writing-guide")
+	output, err := runner.Run(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("running writing guide: %w", err)
 	}
@@ -116,9 +117,9 @@ func WritingGuide(ctx context.Context, runner Runner, entry *model.Entry, closur
 // carries the drafted kind's authoring fact, when one exists, and the
 // formatted draft last. Templates parse per render because factBody closes
 // over the per-call fact source.
-func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.ClosureTarget, refFacts ReferenceFacts) (Request, error) {
+func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.ClosureTarget, refFacts ReferenceFacts) (llm.Request, error) {
 	if refFacts.Source == nil || refFacts.TypeSystemFactID == "" {
-		return Request{}, fmt.Errorf("no type-system reference fact configured")
+		return llm.Request{}, fmt.Errorf("no type-system reference fact configured")
 	}
 	funcs := template.FuncMap{
 		"factBody": refFacts.Source.FactBody,
@@ -131,10 +132,10 @@ func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.Closure
 	}
 	tmpl, err := template.New("writing_guide").Funcs(funcs).ParseFS(writingGuideTemplates, "writingguide_templates/*.tmpl")
 	if err != nil {
-		return Request{}, fmt.Errorf("parsing writing-guide templates: %w", err)
+		return llm.Request{}, fmt.Errorf("parsing writing-guide templates: %w", err)
 	}
 	if tmpl, err = tmpl.ParseFS(sharedPromptTemplates, "shared_templates/*.tmpl"); err != nil {
-		return Request{}, fmt.Errorf("parsing shared prompt templates: %w", err)
+		return llm.Request{}, fmt.Errorf("parsing shared prompt templates: %w", err)
 	}
 
 	sysData := struct{ TypeSystemFactID string }{TypeSystemFactID: refFacts.TypeSystemFactID}
@@ -146,13 +147,14 @@ func renderWritingGuidePrompt(entry *model.Entry, closureTargets []model.Closure
 
 	var sysB, userB strings.Builder
 	if err := tmpl.ExecuteTemplate(&sysB, "writing_guide_system", sysData); err != nil {
-		return Request{}, fmt.Errorf("executing writing_guide_system template: %w", err)
+		return llm.Request{}, fmt.Errorf("executing writing_guide_system template: %w", err)
 	}
 	if err := tmpl.ExecuteTemplate(&userB, "writing_guide_user", userData); err != nil {
-		return Request{}, fmt.Errorf("executing writing_guide_user template: %w", err)
+		return llm.Request{}, fmt.Errorf("executing writing_guide_user template: %w", err)
 	}
 
-	return Request{
+	return llm.Request{
+		Purpose:      llm.PurposeWritingGuide,
 		SystemPrompt: strings.TrimSpace(sysB.String()),
 		UserPrompt:   strings.TrimSpace(userB.String()),
 	}, nil

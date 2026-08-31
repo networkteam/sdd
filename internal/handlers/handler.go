@@ -11,10 +11,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // Reader is the handler-side view of the finder. It bundles every read

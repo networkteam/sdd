@@ -11,9 +11,9 @@ import (
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // fakeReader bundles every read the handler needs into one stub. Tests
@@ -675,13 +675,9 @@ type trippingRunner struct {
 	t *testing.T
 }
 
-func (*trippingRunner) Identity() llm.Identity {
-	return llm.Identity{Provider: "test", Model: "test-model"}
-}
-
-func (r *trippingRunner) Run(_ context.Context, _ llm.Request) (*llm.RunResult, error) {
+func (r *trippingRunner) Run(_ context.Context, _ llm.Request) (llm.Result, error) {
 	r.t.Error("LLM runner invoked despite a caller-supplied summary")
-	return nil, errors.New("must not be called")
+	return llm.Result{}, errors.New("must not be called")
 }
 
 // TestNewEntry_ExplicitSummary_SkipsLLM: a caller-supplied Summary stores

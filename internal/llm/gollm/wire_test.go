@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
 
 	gollmrunner "github.com/networkteam/sdd/internal/llm/gollm"
 )
@@ -70,11 +70,11 @@ func TestOllamaRequestWire(t *testing.T) {
 	if n := strings.Count(prompt, "USER-BLOCK-MARKER"); n != 1 {
 		t.Errorf("user block sent %d times, want 1: %q", n, prompt)
 	}
-	if res.Meta == nil || res.Meta.InputTokens != 11 || res.Meta.OutputTokens != 22 {
-		t.Errorf("usage not parsed: %+v", res.Meta)
+	if res.Usage.InputTokens != 11 || res.Usage.OutputTokens != 22 {
+		t.Errorf("usage not parsed: %+v", res.Usage)
 	}
-	if id := runner.Identity(); id.Variant != "think=high" {
-		t.Errorf("variant = %q, want think=high", id.Variant)
+	if res.Identity.Variant != "think=high" {
+		t.Errorf("variant = %q, want think=high", res.Identity.Variant)
 	}
 }
 

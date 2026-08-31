@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/urfave/cli/v3"
 
 	"github.com/networkteam/sdd/internal/repos"
 	sdd "github.com/networkteam/sdd/pkg/application"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -159,14 +159,9 @@ func buildLocalRecoveryApplication(ctx context.Context, cmd *cli.Command) (*sdd.
 			}
 			return nil
 		}),
-		LLM: sdd.LLMExecutorFuncs{
-			CapabilitiesFunc: func(context.Context) ([]string, error) { return nil, nil },
-			ExecuteFunc: func(context.Context, sdd.LLMRequest) (sdd.LLMResult, error) {
-				return sdd.LLMResult{}, fmt.Errorf("recovery does not execute language models")
-			},
-		},
-
-		LLMTimeout: time.Minute,
+		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+			return pkgllm.Result{}, fmt.Errorf("recovery does not execute language models")
+		}),
 	})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
