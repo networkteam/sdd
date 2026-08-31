@@ -5,6 +5,8 @@ import (
 	"sort"
 
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/serveview"
+	"github.com/networkteam/sdd/internal/truncate"
 )
 
 // FuncClass is one of the registry's three function classes.
@@ -79,6 +81,21 @@ type Query struct {
 	// serve must not write (I7). A query that logs its reads (LogRead) or
 	// mutates is not serve-safe and is rejected as a framing lane at spec load.
 	ServeSafe bool
+	// Bound declares the query's serving knowledge at its one authoritative
+	// site: what part kind the result is, its default cap (a spec-declared
+	// cap overrides it), and how to compose a pull expression for a cut's
+	// remainder (d-tac-qwc).
+	Bound QueryBound
+}
+
+// QueryBound is a query's declared serving knowledge; see Query.Bound.
+type QueryBound struct {
+	Part serveview.PartKind
+	Cap  serveview.Cap
+	// Pull composes a ready-to-run expression for what a cut dropped, from
+	// the rendered inject args and the cut's accounting. Nil when no pull is
+	// expressible.
+	Pull func(args map[string]any, cut truncate.Cut) string
 }
 
 // Command is a registered command.

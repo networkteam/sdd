@@ -21,6 +21,7 @@ import (
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/textpatch"
+	"github.com/networkteam/sdd/internal/truncate"
 )
 
 const (
@@ -960,7 +961,7 @@ func (w *WorkflowSession) framingLanes() ([]string, error) {
 	}
 	var lanes []string
 	for _, call := range inst.Spec.Framing {
-		result, err := w.session.Inject(w.shell, call)
+		result, cut, err := w.session.Inject(w.shell, call)
 		if err != nil {
 			return nil, fmt.Errorf("framing lane %s: %w", call.Fn, err)
 		}
@@ -968,11 +969,31 @@ func (w *WorkflowSession) framingLanes() ([]string, error) {
 		if !ok {
 			return nil, fmt.Errorf("framing lane %s: query returned %T, want string", call.Fn, result)
 		}
+		if cut != nil {
+			text += "\n" + framingCutNotice(*cut)
+		}
 		if text = strings.TrimSpace(text); text != "" {
 			lanes = append(lanes, text)
 		}
 	}
 	return lanes, nil
+}
+
+// framingCutNotice renders one framing lane's cut in this surface's register,
+// appended below the lane's own content — framing blocks are engine-rendered,
+// never authored text, so the notice rides inside the block it describes.
+func framingCutNotice(cut truncate.Cut) string {
+	var b strings.Builder
+	if cut.Dropped > 0 {
+		fmt.Fprintf(&b, "(cut for size: %d of %d items dropped", cut.Dropped, cut.Total)
+	} else {
+		fmt.Fprintf(&b, "(cut for size: kept %d of %d bytes", cut.KeptBytes, cut.TotalBytes)
+	}
+	if cut.Pull != "" {
+		fmt.Fprintf(&b, " — pull the rest: %s", cut.Pull)
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // Leave clears the connection's attachment stamp when it steps away. A

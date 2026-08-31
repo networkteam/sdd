@@ -7,6 +7,8 @@ import (
 	"text/template"
 
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/serveview"
+	"github.com/networkteam/sdd/internal/truncate"
 )
 
 // InstanceStatus is a procedure instance's lifecycle state.
@@ -126,6 +128,9 @@ type Serve struct {
 	// Sizes is the per-part byte accounting of this serve — inject results,
 	// rendered lanes, schema, diagnostics, produced (d-tac-qwc).
 	Sizes []PartSize
+	// Cuts records every bound that fired on this serve; the engine-owned
+	// cuts lane renders them and the measurement harness reads them.
+	Cuts []truncate.Cut
 }
 
 // ServeLane is one rendered lane of a serve's instruction unit — the unit a
@@ -443,7 +448,7 @@ func (s *Session) serveWith(inst *Instance, fullDraft bool) (*Serve, error) {
 	if _, ok := inst.Spec.Units[unitName]; ok {
 		sv.Unit = unitName
 	}
-	lanes, sizes, err := s.renderUnit(inst, step)
+	lanes, sizes, cuts, err := s.renderUnit(inst, step)
 	if err != nil {
 		return nil, err
 	}
@@ -460,6 +465,10 @@ func (s *Session) serveWith(inst *Instance, fullDraft bool) (*Serve, error) {
 			inst.draftServed = map[string]map[string]string{}
 		}
 		inst.draftServed[step.ID] = cur
+	}
+	if len(cuts) > 0 {
+		lanes = append(lanes, ServeLane{Name: "cuts", Text: renderCuts(cuts)})
+		sv.Cuts = cuts
 	}
 	sv.Lanes = lanes
 	for _, lane := range lanes {
@@ -596,41 +605,46 @@ func (s *Session) transitionDiagnostics(inst *Instance, step *Step) []FailedPred
 // section named after the step) lane by lane, each lane a Go template over
 // the store, with inject query results in the template context under each
 // call's effective id. Lanes whose rendered text is empty are dropped.
-func (s *Session) renderUnit(inst *Instance, step *Step) ([]ServeLane, []PartSize, error) {
+func (s *Session) renderUnit(inst *Instance, step *Step) ([]ServeLane, []PartSize, []truncate.Cut, error) {
 	unitName := step.ID
 	if step.Render != "" {
 		unitName = step.Render
 	}
 	unit, ok := inst.Spec.Units[unitName]
 	if !ok {
-		return nil, nil, nil // gates without prose serve diagnostics and schema only
+		return nil, nil, nil, nil // gates without prose serve diagnostics and schema only
 	}
 
 	tmplCtx, err := s.templateContext(inst)
 	if err != nil {
-		return nil, nil, fmt.Errorf("unit %s: %w", unitName, err)
+		return nil, nil, nil, fmt.Errorf("unit %s: %w", unitName, err)
 	}
 	var sizes []PartSize
+	var cuts []truncate.Cut
 	if len(step.Inject) > 0 {
 		fctx, err := s.funcContext(inst)
 		if err != nil {
-			return nil, nil, fmt.Errorf("step %s: %w", step.ID, err)
+			return nil, nil, nil, fmt.Errorf("step %s: %w", step.ID, err)
 		}
 		for _, inj := range step.Inject {
 			q, found := s.engine.Registry.Query(inj.Fn)
 			if !found {
-				return nil, nil, fmt.Errorf("step %s: inject fn %q is not a registered query", step.ID, inj.Fn)
+				return nil, nil, nil, fmt.Errorf("step %s: inject fn %q is not a registered query", step.ID, inj.Fn)
 			}
 			args, err := s.renderInjectArgs(inst, inj.Args)
 			if err != nil {
-				return nil, nil, fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
+				return nil, nil, nil, fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
 			}
 			result, err := q.Fn(fctx, args)
 			if err != nil {
-				return nil, nil, fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
+				return nil, nil, nil, fmt.Errorf("step %s: inject %s: %w", step.ID, inj.Fn, err)
 			}
-			tmplCtx[inj.EffectiveID()] = result
-			sizes = append(sizes, PartSize{Part: "inject:" + inj.EffectiveID(), Bytes: partBytes(result)})
+			value, cut := boundInject(q, inj, args, result)
+			if cut != nil {
+				cuts = append(cuts, *cut)
+			}
+			tmplCtx[inj.EffectiveID()] = value
+			sizes = append(sizes, PartSize{Part: "inject:" + inj.EffectiveID(), Bytes: partBytes(value)})
 		}
 	}
 
@@ -638,17 +652,32 @@ func (s *Session) renderUnit(inst *Instance, step *Step) ([]ServeLane, []PartSiz
 	for _, lane := range unit.Lanes {
 		tmpl, err := template.New(lane.Name).Option("missingkey=zero").Parse(lane.Text)
 		if err != nil {
-			return nil, nil, fmt.Errorf("unit %s: lane %s: %w", unitName, lane.Name, err)
+			return nil, nil, nil, fmt.Errorf("unit %s: lane %s: %w", unitName, lane.Name, err)
 		}
 		var buf strings.Builder
 		if err := tmpl.Execute(&buf, tmplCtx); err != nil {
-			return nil, nil, fmt.Errorf("unit %s: lane %s: %w", unitName, lane.Name, err)
+			return nil, nil, nil, fmt.Errorf("unit %s: lane %s: %w", unitName, lane.Name, err)
 		}
 		if text := strings.TrimSpace(buf.String()); text != "" {
 			lanes = append(lanes, ServeLane{Name: lane.Name, Text: text})
 		}
 	}
-	return lanes, sizes, nil
+	return lanes, sizes, cuts, nil
+}
+
+// boundInject applies one inject's effective cap — the spec's declaration
+// over the query's registration default — and stamps the cut with the part
+// name and, when the query knows how, the pull for the remainder.
+func boundInject(q *Query, inj InjectCall, args map[string]any, result any) (any, *truncate.Cut) {
+	value, cut := serveview.BoundValue(result, serveview.Effective(inj.Cap, q.Bound.Cap))
+	if cut == nil {
+		return value, nil
+	}
+	cut.Part = inj.EffectiveID()
+	if cut.Pull == "" && q.Bound.Pull != nil {
+		cut.Pull = q.Bound.Pull(args, *cut)
+	}
+	return value, cut
 }
 
 // renderInjectArgs renders string args as Go templates against the store

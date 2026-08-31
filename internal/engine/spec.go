@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/serveview"
 )
 
 // Spec is the typed, validated form of a procedure entry's state machine —
@@ -99,6 +100,9 @@ type InjectCall struct {
 	Id   string
 	Fn   string
 	Args map[string]any
+	// Cap is the author's size override for this inject's result; the zero
+	// value defers to the query's registration default (d-tac-qwc).
+	Cap serveview.Cap
 }
 
 // EffectiveID is the template-context key an inject's result lands under.
@@ -210,9 +214,37 @@ type varDeclYAML struct {
 }
 
 type injectYAML struct {
-	Id   string         `yaml:"id"`
-	Fn   string         `yaml:"fn"`
-	Args map[string]any `yaml:"args"`
+	Id       string         `yaml:"id"`
+	Fn       string         `yaml:"fn"`
+	Args     map[string]any `yaml:"args"`
+	MaxBytes int            `yaml:"maxBytes"`
+	MaxItems int            `yaml:"maxItems"`
+}
+
+// toCall lifts the YAML shape into an InjectCall, folding the legacy
+// args.maxBytes spelling into the typed cap so graph-resident specs written
+// before the promotion keep their declared bound.
+func (iy injectYAML) toCall() InjectCall {
+	call := InjectCall{Id: iy.Id, Fn: iy.Fn, Args: iy.Args, Cap: serveview.Cap{MaxBytes: iy.MaxBytes, MaxItems: iy.MaxItems}}
+	if call.Cap.MaxBytes == 0 && call.Args != nil {
+		if n, ok := intArg(call.Args["maxBytes"]); ok && n > 0 {
+			call.Cap.MaxBytes = n
+			delete(call.Args, "maxBytes")
+		}
+	}
+	return call
+}
+
+func intArg(v any) (int, bool) {
+	switch t := v.(type) {
+	case int:
+		return t, true
+	case int64:
+		return int(t), true
+	case float64:
+		return int(t), true
+	}
+	return 0, false
 }
 
 type optionYAML struct {
@@ -331,7 +363,7 @@ func ParseSpec(entry *model.Entry) (*Spec, error) {
 			addProblem("framing[%d]: missing fn", i)
 			continue
 		}
-		call := InjectCall(iy)
+		call := iy.toCall()
 		if call.Id != "" && !isValidFuncName(call.Id) {
 			addProblem("framing[%d]: invalid id %q (identifiers only)", i, call.Id)
 			continue
@@ -557,7 +589,7 @@ func parseStep(sy stepYAML, index int) (*Step, []string) {
 			addProblem("%s: inject[%d]: missing fn", prefix, j)
 			continue
 		}
-		call := InjectCall(iy)
+		call := iy.toCall()
 		if call.Id != "" && !isValidFuncName(call.Id) {
 			addProblem("%s: inject[%d]: invalid id %q (identifiers only)", prefix, j, call.Id)
 			continue

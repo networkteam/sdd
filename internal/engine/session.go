@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/truncate"
 )
 
 // LogVersion stamps every event line. A session generally does not survive
@@ -657,25 +658,32 @@ func (s *Session) Serve(instanceID string) (*Serve, error) {
 // Inject runs one registered query against an instance's live context — the
 // same path renderUnit uses for a step's inject, exposed so a shell can render
 // declared framing lanes (which live outside any step unit) through the one
-// query mechanism. Args templates render against the instance store.
-func (s *Session) Inject(instanceID string, call InjectCall) (any, error) {
+// query mechanism. Args templates render against the instance store. The
+// result arrives bounded by the call's effective cap; a non-nil cut says what
+// the bound dropped, for the caller's surface to render in its own register.
+func (s *Session) Inject(instanceID string, call InjectCall) (any, *truncate.Cut, error) {
 	inst, ok := s.instances[instanceID]
 	if !ok {
-		return nil, fmt.Errorf("instance %q not found in session", instanceID)
+		return nil, nil, fmt.Errorf("instance %q not found in session", instanceID)
 	}
 	q, found := s.engine.Registry.Query(call.Fn)
 	if !found {
-		return nil, fmt.Errorf("inject fn %q is not a registered query", call.Fn)
+		return nil, nil, fmt.Errorf("inject fn %q is not a registered query", call.Fn)
 	}
 	ctx, err := s.funcContext(inst)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	args, err := s.renderInjectArgs(inst, call.Args)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return q.Fn(ctx, args)
+	result, err := q.Fn(ctx, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	value, cut := boundInject(q, call, args, result)
+	return value, cut, nil
 }
 
 // Abandon explicitly discards a running instance, logged as an abandonment

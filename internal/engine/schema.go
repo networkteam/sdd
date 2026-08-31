@@ -148,9 +148,11 @@ func procedureSpecSchema() map[string]any {
 	inject := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"id":   map[string]any{"type": "string"},
-			"fn":   map[string]any{"type": "string"},
-			"args": map[string]any{"type": "object"},
+			"id":       map[string]any{"type": "string"},
+			"fn":       map[string]any{"type": "string"},
+			"args":     map[string]any{"type": "object"},
+			"maxBytes": map[string]any{"type": "integer", "minimum": 0},
+			"maxItems": map[string]any{"type": "integer", "minimum": 0},
 		},
 		"required":             []string{"fn"},
 		"additionalProperties": false,

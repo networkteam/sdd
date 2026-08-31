@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/networkteam/sdd/internal/basefacts"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/textpatch"
+	"github.com/networkteam/sdd/internal/truncate"
 )
 
 // defaultSearchHits caps search responses when the caller sets no limit —
@@ -999,14 +999,11 @@ const maxViewResultBytes = 40000
 // appends a notice naming n() paging as the recovery, so an agent that hit the
 // cap knows how to narrow rather than seeing a silently cut result.
 func guardViewSize(s string) string {
-	if len(s) <= maxViewResultBytes {
+	bounded := truncate.Bytes(s, maxViewResultBytes, "")
+	if bounded.Cut.Clean() {
 		return s
 	}
-	truncated := s[:maxViewResultBytes]
-	if i := strings.LastIndexByte(truncated, '\n'); i > 0 {
-		truncated = truncated[:i]
-	}
-	return fmt.Sprintf("%s\n\n[view output truncated at %d of %d bytes — narrow with n(K), tighter filters, or fewer sections]", truncated, len(truncated), len(s))
+	return fmt.Sprintf("%s\n\n[view output truncated at %d of %d bytes — narrow with n(K), tighter filters, or fewer sections]", bounded.Text, bounded.Cut.KeptBytes, bounded.Cut.TotalBytes)
 }
 
 // maxCollectedValueBytes caps a single projected collected value in a resume
@@ -1073,14 +1070,11 @@ func collectedString(v any) string {
 // capCollectedValue truncates an over-cap value on a rune boundary and appends
 // a notice naming the cap, mirroring guardViewSize.
 func capCollectedValue(s string) string {
-	if len(s) <= maxCollectedValueBytes {
+	bounded := truncate.Bytes(s, maxCollectedValueBytes, "")
+	if bounded.Cut.Clean() {
 		return s
 	}
-	cut := maxCollectedValueBytes
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return fmt.Sprintf("%s\n\n[collected value truncated at %d of %d bytes — persisted in full, compressed here]", s[:cut], cut, len(s))
+	return fmt.Sprintf("%s\n\n[collected value truncated at %d of %d bytes — persisted in full, compressed here]", bounded.Text, bounded.Cut.KeptBytes, bounded.Cut.TotalBytes)
 }
 
 func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {

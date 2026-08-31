@@ -4,11 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/serveview"
 )
 
 func (w *WorkflowSession) buildRegistry() (*engine.Registry, error) {
@@ -73,8 +73,9 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
-		Doc:       engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store. Optional arg maxBytes: cap the rendered result on a line boundary (0 = uncapped), for a framing lane that must stay bounded."},
+		Doc:       engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store. The engine bounds the result at the inject's declared maxBytes (line-boundary cut, honest notice)."},
 		ServeSafe: true,
+		Bound:     engine.QueryBound{Part: serveview.PartText},
 		Fn: func(ctx *engine.Context, args map[string]any) (any, error) {
 			layout, _ := args["layout"].(string)
 			if strings.TrimSpace(layout) == "" {
@@ -85,7 +86,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 			if err != nil {
 				return nil, w.withSessionBindingTargetError(err, fromBinding)
 			}
-			return capOnLineBoundary(result.Sections, workflowIntArg(args, "maxBytes", 0)), nil
+			return result.Sections, nil
 		},
 	}); err != nil {
 		return err
@@ -642,27 +643,6 @@ func workflowStoreStrings(store *engine.Store, name string) []string {
 		}
 	}
 	return result
-}
-
-// capOnLineBoundary truncates s to at most max bytes, preferring a line
-// boundary and otherwise a UTF-8 rune boundary (never splitting a multi-byte
-// rune), then appends a one-line elision notice. A non-positive max leaves s
-// untouched.
-func capOnLineBoundary(s string, max int) string {
-	if max <= 0 || len(s) <= max {
-		return s
-	}
-	truncated := s[:max]
-	if i := strings.LastIndexByte(truncated, '\n'); i > 0 {
-		truncated = truncated[:i]
-	} else {
-		// No newline to cut on — back up to a rune boundary so the byte cap
-		// never slices a multi-byte UTF-8 sequence in half.
-		for len(truncated) > 0 && !utf8.RuneStart(truncated[len(truncated)-1]) {
-			truncated = truncated[:len(truncated)-1]
-		}
-	}
-	return strings.TrimRight(truncated, "\n") + "\n… (lane truncated to fit its byte cap)"
 }
 
 func workflowIntArg(args map[string]any, name string, fallback int) int {
