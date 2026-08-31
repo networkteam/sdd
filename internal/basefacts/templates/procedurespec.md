@@ -69,7 +69,7 @@ A run ends by transitioning to {{ .EndTargets }}.
 
 ### Serve budget
 
-Every automatic serve is bounded per part, but individually capped parts can still sum past a host's response budget. Capture pre-flight and `sdd lint` size each step at its declared worst case and raise an advisory finding when a step exceeds the engine's default serve budget. The finding is a risk note, never a load failure — the spec still runs. To accept the trade, declare `serveBudget: <bytes>` at the spec's top level (beside `params`/`state`/`steps`): a declared total at or above the worst case silences the finding and records the decision on the spec itself.
+Every automatic serve is bounded per part, but individually capped parts can still sum past a host's response budget. Capture pre-flight and the graph's lint sweep size each step at its declared worst case and raise an advisory finding when a step exceeds the engine's default serve budget. The finding is a risk note, never a load failure — the spec still runs. To accept the trade, declare `serveBudget: <bytes>` at the spec's top level (beside `params`/`state`/`steps`): a declared total at or above the worst case silences the finding and records the decision on the spec itself.
 
 ## Variable types
 
