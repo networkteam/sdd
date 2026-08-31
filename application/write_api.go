@@ -235,7 +235,14 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 
 	result := CreateEntryResult{Project: runtime.options.Project, Binding: binding, EntryID: id}
 	if !draft.SkipPreflight {
-		finder := finders.New(finders.Options{PreflightRunner: runtimeLLMRunner{executor: runtime.options.LLM, purpose: "preflight"}})
+		resolver, err := ProcedureQueryResolver()
+		if err != nil {
+			return result, fmt.Errorf("pre-flight: %w", err)
+		}
+		finder := finders.New(finders.Options{
+			PreflightRunner:   runtimeLLMRunner{executor: runtime.options.LLM, purpose: "preflight"},
+			ProcedureResolver: resolver,
+		})
 		preflightCtx, cancel := context.WithTimeout(ctx, runtime.options.LLMTimeout)
 		defer cancel()
 		preflight, err := finder.Preflight(preflightCtx, snapshot.graph, query.PreflightQuery{Entry: entry})

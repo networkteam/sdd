@@ -24,7 +24,7 @@ import (
 // default); a locale code activates the check against description prose.
 func (gf *GraphFinder) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
 	f := gf.finder
-	findings := mechanicalPreflight(q.Entry, gf.graph, f.declaredDependencies())
+	findings := mechanicalPreflight(q.Entry, gf.graph, f.declaredDependencies(), f.procedureResolver)
 
 	llmResult, err := llm.Preflight(ctx, f.preflightRunner, q.Entry, gf.graph, f.language())
 	if err != nil {

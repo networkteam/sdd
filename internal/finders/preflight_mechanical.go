@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/internal/serveview"
 )
 
 // mechanicalPreflight runs Go-side structural checks against a proposed
@@ -55,9 +57,11 @@ import (
 //     resolution is enforced even earlier — a dangling local ref hard-blocks
 //     at write-time validation before pre-flight runs.
 //
-// Severity is strictly binary: SeverityHigh or absent. Mechanical checks
-// never emit medium or low; partial coverage is never "kind-of an actor".
-func mechanicalPreflight(entry *model.Entry, graph *model.Graph, declaredDeps []string) []query.Finding {
+// Severity is binary for structural checks: SeverityHigh or absent — partial
+// coverage is never "kind-of an actor". The one medium is the serve-budget
+// finding on procedure specs, advisory by design: overshoot is a risk, not a
+// defect, and the spec still runs (d-tac-rzi).
+func mechanicalPreflight(entry *model.Entry, graph *model.Graph, declaredDeps []string, resolver engine.QueryResolver) []query.Finding {
 	if entry == nil || graph == nil {
 		return nil
 	}
@@ -78,8 +82,35 @@ func mechanicalPreflight(entry *model.Entry, graph *model.Graph, declaredDeps []
 	}
 	if entry.IsProcedure() {
 		findings = append(findings, procedureWriteOnceFindings(entry, graph)...)
+		findings = append(findings, serveBudgetFindings(entry, resolver)...)
 	}
 
+	return findings
+}
+
+// serveBudgetFindings runs the advisory authoring arithmetic (d-tac-rzi) on a
+// procedure entry: each step whose worst-case serve exceeds the effective
+// total is one medium finding. A spec that does not parse is skipped — spec
+// validation reports that on its own — and a nil resolver skips the check
+// (lint catches the spec on every later sweep).
+func serveBudgetFindings(entry *model.Entry, resolver engine.QueryResolver) []query.Finding {
+	if resolver == nil {
+		return nil
+	}
+	spec, err := engine.ParseSpec(entry)
+	if err != nil {
+		return nil
+	}
+	budget := serveview.Default()
+	var findings []query.Finding
+	for _, size := range spec.OverBudget(budget, resolver) {
+		findings = append(findings, query.Finding{
+			Severity: query.SeverityMedium,
+			Category: "serve-budget",
+			Observation: fmt.Sprintf("step %q sizes to a worst-case %d bytes against the %d-byte serve budget — tighten caps, or declare `serveBudget: %d` on the spec to record the trade",
+				size.Step, size.Bytes, spec.EffectiveTotal(budget), size.Bytes),
+		})
+	}
 	return findings
 }
 

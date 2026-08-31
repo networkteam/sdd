@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/term"
+	sddapp "github.com/networkteam/sdd/application"
 	"github.com/networkteam/sdd/internal/cliout"
 	"github.com/networkteam/sdd/internal/cliout/tui"
 	"github.com/networkteam/sdd/internal/command"
@@ -807,13 +808,18 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			resolver, err := sddapp.ProcedureQueryResolver()
+			if err != nil {
+				return err
+			}
 			handler := handlers.New(handlers.Options{
 				GraphDir: dir,
 				SDDDir:   sddDir,
 				Reader: finders.New(finders.Options{
-					PreflightRunner: runner,
-					Config:          cfg,
-					Repos:           reg,
+					PreflightRunner:   runner,
+					Config:            cfg,
+					Repos:             reg,
+					ProcedureResolver: resolver,
 				}),
 				LLMRunner: runner,
 				Committer: git.CLI{},

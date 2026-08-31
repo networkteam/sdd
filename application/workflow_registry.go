@@ -688,6 +688,14 @@ func workflowIntArg(args map[string]any, name string, fallback int) int {
 	}
 }
 
+// ProcedureQueryResolver returns the engine query registration the authoring
+// arithmetic sizes procedure specs against — the same bounds the runtime
+// serves with (d-tac-rzi). Composition helper for the transitional CLI write
+// path; the application's own flows wire it internally.
+func ProcedureQueryResolver() (engine.QueryResolver, error) {
+	return (&WorkflowSession{}).buildRegistry()
+}
+
 func WorkflowRegistryDocs(class string) ([]RegistryFunction, error) {
 	switch engine.FuncClass(class) {
 	case "", engine.ClassPredicate, engine.ClassQuery, engine.ClassCommand:

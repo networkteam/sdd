@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/networkteam/sdd/internal/basefacts"
+	"github.com/networkteam/sdd/internal/engine"
 	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
@@ -182,7 +183,7 @@ func TestMechanical_ParticipantCoverage_ActiveActorMatches(t *testing.T) {
 		Participants: []string{"Christopher"},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	if len(got) != 0 {
 		t.Fatalf("expected no findings for matching canonical, got %+v", got)
 	}
@@ -199,7 +200,7 @@ func TestMechanical_ParticipantCoverage_UnknownCanonicalBlocks(t *testing.T) {
 		Participants: []string{"Claude"},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding for unknown canonical, got %d", len(got))
 	}
@@ -222,7 +223,7 @@ func TestMechanical_ParticipantCoverage_GraceModeWhenNoActors(t *testing.T) {
 		Participants: []string{"Christopher"},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Category == "participant-drift" {
 			t.Errorf("grace mode should skip participant check, got %+v", f)
@@ -243,7 +244,7 @@ func TestMechanical_ParticipantCoverage_AliasDoesNotMatch(t *testing.T) {
 		Participants: []string{"Chris"},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "participant-drift" {
@@ -270,7 +271,7 @@ func TestMechanical_FocusActorCoverage_ValidActorsPass(t *testing.T) {
 		},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Category == "focus-actor-drift" {
 			t.Errorf("valid focus actors should not draw a finding, got %+v", f)
@@ -290,7 +291,7 @@ func TestMechanical_FocusActorCoverage_UnknownFocusActorBlocks(t *testing.T) {
 		FocusActors: []string{"Claude"},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "focus-actor-drift" && f.Severity == query.SeverityHigh {
@@ -321,7 +322,7 @@ func TestMechanical_FocusActorCoverage_UnknownInvolvementActorBlocks(t *testing.
 		},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "focus-actor-drift" && f.Severity == query.SeverityHigh {
@@ -351,7 +352,7 @@ func TestMechanical_FocusActorCoverage_GraceModeWhenNoActors(t *testing.T) {
 		},
 	}
 
-	for _, f := range mechanicalPreflight(proposed, graph, nil) {
+	for _, f := range mechanicalPreflight(proposed, graph, nil, nil) {
 		if f.Category == "focus-actor-drift" {
 			t.Errorf("grace mode should skip focus actor check, got %+v", f)
 		}
@@ -372,7 +373,7 @@ func TestMechanical_FocusActorCoverage_NonFocusUnaffected(t *testing.T) {
 		FocusActors: []string{"Claude"},
 	}
 
-	for _, f := range mechanicalPreflight(proposed, graph, nil) {
+	for _, f := range mechanicalPreflight(proposed, graph, nil, nil) {
 		if f.Category == "focus-actor-drift" {
 			t.Errorf("non-focus entry must not draw focus-actor-drift, got %+v", f)
 		}
@@ -391,7 +392,7 @@ func TestMechanical_ActorWriteOnce_NewChainAllowed(t *testing.T) {
 		Content:   "joining the project",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Category == "actor-canonical-reused" {
 			t.Errorf("new chain should not trigger reuse finding, got %+v", f)
@@ -414,7 +415,7 @@ func TestMechanical_ActorWriteOnce_ExtendingSameChainAllowed(t *testing.T) {
 		Content:    "typo correction in aliases",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Category == "actor-canonical-reused" {
 			t.Errorf("within-chain reuse should be allowed, got %+v", f)
@@ -437,7 +438,7 @@ func TestMechanical_ActorWriteOnce_CrossChainReuseBlocks(t *testing.T) {
 		Content: "a different person who happens to share the name",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "actor-canonical-reused" && f.Severity == query.SeverityHigh {
@@ -462,7 +463,7 @@ func TestMechanical_RoleCanonicalMismatch_Blocks(t *testing.T) {
 		Content: "contribution pattern",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "role-canonical-mismatch" && f.Severity == query.SeverityHigh {
@@ -488,7 +489,7 @@ func TestMechanical_RoleRefsMissingHead_Blocks(t *testing.T) {
 		Content: "contribution pattern",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "role-refs-missing-head" && f.Severity == query.SeverityHigh {
@@ -514,7 +515,7 @@ func TestMechanical_RoleValid_NoFindings(t *testing.T) {
 		Content:      "contribution pattern",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Severity == query.SeverityHigh {
 			t.Errorf("unexpected high finding: %+v", f)
@@ -534,7 +535,7 @@ func TestMechanical_RefKindMissing_Blocks(t *testing.T) {
 		Refs:    []model.Ref{{ID: target.ID}}, // kind omitted
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "ref-kind-missing" && f.Severity == query.SeverityHigh {
@@ -558,7 +559,7 @@ func TestMechanical_RefKindUnknown_BlocksAtCapture(t *testing.T) {
 		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKindUnknown}},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "ref-kind-invalid" && f.Severity == query.SeverityHigh {
@@ -582,7 +583,7 @@ func TestMechanical_RefKindInvalid_Blocks(t *testing.T) {
 		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKind("bogus")}},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "ref-kind-invalid" && f.Severity == query.SeverityHigh {
@@ -606,7 +607,7 @@ func TestMechanical_RefKindValid_NoFindings(t *testing.T) {
 		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKindAddresses, Desc: "addresses gap"}},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Category == "ref-kind-missing" || f.Category == "ref-kind-invalid" {
 			t.Errorf("unexpected ref-kind finding on valid entry: %+v", f)
@@ -632,7 +633,7 @@ func TestMechanical_RefKindInapplicable_AddressesTerminalDone_Blocks(t *testing.
 		Refs:    []model.Ref{{ID: done.ID, Kind: model.RefKindAddresses}},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "ref-kind-inapplicable" && f.Severity == query.SeverityHigh {
@@ -665,7 +666,7 @@ func TestMechanical_RefKindInapplicable_RefinesClosedTarget_Blocks(t *testing.T)
 		Refs:    []model.Ref{{ID: target.ID, Kind: model.RefKindRefines}},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "ref-kind-inapplicable" && f.Severity == query.SeverityHigh {
@@ -697,7 +698,7 @@ func TestMechanical_RefKindInapplicable_RefinesSuperseded_PointsAtHead(t *testin
 		Refs:    []model.Ref{{ID: old.ID, Kind: model.RefKindRefines}},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "ref-kind-inapplicable" && f.Severity == query.SeverityHigh {
@@ -741,7 +742,7 @@ func TestMechanical_RefKindApplicable_NoFindings(t *testing.T) {
 		},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Category == "ref-kind-inapplicable" {
 			t.Errorf("unexpected ref-kind-inapplicable finding on applicable kind: %+v", f)
@@ -759,7 +760,7 @@ func TestMechanical_RefKindApplicability_DanglingTargetSkipped(t *testing.T) {
 		Refs:    []model.Ref{{ID: "20260410-120000-s-cpt-xxx", Kind: model.RefKindRefines}},
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Category == "ref-kind-inapplicable" {
 			t.Errorf("dangling target must be skipped (ref resolution reports it), got %+v", f)
@@ -781,7 +782,7 @@ func TestMechanical_ProcedureWriteOnce_NewChainAllowed(t *testing.T) {
 		Content:   "the capture move",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	if len(got) != 0 {
 		t.Fatalf("expected no findings for fresh procedure canonical, got %+v", got)
 	}
@@ -799,7 +800,7 @@ func TestMechanical_ProcedureWriteOnce_ReuseBlocked(t *testing.T) {
 		Content:   "a second, unrelated move claiming the same canonical",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding for reused procedure canonical, got %+v", got)
 	}
@@ -821,7 +822,7 @@ func TestMechanical_ProcedureWriteOnce_SupersedeSameChainAllowed(t *testing.T) {
 		Content:    "project override of the capture move",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Category == "procedure-canonical-reused" {
 			t.Errorf("supersede within the chain must not trip write-once, got %+v", f)
@@ -843,11 +844,59 @@ func TestMechanical_ProcedureCanonical_ActorNamespaceSeparate(t *testing.T) {
 		Content:   "the capture move",
 	}
 
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	for _, f := range got {
 		if f.Category == "procedure-canonical-reused" {
 			t.Errorf("actor canonical must not block procedure canonical, got %+v", f)
 		}
+	}
+}
+
+func TestMechanical_ServeBudgetFinding(t *testing.T) {
+	specEntry := func(extra string) *model.Entry {
+		content := "---\ntype: decision\nlayer: prc\nkind: procedure\ncanonical: hugeproc\n" + extra +
+			"state:\n    report: {type: text, desc: x}\n" +
+			"steps:\n    - id: draft\n      collect: [report]\n      inject:\n" +
+			"          - {fn: wide, maxBytes: 50000}\n" +
+			"      transitions:\n          - when: hasBody\n            to: end(completed)\n" +
+			"---\n\n## unit: draft\n\nGuidance.\n"
+		e, err := model.ParseEntry("20260831-121000-d-prc-hug.md", content)
+		if err != nil {
+			t.Fatalf("fixture entry: %v", err)
+		}
+		return e
+	}
+	reg := engine.NewRegistry()
+	if err := reg.RegisterQuery(engine.Query{
+		Doc: engine.FuncDoc{Name: "wide", Doc: "t"},
+		Fn:  func(*engine.Context, map[string]any) (any, error) { return "", nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	graph := model.NewGraph(nil)
+
+	budgetFindings := func(entry *model.Entry, resolver engine.QueryResolver) []query.Finding {
+		var out []query.Finding
+		for _, f := range mechanicalPreflight(entry, graph, nil, resolver) {
+			if f.Category == "serve-budget" {
+				out = append(out, f)
+			}
+		}
+		return out
+	}
+
+	got := budgetFindings(specEntry(""), reg)
+	if len(got) != 1 || got[0].Severity != query.SeverityMedium {
+		t.Fatalf("findings = %+v, want one medium serve-budget finding", got)
+	}
+	if !strings.Contains(got[0].Observation, "draft") || !strings.Contains(got[0].Observation, "serveBudget") {
+		t.Errorf("observation should name the step and the silencer, got %q", got[0].Observation)
+	}
+	if got := budgetFindings(specEntry("serveBudget: 60000\n"), reg); len(got) != 0 {
+		t.Errorf("declared serveBudget must silence the finding, got %+v", got)
+	}
+	if got := budgetFindings(specEntry(""), nil); len(got) != 0 {
+		t.Errorf("nil resolver must skip the check, got %+v", got)
 	}
 }
 
@@ -913,7 +962,7 @@ func TestMechanical_SupersedeNonHead_Blocks(t *testing.T) {
 		Supersedes: []string{target.ID},
 		Content:    "second successor — would fork the chain",
 	}
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "supersede-non-head" && f.Severity == query.SeverityHigh {
@@ -937,7 +986,7 @@ func TestMechanical_SupersedeLiveHead_Allowed(t *testing.T) {
 		Supersedes: []string{target.ID},
 		Content:    "linear successor",
 	}
-	for _, f := range mechanicalPreflight(proposed, graph, nil) {
+	for _, f := range mechanicalPreflight(proposed, graph, nil, nil) {
 		if f.Category == "supersede-non-head" {
 			t.Errorf("superseding a live head should not fork, got %+v", f)
 		}
@@ -959,7 +1008,7 @@ func TestMechanical_SupersedeSettledBranch_Allowed(t *testing.T) {
 		Supersedes: []string{target.ID},
 		Content:    "reviving a settled chain — single active successor, not a fork",
 	}
-	for _, f := range mechanicalPreflight(proposed, graph, nil) {
+	for _, f := range mechanicalPreflight(proposed, graph, nil, nil) {
 		if f.Category == "supersede-non-head" {
 			t.Errorf("superseding a target whose successor is closed should not fork, got %+v", f)
 		}
@@ -986,7 +1035,7 @@ func TestMechanical_CrossRepoRef_UndeclaredDependencyBlocks(t *testing.T) {
 			{ID: "github.com/networkteam/other:20260601-130000-d-tac-def", Kind: model.RefKindSurfaces},
 		},
 	}
-	got := mechanicalPreflight(proposed, graph, nil)
+	got := mechanicalPreflight(proposed, graph, nil, nil)
 	undeclared := 0
 	for _, f := range got {
 		if f.Category == "cross-repo-dep-undeclared" && f.Severity == query.SeverityHigh {
@@ -1012,7 +1061,7 @@ func TestMechanical_CrossRepoRef_DeclaredButUnconnectedBlocks(t *testing.T) {
 			{ID: "github.com/networkteam/other:20260601-120000-s-tac-abc", Kind: model.RefKindGroundedIn},
 		},
 	}
-	got := mechanicalPreflight(proposed, graph, []string{"github.com/networkteam/other"})
+	got := mechanicalPreflight(proposed, graph, []string{"github.com/networkteam/other"}, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "cross-repo-ref-unresolved" && f.Severity == query.SeverityHigh {
@@ -1039,7 +1088,7 @@ func TestMechanical_CrossRepoRef_ForwardClassExemptFromResolution(t *testing.T) 
 			{ID: "github.com/networkteam/other:20260601-130000-d-tac-def", Kind: model.RefKindRequiredBy},
 		},
 	}
-	for _, f := range mechanicalPreflight(proposed, graph, []string{"github.com/networkteam/other"}) {
+	for _, f := range mechanicalPreflight(proposed, graph, []string{"github.com/networkteam/other"}, nil) {
 		if f.Category == "cross-repo-ref-unresolved" || f.Category == "cross-repo-dep-undeclared" {
 			t.Errorf("declared forward-class cross-repo refs must pass, got %+v", f)
 		}
