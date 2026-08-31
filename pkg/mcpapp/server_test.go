@@ -2699,12 +2699,14 @@ func TestDoorAndReplayWirePayloads(t *testing.T) {
 	}
 }
 
-// TestToolResultsCarryThePayloadOnce pins the envelope shape (d-tac-4dz): by
-// default a tool result carries its payload in structuredContent alone — the
-// SDK-synthesized content mirror doubles every serve's model-visible tokens
-// on clients that surface both copies — while Compat restores the mirror for
-// clients that read only content. Error results keep their content either way.
-func TestToolResultsCarryThePayloadOnce(t *testing.T) {
+// TestToolResultsCarryTheSpecEnvelope pins the wire shape: every tool result
+// carries structuredContent (the machine channel, required with the declared
+// output schemas) plus the spec-recommended content text mirror — the channel
+// content-projecting hosts (Codex among them, verified live) feed the model.
+// Model-context doubling was never observed on a verified host's default
+// projection; a lean shape returns as an opt-in only when a both-projecting
+// client shows up in real usage.
+func TestToolResultsCarryTheSpecEnvelope(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "info", Arguments: map[string]any{}})
@@ -2714,8 +2716,11 @@ func TestToolResultsCarryThePayloadOnce(t *testing.T) {
 	if res.StructuredContent == nil {
 		t.Fatal("info result must carry structuredContent")
 	}
-	if len(res.Content) != 0 {
-		t.Errorf("default envelope must not mirror the payload into content, got %d blocks", len(res.Content))
+	if len(res.Content) == 0 {
+		t.Fatal("info result must carry the content text mirror")
+	}
+	if tc, ok := res.Content[0].(*mcp.TextContent); !ok || !strings.Contains(tc.Text, "participant") {
+		t.Errorf("content must mirror the payload, got %+v", res.Content[0])
 	}
 
 	errRes, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "next", Arguments: map[string]any{}})
@@ -2724,16 +2729,6 @@ func TestToolResultsCarryThePayloadOnce(t *testing.T) {
 	}
 	if !errRes.IsError || len(errRes.Content) == 0 {
 		t.Errorf("an error result keeps its content text, got %+v", errRes)
-	}
-
-	compatEnv := newTestServer(t, nil, "", "", func(o *mcpserver.Options) { o.Compat = true })
-	compatCS := connect(t, compatEnv.srv)
-	res, err = compatCS.CallTool(t.Context(), &mcp.CallToolParams{Name: "info", Arguments: map[string]any{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Content) == 0 {
-		t.Error("compat envelope must carry the content mirror")
 	}
 }
 

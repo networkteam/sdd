@@ -48,10 +48,6 @@ func serveCmd() *cli.Command {
 				Usage:   "bearer token required on every HTTP request (transport=http only)",
 				Sources: cli.EnvVars("SDD_SERVE_TOKEN"),
 			},
-			&cli.BoolFlag{
-				Name:  "compat",
-				Usage: "mirror tool results into the content text block for clients that read only content (default: structuredContent only)",
-			},
 		),
 		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
 			dir, err := resolveGraphDir(cmd)
@@ -98,7 +94,6 @@ func serveCmd() *cli.Command {
 					return filepath.Abs(filepath.Join(dir, attachDir, filename))
 				},
 				Version: version,
-				Compat:  cmd.Bool("compat"),
 			})
 			if err != nil {
 				return err

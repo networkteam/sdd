@@ -256,7 +256,7 @@ func prodServeSearch(t *testing.T, root string) string {
 	if result.IsError {
 		t.Fatalf("search returned a tool error: %+v\nstderr:\n%s", result, stderr.String())
 	}
-	// The payload travels in structuredContent alone (d-tac-4dz).
+	// structuredContent is the typed channel; the content text block mirrors it.
 	encoded, err := json.Marshal(result.StructuredContent)
 	if err != nil {
 		t.Fatalf("marshal structuredContent: %v", err)
