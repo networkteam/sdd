@@ -64,21 +64,22 @@ func evalRunner(t *testing.T) *capturingRunner {
 	return &capturingRunner{inner: internalllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})}
 }
 
-// evalConfig resolves the candidate configuration for this run. The user-global
-// config (~/.config/sdd/config.yaml) supplies the base — API keys, Ollama
-// endpoint, timeout, rate limits — so candidates run under the same conditions
-// production would give them. SDD_EVAL_PROVIDER / SDD_EVAL_MODEL /
-// SDD_EVAL_PARAMS select the candidate identity on top; provider and model are
-// always set here, never inherited from the global config, so the incumbent
-// cannot leak in as a silent default. Provider defaults to the direct Anthropic
-// API when a key is reachable (env or global config) — much faster per call
-// than the claude CLI transport, which matters now that pass-rate cases
-// multiply the call count — else the keyless claude-cli. Both defaults target
-// the Sonnet class — the model the ref-meta non-determinism was reported on
-// (s-prc-uh3).
+// evalConfig resolves the candidate configuration for this run. SDD_EVAL_CONFIG
+// optionally names a config file (user-global format, e.g.
+// ~/.config/sdd/config.yaml) whose llm section supplies the base — API keys,
+// Ollama endpoint, timeout, rate limits — so candidates run under the same
+// conditions production would give them; nothing is read implicitly.
+// SDD_EVAL_PROVIDER / SDD_EVAL_MODEL / SDD_EVAL_PARAMS select the candidate
+// identity on top; provider and model are always set here, never inherited from
+// the config file, so the incumbent cannot leak in as a silent default.
+// Provider defaults to the direct Anthropic API when a key is reachable (env or
+// config file) — much faster per call than the claude CLI transport, which
+// matters now that pass-rate cases multiply the call count — else the keyless
+// claude-cli. Both defaults target the Sonnet class — the model the ref-meta
+// non-determinism was reported on (s-prc-uh3).
 func evalConfig(t *testing.T) model.LLMConfig {
 	t.Helper()
-	cfg := globalLLMConfig(t)
+	cfg := evalBaseConfig(t)
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
 		if cfg.APIKeys == nil {
 			cfg.APIKeys = map[string]string{}
@@ -91,18 +92,23 @@ func evalConfig(t *testing.T) model.LLMConfig {
 	return cfg
 }
 
-// globalLLMConfig reads the llm section of the user-global config. A missing
-// file yields the zero config; a malformed one fails the run — proceeding
-// keyless would surface as a confusing provider error later.
-func globalLLMConfig(t *testing.T) model.LLMConfig {
+// evalBaseConfig reads the llm section of the config file named by
+// SDD_EVAL_CONFIG. Unset means no file is read — the zero config. A path that
+// is set but absent or malformed fails the run: an explicitly requested config
+// that silently degrades to keyless would surface as a confusing provider
+// error later.
+func evalBaseConfig(t *testing.T) model.LLMConfig {
 	t.Helper()
-	loc, err := repos.DefaultLocations()
-	if err != nil {
-		t.Fatalf("resolving global config location: %v", err)
+	path := os.Getenv("SDD_EVAL_CONFIG")
+	if path == "" {
+		return model.LLMConfig{}
 	}
-	gc, err := repos.LoadConfigFrom(loc.ConfigPath)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("SDD_EVAL_CONFIG: %v", err)
+	}
+	gc, err := repos.LoadConfigFrom(path)
 	if err != nil {
-		t.Fatalf("reading global config %s: %v", loc.ConfigPath, err)
+		t.Fatalf("reading SDD_EVAL_CONFIG %s: %v", path, err)
 	}
 	return gc.LLM
 }
