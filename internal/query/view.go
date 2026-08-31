@@ -9,6 +9,23 @@ import "github.com/networkteam/sdd/internal/model"
 // not carried here.
 type ViewQuery struct {
 	Layout model.Layout
+	// Budget bounds the view's scaling parts at whole-unit boundaries on
+	// the serve path. Zero values are unbounded — explicit pulls arrive
+	// complete (d-tac-rzi).
+	Budget ViewBudget
+}
+
+// ViewBudget names the per-shape bounds a served view applies: every cut is
+// at a whole unit (a focus group, a marker, a body, a ref sub-line) and the
+// shape carries the dropped count plus a runnable pull for the remainder.
+type ViewBudget struct {
+	// GroupItems caps focus groups, participant groups, and WIP markers per
+	// section.
+	GroupItems int
+	// RefsPerEntry caps expand(refs) sub-lines per entry.
+	RefsPerEntry int
+	// BodyBytes caps as-bodies sections: whole bodies while bytes fit.
+	BodyBytes int
 }
 
 // ViewResult is the structured output of a ViewQuery: one SectionResult

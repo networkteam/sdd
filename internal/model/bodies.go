@@ -12,6 +12,11 @@ const ShapeBodies RenderShape = "bodies"
 // carries nothing but the entries in the order the section produced them.
 type Bodies struct {
 	Entries []*Entry
+	// Dropped counts whole units a serve budget kept out of this section;
+	// Pull is the runnable layout expression for the complete section.
+	// Zero/empty on explicit pulls, which are never cut (d-tac-rzi).
+	Dropped int
+	Pull    string
 }
 
 // Shape implements SectionData.

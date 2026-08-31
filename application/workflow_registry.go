@@ -20,6 +20,15 @@ var serveChainBudget = model.ShowTreeBudget{
 	MaxChildren: 8,
 }
 
+// servedViewBudget bounds a pushed view's scaling shapes at whole units:
+// focus and participant groups, WIP markers, whole bodies, per-entry ref
+// sub-lines. Explicit pulls (the view tool, the CLI) pass no budget.
+var servedViewBudget = query.ViewBudget{
+	GroupItems:   12,
+	RefsPerEntry: 6,
+	BodyBytes:    serveview.Default().Cap(serveview.PartText).MaxBytes,
+}
+
 func (w *WorkflowSession) buildRegistry() (*engine.Registry, error) {
 	registry := engine.NewRegistry()
 	for _, register := range []func(*engine.Registry) error{
@@ -84,14 +93,14 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 	if err := registry.RegisterQuery(engine.Query{
 		Doc:       engine.FuncDoc{Name: "viewLayout", Doc: "Rendered `sdd view` pipeline result. Arg layout: the full pipeline syntax; may be a Go template over the store. The engine bounds the result at the inject's declared maxBytes (line-boundary cut, honest notice)."},
 		ServeSafe: true,
-		Bound:     engine.QueryBound{Part: serveview.PartText},
+		Bound:     engine.QueryBound{Part: serveview.PartText, Cap: serveview.Default().Cap(serveview.PartText)},
 		Fn: func(ctx *engine.Context, args map[string]any) (any, error) {
 			layout, _ := args["layout"].(string)
 			if strings.TrimSpace(layout) == "" {
 				return nil, fmt.Errorf("viewLayout needs arg layout")
 			}
 			target, fromBinding := w.effectiveTarget(ctx.Store)
-			result, err := w.app.View(w.ctx, w.identity, w.project, ViewRequest{Layout: layout, Branch: target.Branch})
+			result, err := w.app.View(w.ctx, w.identity, w.project, ViewRequest{Layout: layout, Branch: target.Branch, Budget: servedViewBudget})
 			if err != nil {
 				return nil, w.withSessionBindingTargetError(err, fromBinding)
 			}

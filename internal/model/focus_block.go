@@ -34,6 +34,11 @@ const (
 // involvement frontmatter.
 type FocusBlock struct {
 	Focuses []FocusGroup
+	// Dropped counts whole units a serve budget kept out of this section;
+	// Pull is the runnable layout expression for the complete section.
+	// Zero/empty on explicit pulls, which are never cut (d-tac-rzi).
+	Dropped int
+	Pull    string
 }
 
 // FocusGroup is one focus decision plus its resolved involvement targets.

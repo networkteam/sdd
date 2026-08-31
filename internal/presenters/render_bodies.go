@@ -35,6 +35,10 @@ func renderAsBodies(w io.Writer, bodies model.Bodies, entryLevel int) {
 			fmt.Fprintf(w, "\n%s\n", body)
 		}
 	}
+	if bodies.Dropped > 0 {
+		fmt.Fprintln(w)
+		writeSectionCut(w, bodies.Dropped, bodies.Pull)
+	}
 }
 
 // bodyIdentity renders an entry's identity line: the full ID a reader cites or

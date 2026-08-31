@@ -11,6 +11,11 @@ const ShapeParticipantsBlock RenderShape = "participants-block"
 // preserves active-actor ordering.
 type ParticipantsBlock struct {
 	Groups []ParticipantsGroup
+	// Dropped counts whole units a serve budget kept out of this section;
+	// Pull is the runnable layout expression for the complete section.
+	// Zero/empty on explicit pulls, which are never cut (d-tac-rzi).
+	Dropped int
+	Pull    string
 }
 
 // ParticipantsGroup couples one active actor head with the derived-active

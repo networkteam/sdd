@@ -35,8 +35,20 @@ func renderAsList(w io.Writer, g *model.Graph, flat model.FlatList, brief bool) 
 			for _, ref := range flat.RefExpansions[i] {
 				writeRefExpansion(w, ref)
 			}
+			if len(flat.RefExpansionDropped) == len(flat.Entries) && flat.RefExpansionDropped[i] > 0 {
+				fmt.Fprintf(w, "    → +%d more refs\n", flat.RefExpansionDropped[i])
+			}
 		}
 	}
+}
+
+// writeSectionCut renders a section's serve-budget cut in the view register:
+// the dropped count and the runnable pull for the complete section.
+func writeSectionCut(w io.Writer, dropped int, pull string) {
+	if dropped <= 0 {
+		return
+	}
+	fmt.Fprintf(w, "(… and %d more — pull: %s)\n", dropped, pull)
 }
 
 // writeRefExpansion renders one expand(refs) sub-line beneath its parent

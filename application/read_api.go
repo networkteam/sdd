@@ -28,6 +28,9 @@ type ViewRequest struct {
 	BranchFromSession bool
 	Repos             []string
 	AllRepos          bool
+	// Budget bounds the view's scaling parts on the serve path; the zero
+	// value is unbounded — explicit pulls arrive complete (d-tac-rzi).
+	Budget query.ViewBudget
 }
 
 type ViewResult struct {

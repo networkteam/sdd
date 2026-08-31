@@ -43,6 +43,10 @@ type FlatList struct {
 	Entries       []*Entry
 	Scores        []float64
 	RefExpansions [][]RefExpansion
+	// RefExpansionDropped is parallel to RefExpansions when a serve budget
+	// capped an entry's ref sub-lines: the count of refs not rendered for
+	// Entries[i]. Nil on explicit pulls, which are never cut (d-tac-rzi).
+	RefExpansionDropped []int
 }
 
 // RefExpansion is one resolved outgoing reference for expand(refs) output.

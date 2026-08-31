@@ -36,4 +36,8 @@ func renderAsParticipantsBlock(w io.Writer, g *model.Graph, block model.Particip
 			line(w, r, g)
 		}
 	}
+	if block.Dropped > 0 {
+		fmt.Fprintln(w)
+		writeSectionCut(w, block.Dropped, block.Pull)
+	}
 }

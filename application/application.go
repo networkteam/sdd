@@ -97,7 +97,7 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 	if err != nil {
 		return ViewResult{}, err
 	}
-	viewResult, err := snapshot.finder.View(query.ViewQuery{Layout: layout})
+	viewResult, err := snapshot.finder.View(query.ViewQuery{Layout: layout, Budget: request.Budget})
 	if err != nil {
 		return ViewResult{}, err
 	}

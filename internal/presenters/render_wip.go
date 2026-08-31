@@ -33,4 +33,5 @@ func renderAsWipList(w io.Writer, list model.WipList) {
 		fmt.Fprintf(w, "  %s  %-15s%s  %s%s  %s\n",
 			m.ID, m.Participant, excl, m.Entry, branch, m.ShortContent(200))
 	}
+	writeSectionCut(w, list.Dropped, list.Pull)
 }

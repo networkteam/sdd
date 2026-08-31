@@ -63,7 +63,7 @@ func (gf *GraphFinder) View(q query.ViewQuery) (*query.ViewResult, error) {
 
 	sections := make([]query.SectionResult, 0, len(q.Layout.Sections))
 	for i, section := range q.Layout.Sections {
-		sr, err := executeSection(gf.graph, wipMarkers, section, now)
+		sr, err := executeSection(gf.graph, wipMarkers, section, q.Budget, now)
 		if err != nil {
 			return nil, fmt.Errorf("section %d: %w", i+1, err)
 		}
@@ -180,7 +180,7 @@ func parseSourceArg(args []model.FunctionArg) (string, error) {
 //
 // now is the clock used for focus-block heat scoring (test determinism
 // via injection).
-func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model.Section, now time.Time) (query.SectionResult, error) {
+func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model.Section, budget query.ViewBudget, now time.Time) (query.SectionResult, error) {
 	if len(section.Functions) == 0 {
 		return query.SectionResult{}, fmt.Errorf("empty section")
 	}
@@ -218,10 +218,16 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 				"render-shape mismatch: source(wip) produces a wip-list result, but %s expects a different shape (use as-wip-list)",
 				spec.render)
 		}
+		list := model.WipList{Markers: wipMarkers}
+		if budget.GroupItems > 0 && len(list.Markers) > budget.GroupItems {
+			list.Dropped = len(list.Markers) - budget.GroupItems
+			list.Markers = list.Markers[:budget.GroupItems]
+			list.Pull = section.Expr()
+		}
 		return query.SectionResult{
 			Render: spec.render,
 			Name:   spec.sectionName(),
-			Data:   model.WipList{Markers: wipMarkers},
+			Data:   list,
 		}, nil
 	}
 
@@ -323,6 +329,11 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	// actorless filter stays quiet rather than producing a bare title.
 	if spec.render == "as-participants-block" {
 		block := participantsBlockFromEntries(g, entries)
+		if budget.GroupItems > 0 && len(block.Groups) > budget.GroupItems {
+			block.Dropped = len(block.Groups) - budget.GroupItems
+			block.Groups = block.Groups[:budget.GroupItems]
+			block.Pull = section.Expr()
+		}
 		return query.SectionResult{
 			Render: spec.render,
 			Name:   spec.sectionName(),
@@ -335,10 +346,29 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	// ranked and paged set unchanged — the render composes each body into the
 	// surrounding document's heading hierarchy.
 	if spec.render == "as-bodies" {
+		bodies := model.Bodies{Entries: entries}
+		if budget.BodyBytes > 0 {
+			// Whole bodies while bytes fit — a body cut mid-way destroys the
+			// content's purpose, so the unit is the entry (d-tac-rzi).
+			kept, total := 0, 0
+			for _, e := range entries {
+				n := len(e.Content)
+				if total+n > budget.BodyBytes {
+					break
+				}
+				kept++
+				total += n
+			}
+			if kept < len(entries) {
+				bodies.Dropped = len(entries) - kept
+				bodies.Entries = entries[:kept]
+				bodies.Pull = section.Expr()
+			}
+		}
 		return query.SectionResult{
 			Render: spec.render,
 			Name:   spec.sectionName(),
-			Data:   model.Bodies{Entries: entries},
+			Data:   bodies,
 		}, nil
 	}
 
@@ -360,6 +390,11 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 		// targets. Score is fixed at heat(exp-14d) per slice-7 design;
 		// stalled threshold takes the user-supplied value if set.
 		block := expandInvolvement(g, entries, focusBlockScorer(g, now), spec.stalledThreshold)
+		if budget.GroupItems > 0 && len(block.Focuses) > budget.GroupItems {
+			block.Dropped = len(block.Focuses) - budget.GroupItems
+			block.Focuses = block.Focuses[:budget.GroupItems]
+			block.Pull = section.Expr()
+		}
 		return query.SectionResult{
 			Render: spec.render,
 			Name:   spec.sectionName(),
@@ -378,6 +413,15 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 	flat := model.FlatList{Entries: entries, Scores: scores}
 	if spec.expandField == "refs" {
 		flat.RefExpansions = expandRefs(g, entries, spec.expandRefsInactive)
+		if budget.RefsPerEntry > 0 {
+			flat.RefExpansionDropped = make([]int, len(flat.RefExpansions))
+			for i, refs := range flat.RefExpansions {
+				if len(refs) > budget.RefsPerEntry {
+					flat.RefExpansionDropped[i] = len(refs) - budget.RefsPerEntry
+					flat.RefExpansions[i] = refs[:budget.RefsPerEntry]
+				}
+			}
+		}
 	}
 	return query.SectionResult{
 		Render: spec.render,

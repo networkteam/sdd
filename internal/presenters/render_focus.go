@@ -34,6 +34,10 @@ func renderAsFocusBlock(w io.Writer, g *model.Graph, block model.FocusBlock, bri
 			writeFocusTarget(w, g, target, brief)
 		}
 	}
+	if block.Dropped > 0 {
+		fmt.Fprintln(w)
+		writeSectionCut(w, block.Dropped, block.Pull)
+	}
 }
 
 // focusHeaderLine renders the focus entry as a single line — same shape

@@ -1,6 +1,7 @@
 package finders
 
 import (
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -2196,5 +2197,40 @@ func TestView_SkipRejectedForParticipantsBlock(t *testing.T) {
 	f := New(Options{})
 	if _, err := f.OnGraph(g).View(query.ViewQuery{Layout: layout}); err == nil {
 		t.Fatal("skip over the participants block must be rejected")
+	}
+}
+
+func TestView_ServeBudgetCutsShapesAtWholeUnits(t *testing.T) {
+	hub := entry("20260101-090000-d-tac-hub", withKind(model.KindPlan))
+	refs := []*model.Entry{hub}
+	for i := range 9 {
+		refs = append(refs, entry(
+			fmt.Sprintf("20260101-10%02d00-d-tac-r%c", i, 'a'+i),
+			withKind(model.KindDirective), withRefs(hub.ID),
+		))
+	}
+	g := model.NewGraph(refs)
+	f := New(Options{})
+
+	bodiesLayout := mustParseLayout(t, `kind(directive):as-bodies:name("Bodies")`)
+	bounded, err := f.OnGraph(g).View(query.ViewQuery{Layout: bodiesLayout, Budget: query.ViewBudget{BodyBytes: 1}})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	bodies := bounded.Sections[0].Data.(model.Bodies)
+	if len(bodies.Entries) != 0 || bodies.Dropped != 9 {
+		t.Fatalf("bodies cut = %d kept, %d dropped; want whole-body cut accounting", len(bodies.Entries), bodies.Dropped)
+	}
+	if bodies.Pull != `kind(directive):as-bodies:name("Bodies")` {
+		t.Fatalf("bodies pull = %q, want the section's own source", bodies.Pull)
+	}
+
+	unbounded, err := f.OnGraph(g).View(query.ViewQuery{Layout: bodiesLayout})
+	if err != nil {
+		t.Fatalf("View: %v", err)
+	}
+	full := unbounded.Sections[0].Data.(model.Bodies)
+	if full.Dropped != 0 || len(full.Entries) != 9 {
+		t.Fatalf("explicit pulls must arrive complete: %d kept, %d dropped", len(full.Entries), full.Dropped)
 	}
 }
