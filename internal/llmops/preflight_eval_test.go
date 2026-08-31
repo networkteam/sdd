@@ -8,11 +8,9 @@
 // The suite is an EXTERNAL test package (llm_test) so it drives the real
 // pre-flight pipeline through the exported llm.Preflight orchestrator with a
 // production-built Runner — no bespoke runner, and the eval exercises the same
-// path production does. Provider/model are selectable via SDD_EVAL_PROVIDER /
-// SDD_EVAL_MODEL (default: the claude-cli provider on Sonnet — the model class
-// the ref-meta non-determinism was reported on, s-prc-uh3, and the transport
-// that needs no API key because it rides the logged-in claude CLI). Set
-// SDD_EVAL_PROVIDER=anthropic (+ a key) for the faster direct-API path.
+// path production does. The candidate configuration (provider, model, params)
+// is resolved by evalConfig below; per-call usage records through the sinks in
+// eval_stats_test.go.
 //
 // Expectations match the severity-scored output format: HasBlocking() == true
 // means at least one `high` finding was reported (the blocking threshold).
@@ -28,9 +26,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/networkteam/sdd/internal/finders"
+	internalllm "github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llm/factory"
 	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/repos"
 	"github.com/networkteam/sdd/pkg/llm"
 )
 
@@ -51,33 +52,82 @@ func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (llm.Result,
 	return res, err
 }
 
-// evalRunner builds the production Runner the eval validates against, wrapped to
-// capture raw output. Provider/model come from SDD_EVAL_PROVIDER / SDD_EVAL_MODEL.
-// When ANTHROPIC_API_KEY is set (e.g. via a gitignored .env loaded by devbox
-// env_from), the default provider is the direct Anthropic API — much faster per
-// call than the claude CLI transport, which matters now that pass-rate cases
-// multiply the call count. Without a key it falls back to the keyless claude-cli.
-// Both defaults target the Sonnet class — the model the ref-meta non-determinism
-// was reported on (s-prc-uh3).
+// evalRunner builds the production Runner the eval validates against, wrapped
+// to capture raw output and to record per-call usage (eval_stats_test.go).
+// The candidate configuration comes from evalConfig.
 func evalRunner(t *testing.T) *capturingRunner {
 	t.Helper()
-	provider := getenvOr("SDD_EVAL_PROVIDER", defaultEvalProvider())
-	cfg := model.LLMConfig{
-		Provider: provider,
-		Model:    getenvOr("SDD_EVAL_MODEL", defaultEvalModel(provider)),
-	}
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		cfg.APIKeys = map[string]string{"anthropic": key}
-	}
-	runner, err := factory.New(cfg)
+	runner, err := factory.New(evalConfig(t))
 	if err != nil {
 		t.Fatalf("building eval runner: %v", err)
 	}
-	return &capturingRunner{inner: runner}
+	return &capturingRunner{inner: internalllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})}
 }
 
-func defaultEvalProvider() string {
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+// evalConfig resolves the candidate configuration for this run. The user-global
+// config (~/.config/sdd/config.yaml) supplies the base — API keys, Ollama
+// endpoint, timeout, rate limits — so candidates run under the same conditions
+// production would give them. SDD_EVAL_PROVIDER / SDD_EVAL_MODEL /
+// SDD_EVAL_PARAMS select the candidate identity on top; provider and model are
+// always set here, never inherited from the global config, so the incumbent
+// cannot leak in as a silent default. Provider defaults to the direct Anthropic
+// API when a key is reachable (env or global config) — much faster per call
+// than the claude CLI transport, which matters now that pass-rate cases
+// multiply the call count — else the keyless claude-cli. Both defaults target
+// the Sonnet class — the model the ref-meta non-determinism was reported on
+// (s-prc-uh3).
+func evalConfig(t *testing.T) model.LLMConfig {
+	t.Helper()
+	cfg := globalLLMConfig(t)
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		if cfg.APIKeys == nil {
+			cfg.APIKeys = map[string]string{}
+		}
+		cfg.APIKeys["anthropic"] = key
+	}
+	cfg.Provider = getenvOr("SDD_EVAL_PROVIDER", defaultEvalProvider(cfg))
+	cfg.Model = getenvOr("SDD_EVAL_MODEL", defaultEvalModel(cfg.Provider))
+	cfg.Params = parseEvalParams(t, os.Getenv("SDD_EVAL_PARAMS"))
+	return cfg
+}
+
+// globalLLMConfig reads the llm section of the user-global config. A missing
+// file yields the zero config; a malformed one fails the run — proceeding
+// keyless would surface as a confusing provider error later.
+func globalLLMConfig(t *testing.T) model.LLMConfig {
+	t.Helper()
+	loc, err := repos.DefaultLocations()
+	if err != nil {
+		t.Fatalf("resolving global config location: %v", err)
+	}
+	gc, err := repos.LoadConfigFrom(loc.ConfigPath)
+	if err != nil {
+		t.Fatalf("reading global config %s: %v", loc.ConfigPath, err)
+	}
+	return gc.LLM
+}
+
+// parseEvalParams parses SDD_EVAL_PARAMS ("key=value,key=value") into the
+// config's Params map — behaviour-affecting provider settings such as a
+// reasoning effort, recorded as the call's variant. Empty input yields nil.
+func parseEvalParams(t *testing.T, raw string) map[string]string {
+	t.Helper()
+	if raw == "" {
+		return nil
+	}
+	params := map[string]string{}
+	for _, pair := range strings.Split(raw, ",") {
+		key, value, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if !ok || key == "" {
+			t.Fatalf("malformed SDD_EVAL_PARAMS entry %q (want key=value,key=value)", pair)
+		}
+		params[key] = value
+	}
+	return params
+}
+
+func defaultEvalProvider(cfg model.LLMConfig) string {
+	if cfg.APIKeys["anthropic"] != "" {
 		return "anthropic"
 	}
 	return "claude-cli"
@@ -127,8 +177,24 @@ func runEvalOnce(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llmo
 	defer cancel()
 
 	// English default — the language-drift rubric only fires for non-empty locales.
-	result, err := llmops.Preflight(ctx, runner, proposed, graph, "")
+	result, err := llmops.Preflight(ctx, runner, proposed, evalGraphWithBase(t, graph), "")
 	return result, runner.lastText, err
+}
+
+// evalGraphWithBase mirrors the production load paths (finders.LoadGraph,
+// application.BuildSnapshot): the case's entries plus the embedded base
+// entries, disk-wins, so prompt inputs pulled from graph facts resolve.
+func evalGraphWithBase(t *testing.T, graph *model.Graph) *model.Graph {
+	t.Helper()
+	base, err := finders.BaseEntries()
+	if err != nil {
+		t.Fatalf("loading base entries: %v", err)
+	}
+	onDisk := make(map[string]bool, len(graph.Entries))
+	for _, e := range graph.Entries {
+		onDisk[e.ID] = true
+	}
+	return model.NewGraph(model.MergeEmbedded(graph.Entries, onDisk, base))
 }
 
 // --- N-run pass-rate support (plan d-tac-tph, AC 2) ---
