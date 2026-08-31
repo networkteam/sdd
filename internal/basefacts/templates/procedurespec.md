@@ -62,10 +62,14 @@ An agent chooser (`chooser: agent`) or user chooser (`chooser: user`) declares `
 ### On any step
 
 - `collect` — the state fields reportable here; a `?` suffix marks one optional (quote the marker: `"anchor?"`), and required ones hold the step until reported.
-- `inject` — a list of `{fn: <query name>, args?}` calls: each result is served into the step's instructions under its function's name.
+- `inject` — a list of `{fn: <query name>, args?, maxBytes?, maxItems?}` calls: each result is served into the step's instructions under its function's name. Size is the engine's job — an inject without a declared cap is bounded by the engine's defaults; `maxBytes`/`maxItems` are overrides.
 - `render` — the name of an extra `## unit:` section from the body, served with the step (typically presenting one collected field's content).
 
 A run ends by transitioning to {{ .EndTargets }}.
+
+### Serve budget
+
+Every automatic serve is bounded per part, but individually capped parts can still sum past a host's response budget. Capture pre-flight and `sdd lint` size each step at its declared worst case and raise an advisory finding when a step exceeds the engine's default serve budget. The finding is a risk note, never a load failure — the spec still runs. To accept the trade, declare `serveBudget: <bytes>` at the spec's top level (beside `params`/`state`/`steps`): a declared total at or above the worst case silences the finding and records the decision on the spec itself.
 
 ## Variable types
 
