@@ -2702,6 +2702,44 @@ func TestDoorAndReplayWirePayloads(t *testing.T) {
 	}
 }
 
+// TestToolResultsCarryThePayloadOnce pins the envelope shape (d-tac-4dz): by
+// default a tool result carries its payload in structuredContent alone — the
+// SDK-synthesized content mirror doubles every serve's model-visible tokens
+// on clients that surface both copies — while Compat restores the mirror for
+// clients that read only content. Error results keep their content either way.
+func TestToolResultsCarryThePayloadOnce(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "info", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StructuredContent == nil {
+		t.Fatal("info result must carry structuredContent")
+	}
+	if len(res.Content) != 0 {
+		t.Errorf("default envelope must not mirror the payload into content, got %d blocks", len(res.Content))
+	}
+
+	errRes, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "next", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !errRes.IsError || len(errRes.Content) == 0 {
+		t.Errorf("an error result keeps its content text, got %+v", errRes)
+	}
+
+	compatEnv := newTestServer(t, nil, "", "", func(o *mcpserver.Options) { o.Compat = true })
+	compatCS := connect(t, compatEnv.srv)
+	res, err = compatCS.CallTool(t.Context(), &mcp.CallToolParams{Name: "info", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Content) == 0 {
+		t.Error("compat envelope must carry the content mirror")
+	}
+}
+
 // bareShellProcedure is a minimal session shell declaring no framing lanes —
 // used to pin the info-only framing fallback.
 const bareShellProcedure = `---

@@ -32,6 +32,11 @@ type Options struct {
 	// read_attachment results. Canonical attachment reads remain path-free.
 	LocalAttachmentPath func(entryID, filename string) (string, error)
 	Version             string
+	// Compat restores the backwards-compatible `content` text mirror of
+	// structuredContent on tool results, for registrations on clients that
+	// read only `content`. Off by default: clients that surface both copies
+	// double every serve's model-visible tokens (d-tac-4dz).
+	Compat bool
 }
 
 // Server wires the MCP protocol surface to the engine and the SDD read and
@@ -90,8 +95,25 @@ func New(opts Options) (*Server, error) {
 		Instructions: serverInstructions,
 	})
 	s.mcp.AddReceivingMiddleware(s.trackSessionMiddleware)
+	if !opts.Compat {
+		s.mcp.AddReceivingMiddleware(stripContentMirror)
+	}
 	s.registerTools()
 	return s, nil
+}
+
+// stripContentMirror drops the `content` text mirror the SDK synthesizes
+// beside structuredContent, so a tool result carries its payload once
+// (d-tac-4dz). Error results keep their content — the error text lives there
+// — and results without structured content pass unchanged.
+func stripContentMirror(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		res, err := next(ctx, method, req)
+		if toolRes, ok := res.(*mcp.CallToolResult); ok && !toolRes.IsError && toolRes.StructuredContent != nil {
+			toolRes.Content = []mcp.Content{}
+		}
+		return res, err
+	}
 }
 
 // RunStdio serves a single local connection over stdin/stdout until the

@@ -256,13 +256,12 @@ func prodServeSearch(t *testing.T, root string) string {
 	if result.IsError {
 		t.Fatalf("search returned a tool error: %+v\nstderr:\n%s", result, stderr.String())
 	}
-	var text strings.Builder
-	for _, content := range result.Content {
-		if tc, ok := content.(*mcp.TextContent); ok {
-			text.WriteString(tc.Text)
-		}
+	// The payload travels in structuredContent alone (d-tac-4dz).
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structuredContent: %v", err)
 	}
-	return text.String()
+	return string(encoded)
 }
 
 func prodEnv(root string, extra ...string) []string {
