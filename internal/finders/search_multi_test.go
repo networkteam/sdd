@@ -59,7 +59,7 @@ func TestMultiSearchTextAcrossRepos(t *testing.T) {
 	}
 	repostest.WriteConfig(t, loc.ConfigPath, cfg)
 
-	f := New(Options{Repos: reg})
+	f := New(Options{Repos: reg, Config: &model.PerRepoConfig{}})
 	g, err := f.CurrentGraph(localDir)
 	if err != nil {
 		t.Fatal(err)

@@ -152,12 +152,17 @@ var readOnlyRunner pkgllm.RunnerFunc = func(context.Context, pkgllm.Request) (pk
 // runner errors on invocation so accidental use in a code path that does
 // call Preflight is loud. Config load failures propagate — a malformed
 // config is a real problem and the caller decides how to surface it.
-// Returns nil cfg silently only when the CWD is outside an sdd repo or
-// config files simply don't exist (legitimate "no config" states).
+// When the CWD is outside an sdd repo or config files simply don't exist,
+// loadConfig established that absence is the world state, so the effective
+// config is the empty one — resolved here explicitly because a nil config
+// on the finder means a wiring fault and errors (s-tac-uya).
 func newReadFinder() (*finders.Finder, error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, err
+	}
+	if cfg == nil {
+		cfg = &model.PerRepoConfig{}
 	}
 	reg, _, err := defaultRepos()
 	if err != nil {

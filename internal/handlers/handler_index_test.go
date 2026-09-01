@@ -13,6 +13,7 @@ import (
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/index"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/pkg/llm"
 )
@@ -93,6 +94,7 @@ func readFinderFor(t *testing.T) *finders.Finder {
 	t.Helper()
 	return finders.New(finders.Options{
 		PreflightRunner: noopRunner{},
+		Config:          &model.PerRepoConfig{},
 	})
 }
 

@@ -87,7 +87,7 @@ func TestLint_LoadErrorsCountedAndReported(t *testing.T) {
 	g := model.NewGraphWithLoadIssues([]*model.Entry{clean}, []model.LoadIssue{
 		{Ref: "20260101-120001-s-prc-bad", Message: "parsing frontmatter: unexpected token"},
 	})
-	f := finders.New(finders.Options{})
+	f := finders.New(finders.Options{Config: &model.PerRepoConfig{}})
 
 	res, err := f.OnGraph(g).Lint(query.LintQuery{})
 	if err != nil {
@@ -110,7 +110,7 @@ func TestLint_MissingSummaryOnly(t *testing.T) {
 	missing := lintEntry(t, "20260101-120001-s-prc-bbb", "")
 
 	g := model.NewGraph([]*model.Entry{withSummary, missing})
-	f := finders.New(finders.Options{})
+	f := finders.New(finders.Options{Config: &model.PerRepoConfig{}})
 
 	res, err := f.OnGraph(g).Lint(query.LintQuery{})
 	if err != nil {
@@ -173,7 +173,7 @@ steps:
 	bad := procEntry("20260101-130001-d-prc-bad", "badproc", broken)
 	g := model.NewGraph([]*model.Entry{big, bad})
 
-	res, err := finders.New(finders.Options{ProcedureRegistry: reg}).OnGraph(g).Lint(query.LintQuery{})
+	res, err := finders.New(finders.Options{ProcedureRegistry: reg, Config: &model.PerRepoConfig{}}).OnGraph(g).Lint(query.LintQuery{})
 	if err != nil {
 		t.Fatalf("Lint: %v", err)
 	}
@@ -190,7 +190,7 @@ steps:
 	}
 
 	// Without a registry the provider is skipped entirely.
-	res, err = finders.New(finders.Options{}).OnGraph(model.NewGraph([]*model.Entry{big, bad})).Lint(query.LintQuery{})
+	res, err = finders.New(finders.Options{Config: &model.PerRepoConfig{}}).OnGraph(model.NewGraph([]*model.Entry{big, bad})).Lint(query.LintQuery{})
 	if err != nil {
 		t.Fatalf("Lint: %v", err)
 	}

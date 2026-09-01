@@ -6,9 +6,17 @@ import "github.com/networkteam/sdd/internal/query"
 // header surface that skill session-start injections read. Pure config
 // inspection — no graph access required.
 func (f *Finder) Info(_ query.InfoQuery) (*query.InfoResult, error) {
+	participant, err := f.localParticipant()
+	if err != nil {
+		return nil, err
+	}
+	language, err := f.language()
+	if err != nil {
+		return nil, err
+	}
 	return &query.InfoResult{
-		LocalParticipant: f.localParticipant(),
-		Language:         f.language(),
+		LocalParticipant: participant,
+		Language:         language,
 		Search:           f.searchCapability(),
 	}, nil
 }

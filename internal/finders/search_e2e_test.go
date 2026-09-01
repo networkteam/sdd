@@ -115,6 +115,7 @@ func setupE2E(t *testing.T) *e2eSetup {
 
 	reader := finders.New(finders.Options{
 		PreflightRunner: e2eNoopRunner{},
+		Config:          &model.PerRepoConfig{},
 	})
 
 	return &e2eSetup{

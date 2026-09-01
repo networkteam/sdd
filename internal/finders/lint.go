@@ -24,7 +24,9 @@ func (gf *GraphFinder) Lint(_ query.LintQuery) (*query.LintResult, error) {
 	}
 
 	validateSummaries(gf.graph)
-	gf.finder.validateCrossRepoDeps(gf.graph)
+	if err := gf.finder.validateCrossRepoDeps(gf.graph); err != nil {
+		return nil, fmt.Errorf("lint: %w", err)
+	}
 
 	result := &query.LintResult{}
 	for _, issue := range gf.graph.LoadIssues {
@@ -157,9 +159,13 @@ func (f *Finder) repoIndexLint(result *query.LintResult) {
 // per entry so the finding points at the exact entry and repo. Embedded base
 // entries are skipped: they are framework-shipped and never reference a
 // project's declared dependencies.
-func (f *Finder) validateCrossRepoDeps(graph *model.Graph) {
-	declared := make(map[string]bool, len(f.declaredDependencies()))
-	for _, dep := range f.declaredDependencies() {
+func (f *Finder) validateCrossRepoDeps(graph *model.Graph) error {
+	deps, err := f.declaredDependencies()
+	if err != nil {
+		return err
+	}
+	declared := make(map[string]bool, len(deps))
+	for _, dep := range deps {
 		declared[dep] = true
 	}
 	for _, entry := range graph.Entries {
@@ -180,6 +186,7 @@ func (f *Finder) validateCrossRepoDeps(graph *model.Graph) {
 			})
 		}
 	}
+	return nil
 }
 
 // validateSummaries flags entries that have no summary yet. Under the
