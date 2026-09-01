@@ -48,7 +48,7 @@ func TestRunPreflight_NoFindings(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(Options{PreflightRunner: runner})
+	f := New(Options{PreflightRunner: runner, Config: &model.PerRepoConfig{}})
 	result, err := f.Preflight(context.Background(), graph, query.PreflightQuery{Entry: proposed})
 	if err != nil {
 		t.Fatalf("Preflight() error: %v", err)
@@ -76,7 +76,7 @@ func TestRunPreflight_BlockingFinding(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": [{"severity": "high", "category": "signal-target-miss", "observation": "signal not genuinely addressed"}]}`}
-	f := New(Options{PreflightRunner: runner})
+	f := New(Options{PreflightRunner: runner, Config: &model.PerRepoConfig{}})
 	result, err := f.Preflight(context.Background(), graph, query.PreflightQuery{Entry: proposed})
 	if err != nil {
 		t.Fatalf("Preflight() error: %v", err)
@@ -110,7 +110,7 @@ func TestRunPreflight_NonBlockingFindings(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": [{"severity": "medium", "category": "plan-coverage-ambiguity", "observation": "could be clearer"}, {"severity": "low", "category": "opening-reference-dependent", "observation": "stylistic"}]}`}
-	f := New(Options{PreflightRunner: runner})
+	f := New(Options{PreflightRunner: runner, Config: &model.PerRepoConfig{}})
 	result, err := f.Preflight(context.Background(), graph, query.PreflightQuery{Entry: proposed})
 	if err != nil {
 		t.Fatalf("Preflight() error: %v", err)
@@ -133,7 +133,7 @@ func TestRunPreflight_RunnerError(t *testing.T) {
 	}
 
 	runner := &mockRunner{err: fmt.Errorf("claude CLI not found")}
-	f := New(Options{PreflightRunner: runner})
+	f := New(Options{PreflightRunner: runner, Config: &model.PerRepoConfig{}})
 	_, err := f.Preflight(context.Background(), graph, query.PreflightQuery{Entry: proposed})
 	if err == nil {
 		t.Fatal("Preflight() expected error when runner fails")
@@ -153,7 +153,7 @@ func TestRunPreflight_ParseError(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: "I think this looks fine!"}
-	f := New(Options{PreflightRunner: runner})
+	f := New(Options{PreflightRunner: runner, Config: &model.PerRepoConfig{}})
 	_, err := f.Preflight(context.Background(), graph, query.PreflightQuery{Entry: proposed})
 	if err == nil {
 		t.Fatal("Preflight() expected error when response is unparseable")
@@ -930,7 +930,7 @@ func TestRunPreflight_CorrectCheckTypeSelection(t *testing.T) {
 	}
 
 	runner := &mockRunner{response: `{"findings": []}`}
-	f := New(Options{PreflightRunner: runner})
+	f := New(Options{PreflightRunner: runner, Config: &model.PerRepoConfig{}})
 	_, err := f.Preflight(context.Background(), graph, query.PreflightQuery{Entry: proposed})
 	if err != nil {
 		t.Fatal(err)

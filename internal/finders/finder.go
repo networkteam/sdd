@@ -14,8 +14,9 @@ import (
 // Finder holds dependencies and config shared across query methods.
 // Config is a snapshot taken at construction time — short-lived CLI means
 // a single read at the composition root is sufficient. Nil means no config
-// is available (fresh repo, read-only commands, tests); finder methods
-// degrade gracefully.
+// is available (fresh repo, read-only commands, tests); read methods
+// degrade gracefully, while Preflight — the write gate — errors on a nil
+// config rather than run its config-driven checks blind.
 type Finder struct {
 	preflightRunner    llm.Runner
 	writingGuideRunner llm.Runner

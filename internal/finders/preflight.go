@@ -2,6 +2,7 @@ package finders
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
@@ -24,6 +25,12 @@ import (
 // default); a locale code activates the check against description prose.
 func (gf *GraphFinder) Preflight(ctx context.Context, q query.PreflightQuery) (*query.PreflightResult, error) {
 	f := gf.finder
+	// The write gate refuses to run blind: a nil config would empty the
+	// declared-dependency list and drop the configured language, silently
+	// weakening the checks below (s-tac-uya) — fail loud instead.
+	if f.cfg == nil {
+		return nil, fmt.Errorf("pre-flight requires the per-repo config; the finder was constructed without Options.Config")
+	}
 	findings := mechanicalPreflight(q.Entry, gf.graph, f.declaredDependencies(), f.procedureRegistry)
 
 	llmResult, err := llmops.Preflight(ctx, f.preflightRunner, q.Entry, gf.graph, f.language())

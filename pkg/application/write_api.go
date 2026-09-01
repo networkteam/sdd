@@ -242,6 +242,10 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		finder := finders.New(finders.Options{
 			PreflightRunner:   runtime.options.LLM,
 			ProcedureRegistry: registry,
+			Config: &model.PerRepoConfig{
+				Language:     runtime.options.Language,
+				Dependencies: runtime.options.Dependencies,
+			},
 		})
 		preflight, err := finder.Preflight(ctx, snapshot.graph, query.PreflightQuery{Entry: entry})
 		if err != nil {
