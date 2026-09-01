@@ -277,7 +277,7 @@ func TestSessionAttachmentMetadataRoundTrips(t *testing.T) {
 	}
 	now := time.Now().UTC().Round(0)
 	metadata := sdd.SessionMetadata{
-		CodecVersion: 1, ID: "attached", Subject: "christopher", Project: "example",
+		ID: "attached", Subject: "christopher", Project: "example",
 		Attachment: &sdd.Attachment{Subject: "christopher", MCPSessionID: "mcp-1", ClientName: "test-client", LastActivity: now},
 	}
 	created, err := store.Create(t.Context(), metadata)
@@ -344,7 +344,7 @@ func TestFilesystemSessionStoreReadsEveryReleasedFormatAndSkipsUnreadable(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	metadata := sdd.SessionMetadata{CodecVersion: 1, ID: "current", Subject: "local", Project: "local"}
+	metadata := sdd.SessionMetadata{ID: "current", Subject: "local", Project: "local"}
 	if _, err := store.Create(t.Context(), metadata); err != nil {
 		t.Fatal(err)
 	}

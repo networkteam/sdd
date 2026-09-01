@@ -212,7 +212,7 @@ func (a *Application) OpenWorkflow(ctx context.Context, identity RequestIdentity
 	id := newWorkflowSessionID(time.Now())
 	now := runtime.options.Now().UTC().Round(0)
 	metadata := SessionMetadata{
-		CodecVersion: SessionCodecVersion, ID: id, Subject: principal.Subject,
+		ID: id, Subject: principal.Subject,
 		Project: runtime.options.Project.ID, Participant: principal.Participant, UpdatedAt: now,
 		Attachment: newAttachment(principal.Subject, request.MCPSessionID, request.ClientName, request.ClientVersion, now, ""),
 	}

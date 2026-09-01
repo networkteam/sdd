@@ -12,14 +12,16 @@ import (
 type SessionID string
 
 // SessionMetadata is structured routing and ownership data. Dialogue events
-// remain opaque to the store.
+// remain opaque to the store. The type itself is the metadata contract: its
+// evolution is the Go type's own, and how a store survives that is the
+// adapter's concern — schema migrations, or format discrimination in its
+// persisted record (d-tac-8js).
 type SessionMetadata struct {
-	CodecVersion uint32
-	ID           SessionID
-	Subject      string
-	Project      ProjectID
-	Participant  string
-	Label        string
+	ID          SessionID
+	Subject     string
+	Project     ProjectID
+	Participant string
+	Label       string
 	// Branch is the session's explicit branch binding. Empty means unbound;
 	// compositions without a branch concept leave it empty.
 	Branch     string `json:"branch,omitempty"`
@@ -210,6 +212,11 @@ type SessionAppend struct {
 
 // SessionStore persists structured metadata plus ordered opaque events. Append
 // is the sole mutation primitive and must compare ExpectedVersion atomically.
+//
+// Compositions must not run mixed engine versions against one session store:
+// metadata carries no version guard (d-tac-8js), so an older engine reading
+// metadata a newer one wrote is undetected there — only a session the newer
+// engine actually advanced fails closed, through StoredEvent.CodecVersion.
 //
 // List is also the enumeration collection sweeps over, and Delete is what makes
 // them possible against any implementation rather than only the local one.

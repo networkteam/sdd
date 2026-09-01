@@ -188,7 +188,7 @@ func (f *failOnceFinalizer) Finalize(context.Context, sdd.AppliedMutation) error
 func openBinding(t *testing.T, sessions sdd.SessionStore, subject string, id sdd.SessionID) sdd.SessionBinding {
 	t.Helper()
 	created, err := sessions.Create(t.Context(), sdd.SessionMetadata{
-		CodecVersion: sdd.SessionCodecVersion, ID: id, Subject: subject, Project: "example", Participant: subject,
+		ID: id, Subject: subject, Project: "example", Participant: subject,
 		Attachment: &sdd.Attachment{Subject: subject, MCPSessionID: "mcp", LastActivity: time.Now().UTC().Round(0)},
 	})
 	if err != nil {
@@ -535,7 +535,7 @@ func TestPreparedAttachmentCrossesHomeStagingIntoTargetGraph(t *testing.T) {
 func TestLegacyIntentRequiresAuthorizedAuditedTargetBinding(t *testing.T) {
 	authorizer := &recordingRecoveryAuthorizer{}
 	application, sessions, _, graph := newDurableApplication(t, time.Now, nil, nil, authorizer)
-	metadata := sdd.SessionMetadata{CodecVersion: sdd.SessionCodecVersion, ID: "legacy-v1", Subject: "christopher", Project: "example"}
+	metadata := sdd.SessionMetadata{ID: "legacy-v1", Subject: "christopher", Project: "example"}
 	stored, err := sessions.Create(t.Context(), metadata)
 	if err != nil {
 		t.Fatal(err)
@@ -785,7 +785,13 @@ func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *te
 
 func TestSessionReplayFailsClosedForUnsupportedCodec(t *testing.T) {
 	application, sessions, _, _ := newDurableApplication(t, time.Now, nil, nil)
-	_, err := sessions.Create(t.Context(), sdd.SessionMetadata{CodecVersion: 99, ID: "future", Subject: "christopher", Project: "example"})
+	created, err := sessions.Create(t.Context(), sdd.SessionMetadata{ID: "future", Subject: "christopher", Project: "example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = sessions.Append(t.Context(), "future", created.Version, sdd.SessionAppend{
+		Events: []sdd.StoredEvent{{CodecVersion: 99, Code: sdd.WorkflowEventCode, Payload: []byte(`{}`)}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

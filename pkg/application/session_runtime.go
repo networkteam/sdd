@@ -110,9 +110,6 @@ func sessionBindingFrom(stored StoredSession) SessionBinding {
 }
 
 func validateStoredSession(stored StoredSession) error {
-	if !SupportedSessionCodecVersion(stored.Metadata.CodecVersion) {
-		return &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported session codec version", Version: stored.Metadata.CodecVersion}
-	}
 	for _, event := range stored.Events {
 		if !SupportedSessionCodecVersion(event.CodecVersion) {
 			return &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported session event codec version", Version: event.CodecVersion}

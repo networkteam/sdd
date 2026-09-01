@@ -2228,7 +2228,7 @@ func TestAbandonSessionByHandle_SurfacesHeldMarkers(t *testing.T) {
 		{V: 1, TS: time.Date(2026, 7, 6, 9, 0, 2, 0, time.UTC), Session: sessionID, Seq: 3, Instance: "i_1", Event: engine.EventOpResult, Data: map[string]any{"step": "setup", "fn": "wipStart", "writes": map[string]any{"wipMarker": "wip-123"}}},
 	}
 	stored, err := env.sessions.Create(t.Context(), sdd.SessionMetadata{
-		CodecVersion: 1, ID: sdd.SessionID(sessionID), Subject: "tester", Project: "test", Participant: "Tester",
+		ID: sdd.SessionID(sessionID), Subject: "tester", Project: "test", Participant: "Tester",
 		UpdatedAt: time.Date(2026, 7, 6, 9, 0, 2, 0, time.UTC),
 	})
 	if err != nil {

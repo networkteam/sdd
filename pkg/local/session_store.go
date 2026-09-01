@@ -312,10 +312,9 @@ func readSessionLog(location StoreLocation, name string, id app.SessionID) (app.
 	}
 	defer func() { _ = file.Close() }()
 	return decodeSessionLog(file, id, app.SessionMetadata{
-		CodecVersion: app.SessionCodecVersion,
-		ID:           id,
-		Subject:      location.Subject,
-		Project:      location.Project,
+		ID:      id,
+		Subject: location.Subject,
+		Project: location.Project,
 	})
 }
 
