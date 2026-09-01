@@ -1,6 +1,10 @@
 package model
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/networkteam/sdd/pkg/application/types"
+)
 
 // ShowTreeItem represents an entry at a specific depth in a show tree.
 // Depth 0 is the primary entry. Depth 1+ entries are summary-only.
@@ -71,16 +75,9 @@ type ShowTree struct {
 	DownstreamTruncated []TruncatedRef
 }
 
-// ShowTreeBudget bounds a tree's expansion per direction: MaxNodes caps how
-// many whole-entry nodes one direction may carry, MaxChildren caps one
-// node's fan-out. Children past a bound land as TruncatedRefs — the same
-// honest frontier the depth limit renders — never silently dropped. Zero
-// values are unbounded: explicit pulls (sdd show, the MCP show tool) pass no
-// budget and arrive complete (d-tac-rzi).
-type ShowTreeBudget struct {
-	MaxNodes    int
-	MaxChildren int
-}
+// ShowTreeBudget is defined in pkg/application/types — the exported surface
+// names it, so the definition lives in the cycle-free public leaf (s-tac-ah2).
+type ShowTreeBudget = types.ShowTreeBudget
 
 // treeWalk carries one direction's budget accounting through the recursion.
 type treeWalk struct {

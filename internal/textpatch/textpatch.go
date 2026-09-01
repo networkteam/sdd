@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
-// Pair is one exact search-replace edit.
-type Pair struct {
-	Old string
-	New string
-}
+// Pair is one exact search-replace edit — defined in pkg/application/types
+// (as PatchPair) because the exported surface names it (s-tac-ah2).
+type Pair = types.PatchPair
 
 // Apply returns text with every pair applied in order, or an error naming the
 // first failing pair — Old empty, absent, or matching more than once. On

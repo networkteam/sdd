@@ -1,6 +1,9 @@
 package query
 
-import "github.com/networkteam/sdd/internal/model"
+import (
+	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/application/types"
+)
 
 // ViewQuery captures intent to execute a layout pipeline. Pure intent: the
 // Layout AST is produced upstream by ParseLayout — the finder consumes the
@@ -15,18 +18,9 @@ type ViewQuery struct {
 	Budget ViewBudget
 }
 
-// ViewBudget names the per-shape bounds a served view applies: every cut is
-// at a whole unit (a focus group, a marker, a body, a ref sub-line) and the
-// shape carries the dropped count plus a runnable pull for the remainder.
-type ViewBudget struct {
-	// GroupItems caps focus groups, participant groups, and WIP markers per
-	// section.
-	GroupItems int
-	// RefsPerEntry caps expand(refs) sub-lines per entry.
-	RefsPerEntry int
-	// BodyBytes caps as-bodies sections: whole bodies while bytes fit.
-	BodyBytes int
-}
+// ViewBudget is defined in pkg/application/types — the exported surface names
+// it, so the definition lives in the cycle-free public leaf (s-tac-ah2).
+type ViewBudget = types.ViewBudget
 
 // ViewResult is the structured output of a ViewQuery: one SectionResult
 // per section in the source layout, in the order they appeared.

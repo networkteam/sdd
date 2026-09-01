@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/networkteam/sdd/pkg/application/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -212,12 +213,9 @@ func IsValidIntent(s string) bool {
 	return validIntents[Intent(s)]
 }
 
-// Warning represents a validation issue found on a graph entry.
-type Warning struct {
-	Field   string // "refs", "closes", "supersedes"
-	Value   string // the offending ID or value
-	Message string // human-readable description
-}
+// Warning is defined in pkg/application/types — the exported surface names
+// it, so the definition lives in the cycle-free public leaf (s-tac-ah2).
+type Warning = types.Warning
 
 type Entry struct {
 	ID           string

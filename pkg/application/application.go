@@ -16,6 +16,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // Application resolves current access and dispatches protocol-neutral SDD
@@ -83,7 +84,7 @@ func (a *Application) Vocabulary(ctx context.Context, identity RequestIdentity, 
 // category and derive their exit state from LintResult.Errors alone. Index
 // findings need shell-resolved inputs (IndexLintQuery) and stay a shell
 // concern.
-func (a *Application) Lint(ctx context.Context, identity RequestIdentity, project ProjectID, request query.LintQuery) (result *query.LintResult, err error) {
+func (a *Application) Lint(ctx context.Context, identity RequestIdentity, project ProjectID, request types.LintQuery) (result *types.LintResult, err error) {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return nil, err

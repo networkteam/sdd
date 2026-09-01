@@ -10,13 +10,14 @@ import (
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/serveview"
 	"github.com/networkteam/sdd/internal/truncate"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // serveChainBudget bounds each direction of a served entry chain: the
 // entry-list default from the serve budget caps nodes, and the fan-out cap
 // keeps one hub entry from spending the whole node budget on its own edges.
 // Explicit pulls (sdd show, the MCP show tool) never pass a budget.
-var serveChainBudget = model.ShowTreeBudget{
+var serveChainBudget = types.ShowTreeBudget{
 	MaxNodes:    serveview.Default().Cap(serveview.PartEntryList).MaxItems,
 	MaxChildren: 8,
 }
@@ -24,7 +25,7 @@ var serveChainBudget = model.ShowTreeBudget{
 // servedViewBudget bounds a pushed view's scaling shapes at whole units:
 // focus and participant groups, WIP markers, whole bodies, per-entry ref
 // sub-lines. Explicit pulls (the view tool, the CLI) pass no budget.
-var servedViewBudget = query.ViewBudget{
+var servedViewBudget = types.ViewBudget{
 	GroupItems:   12,
 	RefsPerEntry: 6,
 	BodyBytes:    serveview.Default().Cap(serveview.PartText).MaxBytes,
@@ -435,7 +436,7 @@ func (w *WorkflowSession) draftFromStore(store *engine.Store) EntryDraft {
 	}
 	for _, inv := range workflowStoreDocuments(store, "involvement") {
 		target, _ := inv["target"].(string)
-		involvement := model.Involvement{Target: target, When: focusWhenFromDocument(inv["when"])}
+		involvement := types.Involvement{Target: target, When: focusWhenFromDocument(inv["when"])}
 		// "actors" is present in the normalized document only when it was set
 		// (engine.Involvement.MarshalJSON), so key presence reconstructs the
 		// unset-vs-explicit-empty distinction the model relies on.
@@ -586,10 +587,10 @@ func (w *WorkflowSession) withSessionBindingTargetError(err error, fromBinding b
 	return withSessionBindingTargetError(w.branch, fromBinding, err)
 }
 
-// focusWhenFromDocument builds a model.FocusWhen from a normalized store value.
+// focusWhenFromDocument builds a types.FocusWhen from a normalized store value.
 // The value is a JSON document (map keyed by When's json field names) or absent;
 // a range with neither end set collapses to nil.
-func focusWhenFromDocument(v any) *model.FocusWhen {
+func focusWhenFromDocument(v any) *types.FocusWhen {
 	doc, ok := v.(map[string]any)
 	if !ok {
 		return nil
@@ -599,7 +600,7 @@ func focusWhenFromDocument(v any) *model.FocusWhen {
 	if from == "" && to == "" {
 		return nil
 	}
-	return &model.FocusWhen{From: from, To: to}
+	return &types.FocusWhen{From: from, To: to}
 }
 
 // documentStrings coerces a normalized list value ([]any of strings) to []string,

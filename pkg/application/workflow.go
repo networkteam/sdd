@@ -22,6 +22,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/textpatch"
 	"github.com/networkteam/sdd/internal/truncate"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 const (
@@ -95,10 +96,10 @@ type WorkflowServe struct {
 	Diagnostics    []string
 	// InstructionLanes are the unit's rendered lanes in order — what the MCP
 	// layer dedups independently; Instructions is their join plus diagnostics.
-	InstructionLanes []engine.ServeLane
+	InstructionLanes []types.ServeLane
 	// Sizes is the engine's per-part byte accounting for this serve, read by
 	// the serve-budget measurement (d-tac-qwc).
-	Sizes []engine.PartSize
+	Sizes []types.PartSize
 	Base  *WorkflowServe
 	// Collected is the instance's already-gathered param and state values,
 	// projected only onto resume serves so a newly attached or reoriented
@@ -709,7 +710,7 @@ func (w *WorkflowSession) StageAttachment(ctx context.Context, identity RequestI
 // so a small correction costs neither a full re-stage nor a full re-read
 // (20260826-120330-d-tac-8f8). Atomic: a failing pair names itself and the
 // staged file stays unchanged.
-func (w *WorkflowSession) EditStagedAttachment(ctx context.Context, identity RequestIdentity, handle string, pairs []textpatch.Pair) error {
+func (w *WorkflowSession) EditStagedAttachment(ctx context.Context, identity RequestIdentity, handle string, pairs []types.PatchPair) error {
 	w.setOperation(ctx, identity)
 	current, err := w.readStagedBlob(ctx, identity, handle)
 	if err != nil {
@@ -1216,8 +1217,8 @@ func (w *WorkflowSession) publicServe(serve *engine.Serve) *WorkflowServe {
 		Session: w.ID(), Branch: w.branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: string(serve.Status),
 		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Diagnostics: append([]string(nil), serve.Diagnostics...),
-		InstructionLanes: append([]engine.ServeLane(nil), serve.Lanes...),
-		Sizes:            append([]engine.PartSize(nil), serve.Sizes...),
+		InstructionLanes: append([]types.ServeLane(nil), serve.Lanes...),
+		Sizes:            append([]types.PartSize(nil), serve.Sizes...),
 	}
 	if serve.Chooser != nil {
 		chooser := &WorkflowChooser{Chooser: serve.Chooser.Chooser, Kind: ChooserKind(serve.Chooser.Kind)}

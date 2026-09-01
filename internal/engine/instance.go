@@ -11,6 +11,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/serveview"
 	"github.com/networkteam/sdd/internal/truncate"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // InstanceStatus is a procedure instance's lifecycle state.
@@ -135,12 +136,9 @@ type Serve struct {
 	Cuts []truncate.Cut
 }
 
-// ServeLane is one rendered lane of a serve's instruction unit — the unit a
-// host's served-once memory dedups at (d-tac-87o).
-type ServeLane struct {
-	Name string
-	Text string
-}
+// ServeLane is defined in pkg/application/types — the exported surface names
+// it, so the definition lives in the cycle-free public leaf (s-tac-ah2).
+type ServeLane = types.ServeLane
 
 // evalGuard evaluates a guard against the registry, returning the verdict
 // and the failing predicates for diagnostics.

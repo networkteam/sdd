@@ -11,6 +11,7 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/application/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -133,9 +134,9 @@ func BuildSnapshot(_ context.Context, data SnapshotData) (*Snapshot, error) {
 // (unreadable) documents and per-entry validation warnings — so external hosts
 // can render graph health without reaching into the private model. A clean
 // graph reports zero of each.
-func (s *Snapshot) Health() model.GraphHealth {
+func (s *Snapshot) Health() types.GraphHealth {
 	if s == nil || s.finder == nil {
-		return model.GraphHealth{}
+		return types.GraphHealth{}
 	}
 	return s.finder.Health()
 }

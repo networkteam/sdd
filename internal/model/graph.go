@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // Graph holds all entries and their reference indexes.
@@ -753,26 +755,13 @@ func (g *Graph) Lint() []*Entry {
 	return result
 }
 
-// HealthIssue is one graph-integrity problem as a displayable line: the entry
-// ID (or load ref) it concerns and the human message.
-type HealthIssue struct {
-	Ref     string
-	Message string
-}
-
-// GraphHealth is a flat summary of graph-integrity problems: the count of
-// entry warnings, the count of unreadable (load-failed) entries, and every
-// problem as an ordered line (load failures first, then entry warnings).
-type GraphHealth struct {
-	Warnings   int
-	LoadErrors int
-	Issues     []HealthIssue
-}
-
-// Clean reports whether the graph carries no integrity problems at all.
-func (h GraphHealth) Clean() bool {
-	return h.Warnings == 0 && h.LoadErrors == 0
-}
+// HealthIssue and GraphHealth are defined in pkg/application/types — the
+// exported surface names them, so the definitions live in the cycle-free
+// public leaf (s-tac-ah2).
+type (
+	HealthIssue = types.HealthIssue
+	GraphHealth = types.GraphHealth
+)
 
 // Health flattens the graph's load failures and per-entry warnings into one
 // summary. It is a pure read of state already computed at construction

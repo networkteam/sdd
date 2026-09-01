@@ -16,6 +16,7 @@ import (
 	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 type Finding struct {
@@ -68,8 +69,8 @@ type EntryDraft struct {
 	// NewEntryCmd fields — ignored on other kinds, written onto the entry so
 	// the model-layer validator sees the required involvement frontmatter.
 	FocusActors   []string
-	FocusWhen     *model.FocusWhen
-	Involvement   []model.Involvement
+	FocusWhen     *types.FocusWhen
+	Involvement   []types.Involvement
 	SkipPreflight bool
 }
 
@@ -79,7 +80,7 @@ type EntryDraft struct {
 // field — and route the instance back to a step that can fix it, rather than
 // wedging behind an opaque hard error (closes half of s-prc-g0j).
 type ValidationError struct {
-	Warnings []model.Warning
+	Warnings []types.Warning
 }
 
 func (e *ValidationError) Error() string {
@@ -175,7 +176,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	id := model.GenerateIDAt(entryType, layer, suffix, runtime.options.Now())
 	entry, assemblyFindings := entryFromDraft(draft, id, runtime.options.Now())
 	if len(assemblyFindings) > 0 {
-		warnings := make([]model.Warning, 0, len(assemblyFindings))
+		warnings := make([]types.Warning, 0, len(assemblyFindings))
 		for _, f := range assemblyFindings {
 			warnings = append(warnings, f.Warning())
 		}
@@ -225,7 +226,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	validated, writeFindings := construction.ValidateForWrite(snapshot.graph)
 	findings = append(findings, writeFindings...)
 	if len(findings) > 0 {
-		warnings := make([]model.Warning, 0, len(findings))
+		warnings := make([]types.Warning, 0, len(findings))
 		for _, f := range findings {
 			warnings = append(warnings, f.Warning())
 		}
@@ -461,7 +462,7 @@ func entryFromDraft(draft EntryDraft, id string, now time.Time) (*model.Entry, [
 		Canonical: draft.Canonical, Aliases: append([]string(nil), draft.Aliases...), Actor: draft.Actor,
 		Class:       model.ProcedureClass(draft.Class),
 		FocusActors: append([]string(nil), draft.FocusActors...), FocusWhen: draft.FocusWhen,
-		Involvement: append([]model.Involvement(nil), draft.Involvement...),
+		Involvement: append([]types.Involvement(nil), draft.Involvement...),
 	}
 	if len(draft.ProcedureSpec) > 0 {
 		if kind != model.KindProcedure {

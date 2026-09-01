@@ -3,15 +3,13 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
-// PartSize names one serve part and its byte size — the per-part accounting
-// behind the serve-budget measurement (d-tac-qwc). Injects and lanes are the
-// scaling parts; schema, diagnostics, and produced complete a serve's weight.
-type PartSize struct {
-	Part  string
-	Bytes int
-}
+// PartSize is defined in pkg/application/types — the exported surface names
+// it, so the definition lives in the cycle-free public leaf (s-tac-ah2).
+type PartSize = types.PartSize
 
 // partBytes measures a part as it reaches the wire: strings by length,
 // everything else by its JSON encoding.

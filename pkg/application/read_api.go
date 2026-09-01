@@ -1,8 +1,8 @@
 package application
 
 import (
-	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // Default show expansion depths favor grounding context while keeping the
@@ -30,7 +30,7 @@ type ViewRequest struct {
 	AllRepos          bool
 	// Budget bounds the view's scaling parts on the serve path; the zero
 	// value is unbounded — explicit pulls arrive complete (d-tac-rzi).
-	Budget query.ViewBudget
+	Budget types.ViewBudget
 	// OmitRecovery skips the appended recovery notices — for injected lanes
 	// whose session already carries them via sessionInfo, so a pending
 	// recovery is served once, not once per lane.
@@ -60,7 +60,7 @@ type ShowRequest struct {
 	BranchFromSession bool
 	// Budget bounds each direction's chain expansion on the serve path; the
 	// zero value is unbounded — explicit pulls arrive complete (d-tac-rzi).
-	Budget model.ShowTreeBudget
+	Budget types.ShowTreeBudget
 }
 
 type ShowResult struct {
