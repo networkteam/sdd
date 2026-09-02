@@ -19,8 +19,7 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
-	internalllm "github.com/networkteam/sdd/internal/llm"
-	"github.com/networkteam/sdd/internal/llm/embed"
+	localembed "github.com/networkteam/sdd/internal/llm/embed"
 	"github.com/networkteam/sdd/internal/llm/factory"
 	"github.com/networkteam/sdd/internal/llmstats"
 	"github.com/networkteam/sdd/internal/meta"
@@ -96,14 +95,23 @@ func newRunner(cmd *cli.Command, timeoutFlag string) (pkgllm.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Best-effort sink: outside an sdd repo the runner simply records nothing.
-	var sink internalllm.StatsSink
-	if sddDir, err := resolveSDDDir(); err == nil {
-		if fileSink, err := llmstats.NewFileSink(filepath.Join(sddDir, "stats")); err == nil {
-			sink = fileSink
-		}
+	return pkgllm.Observed(runner, statsSink()), nil
+}
+
+// statsSink is the recording sink both the chat runner and the embedder are
+// observed into: one debug log line per call, and one row in .sdd/stats/llm.jsonl
+// that `sdd stats` reads. Best-effort: outside an sdd repo, or when the sink
+// directory cannot be created, calls are logged but not recorded.
+func statsSink() pkgllm.StatsSink {
+	sddDir, err := resolveSDDDir()
+	if err != nil {
+		return llmstats.Logged(nil)
 	}
-	return internalllm.Observed(runner, sink), nil
+	fileSink, err := llmstats.NewFileSink(filepath.Join(sddDir, "stats"))
+	if err != nil {
+		return llmstats.Logged(nil)
+	}
+	return llmstats.Logged(fileSink)
 }
 
 // resolveTimeout returns the per-call LLM timeout for the given flag name,
@@ -334,17 +342,6 @@ func main() {
 
 			warnUnknownConfigKeys(ctx)
 
-			// Attach a stats sink for the embedding paths, which still record
-			// through the context (chat calls record via the observing
-			// decorator composed in newRunner). Best-effort: if .sdd/ isn't
-			// discoverable or the sink can't be created, embedding calls
-			// simply record nothing.
-			if sddDir, err := resolveSDDDir(); err == nil {
-				if sink, err := llmstats.NewFileSink(filepath.Join(sddDir, "stats")); err == nil {
-					ctx = internalllm.WithStatsSink(ctx, sink)
-				}
-			}
-
 			// Background sync check runs on every command except `sdd init`
 			// (bootstrap may precede remote configuration — sync would emit
 			// spurious warnings). Cooldown-bound and timeout-bound internally;
@@ -441,7 +438,7 @@ func statsCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:  "op",
-				Usage: "Filter by operation (preflight, summarize, embed-documents, embed-queries)",
+				Usage: "Filter by operation (preflight, summarize, writing-guide, embed-document, embed-query)",
 			},
 			&cli.StringFlag{
 				Name:  "provider",
@@ -1023,7 +1020,7 @@ func lintCmd() *cli.Command {
 			}
 			var idxDir string
 			if embCfg.Provider != "" {
-				if emb, err := embed.New(embCfg); err == nil {
+				if emb, err := localembed.New(embCfg); err == nil {
 					idxDir, _ = resolveIndexStore(emb)
 				}
 			}

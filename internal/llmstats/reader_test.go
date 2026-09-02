@@ -1,11 +1,12 @@
 package llmstats
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	"github.com/networkteam/sdd/internal/llm"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
@@ -51,13 +52,13 @@ func TestWriterReaderRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sink.RecordCall(llm.CallStat{
+	sink.RecordCall(context.Background(), pkgllm.CallStat{
 		Purpose: "preflight", Identity: pkgllm.Identity{Provider: "anthropic", Model: "claude-sonnet-4-6"},
-		Usage: pkgllm.Usage{InputTokens: 6341, OutputTokens: 12, CacheReadTokens: 6163}, DurationMS: 5000,
+		Usage: pkgllm.Usage{InputTokens: 6341, OutputTokens: 12, CacheReadTokens: 6163}, Duration: 5000 * time.Millisecond,
 	})
-	sink.RecordCall(llm.CallStat{
+	sink.RecordCall(context.Background(), pkgllm.CallStat{
 		Purpose: "embed-documents", Identity: pkgllm.Identity{Provider: "ollama", Model: "qwen3-embedding:8b"},
-		Items: 8, Usage: pkgllm.Usage{InputTokens: 1200}, DurationMS: 900,
+		Items: 8, Usage: pkgllm.Usage{InputTokens: 1200}, Duration: 900 * time.Millisecond,
 	})
 
 	recs, err := NewReader(dir).Read()

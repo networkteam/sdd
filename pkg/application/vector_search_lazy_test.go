@@ -9,6 +9,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/pkg/application"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -41,25 +42,20 @@ func TestVectorSearchWithLazyDimensionEmbedder(t *testing.T) {
 	}
 	// Mirrors the lazy ollama embedder: the spec never announces a
 	// dimensionality up front — vectors reveal it on first real use.
-	embeddings := sdd.EmbeddingExecutorFuncs{
-		SpecFunc: func(context.Context) (sdd.EmbeddingSpec, error) {
-			return sdd.EmbeddingSpec{Fingerprint: "lazy-test"}, nil
-		},
-		EmbedFunc: func(_ context.Context, inputs []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
-			vectors := make([]sdd.EmbeddingVector, len(inputs))
-			for i, input := range inputs {
-				values := []float32{0, 1}
-				if input.Purpose == sdd.EmbeddingQuery || strings.Contains(input.Text, "protocol-neutral") {
-					values = []float32{1, 0}
-				}
-				vectors[i] = sdd.EmbeddingVector{ID: input.ID, Values: values}
+	embeddings := embed.EmbedderFunc{Space: "lazy-test", Run: func(_ context.Context, req embed.Request) (embed.Result, error) {
+		vectors := make([][]float32, len(req.Texts))
+		for i, text := range req.Texts {
+			values := []float32{0, 1}
+			if req.Purpose == embed.PurposeQuery || strings.Contains(text, "protocol-neutral") {
+				values = []float32{1, 0}
 			}
-			return vectors, nil
-		},
-	}
+			vectors[i] = values
+		}
+		return embed.Result{Vectors: vectors}, nil
+	}}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example", DisplayName: "Example"},
-		Graph:   graph, Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings,
+		Graph:   graph, Sessions: sessions, StagedBlobs: blobs, Embedder: embeddings,
 		SearchIndex: localadapter.NewMemorySearchIndexStore(),
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil

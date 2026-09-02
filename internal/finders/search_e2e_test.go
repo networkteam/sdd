@@ -21,10 +21,10 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/index"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 // e2eEmbedder produces deterministic 4-dim vectors. Inputs containing
@@ -33,21 +33,13 @@ import (
 // component.
 type e2eEmbedder struct{}
 
-func (e *e2eEmbedder) EmbedDocuments(_ context.Context, texts []string) ([][]float32, error) {
-	return e.embed(texts)
-}
-func (e *e2eEmbedder) EmbedQueries(_ context.Context, texts []string) ([][]float32, error) {
-	return e.embed(texts)
-}
-func (e *e2eEmbedder) embed(texts []string) ([][]float32, error) {
-	out := make([][]float32, len(texts))
-	for i, t := range texts {
+func (e *e2eEmbedder) Embed(_ context.Context, req embed.Request) (embed.Result, error) {
+	out := make([][]float32, len(req.Texts))
+	for i, t := range req.Texts {
 		out[i] = e2eVector(t)
 	}
-	return out, nil
+	return embed.Result{Vectors: out}, nil
 }
-func (e *e2eEmbedder) Dimensions() int     { return 4 }
-func (e *e2eEmbedder) BatchSize() int      { return 64 }
 func (e *e2eEmbedder) Fingerprint() string { return "e2e/v1/4" }
 
 func e2eVector(t string) []float32 {
@@ -131,7 +123,7 @@ func (s *e2eSetup) build(t *testing.T) {
 	h := handlers.NewIndexHandler(handlers.IndexHandlerOptions{
 		GraphDir: s.graphDir,
 		IndexDir: s.indexDir,
-		Embedder: s.embedder,
+		Embedder: handlers.IndexEmbedder{Embedder: s.embedder, BatchSize: 64},
 		Reader:   s.reader,
 	})
 	if err := h.Build(context.Background(), &command.BuildIndexCmd{}); err != nil {
@@ -144,7 +136,7 @@ func (s *e2eSetup) lazyFill(t *testing.T) {
 	h := handlers.NewIndexHandler(handlers.IndexHandlerOptions{
 		GraphDir: s.graphDir,
 		IndexDir: s.indexDir,
-		Embedder: s.embedder,
+		Embedder: handlers.IndexEmbedder{Embedder: s.embedder, BatchSize: 64},
 		Reader:   s.reader,
 	})
 	if err := h.LazyFill(context.Background(), &command.LazyFillIndexCmd{}); err != nil {
@@ -350,18 +342,12 @@ func TestE2E_TextModeDoesNotEmbed(t *testing.T) {
 }
 
 type countingEmbedder struct {
-	inner llm.Embedder
+	inner embed.Embedder
 	calls int
 }
 
-func (c *countingEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+func (c *countingEmbedder) Embed(ctx context.Context, req embed.Request) (embed.Result, error) {
 	c.calls++
-	return c.inner.EmbedDocuments(ctx, texts)
+	return c.inner.Embed(ctx, req)
 }
-func (c *countingEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
-	c.calls++
-	return c.inner.EmbedQueries(ctx, texts)
-}
-func (c *countingEmbedder) Dimensions() int     { return c.inner.Dimensions() }
-func (c *countingEmbedder) BatchSize() int      { return c.inner.BatchSize() }
 func (c *countingEmbedder) Fingerprint() string { return c.inner.Fingerprint() }

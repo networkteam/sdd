@@ -13,6 +13,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/textsplitter"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 // vectorSearch answers a phrase or hybrid search against the machine-global
@@ -28,17 +29,14 @@ import (
 //     status, supersession, and embedded-entry rules at read time;
 //  5. renders citations from stored hit metadata; fuses with text for hybrid.
 func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, attachments GraphStore, request query.SearchQuery) (*query.SearchResult, error) {
-	if r.options.Embeddings == nil || r.options.SearchIndex == nil {
+	if r.options.Embedder == nil || r.options.SearchIndex == nil {
 		return nil, errVectorUnavailable
 	}
-	spec, err := r.options.Embeddings.Spec(ctx)
-	if err != nil {
-		return nil, err
+	fingerprint := r.options.Embedder.Fingerprint()
+	if fingerprint == "" {
+		return nil, fmt.Errorf("sdd: embedder returned an empty fingerprint")
 	}
-	if spec.Fingerprint == "" {
-		return nil, fmt.Errorf("sdd: embedding executor returned invalid spec")
-	}
-	namespace := IndexNamespace{Project: r.options.Project.ID, Fingerprint: spec.Fingerprint, Metric: "cosine"}
+	namespace := IndexNamespace{Project: r.options.Project.ID, Fingerprint: fingerprint, Metric: "cosine"}
 
 	// The current state hash of every entry that belongs in the store, computed
 	// once: reconcile compares it against stored versions for presence, and the
@@ -52,12 +50,12 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, a
 		return nil, err
 	}
 
-	queryVectors, err := r.options.Embeddings.Embed(ctx, []EmbeddingInput{{ID: "query", Text: request.Phrase, Purpose: EmbeddingQuery}})
+	embedded, err := r.options.Embedder.Embed(ctx, embed.Request{Purpose: embed.PurposeQuery, Texts: []string{request.Phrase}})
 	if err != nil {
 		return nil, err
 	}
-	if len(queryVectors) != 1 || len(queryVectors[0].Values) == 0 {
-		return nil, fmt.Errorf("sdd: embedding executor returned invalid query vector")
+	if len(embedded.Vectors) != 1 || len(embedded.Vectors[0]) == 0 {
+		return nil, fmt.Errorf("sdd: embedder returned an invalid query vector")
 	}
 
 	limit := request.EffectiveLimit()
@@ -67,7 +65,7 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, a
 	if chunkLimit < 50 {
 		chunkLimit = 50
 	}
-	hits, err := r.options.SearchIndex.Nearest(ctx, []IndexNamespace{namespace}, queryVectors[0].Values, chunkLimit)
+	hits, err := r.options.SearchIndex.Nearest(ctx, []IndexNamespace{namespace}, embedded.Vectors[0], chunkLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -186,8 +184,7 @@ func (r *ProjectRuntime) embedEntries(ctx context.Context, snapshot *Snapshot, s
 	attachments := graphStoreAttachmentReader{store: store}
 	splitter := textsplitter.NewSplitter()
 
-	canonical := map[string]CanonicalChunk{}
-	var inputs []EmbeddingInput
+	var pending []CanonicalChunk
 	for _, entry := range entries {
 		hash := hashes[entry.ID]
 		if hash == "" {
@@ -208,33 +205,36 @@ func (r *ProjectRuntime) embedEntries(ctx context.Context, snapshot *Snapshot, s
 			if skip != nil && skip(chunk) {
 				continue
 			}
-			canonical[chunk.ID] = chunk
-			inputs = append(inputs, EmbeddingInput{ID: chunk.ID, Text: chunk.Text, Purpose: EmbeddingDocument})
+			pending = append(pending, chunk)
 		}
 	}
-	if len(inputs) == 0 {
+	if len(pending) == 0 {
 		return nil
 	}
-	vectors, err := r.options.Embeddings.Embed(ctx, inputs)
+	texts := make([]string, len(pending))
+	for i, chunk := range pending {
+		texts[i] = chunk.Text
+	}
+	embedded, err := r.options.Embedder.Embed(ctx, embed.Request{Purpose: embed.PurposeDocument, Texts: texts})
 	if err != nil {
 		return err
 	}
-	if len(vectors) != len(inputs) {
-		return fmt.Errorf("sdd: embedding executor returned %d vectors for %d inputs", len(vectors), len(inputs))
+	if len(embedded.Vectors) != len(pending) {
+		return fmt.Errorf("sdd: embedder returned %d vectors for %d inputs", len(embedded.Vectors), len(pending))
 	}
 	dims := 0
-	upserts := make([]IndexedChunk, 0, len(vectors))
-	for i, vector := range vectors {
-		if vector.ID != inputs[i].ID || len(vector.Values) == 0 {
-			return fmt.Errorf("sdd: embedding vector %d does not match its input", i)
+	upserts := make([]IndexedChunk, 0, len(pending))
+	for i, vector := range embedded.Vectors {
+		if len(vector) == 0 {
+			return fmt.Errorf("sdd: embedding vector %d is empty", i)
 		}
 		if dims == 0 {
-			dims = len(vector.Values)
+			dims = len(vector)
 		}
-		if len(vector.Values) != dims {
-			return fmt.Errorf("sdd: embedding vector %d has %d dimensions, want %d", i, len(vector.Values), dims)
+		if len(vector) != dims {
+			return fmt.Errorf("sdd: embedding vector %d has %d dimensions, want %d", i, len(vector), dims)
 		}
-		upserts = append(upserts, IndexedChunk{Chunk: canonical[vector.ID], Vector: vector.Values})
+		upserts = append(upserts, IndexedChunk{Chunk: pending[i], Vector: vector})
 	}
 	return r.options.SearchIndex.Reconcile(ctx, namespace, snapshot.revision, upserts, nil)
 }

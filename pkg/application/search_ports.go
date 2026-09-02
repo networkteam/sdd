@@ -2,38 +2,6 @@ package application
 
 import "context"
 
-// EmbeddingSpec identifies the vector space an executor embeds into. The
-// fingerprint must uniquely determine the embedding model and with it the
-// vector dimensionality — dimensionality itself is discovered from the
-// vectors on first real use, so lazy providers (ollama reports dimensions
-// only with its first response) satisfy the contract without a probe call.
-type EmbeddingSpec struct {
-	Fingerprint string
-}
-
-type EmbeddingInput struct {
-	ID      string
-	Text    string
-	Purpose EmbeddingPurpose
-}
-
-type EmbeddingPurpose string
-
-const (
-	EmbeddingDocument EmbeddingPurpose = "document"
-	EmbeddingQuery    EmbeddingPurpose = "query"
-)
-
-type EmbeddingVector struct {
-	ID     string
-	Values []float32
-}
-
-type EmbeddingExecutor interface {
-	Spec(context.Context) (EmbeddingSpec, error)
-	Embed(context.Context, []EmbeddingInput) ([]EmbeddingVector, error)
-}
-
 // IndexNamespace keys one reconciled vector index. The fingerprint pins the
 // embedding model (and thus the dimensionality), so dimensions are not part
 // of the identity — stores enforce vector-length consistency per namespace

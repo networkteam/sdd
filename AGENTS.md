@@ -83,9 +83,9 @@ sdd/
 │   ├── finders/            # Query execution — pure reads, no side effects
 │   ├── model/              # Pure domain types (no I/O, no deps)
 │   ├── presenters/         # View rendering of query results
-│   ├── llm/                # LLM client machinery: observing + timeout decorators, CallStat/StatsSink, embed plumbing; provider adapters (claude, gollm) and the factory beneath it
+│   ├── llm/                # Provider adapters (claude, gollm, embed) and the config-driven factories that compose pkg/llm and pkg/llm/embed
 │   ├── llmops/             # The LLM operations: pre-flight, summarize, writing guide, with their prompts
-│   ├── llmstats/           # FileSink/Reader for .sdd/stats/llm.jsonl (owns the wire shape)
+│   ├── llmstats/           # FileSink/Reader for .sdd/stats/llm.jsonl (owns the wire shape) and the debug-logging sink
 │   ├── git/                # Git adapter: exec-based implementations of the consumer-defined git interfaces (handlers.Committer/…, finders.GitSyncer, repos.Git)
 │   ├── repos/              # Connected repos for cross-repo refs: Locations (explicit paths), Registry (pure reads → finders), Manager (clone/pull/config writes → handlers)
 │   ├── meta/               # Config resolution

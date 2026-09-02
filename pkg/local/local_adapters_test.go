@@ -15,6 +15,7 @@ import (
 	"time"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 	"github.com/networkteam/sdd/pkg/sddtest"
 )
@@ -97,20 +98,15 @@ func TestFilesystemStagedBlobStoreConformance(t *testing.T) {
 }
 
 func TestFunctionalMechanicalAdaptersConform(t *testing.T) {
-	embeddings := sdd.EmbeddingExecutorFuncs{
-		SpecFunc: func(context.Context) (sdd.EmbeddingSpec, error) {
-			return sdd.EmbeddingSpec{Fingerprint: "fixture"}, nil
-		},
-		EmbedFunc: func(_ context.Context, inputs []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
-			vectors := make([]sdd.EmbeddingVector, len(inputs))
-			for i, input := range inputs {
-				vectors[i] = sdd.EmbeddingVector{ID: input.ID, Values: []float32{float32(i), 1}}
-			}
-			return vectors, nil
-		},
-	}
-	sddtest.RunEmbeddingExecutorTests(t, func(*testing.T) sddtest.EmbeddingExecutorFixture {
-		return sddtest.EmbeddingExecutorFixture{Executor: embeddings, Inputs: []sdd.EmbeddingInput{{ID: "one", Text: "text"}}}
+	embeddings := embed.EmbedderFunc{Space: "fixture", Run: func(_ context.Context, req embed.Request) (embed.Result, error) {
+		vectors := make([][]float32, len(req.Texts))
+		for i := range req.Texts {
+			vectors[i] = []float32{float32(i), 1}
+		}
+		return embed.Result{Vectors: vectors}, nil
+	}}
+	sddtest.RunEmbedderTests(t, func(*testing.T) sddtest.EmbedderFixture {
+		return sddtest.EmbedderFixture{Embedder: embeddings, Texts: []string{"text"}}
 	})
 
 	memIndex := newMemoryIndex()

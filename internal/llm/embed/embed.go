@@ -1,7 +1,7 @@
-// Package embed provides Embedder implementations for OpenAI-compatible
-// (`/v1/embeddings`) and Ollama (`/api/embeddings`) endpoints, plus a
-// factory that dispatches by configured provider and wraps remote
-// providers with a rate.Limiter (paralleling the chat-runner factory).
+// Package embed is the local host's embed.Embedder composition: it resolves
+// model.EmbeddingConfig — a host-private schema that never goes public — into
+// one pkg/llm/embed Embedder (provider adapter plus rate-limit decorator),
+// paralleling the chat-runner factory.
 package embed
 
 import (
@@ -10,10 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/time/rate"
-
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
+	pkgembed "github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 // Per-provider default batch sizes when EmbeddingConfig.BatchSize is zero.
@@ -27,13 +26,16 @@ const (
 )
 
 // New constructs an Embedder from cfg. Returns an error when Provider is
-// unrecognised or required fields (Model, API key for remote providers)
-// are missing. Remote providers ("openai") are wrapped with a rate.Limiter
-// using cfg.RateLimitRPS or a conservative provider default. The batch
-// size flows from cfg.BatchSize (zero → provider default) so command-line
-// flags / config overrides reach the transport without env-var sniffing
-// in the package.
-func New(cfg model.EmbeddingConfig) (llm.Embedder, error) {
+// unrecognised or required fields (Model, API key for remote providers) are
+// missing. Remote providers ("openai") are wrapped with embed.RateLimited
+// using cfg.RateLimitRPS or a conservative provider default.
+//
+// The per-round-trip deadline (cfg.Timeout) lives in the adapters' HTTP
+// client rather than in embed.Bounded: one Embed spans as many round-trips as
+// its batch needs, and a cold index reconcile hands thousands of chunks to a
+// single call, so a whole-call bound would fail exactly the calls that take
+// longest legitimately.
+func New(cfg model.EmbeddingConfig) (pkgembed.Embedder, error) {
 	if cfg.Provider == "" {
 		return nil, fmt.Errorf("no embedding provider configured — run `sdd config set embedding.provider <provider>`")
 	}
@@ -42,14 +44,15 @@ func New(cfg model.EmbeddingConfig) (llm.Embedder, error) {
 	}
 
 	timeout := resolveTimeout(cfg.Timeout)
+	batchSize := BatchSize(cfg)
 
-	var inner llm.Embedder
+	var inner pkgembed.Embedder
 	var err error
 	switch cfg.Provider {
 	case "openai":
-		inner, err = newOpenAI(cfg, timeout, resolveBatchSize(cfg.BatchSize, defaultOpenAIBatchSize))
+		inner, err = newOpenAI(cfg, timeout, batchSize)
 	case "ollama":
-		inner = newOllama(cfg, timeout, resolveBatchSize(cfg.BatchSize, defaultOllamaBatchSize))
+		inner = newOllama(cfg, timeout, batchSize)
 	default:
 		return nil, fmt.Errorf("unknown embedding provider %q (supported: openai, ollama)", cfg.Provider)
 	}
@@ -63,10 +66,26 @@ func New(cfg model.EmbeddingConfig) (llm.Embedder, error) {
 			rps = providerDefaultRPS(cfg.Provider, cfg.Model)
 		}
 		if rps > 0 {
-			inner = newRateLimited(inner, rps)
+			inner = pkgembed.RateLimited(inner, rps)
 		}
 	}
 	return inner, nil
+}
+
+// BatchSize resolves the number of inputs one transport round-trip carries:
+// cfg.BatchSize when positive, else the provider default. The adapters split
+// larger requests by it internally; the CLI indexer buckets its work by it so
+// progress advances once per round-trip.
+func BatchSize(cfg model.EmbeddingConfig) int {
+	if cfg.BatchSize > 0 {
+		return cfg.BatchSize
+	}
+	switch cfg.Provider {
+	case "ollama":
+		return defaultOllamaBatchSize
+	default:
+		return defaultOpenAIBatchSize
+	}
 }
 
 func isRemote(provider string) bool {
@@ -92,16 +111,6 @@ func providerDefaultRPS(provider, modelName string) float64 {
 	}
 }
 
-// resolveBatchSize returns cfg.BatchSize if positive, otherwise the
-// provider-specific fallback. Negative values fall back too (treat as
-// "unset") rather than erroring — the CLI surface validates earlier.
-func resolveBatchSize(cfg, fallback int) int {
-	if cfg > 0 {
-		return cfg
-	}
-	return fallback
-}
-
 // resolveTimeout parses the configured Go duration string, falling back to
 // 2m when empty or unparseable. Embedding calls are batch-shaped — a
 // single call over the default 64-input batch can take ~90s on a local
@@ -121,38 +130,37 @@ func resolveTimeout(raw string) time.Duration {
 	return d
 }
 
-// rateLimited wraps an Embedder with a token-bucket limiter so parallel
-// batch operations don't exceed provider rate limits.
-type rateLimited struct {
-	inner   llm.Embedder
-	limiter *rate.Limiter
-}
-
-func newRateLimited(inner llm.Embedder, rps float64) llm.Embedder {
-	burst := int(rps)
-	if burst < 1 {
-		burst = 1
-	}
-	return &rateLimited{
-		inner:   inner,
-		limiter: rate.NewLimiter(rate.Limit(rps), burst),
+// templateFor selects the configured template for the request's purpose.
+func templateFor(purpose pkgembed.Purpose, document, query string) (string, error) {
+	switch purpose {
+	case pkgembed.PurposeDocument:
+		return document, nil
+	case pkgembed.PurposeQuery:
+		return query, nil
+	default:
+		return "", fmt.Errorf("unknown embedding purpose %q", purpose)
 	}
 }
 
-func (r *rateLimited) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
-	if err := r.limiter.Wait(ctx); err != nil {
-		return nil, fmt.Errorf("rate limiter: %w", err)
+// batched runs call over texts in batchSize-sized slices — one transport
+// round-trip each — concatenating vectors in input order and summing the
+// reported input tokens. A failure is attributed to identity so the observing
+// decorator can record it.
+func batched(ctx context.Context, identity llm.Identity, texts []string, batchSize int,
+	call func(ctx context.Context, texts []string) ([][]float32, int, error)) (pkgembed.Result, error) {
+	result := pkgembed.Result{Identity: identity}
+	if len(texts) == 0 {
+		return result, nil
 	}
-	return r.inner.EmbedDocuments(ctx, texts)
-}
-
-func (r *rateLimited) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
-	if err := r.limiter.Wait(ctx); err != nil {
-		return nil, fmt.Errorf("rate limiter: %w", err)
+	result.Vectors = make([][]float32, 0, len(texts))
+	for start := 0; start < len(texts); start += batchSize {
+		end := min(start+batchSize, len(texts))
+		vectors, tokens, err := call(ctx, texts[start:end])
+		if err != nil {
+			return pkgembed.Result{}, &llm.Error{Identity: identity, Err: fmt.Errorf("%s batch [%d:%d]: %w", identity.Provider, start, end, err)}
+		}
+		result.Vectors = append(result.Vectors, vectors...)
+		result.Usage.InputTokens += tokens
 	}
-	return r.inner.EmbedQueries(ctx, texts)
+	return result, nil
 }
-
-func (r *rateLimited) Dimensions() int     { return r.inner.Dimensions() }
-func (r *rateLimited) Fingerprint() string { return r.inner.Fingerprint() }
-func (r *rateLimited) BatchSize() int      { return r.inner.BatchSize() }

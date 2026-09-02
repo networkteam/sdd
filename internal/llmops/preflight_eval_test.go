@@ -27,12 +27,12 @@ import (
 	"time"
 
 	"github.com/networkteam/sdd/internal/finders"
-	internalllm "github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llm/factory"
 	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
 	"github.com/networkteam/sdd/pkg/llm"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 // capturingRunner wraps a real llm.Runner and records the last raw response.
@@ -61,7 +61,7 @@ func evalRunner(t *testing.T) *capturingRunner {
 	if err != nil {
 		t.Fatalf("building eval runner: %v", err)
 	}
-	return &capturingRunner{inner: internalllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})}
+	return &capturingRunner{inner: pkgllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})}
 }
 
 // evalConfig resolves the candidate configuration for this run. SDD_EVAL_CONFIG

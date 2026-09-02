@@ -5,14 +5,10 @@
 package factory
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	"golang.org/x/time/rate"
-
-	internalllm "github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llm/claude"
 	gollmrunner "github.com/networkteam/sdd/internal/llm/gollm"
 	"github.com/networkteam/sdd/internal/model"
@@ -26,7 +22,7 @@ const defaultTimeout = 2 * time.Minute
 
 // New builds a composed llm.Runner from config. Provider and model fall back
 // to model.DefaultLLMProvider / model.DefaultLLMModel when empty. Remote
-// providers (anthropic, openai) get wrapped with a rate.Limiter: an
+// providers (anthropic, openai) get wrapped with llm.RateLimited: an
 // explicit cfg.RateLimitRPS takes precedence, otherwise a conservative
 // tier-1-safe default is selected per provider/model family (see
 // providerDefaultRPS). Local providers (claude-cli, ollama) stay
@@ -51,7 +47,7 @@ func New(cfg model.LLMConfig) (llm.Runner, error) {
 			timeout = d
 		}
 	}
-	return internalllm.Bounded(runner, timeout), nil
+	return llm.Bounded(runner, timeout), nil
 }
 
 // compose builds the provider adapter and its rate-limit wrap — everything
@@ -72,15 +68,20 @@ func compose(cfg model.LLMConfig) (llm.Runner, error) {
 	}
 
 	if isRemote(provider) {
-		rps := cfg.RateLimitRPS
-		if rps == 0 {
-			rps = providerDefaultRPS(provider, cfg.Model)
-		}
-		if rps > 0 {
-			runner = newRateLimited(runner, rps)
+		if rps := effectiveRPS(cfg); rps > 0 {
+			runner = llm.RateLimited(runner, rps)
 		}
 	}
 	return runner, nil
+}
+
+// effectiveRPS is the rate the remote provider is capped at: an explicit
+// cfg.RateLimitRPS, else the per-provider/model default.
+func effectiveRPS(cfg model.LLMConfig) float64 {
+	if cfg.RateLimitRPS != 0 {
+		return cfg.RateLimitRPS
+	}
+	return providerDefaultRPS(cfg.Provider, cfg.Model)
 }
 
 // providerDefaultRPS returns a conservative, tier-1-safe RPS default for a
@@ -135,31 +136,4 @@ func isRemote(provider string) bool {
 	default:
 		return false
 	}
-}
-
-// rateLimited wraps a Runner with a token-bucket limiter so parallel
-// batch operations don't exceed provider rate limits.
-type rateLimited struct {
-	inner   llm.Runner
-	limiter *rate.Limiter
-}
-
-func newRateLimited(inner llm.Runner, rps float64) llm.Runner {
-	// Burst equals ceiling of 1s worth of requests — small bursts are
-	// fine, sustained rate is the constraint.
-	burst := int(rps)
-	if burst < 1 {
-		burst = 1
-	}
-	return &rateLimited{
-		inner:   inner,
-		limiter: rate.NewLimiter(rate.Limit(rps), burst),
-	}
-}
-
-func (r *rateLimited) Run(ctx context.Context, req llm.Request) (llm.Result, error) {
-	if err := r.limiter.Wait(ctx); err != nil {
-		return llm.Result{}, fmt.Errorf("rate limiter: %w", err)
-	}
-	return r.inner.Run(ctx, req)
 }

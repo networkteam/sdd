@@ -17,12 +17,12 @@ import (
 	"github.com/networkteam/sdd/internal/git"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/index"
-	"github.com/networkteam/sdd/internal/llm"
-	"github.com/networkteam/sdd/internal/llm/embed"
+	localembed "github.com/networkteam/sdd/internal/llm/embed"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 // resolveEmbeddingConfig builds the effective EmbeddingConfig by merging
@@ -103,7 +103,7 @@ func embeddingFlags() []cli.Flag {
 // The repo key is the committed repo_id when declared — shared by the
 // checkout, its worktrees, and the connected-repo cache — else a hash of
 // the repo root. Returns ("", err) when no .sdd is found.
-func resolveIndexStore(emb llm.Embedder) (string, error) {
+func resolveIndexStore(emb embed.Embedder) (string, error) {
 	sddDir, err := resolveSDDDir()
 	if err != nil {
 		return "", err
@@ -133,35 +133,45 @@ func resolveIndexStore(emb llm.Embedder) (string, error) {
 // index shares, so it wins over the project-local block; with no global
 // embedding configured, the local resolution applies (and member indexes
 // build under that fingerprint instead).
-func crossRepoEmbedder(cmd *cli.Command) (llm.Embedder, error) {
+func crossRepoEmbedder(cmd *cli.Command) (handlers.IndexEmbedder, error) {
 	reg, _, err := defaultRepos()
 	if err != nil {
-		return nil, err
+		return handlers.IndexEmbedder{}, err
 	}
 	gcfg, err := reg.Load()
 	if err != nil {
 		// A broken global config must surface, not silently fall back to
 		// the local embedder (which would build in a different vector space).
-		return nil, err
+		return handlers.IndexEmbedder{}, err
 	}
 	if gcfg.Embedding.Provider != "" {
-		return embed.New(gcfg.Embedding)
+		return newEmbedder(gcfg.Embedding)
 	}
 	return buildEmbedder(cmd)
 }
 
-// buildEmbedder constructs the configured embedder, or returns nil when
-// no provider is configured. Errors only on misconfiguration (unknown
-// provider, missing required fields).
-func buildEmbedder(cmd *cli.Command) (llm.Embedder, error) {
+// buildEmbedder constructs the configured embedder, or returns the zero value
+// (nil Embedder) when no provider is configured. Errors only on
+// misconfiguration (unknown provider, missing required fields).
+func buildEmbedder(cmd *cli.Command) (handlers.IndexEmbedder, error) {
 	cfg, err := resolveEmbeddingConfig(cmd)
 	if err != nil {
-		return nil, err
+		return handlers.IndexEmbedder{}, err
 	}
 	if cfg.Provider == "" {
-		return nil, nil
+		return handlers.IndexEmbedder{}, nil
 	}
-	return embed.New(cfg)
+	return newEmbedder(cfg)
+}
+
+// newEmbedder composes the local embedder the way newRunner composes the chat
+// runner: the factory's adapter and rate limit, observed into the stats sink.
+func newEmbedder(cfg model.EmbeddingConfig) (handlers.IndexEmbedder, error) {
+	emb, err := localembed.New(cfg)
+	if err != nil {
+		return handlers.IndexEmbedder{}, err
+	}
+	return handlers.IndexEmbedder{Embedder: embed.Observed(emb, statsSink()), BatchSize: localembed.BatchSize(cfg)}, nil
 }
 
 func indexCmd() *cli.Command {
@@ -190,7 +200,7 @@ func indexCmd() *cli.Command {
 			// Cross-repo pre-indexing must build under the one vector space
 			// every connected index shares (the global embedding config), so
 			// the local index it warms matches what a cross-repo search reads.
-			var emb llm.Embedder
+			var emb handlers.IndexEmbedder
 			var err error
 			if crossRepo {
 				emb, err = crossRepoEmbedder(cmd)
@@ -200,7 +210,7 @@ func indexCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			if emb == nil {
+			if emb.Embedder == nil {
 				return fmt.Errorf("no embedding provider configured (set embedding.provider in .sdd/config.local.yaml or pass --embedding-provider)")
 			}
 
@@ -375,7 +385,7 @@ func searchCmd() *cli.Command {
 			}
 
 			var (
-				emb    llm.Embedder
+				emb    handlers.IndexEmbedder
 				idxDir string
 				ih     *handlers.IndexHandler
 			)
@@ -389,7 +399,7 @@ func searchCmd() *cli.Command {
 				if err != nil {
 					return err
 				}
-				if emb == nil {
+				if emb.Embedder == nil {
 					return fmt.Errorf("vector search requires an embedding provider — set embedding.provider in .sdd/config.local.yaml")
 				}
 				idxDir, err = resolveIndexStore(emb)

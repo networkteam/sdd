@@ -1,10 +1,12 @@
-// Package llmstats provides a durable sink for per-call LLM metrics. It
-// implements llm.StatsSink by appending one JSON record per call to a local
-// JSONL file (.sdd/stats/llm.jsonl), so prompt-cache effectiveness and token
-// usage become measurable over time without an external service (d-tac-zis).
+// Package llmstats is the local host's durable recording of per-call LLM
+// metrics: a pkg/llm StatsSink appending one JSON record per call to
+// .sdd/stats/llm.jsonl, so prompt-cache effectiveness and token usage become
+// measurable over time without an external service (d-tac-zis), plus the
+// debug-logging sink the CLI composes in front of it.
 package llmstats
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/networkteam/sdd/internal/llm"
+	"github.com/networkteam/sdd/pkg/llm"
 )
 
 // FileSink appends one JSON record per LLM call to a JSONL file. Safe for
@@ -35,7 +37,7 @@ func NewFileSink(dir string) (*FileSink, error) {
 // RecordCall appends one JSON line for the call. Errors are swallowed: stats
 // collection is best-effort and must never break a capture or summarize. The
 // on-disk shape is Record, shared with the reader (reader.go).
-func (s *FileSink) RecordCall(stat llm.CallStat) {
+func (s *FileSink) RecordCall(_ context.Context, stat llm.CallStat) {
 	line, err := json.Marshal(Record{
 		Timestamp:         s.now().UTC().Format(time.RFC3339),
 		Op:                stat.Purpose,
@@ -47,7 +49,7 @@ func (s *FileSink) RecordCall(stat llm.CallStat) {
 		OutputTokens:      stat.Usage.OutputTokens,
 		CacheReadTokens:   stat.Usage.CacheReadTokens,
 		CacheCreateTokens: stat.Usage.CacheCreateTokens,
-		DurationMS:        stat.DurationMS,
+		DurationMS:        stat.Duration.Milliseconds(),
 		Error:             stat.Error,
 	})
 	if err != nil {

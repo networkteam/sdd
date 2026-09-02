@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/networkteam/sdd/pkg/llm"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 // ProjectRuntime owns the immutable ports and project configuration resolved
@@ -27,16 +28,17 @@ type ProjectRuntimeOptions struct {
 	Recovery      RecoveryAuthorizer
 	Sessions      SessionStore
 	StagedBlobs   StagedBlobStore
-	Embeddings    EmbeddingExecutor
-	SearchIndex   SearchIndexStore
-	// LLM is the single LLM dependency: a pkg/llm Runner, injected as an
-	// instance that arrives already composed — observed and bounded by the
-	// host's decorators. Routing, deadlines, and recording are the host's
-	// composition duty (20260830-234501-d-cpt-q6n); application contributes
-	// only the facts it alone holds, the Purpose and the prompts.
-	LLM        llm.Runner
-	Finalizers []MutationFinalizer
-	Now        func() time.Time
+	// Embedder and LLM are the two model dependencies, each a pkg/llm port
+	// injected as an instance that arrives already composed — observed,
+	// bounded, and rate-limited by the host's decorators. Routing, deadlines,
+	// and recording are the host's composition duty (20260830-234501-d-cpt-q6n,
+	// 20260902-114838-d-tac-cov); application contributes only the facts it
+	// alone holds: the Purpose and the prompts, or the texts.
+	Embedder    embed.Embedder
+	SearchIndex SearchIndexStore
+	LLM         llm.Runner
+	Finalizers  []MutationFinalizer
+	Now         func() time.Time
 	// ExcludeEmbeddedFromIndex mirrors the CLI's excludeEmbedded semantics for
 	// the vector index: connected-repo runtimes set it so binary-shipped base
 	// entries embed once per machine (in the base store) rather than once per
@@ -59,8 +61,8 @@ func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
 	if options.StagedBlobs == nil {
 		return nil, fmt.Errorf("sdd: StagedBlobStore is required")
 	}
-	if (options.Embeddings == nil) != (options.SearchIndex == nil) {
-		return nil, fmt.Errorf("sdd: EmbeddingExecutor and SearchIndexStore must be configured together")
+	if (options.Embedder == nil) != (options.SearchIndex == nil) {
+		return nil, fmt.Errorf("sdd: Embedder and SearchIndexStore must be configured together")
 	}
 	if options.LLM == nil {
 		return nil, fmt.Errorf("sdd: LLM runner is required")

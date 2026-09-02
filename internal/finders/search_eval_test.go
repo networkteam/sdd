@@ -38,8 +38,7 @@ import (
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/index"
-	"github.com/networkteam/sdd/internal/llm"
-	"github.com/networkteam/sdd/internal/llm/embed"
+	localembed "github.com/networkteam/sdd/internal/llm/embed"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
@@ -89,7 +88,7 @@ func loadEvalPairs(t *testing.T) []evalPair {
 	return pairs
 }
 
-func evalEmbedder(t *testing.T) llm.Embedder {
+func evalEmbedder(t *testing.T) handlers.IndexEmbedder {
 	t.Helper()
 	provider := os.Getenv("SDD_EVAL_PROVIDER")
 	if provider == "" {
@@ -121,11 +120,11 @@ func evalEmbedder(t *testing.T) llm.Embedder {
 	default:
 		t.Fatalf("unknown SDD_EVAL_PROVIDER %q", provider)
 	}
-	emb, err := embed.New(cfg)
+	emb, err := localembed.New(cfg)
 	if err != nil {
 		t.Fatalf("build embedder: %v", err)
 	}
-	return emb
+	return handlers.IndexEmbedder{Embedder: emb, BatchSize: localembed.BatchSize(cfg)}
 }
 
 func TestEvalRecall(t *testing.T) {

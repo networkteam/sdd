@@ -12,6 +12,7 @@ import (
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 type fakeEmbedder struct {
@@ -21,22 +22,14 @@ type fakeEmbedder struct {
 // Embed produces deterministic 4-dim vectors keyed off SHA-256 of input,
 // then maps a few well-known phrases / texts to specific corners of the
 // space so the search assertions know which way the cosine will lean.
-func (f *fakeEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
-	return f.embed(texts)
-}
-func (f *fakeEmbedder) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
-	return f.embed(texts)
-}
-func (f *fakeEmbedder) embed(texts []string) ([][]float32, error) {
+func (f *fakeEmbedder) Embed(_ context.Context, req embed.Request) (embed.Result, error) {
 	f.calls++
-	out := make([][]float32, len(texts))
-	for i, t := range texts {
+	out := make([][]float32, len(req.Texts))
+	for i, t := range req.Texts {
 		out[i] = vectorFor(t)
 	}
-	return out, nil
+	return embed.Result{Vectors: out}, nil
 }
-func (f *fakeEmbedder) Dimensions() int     { return 4 }
-func (f *fakeEmbedder) BatchSize() int      { return 64 }
 func (f *fakeEmbedder) Fingerprint() string { return "fake/1/4" }
 
 // vectorFor maps text to a 4-dim vector. Inputs containing one of a few
@@ -500,11 +493,7 @@ func TestAdjustVectorScore(t *testing.T) {
 	}
 }
 
-// Sanity guard so the search package's test-only fake embedder satisfies
-// the llm.Embedder interface — caught at compile time.
-var _ = (struct {
-	a interface{ Dimensions() int }
-}{a: &fakeEmbedder{}})
+var _ embed.Embedder = (*fakeEmbedder)(nil)
 
 // Used in SearchFinder_TextModeMultiTermAND; reflect imported so future
 // breadcrumb assertions compile out of the box.

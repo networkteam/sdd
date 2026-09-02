@@ -1,7 +1,9 @@
 // Package llm is the public LLM boundary of the SDD framework
-// (20260830-234501-d-cpt-q6n): pure vocabulary plus one one-method interface.
-// No dependencies, no I/O, no machinery — routing, observation, and timeouts
-// compose around Runner instances at each host's composition site.
+// (20260830-234501-d-cpt-q6n): pure vocabulary plus one one-method interface,
+// and the composition pieces every host needs around it — Bounded, RateLimited,
+// Observed with its CallStat and StatsSink, ByPurpose (20260902-114838-d-tac-cov).
+// No provider adapters, no configuration, no I/O: those stay at each host's
+// composition site.
 //
 // The guiding analogy is net/http: Runner is our RoundTripper. Attribution is
 // response-carried (Result.Identity) rather than a method on the interface,

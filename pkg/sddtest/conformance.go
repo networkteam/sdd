@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 type AccessResolverFixture struct {
@@ -251,39 +252,41 @@ func RunStagedBlobStoreTests(t *testing.T, factory func(*testing.T) StagedBlobSt
 	}
 }
 
-type EmbeddingExecutorFixture struct {
-	Executor sdd.EmbeddingExecutor
-	Inputs   []sdd.EmbeddingInput
+type EmbedderFixture struct {
+	Embedder embed.Embedder
+	Texts    []string
 }
 
-func RunEmbeddingExecutorTests(t *testing.T, factory func(*testing.T) EmbeddingExecutorFixture) {
+// RunEmbedderTests checks the embed.Embedder contract: a stable non-empty
+// fingerprint, one non-empty vector per text in order, all of equal length.
+func RunEmbedderTests(t *testing.T, factory func(*testing.T) EmbedderFixture) {
 	t.Helper()
 	fixture := factory(t)
-	spec, err := fixture.Executor.Spec(t.Context())
-	if err != nil {
-		t.Fatalf("Spec: %v", err)
+	fingerprint := fixture.Embedder.Fingerprint()
+	if fingerprint == "" {
+		t.Fatal("Fingerprint is empty")
 	}
-	if spec.Fingerprint == "" {
-		t.Fatalf("Spec = %+v", spec)
-	}
-	vectors, err := fixture.Executor.Embed(t.Context(), fixture.Inputs)
+	result, err := fixture.Embedder.Embed(t.Context(), embed.Request{Purpose: embed.PurposeDocument, Texts: fixture.Texts})
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
 	}
-	if len(vectors) != len(fixture.Inputs) {
-		t.Fatalf("Embed returned %d vectors, want %d", len(vectors), len(fixture.Inputs))
+	if len(result.Vectors) != len(fixture.Texts) {
+		t.Fatalf("Embed returned %d vectors, want %d", len(result.Vectors), len(fixture.Texts))
 	}
 	dims := 0
-	for i, vector := range vectors {
-		if vector.ID != fixture.Inputs[i].ID || len(vector.Values) == 0 {
-			t.Fatalf("vector %d = %+v", i, vector)
+	for i, vector := range result.Vectors {
+		if len(vector) == 0 {
+			t.Fatalf("vector %d is empty", i)
 		}
 		if dims == 0 {
-			dims = len(vector.Values)
+			dims = len(vector)
 		}
-		if len(vector.Values) != dims {
-			t.Fatalf("vector %d has %d dimensions, want %d", i, len(vector.Values), dims)
+		if len(vector) != dims {
+			t.Fatalf("vector %d has %d dimensions, want %d", i, len(vector), dims)
 		}
+	}
+	if fixture.Embedder.Fingerprint() != fingerprint {
+		t.Fatal("Fingerprint changed across a call")
 	}
 }
 
