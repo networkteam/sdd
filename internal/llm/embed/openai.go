@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/pkg/llm"
@@ -24,13 +23,12 @@ type openaiEmbedder struct {
 	apiKey           string
 	identity         llm.Identity
 	dimensions       int // 0 means "use model native"
-	batchSize        int
 	queryTemplate    string
 	documentTemplate string
 	httpClient       *http.Client
 }
 
-func newOpenAI(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) (pkgembed.Embedder, error) {
+func newOpenAI(cfg model.EmbeddingConfig) (pkgembed.Embedder, error) {
 	apiKey := cfg.APIKeys["openai"]
 	if apiKey == "" {
 		return nil, fmt.Errorf("embedding.api_keys.openai is required for openai provider")
@@ -44,10 +42,9 @@ func newOpenAI(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) 
 		apiKey:           apiKey,
 		identity:         llm.Identity{Provider: "openai", Model: cfg.Model},
 		dimensions:       cfg.Dimensions,
-		batchSize:        batchSize,
 		queryTemplate:    cfg.QueryTemplate,
 		documentTemplate: cfg.DocumentTemplate,
-		httpClient:       &http.Client{Timeout: timeout},
+		httpClient:       &http.Client{},
 	}, nil
 }
 
@@ -79,10 +76,17 @@ func (e *openaiEmbedder) Embed(ctx context.Context, req pkgembed.Request) (pkgem
 	if err != nil {
 		return pkgembed.Result{}, err
 	}
-	return batched(ctx, e.identity, applyTemplate(tmpl, req.Texts), e.batchSize, e.embedBatch)
+	return e.request(ctx, applyTemplate(tmpl, req.Texts))
 }
 
-func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) (vectors [][]float32, tokens int, err error) {
+// request sends the templated texts as one /v1/embeddings call; the deadline
+// and any batching arrive composed around the adapter.
+func (e *openaiEmbedder) request(ctx context.Context, texts []string) (result pkgembed.Result, err error) {
+	defer func() {
+		if err != nil {
+			err = &llm.Error{Identity: e.identity, Err: err}
+		}
+	}()
 	body := openaiEmbedRequest{
 		Input:          texts,
 		Model:          e.identity.Model,
@@ -91,18 +95,18 @@ func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) (vector
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("marshal request: %w", err)
+		return pkgembed.Result{}, fmt.Errorf("marshal request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint+"/v1/embeddings", bytes.NewReader(buf))
 	if err != nil {
-		return nil, 0, fmt.Errorf("build request: %w", err)
+		return pkgembed.Result{}, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+e.apiKey)
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("openai embed request: %w", err)
+		return pkgembed.Result{}, fmt.Errorf("openai embed request: %w", err)
 	}
 	defer func() {
 		err = errors.Join(err, resp.Body.Close())
@@ -110,24 +114,24 @@ func (e *openaiEmbedder) embedBatch(ctx context.Context, texts []string) (vector
 
 	var decoded openaiEmbedResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return nil, 0, fmt.Errorf("decode openai response (status %d): %w", resp.StatusCode, err)
+		return pkgembed.Result{}, fmt.Errorf("decode openai response (status %d): %w", resp.StatusCode, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		if decoded.Error != nil {
-			return nil, 0, fmt.Errorf("openai embed error (status %d, %s/%s): %s",
+			return pkgembed.Result{}, fmt.Errorf("openai embed error (status %d, %s/%s): %s",
 				resp.StatusCode, decoded.Error.Type, decoded.Error.Code, decoded.Error.Message)
 		}
-		return nil, 0, fmt.Errorf("openai embed status %d", resp.StatusCode)
+		return pkgembed.Result{}, fmt.Errorf("openai embed status %d", resp.StatusCode)
 	}
 	if len(decoded.Data) != len(texts) {
-		return nil, 0, fmt.Errorf("openai returned %d embeddings for %d inputs", len(decoded.Data), len(texts))
+		return pkgembed.Result{}, fmt.Errorf("openai returned %d embeddings for %d inputs", len(decoded.Data), len(texts))
 	}
 
-	vectors = make([][]float32, len(decoded.Data))
+	vectors := make([][]float32, len(decoded.Data))
 	for i, d := range decoded.Data {
 		vectors[i] = d.Embedding
 	}
-	return vectors, decoded.Usage.PromptTokens, nil
+	return pkgembed.Result{Vectors: vectors, Identity: e.identity, Usage: llm.Usage{InputTokens: decoded.Usage.PromptTokens}}, nil
 }
 
 func (e *openaiEmbedder) Fingerprint() string {

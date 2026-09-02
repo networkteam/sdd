@@ -165,13 +165,16 @@ func buildEmbedder(cmd *cli.Command) (handlers.IndexEmbedder, error) {
 }
 
 // newEmbedder composes the local embedder the way newRunner composes the chat
-// runner: the factory's adapter and rate limit, observed into the stats sink.
+// runner: the factory's bounded, rate-limited adapter, observed into the stats
+// sink per request, batched to the configured size outside the observer so one
+// stats row is one round-trip.
 func newEmbedder(cfg model.EmbeddingConfig) (handlers.IndexEmbedder, error) {
 	emb, err := localembed.New(cfg)
 	if err != nil {
 		return handlers.IndexEmbedder{}, err
 	}
-	return handlers.IndexEmbedder{Embedder: embed.Observed(emb, statsSink()), BatchSize: localembed.BatchSize(cfg)}, nil
+	size := localembed.BatchSize(cfg)
+	return handlers.IndexEmbedder{Embedder: embed.Batched(embed.Observed(emb, statsSink()), size), BatchSize: size}, nil
 }
 
 func indexCmd() *cli.Command {

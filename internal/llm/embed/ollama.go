@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/pkg/llm"
@@ -24,13 +23,12 @@ const defaultOllamaEndpoint = "http://localhost:11434"
 type ollamaEmbedder struct {
 	endpoint         string
 	identity         llm.Identity
-	batchSize        int
 	queryTemplate    string
 	documentTemplate string
 	httpClient       *http.Client
 }
 
-func newOllama(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) pkgembed.Embedder {
+func newOllama(cfg model.EmbeddingConfig) pkgembed.Embedder {
 	endpoint := cfg.OllamaEndpoint
 	if endpoint == "" {
 		endpoint = defaultOllamaEndpoint
@@ -38,10 +36,9 @@ func newOllama(cfg model.EmbeddingConfig, timeout time.Duration, batchSize int) 
 	return &ollamaEmbedder{
 		endpoint:         endpoint,
 		identity:         llm.Identity{Provider: "ollama", Model: cfg.Model},
-		batchSize:        batchSize,
 		queryTemplate:    cfg.QueryTemplate,
 		documentTemplate: cfg.DocumentTemplate,
-		httpClient:       &http.Client{Timeout: timeout},
+		httpClient:       &http.Client{},
 	}
 }
 
@@ -63,24 +60,30 @@ func (e *ollamaEmbedder) Embed(ctx context.Context, req pkgembed.Request) (pkgem
 	if err != nil {
 		return pkgembed.Result{}, err
 	}
-	return batched(ctx, e.identity, applyTemplate(tmpl, req.Texts), e.batchSize, e.embedBatch)
+	return e.request(ctx, applyTemplate(tmpl, req.Texts))
 }
 
-func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) (vectors [][]float32, tokens int, err error) {
+// request sends the templated texts as one /api/embed call; see openaiEmbedder.request.
+func (e *ollamaEmbedder) request(ctx context.Context, texts []string) (result pkgembed.Result, err error) {
+	defer func() {
+		if err != nil {
+			err = &llm.Error{Identity: e.identity, Err: err}
+		}
+	}()
 	body := ollamaEmbedRequest{Model: e.identity.Model, Input: texts}
 	buf, err := json.Marshal(body)
 	if err != nil {
-		return nil, 0, fmt.Errorf("marshal ollama request: %w", err)
+		return pkgembed.Result{}, fmt.Errorf("marshal ollama request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.endpoint+"/api/embed", bytes.NewReader(buf))
 	if err != nil {
-		return nil, 0, fmt.Errorf("build ollama request: %w", err)
+		return pkgembed.Result{}, fmt.Errorf("build ollama request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("ollama embed request: %w", err)
+		return pkgembed.Result{}, fmt.Errorf("ollama embed request: %w", err)
 	}
 	defer func() {
 		err = errors.Join(err, resp.Body.Close())
@@ -88,20 +91,20 @@ func (e *ollamaEmbedder) embedBatch(ctx context.Context, texts []string) (vector
 
 	var decoded ollamaEmbedResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return nil, 0, fmt.Errorf("decode ollama response (status %d): %w", resp.StatusCode, err)
+		return pkgembed.Result{}, fmt.Errorf("decode ollama response (status %d): %w", resp.StatusCode, err)
 	}
 	if resp.StatusCode != http.StatusOK || decoded.Error != "" {
 		msg := decoded.Error
 		if msg == "" {
 			msg = fmt.Sprintf("status %d", resp.StatusCode)
 		}
-		return nil, 0, fmt.Errorf("ollama embed error: %s", msg)
+		return pkgembed.Result{}, fmt.Errorf("ollama embed error: %s", msg)
 	}
 	if len(decoded.Embeddings) != len(texts) {
-		return nil, 0, fmt.Errorf("ollama returned %d embeddings for %d inputs (model %q)",
+		return pkgembed.Result{}, fmt.Errorf("ollama returned %d embeddings for %d inputs (model %q)",
 			len(decoded.Embeddings), len(texts), e.identity.Model)
 	}
-	return decoded.Embeddings, decoded.PromptEvalCount, nil
+	return pkgembed.Result{Vectors: decoded.Embeddings, Identity: e.identity, Usage: llm.Usage{InputTokens: decoded.PromptEvalCount}}, nil
 }
 
 // Fingerprint carries the model name only: Ollama models expose no

@@ -262,9 +262,9 @@ func TestOllamaEmbedder_Embed(t *testing.T) {
 	}
 }
 
-// Large inputs split into batchSize round-trips, preserving order and summing
-// the reported tokens.
-func TestOllamaEmbedder_BatchSplit(t *testing.T) {
+// The adapter is a transport: one Embed is one request whatever the configured
+// batch size, since splitting is composed around it (embed.Batched).
+func TestOllamaEmbedder_OneRequestPerEmbed(t *testing.T) {
 	t.Parallel()
 
 	var calls int
@@ -308,16 +308,11 @@ func TestOllamaEmbedder_BatchSplit(t *testing.T) {
 	if len(got.Vectors) != n {
 		t.Fatalf("got %d embeddings, want %d", len(got.Vectors), n)
 	}
-	for i, v := range got.Vectors {
-		if v[1] != float32(inputs[i][1]) {
-			t.Fatalf("vector %d out of order: %v for %q", i, v, inputs[i])
-		}
-	}
-	if calls != 2 {
-		t.Errorf("expected 2 batch calls, got %d", calls)
+	if calls != 1 {
+		t.Errorf("expected 1 request for %d inputs, got %d", n, calls)
 	}
 	if got.Usage.InputTokens != n {
-		t.Errorf("tokens summed across batches: got %d, want %d", got.Usage.InputTokens, n)
+		t.Errorf("tokens: got %d, want %d", got.Usage.InputTokens, n)
 	}
 }
 

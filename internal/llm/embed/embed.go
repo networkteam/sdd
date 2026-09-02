@@ -1,17 +1,15 @@
 // Package embed is the local host's embed.Embedder composition: it resolves
 // model.EmbeddingConfig — a host-private schema that never goes public — into
-// one pkg/llm/embed Embedder (provider adapter plus rate-limit decorator),
+// one pkg/llm/embed Embedder (provider adapter, timeout, rate limit),
 // paralleling the chat-runner factory.
 package embed
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/networkteam/sdd/internal/model"
-	"github.com/networkteam/sdd/pkg/llm"
 	pkgembed "github.com/networkteam/sdd/pkg/llm/embed"
 )
 
@@ -25,16 +23,13 @@ const (
 	defaultOllamaBatchSize = 64
 )
 
-// New constructs an Embedder from cfg. Returns an error when Provider is
-// unrecognised or required fields (Model, API key for remote providers) are
-// missing. Remote providers ("openai") are wrapped with embed.RateLimited
-// using cfg.RateLimitRPS or a conservative provider default.
-//
-// The per-round-trip deadline (cfg.Timeout) lives in the adapters' HTTP
-// client rather than in embed.Bounded: one Embed spans as many round-trips as
-// its batch needs, and a cold index reconcile hands thousands of chunks to a
-// single call, so a whole-call bound would fail exactly the calls that take
-// longest legitimately.
+// New constructs the per-round-trip embedder from cfg: the provider adapter,
+// which sends one request per Embed, bounded by cfg.Timeout and, for remote
+// providers ("openai"), rate-limited by cfg.RateLimitRPS or a conservative
+// provider default. The caller composes embed.Batched around it with
+// BatchSize(cfg) (20260902-154750-d-tac-o1s), so deadline and limiter apply
+// to each request. Returns an error when Provider is unrecognised or required
+// fields (Model, API key for remote providers) are missing.
 func New(cfg model.EmbeddingConfig) (pkgembed.Embedder, error) {
 	if cfg.Provider == "" {
 		return nil, fmt.Errorf("no embedding provider configured — run `sdd config set embedding.provider <provider>`")
@@ -43,16 +38,13 @@ func New(cfg model.EmbeddingConfig) (pkgembed.Embedder, error) {
 		return nil, fmt.Errorf("embedding.model is required")
 	}
 
-	timeout := resolveTimeout(cfg.Timeout)
-	batchSize := BatchSize(cfg)
-
-	var inner pkgembed.Embedder
+	var adapter pkgembed.Embedder
 	var err error
 	switch cfg.Provider {
 	case "openai":
-		inner, err = newOpenAI(cfg, timeout, batchSize)
+		adapter, err = newOpenAI(cfg)
 	case "ollama":
-		inner = newOllama(cfg, timeout, batchSize)
+		adapter = newOllama(cfg)
 	default:
 		return nil, fmt.Errorf("unknown embedding provider %q (supported: openai, ollama)", cfg.Provider)
 	}
@@ -60,22 +52,23 @@ func New(cfg model.EmbeddingConfig) (pkgembed.Embedder, error) {
 		return nil, err
 	}
 
+	embedder := pkgembed.Bounded(adapter, resolveTimeout(cfg.Timeout))
 	if isRemote(cfg.Provider) {
 		rps := cfg.RateLimitRPS
 		if rps == 0 {
 			rps = providerDefaultRPS(cfg.Provider, cfg.Model)
 		}
 		if rps > 0 {
-			inner = pkgembed.RateLimited(inner, rps)
+			embedder = pkgembed.RateLimited(embedder, rps)
 		}
 	}
-	return inner, nil
+	return embedder, nil
 }
 
-// BatchSize resolves the number of inputs one transport round-trip carries:
-// cfg.BatchSize when positive, else the provider default. The adapters split
-// larger requests by it internally; the CLI indexer buckets its work by it so
-// progress advances once per round-trip.
+// BatchSize resolves the number of texts one request carries: cfg.BatchSize
+// when positive, else the provider default. The composition site hands it to
+// embed.Batched, and the CLI indexer buckets its work by it so a bucket is at
+// most one request.
 func BatchSize(cfg model.EmbeddingConfig) int {
 	if cfg.BatchSize > 0 {
 		return cfg.BatchSize
@@ -140,27 +133,4 @@ func templateFor(purpose pkgembed.Purpose, document, query string) (string, erro
 	default:
 		return "", fmt.Errorf("unknown embedding purpose %q", purpose)
 	}
-}
-
-// batched runs call over texts in batchSize-sized slices — one transport
-// round-trip each — concatenating vectors in input order and summing the
-// reported input tokens. A failure is attributed to identity so the observing
-// decorator can record it.
-func batched(ctx context.Context, identity llm.Identity, texts []string, batchSize int,
-	call func(ctx context.Context, texts []string) ([][]float32, int, error)) (pkgembed.Result, error) {
-	result := pkgembed.Result{Identity: identity}
-	if len(texts) == 0 {
-		return result, nil
-	}
-	result.Vectors = make([][]float32, 0, len(texts))
-	for start := 0; start < len(texts); start += batchSize {
-		end := min(start+batchSize, len(texts))
-		vectors, tokens, err := call(ctx, texts[start:end])
-		if err != nil {
-			return pkgembed.Result{}, &llm.Error{Identity: identity, Err: fmt.Errorf("%s batch [%d:%d]: %w", identity.Provider, start, end, err)}
-		}
-		result.Vectors = append(result.Vectors, vectors...)
-		result.Usage.InputTokens += tokens
-	}
-	return result, nil
 }
