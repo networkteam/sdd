@@ -126,9 +126,9 @@ The original `/sdd` skill (`$sdd` on Codex) still works in v0.17.0 and opens wit
 - Cross-repo references — connect another graph and reference, search, and traverse across repository boundaries
 - Composable views — filter, rank, and render the graph to make it accessible for the agent
 - Mining external material — transcripts, articles, meeting notes — into the graph through dialogue
-- Multilingual graph authoring, with translated SDD vocabulary in the skill
+- Multilingual graph authoring — dialogue in any language, entries canonicalized to the graph's configured one
 - Git-native and immutable, with background awareness of remote state
-- A skill covering the common moves: bootstrap, catch up, capture, decide, engage, groom, augment, explore
+- Eight moves the engine serves step by step: bootstrap, catch up, capture, interview, engage, implementation, evaluate, groom
 
 ## Embed SDD in a Go application
 
@@ -199,13 +199,13 @@ Claude: [plays back an operational gap signal — "importer rejects
 Claude: [records the gap in the graph]
 ```
 
-Before writing, Claude plays back the proposed entry. A pre-flight validator (LLM-based, invoked by the CLI) reviews the draft against its refs and flags contradictions, missing acceptance criteria on plans, unrelated references, and similar calibration gaps. `high` findings block the write; `medium` and `low` are advisory. It works as a required gate to make sure entries are consistent and follow contracts and SDD rules.
+Before the playback, a writing guide judges the draft on its own terms — stranding, dilution, conflation, pointing, form — and returns findings that lead with their reasoning, which the agent folds in by judgment. Nothing gates on them: the findings arrive, the drafting call stays with the agent. Then Claude plays the entry back exactly as it will be written, and you confirm it. At the write, a pre-flight validator checks the draft against the graph — contradictions with its refs, missing acceptance criteria on plans, unrelated references. `high` findings block the write, and only you can choose to override them.
 
 Capture also works on material from elsewhere — a transcript, an article, a meeting note. The agent reads it against the graph, ties passages to existing entries, and synthesizes with you what's actually new — facts the source adds, insights the connection produces, gaps it raises, decisions the source records. Those become entries.
 
-### Plan
+### Plan a change
 
-Plan decisions (`--kind plan`) carry an `## Acceptance criteria` section — each AC is a verifiable outcome that becomes the contract between plan author, implementing agent, and the pre-flight validator that checks the closing done signal.
+A plan is a capture like any other, of a decision whose kind is `plan`. It carries an `## Acceptance criteria` section — each AC is a verifiable outcome that becomes the contract between plan author, implementing agent, and the pre-flight validator that checks the closing done signal.
 
 ```
 > Let's plan copy-on-edit variants.
@@ -222,9 +222,23 @@ Claude: [records the plan in the graph]
 
 Claude can attach a longer design doc for plans that need more than the ACs to carry.
 
+### Interview
+
+When the shared understanding isn't there yet, the agent takes the journalist's posture and you're the expert: one researched question per turn, each answer grounded back against the graph to connect it or push back.
+
+```
+> I want to think through how variants should behave on re-import.
+
+Claude: Before the mechanism — when the importer sees a recipe it
+        already has, who decides it's the same recipe? You, or the
+        source's own ID?
+```
+
+It closes with a synthesis, and whatever crystallized becomes captures.
+
 ### Engage
 
-Engage anchors on an entry — implementation, research, or evaluation, depending on what the entry calls for.
+Engage is the universal way into a specific entry. It reads the entry and its chains, synthesizes a brief shaped by the entry's kind and your goal, then puts the candidate next moves to you.
 
 ```
 > Engage d-cpt-vr4.
@@ -236,7 +250,13 @@ Claude: [reads the entry and its chain, surfaces the design
          Capture that first, or proceed and address it inline?
 ```
 
-For implementation, a WIP marker signals the work is in flight. When the work finishes, Claude plays back the closing done signal, captures it, and takes the marker down. The entry chain can ride a git branch when multiple participants work in parallel.
+### Implementation
+
+Running committed work. You pick the run mode, a WIP marker signals the work is in flight, and progress comes back as per-slice check-ins where a blocker opens dialogue instead of a silent stall. At closeout Claude records the closing done signal citing the commits, takes the marker down, and offers an evaluation. The entry chain can ride a git branch when multiple participants work in parallel.
+
+### Evaluate
+
+Evaluation is real work, not a rubber stamp. You scope which lenses the run covers — inner is verification (did we build it right), outer is validation (did it do what it was for) — and the judgment is carried out against evidence and recorded as a done signal, with anything it surfaces captured as its own entries.
 
 ### Groom
 
@@ -297,15 +317,10 @@ See [docs/signal-dialogue-decision.md](docs/signal-dialogue-decision.md) for the
 
 Each graph has a single authoring language configured as `language: <locale>` in `.sdd/config.yaml` (set at `sdd init` time, default `en`). When the language is non-English:
 
-- **Captured entry descriptions are written in the configured language.** Dialogue with the agent can flow freely in any language, but the text that lands in the graph is canonicalized — the `/sdd` skill translates dialogue content before running `sdd new` so the graph stays coherent across sessions. Pre-flight enforces this: an entry whose description language doesn't match is flagged as drift and blocks capture.
-- **The `/sdd` skill renders translated SDD vocabulary** (types, kinds, layers, status labels) on demand, reading `references/vocabulary-<locale>.md`. Catch-up narration, playback, and grooming tables use translated terms.
-- **The technical surface stays English.** YAML frontmatter, CLI tokens, entry IDs, and section headers like `## Acceptance criteria` are canonical identifiers. CLI output (`sdd info`, `sdd view`, `sdd show`) also stays English — translation is a skill concern, not a CLI concern.
+- **Captured entry text is written in the configured language.** Dialogue with the agent can flow freely in any language, but what lands in the graph is canonicalized, so the graph stays coherent across sessions. The engine hands the configured language to the agent as it drafts, and to the checks that read the draft: pre-flight flags an entry whose language doesn't match as drift and blocks the capture, and generated summaries follow the configured language rather than the source material's.
+- **The technical surface stays English.** YAML frontmatter, CLI tokens, entry IDs, and section headers like `## Acceptance criteria` are canonical identifiers. CLI output (`sdd info`, `sdd view`, `sdd show`) also stays English.
 
-German (`de`) is the only bundled locale today.
-
-**Adding a locale locally** — drop `vocabulary-<locale>.md` into your installed skill tree (`~/.claude/skills/sdd/references/` for user scope, `.claude/skills/sdd/references/` for project scope). Follow the German file's structure. `sdd init` refreshes bundled files but leaves user-added files alone.
-
-**Contributing a locale upstream** — drop the file into `internal/bundledskills/claude/sdd/references/` and submit a PR.
+Translated SDD vocabulary (types, kinds, layers, status labels) ships for German (`de`) as a reference in the deprecated `/sdd` skill tree, which v0.18.0 removes along with the rest of those skills.
 
 ## Connected repos
 
@@ -374,8 +389,8 @@ Run non-interactively by passing every required flag: `sdd init --scope project 
 
 SDD runs on more than one agent harness. Skills are authored once as agent-neutral templates and rendered per agent into that agent's own committed directory:
 
-- **Claude Code** — `.claude/skills/`, invoked as `/sdd`.
-- **OpenAI Codex** — `.agents/skills/` (the open [Agent Skills standard](https://agentskills.io)), invoked as `$sdd`.
+- **Claude Code** — `.claude/skills/`, invoked as `/sdd-engine`.
+- **OpenAI Codex** — `.agents/skills/` (the open [Agent Skills standard](https://agentskills.io)), invoked as `$sdd-engine`.
 
 A committed `supported_agents` list in `.sdd/config.yaml` records which agents the project renders; `sdd init` offers a multi-select on a fresh project and re-renders every listed agent on each run. Add agents with `sdd init --agents claude,codex`.
 
@@ -512,7 +527,11 @@ your-project/
 
 The vector index and the connected-repo caches don't live in the project tree — they're per-machine derived state in a content-addressed store under your user cache directory (keyed by repo identity and embedder fingerprint), shared across a repo's checkouts and worktrees and rebuilt on demand. Nothing to commit or clean up by hand.
 
-`sdd init` also installs the Claude Code skills at the agent's skill directory (defaults to `~/.claude/skills/`, or `.claude/skills/` with `--scope project`). Those paths are an implementation detail of the target agent — inspect them if you're curious, but they aren't part of your project's source tree.
+Engine sessions are per-machine too, stored per project under your XDG state directory and shared across that repo's checkouts and worktrees. Ended sessions are collected on `sdd serve` startup once they pass the retention window (`sessions.retention`); running ones survive a binary upgrade, so there's no offline window when you update sdd.
+
+`sdd init` also installs the skills for each configured agent at that agent's skill directory (defaults to `~/.claude/skills/` for Claude Code, or `.claude/skills/` with `--scope project`). Those paths are an implementation detail of the target agent — inspect them if you're curious, but they aren't part of your project's source tree.
+
+Registering the MCP server does land in your project tree, so engine mode works without manual setup. For Claude Code that's a `.mcp.json` entry for `sdd serve` plus an `mcp__sdd__*` allow rule in `.claude/settings.json`; for Codex it's a `.codex/config.toml` entry that forwards `SSH_AUTH_SOCK` so `sdd serve` can reach your ssh-agent to sign commits. An `sdd` entry you already have is left alone. This is project scope only today.
 
 ## Docs
 
