@@ -10,50 +10,27 @@ import (
 	mcpserver "github.com/networkteam/sdd/pkg/mcpapp"
 )
 
-// TestViewFirstHitHint covers the four (bound × first-view) cells of the
-// view-tool breadcrumb (AC8). The first-view pointer is keyed to the
-// connection, so two fresh connections realize every cell: an unbound reader
-// (the s-prc-3kh cohort) and a bound session.
+// TestViewFirstHitHint covers the view-tool breadcrumb (AC8): the first view
+// call on a connection carries the pointer to the view-grammar fact, later
+// calls carry nothing. The pointer is keyed to the connection, so a second
+// connection pays it again.
 func TestViewFirstHitHint(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
-	const doorMark = "start_session opens a fresh one"
 	const factMark = "view layout grammar"
 
-	// Connection A: never opens a session (unbound).
-	unbound := connect(t, env.srv)
-	var a1, a2 mcpserver.ViewResult
-	call(t, unbound, "view", map[string]any{"layout": "active:as-list"}, &a1)
-	call(t, unbound, "view", map[string]any{"layout": "active:as-list"}, &a2)
+	for _, name := range []string{"first connection", "second connection"} {
+		cs := connect(t, env.srv)
+		session := openSession(t, cs).Session
+		var v1, v2 mcpserver.ViewResult
+		call(t, cs, "view", map[string]any{"session": session, "layout": "active:as-list"}, &v1)
+		call(t, cs, "view", map[string]any{"session": session, "layout": "active:as-list"}, &v2)
 
-	// unbound + first view: door AND fact, door first.
-	if !strings.Contains(a1.Hint, doorMark) || !strings.Contains(a1.Hint, factMark) {
-		t.Errorf("unbound first view should join both breadcrumbs: %q", a1.Hint)
-	}
-	if !strings.Contains(a1.Hint, basefacts.ViewGrammarFactID) {
-		t.Errorf("first-view hint should point at the fact ID: %q", a1.Hint)
-	}
-	if strings.Index(a1.Hint, doorMark) > strings.Index(a1.Hint, factMark) {
-		t.Errorf("door breadcrumb should come first: %q", a1.Hint)
-	}
-	// unbound + subsequent view: door only.
-	if !strings.Contains(a2.Hint, doorMark) || strings.Contains(a2.Hint, factMark) {
-		t.Errorf("unbound second view should carry the door breadcrumb only: %q", a2.Hint)
-	}
-
-	// Connection B: opens a session (bound).
-	bound := connect(t, env.srv)
-	openSession(t, bound)
-	var b1, b2 mcpserver.ViewResult
-	call(t, bound, "view", map[string]any{"layout": "active:as-list"}, &b1)
-	call(t, bound, "view", map[string]any{"layout": "active:as-list"}, &b2)
-
-	// bound + first view: fact only.
-	if strings.Contains(b1.Hint, doorMark) || !strings.Contains(b1.Hint, factMark) {
-		t.Errorf("bound first view should carry the fact breadcrumb only: %q", b1.Hint)
-	}
-	// bound + subsequent view: no breadcrumb.
-	if b2.Hint != "" {
-		t.Errorf("bound second view should carry no breadcrumb, got %q", b2.Hint)
+		if !strings.Contains(v1.Hint, factMark) || !strings.Contains(v1.Hint, basefacts.ViewGrammarFactID) {
+			t.Errorf("%s: first view should carry the fact breadcrumb naming the fact ID: %q", name, v1.Hint)
+		}
+		if v2.Hint != "" {
+			t.Errorf("%s: second view should carry no breadcrumb, got %q", name, v2.Hint)
+		}
 	}
 }
 
@@ -84,9 +61,10 @@ A fixture gap authored by Christopher.
 
 	env := newTestServer(t, nil, graphDir, "")
 	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
 
 	var empty mcpserver.ViewResult
-	call(t, cs, "view", map[string]any{"layout": "participant(Nobody):as-list"}, &empty)
+	call(t, cs, "view", map[string]any{"session": session, "layout": "participant(Nobody):as-list"}, &empty)
 	if !strings.Contains(empty.Sections, "0 entries matched") {
 		t.Errorf("empty participant view missing explicit statement: %q", empty.Sections)
 	}
@@ -95,7 +73,7 @@ A fixture gap authored by Christopher.
 	}
 
 	var hit mcpserver.ViewResult
-	call(t, cs, "view", map[string]any{"layout": "participant(Christopher):as-list"}, &hit)
+	call(t, cs, "view", map[string]any{"session": session, "layout": "participant(Christopher):as-list"}, &hit)
 	if strings.Contains(hit.Sections, "0 entries matched") {
 		t.Errorf("matching participant view should not report an empty result: %q", hit.Sections)
 	}
@@ -108,7 +86,7 @@ A fixture gap authored by Christopher.
 	// claim "0 entries matched" (nor name participants as if the filter
 	// missed) — the honest render is the presenter's "(no topics)" line.
 	var counts mcpserver.ViewResult
-	call(t, cs, "view", map[string]any{"layout": "participant(Christopher):as-counts"}, &counts)
+	call(t, cs, "view", map[string]any{"session": session, "layout": "participant(Christopher):as-counts"}, &counts)
 	if strings.Contains(counts.Sections, "0 entries matched") {
 		t.Errorf("untagged as-counts falsely reported an empty result: %q", counts.Sections)
 	}

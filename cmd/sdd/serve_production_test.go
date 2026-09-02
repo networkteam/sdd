@@ -245,11 +245,19 @@ func prodServeSearch(t *testing.T, root string) string {
 		t.Fatalf("connect serve: %v\nstderr:\n%s", err, stderr.String())
 	}
 	defer func() { _ = session.Close() }()
+	door, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "start_session", Arguments: map[string]any{}})
+	if err != nil || door.IsError {
+		t.Fatalf("start_session over stdio: %v %+v\nstderr:\n%s", err, door, stderr.String())
+	}
+	handle, _ := door.StructuredContent.(map[string]any)["session"].(string)
+	if handle == "" {
+		t.Fatalf("start_session served no session handle: %+v", door.StructuredContent)
+	}
 	// The fake embeddings are content-hash noise, so ranking is arbitrary; a
 	// limit covering the whole corpus (seeded entries + embedded base facts
 	// and procedures) keeps this warm-index assertion independent of base
 	// content edits.
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "search", Arguments: map[string]any{"query": phrase, "limit": 50}})
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "search", Arguments: map[string]any{"session": handle, "query": phrase, "limit": 50}})
 	if err != nil {
 		t.Fatalf("search over stdio: %v\nstderr:\n%s", err, stderr.String())
 	}

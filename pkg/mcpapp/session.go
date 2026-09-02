@@ -88,7 +88,8 @@ func (st *sessionStore) connections() []*mcp.ServerSession {
 }
 
 type sessionDescriptor struct {
-	Session      string               `json:"session" jsonschema:"session handle; pass to resume_session"`
+	Session      string               `json:"session" jsonschema:"session handle (project:session-id); pass to resume_session"`
+	Project      string               `json:"project,omitempty" jsonschema:"the project the session is bound to"`
 	Label        string               `json:"label,omitempty" jsonschema:"the session's subject — agent-supplied, falling back to the first line of the most recent drafted body; blank when nothing was drafted"`
 	Participant  string               `json:"participant,omitempty"`
 	Branch       string               `json:"branch,omitempty" jsonschema:"the session's declared branch binding"`

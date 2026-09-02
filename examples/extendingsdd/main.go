@@ -65,7 +65,9 @@ func main() {
 	check(err)
 	application, err := sdd.NewApplication(externalAccess{runtime: runtime})
 	check(err)
-	server, err := mcpapp.New(mcpapp.Options{Application: application, Project: "example", Version: "example"})
+	// No pinned project: the wrapper serves every project the principal can
+	// reach, and with one accessible project start_session infers it.
+	server, err := mcpapp.New(mcpapp.Options{Application: application, Version: "example"})
 	check(err)
 
 	token := env("SDD_EXAMPLE_TOKEN", "development-token")

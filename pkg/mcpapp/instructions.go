@@ -22,21 +22,27 @@ The minimum to read it right:
 Everything else is served. There are two doors into a dialogue: start_session
 opens a fresh one and returns its opening serve — your orientation, how the
 dialogue should feel, and the moves you can start; resume_session attaches to
-an existing session by its handle. Attaching to a session this connection did
-not open carries the user's verbatim request in userWords (a fresh ask that
-merely resembles the work is not consent); taking over one that another client
-is actively driving additionally needs takeover:true, and only recorded session
-state resumes — not the other conversation's context.
+an existing session by its handle. start_session is the only tool that takes a
+project: one server serves every project the principal can reach, a sole
+project is inferred, and when several exist and none was passed the response
+lists them (status project-required) instead of opening a session — choose
+with the user, then call again with project. Attaching to a session this
+connection did not open carries the user's verbatim request in userWords (a
+fresh ask that merely resembles the work is not consent); taking over one that
+another client is actively driving additionally needs takeover:true, and only
+recorded session state resumes — not the other conversation's context.
 
-The session handle is the dialogue's identity. Every work tool (start_procedure,
-next, park, stage_attachment, and abandon of a move) carries it as a required
-argument naming the session this connection is attached to — retain it across
-context compaction. The one exception is abandon's teardown mode (session alone,
-no instance): it tears down a session by handle without attaching, so the handle
-there names a session you need not be attached to. Discovery and reading stay
-free: list_sessions shows every session with open work (no handle needed), and
-the read tools (search, view, show, read_attachment, info, registry) are always
-ungated.
+The session handle (project:session-id) is the dialogue's identity and binds it
+to one project. Every other tool carries it as a required argument naming the
+session this connection is attached to — the work tools (start_procedure, next,
+park, stage_attachment, bind_branch, abandon of a move) and the reads (search,
+view, show, read_attachment, info, registry) alike; a read runs in the session's
+project and branch. Retain the handle across context compaction. The one
+exception is abandon's teardown mode (session alone, no instance): it tears
+down a session by handle without attaching, so the handle there names a session
+you need not be attached to. Reads are free in the sense that matters: no move
+has to be running and no procedure state gates them. Discovery is free too:
+list_sessions shows every session with open work (no handle needed).
 
 If you lose the handle — your context was compacted or summarized — recover
 without guessing: resume_session with no arguments re-serves the session this

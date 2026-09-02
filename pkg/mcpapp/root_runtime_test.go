@@ -77,7 +77,7 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 	}
 
 	var search mcpserver.SearchResult
-	call(t, client, "search", map[string]any{"terms": []string{"oscillation"}}, &search)
+	call(t, client, "search", map[string]any{"session": opened.Session, "terms": []string{"oscillation"}}, &search)
 	if search.Results == "" {
 		t.Fatal("root runtime search returned no result")
 	}

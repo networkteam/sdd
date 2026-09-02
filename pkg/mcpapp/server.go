@@ -15,8 +15,10 @@ import (
 
 // Options configures a workflow MCP server.
 type Options struct {
-	// Application is the protocol-neutral SDD runtime. Project selects the
-	// immutable base project for this MCP application.
+	// Application is the protocol-neutral SDD runtime. Project optionally pins
+	// the one project this server serves; left empty, start_session selects
+	// the project inside the dialogue and a sole accessible project is
+	// inferred (d-tac-1z6).
 	Application *sdd.Application
 	Project     sdd.ProjectID
 	// LocalIdentity supplies the identity for a trusted composition whose
@@ -69,9 +71,6 @@ var ErrServerClosing = errors.New("mcpapp: server is shutting down")
 func New(opts Options) (*Server, error) {
 	if opts.Application == nil {
 		return nil, errors.New("mcpapp: Application is required")
-	}
-	if opts.Project == "" {
-		return nil, errors.New("mcpapp: Project is required")
 	}
 	s := &Server{
 		app:                 opts.Application,

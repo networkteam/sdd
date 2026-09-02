@@ -3,6 +3,7 @@ package mcpapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,9 +30,23 @@ const defaultSearchHits = 8
 // --- the loop -------------------------------------------------------------
 
 type StartSessionArgs struct {
-	Shell string `json:"shell,omitempty" jsonschema:"shell procedure to open the session with, by canonical; defaults to user-dialogue"`
-	Label string `json:"label,omitempty" jsonschema:"short single-line subject label for the session; set it early, update when the subject sharpens"`
+	Project string `json:"project,omitempty" jsonschema:"project to open the session in, by ID. Optional: a composition serving one project infers it; when several are accessible and none is passed, the response lists them under projects instead of starting a session — pick one and call again"`
+	Shell   string `json:"shell,omitempty" jsonschema:"shell procedure to open the session with, by canonical; defaults to user-dialogue"`
+	Label   string `json:"label,omitempty" jsonschema:"short single-line subject label for the session; set it early, update when the subject sharpens"`
 }
+
+// ProjectResult is one accessible project, served by start_session when the
+// caller must choose before a session can open.
+type ProjectResult struct {
+	ID          string `json:"id" jsonschema:"project ID; pass as start_session's project"`
+	DisplayName string `json:"display_name,omitempty"`
+	CanWrite    bool   `json:"can_write"`
+}
+
+// StatusProjectRequired is the ServeResult status start_session returns when
+// the composition has several projects and none was passed: no session
+// opened, the accessible projects are listed instead.
+const StatusProjectRequired = "project-required"
 
 type StartProcedureArgs struct {
 	Session   string         `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — carry it across context compaction"`
@@ -97,11 +112,13 @@ type ChooserResult struct {
 // ServeResult is the loop's uniform response shape: where the instance
 // stands, what advances it, and the material to work with.
 type ServeResult struct {
-	Session        string            `json:"session" jsonschema:"session handle; sessions survive restarts and resume via resume_session"`
+	Session        string            `json:"session,omitempty" jsonschema:"session handle (project:session-id); sessions survive restarts and resume via resume_session. Pass it to every other tool"`
+	Project        string            `json:"project,omitempty" jsonschema:"the project this session is bound to"`
+	Projects       []ProjectResult   `json:"projects,omitempty" jsonschema:"start_session only: the principal's accessible projects, served with status project-required when several exist and none was passed — no session opened yet"`
 	Branch         string            `json:"branch,omitempty" jsonschema:"the session's declared branch binding"`
-	Instance       string            `json:"instance"`
-	Procedure      string            `json:"procedure"`
-	Status         string            `json:"status" jsonschema:"running, completed, or abandoned"`
+	Instance       string            `json:"instance,omitempty"`
+	Procedure      string            `json:"procedure,omitempty"`
+	Status         string            `json:"status" jsonschema:"running, completed, or abandoned — or project-required from start_session, when a project must be chosen first"`
 	Step           string            `json:"step,omitempty"`
 	Goal           string            `json:"goal" jsonschema:"one line: what advances the instance from here"`
 	Instructions   string            `json:"instructions,omitempty"`
@@ -144,7 +161,7 @@ type ListSessionsResult struct {
 }
 
 type ResumeSessionArgs struct {
-	Session   string `json:"session,omitempty" jsonschema:"a session handle (from list_sessions) to attach this connection to — works on a fresh unbound connection, and switches away from a currently attached session (parking or concluding it per the leave rule). Omit to reorient the session this connection is already attached to; omit while unattached and the rejection carries the sessions with open work to attach to"`
+	Session   string `json:"session,omitempty" jsonschema:"a session handle (project:session-id, from a serve or list_sessions) to attach this connection to — works on a fresh unbound connection, and switches away from a currently attached session (parking or concluding it per the leave rule). Omit to reorient the session this connection is already attached to; omit while unattached and the rejection carries the sessions with open work to attach to"`
 	UserWords string `json:"userWords,omitempty" jsonschema:"the user's verbatim request to move into this session; required when attaching to a session this connection did not open. A fresh request that merely resembles the work is not consent — relay what the user actually said"`
 	Takeover  bool   `json:"takeover,omitempty" jsonschema:"pass true to take over a session another client is actively driving (a recent attachment); needed only when the refusal says so. Only recorded session state resumes — not the other conversation's context"`
 	// FullReplay forces a one-shot full re-serve of the currently attached
@@ -156,7 +173,8 @@ type ResumeSessionArgs struct {
 }
 
 type ResumeSessionResult struct {
-	Session      string        `json:"session"`
+	Session      string        `json:"session" jsonschema:"session handle (project:session-id)"`
+	Project      string        `json:"project,omitempty" jsonschema:"the project this session is bound to"`
 	Participant  string        `json:"participant,omitempty"`
 	Label        string        `json:"label,omitempty" jsonschema:"the session's subject label, when one was recorded"`
 	Branch       string        `json:"branch,omitempty" jsonschema:"the session's declared branch binding"`
@@ -197,6 +215,7 @@ type StageAttachmentResult struct {
 // --- free reads -------------------------------------------------------------
 
 type SearchArgs struct {
+	Session           string   `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the read runs in that session's project and branch"`
 	Terms             []string `json:"terms,omitempty" jsonschema:"text mode: regex terms combined with AND"`
 	Query             string   `json:"query,omitempty" jsonschema:"vector mode: free-form phrase (requires a configured embedding provider); both together run hybrid"`
 	Type              string   `json:"type,omitempty" jsonschema:"filter: s/signal or d/decision"`
@@ -211,10 +230,10 @@ type SearchArgs struct {
 
 type SearchResult struct {
 	Results string `json:"results" jsonschema:"matching entries with citations"`
-	Hint    string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 type ViewArgs struct {
+	Session  string   `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the read runs in that session's project and branch"`
 	Layout   string   `json:"layout" jsonschema:"sdd view layout pipeline, e.g. 'active:as-counts' or 'top(15)'"`
 	Repos    []string `json:"repos,omitempty" jsonschema:"also render the layout over these connected repos' graphs (additive to the local graph)"`
 	AllRepos bool     `json:"all_repos,omitempty" jsonschema:"also render the layout over every connected repo"`
@@ -222,27 +241,27 @@ type ViewArgs struct {
 
 type ViewResult struct {
 	Sections string `json:"sections"`
-	Hint     string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
+	Hint     string `json:"hint,omitempty" jsonschema:"one-line pointer to the view layout grammar, served once per connection"`
 }
 
 type ShowArgs struct {
-	IDs  []string `json:"ids" jsonschema:"entry IDs to show; accepts an unambiguous short ID ({type}-{layer}-{suffix}) and resolves it to the full entry"`
-	Up   *int     `json:"up,omitempty" jsonschema:"upstream chain depth; omitted = default 2, 0 = no upstream"`
-	Down *int     `json:"down,omitempty" jsonschema:"downstream chain depth; omitted = default 1, 0 = no downstream"`
+	Session string   `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the read runs in that session's project and branch"`
+	IDs     []string `json:"ids" jsonschema:"entry IDs to show; accepts an unambiguous short ID ({type}-{layer}-{suffix}) and resolves it to the full entry"`
+	Up      *int     `json:"up,omitempty" jsonschema:"upstream chain depth; omitted = default 2, 0 = no upstream"`
+	Down    *int     `json:"down,omitempty" jsonschema:"downstream chain depth; omitted = default 1, 0 = no downstream"`
 }
 
 type ShowResult struct {
 	Entries string `json:"entries"`
-	Hint    string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 type ReadAttachmentArgs struct {
+	Session  string `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the read runs in that session's project, and a staged file is read from that session"`
 	ID       string `json:"id,omitempty" jsonschema:"full ID of the entry whose attachment to read; omit when reading a staged file by handle"`
 	Name     string `json:"name,omitempty" jsonschema:"attachment filename; optional when the entry has exactly one"`
 	Offset   int64  `json:"offset,omitempty" jsonschema:"byte position to continue from (next_offset of the previous page)"`
 	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"page size cap; default 65536"`
-	Session  string `json:"session,omitempty" jsonschema:"with handle: the session handle this connection is attached to, whose staged file to read"`
-	Handle   string `json:"handle,omitempty" jsonschema:"read a file staged in this session (before any entry carries it) by its handle, in the same bounded pages; pass with session instead of id"`
+	Handle   string `json:"handle,omitempty" jsonschema:"read a file staged in this session (before any entry carries it) by its handle, in the same bounded pages; pass instead of id"`
 }
 
 type ReadAttachmentResult struct {
@@ -254,22 +273,24 @@ type ReadAttachmentResult struct {
 	More       bool     `json:"more"`
 	Available  []string `json:"available" jsonschema:"the entry's attachment filenames"`
 	Path       string   `json:"path,omitempty" jsonschema:"absolute filesystem path; present only for local (stdio) clients, which may read the file directly instead of paging"`
-	Hint       string   `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
-type InfoArgs struct{}
+type InfoArgs struct {
+	Session string `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the header describes that session's project"`
+}
 
 type InfoResult struct {
+	Project     string `json:"project,omitempty" jsonschema:"the session's project ID"`
 	Participant string `json:"participant,omitempty" jsonschema:"configured local participant (canonical name)"`
 	Language    string `json:"language,omitempty" jsonschema:"configured graph language; empty = English"`
 	Search      string `json:"search" jsonschema:"available retrieval modes: text or vector,text"`
 	Recovery    string `json:"recovery,omitempty" jsonschema:"host-neutral actionable recovery notices; empty when no write awaits explicit recovery"`
 	Version     string `json:"version,omitempty"`
-	Hint        string `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 type RegistryArgs struct {
-	Class string `json:"class,omitempty" jsonschema:"filter: predicate, query, or command"`
+	Session string `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required"`
+	Class   string `json:"class,omitempty" jsonschema:"filter: predicate, query, or command"`
 }
 
 type RegistryFuncResult struct {
@@ -282,17 +303,19 @@ type RegistryFuncResult struct {
 
 type RegistryResult struct {
 	Functions []RegistryFuncResult `json:"functions"`
-	Hint      string               `json:"hint,omitempty" jsonschema:"one-line breadcrumb while no session runs"`
 }
 
 func (s *Server) registerTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "start_session",
-		Description: "Open a fresh dialogue session — one of the two doors. Auto-starts the session shell " +
-			"(user-dialogue by default) and returns its opening serve: your orientation, the available " +
-			"moves, and the returned session handle. That handle is the dialogue's identity — retain it " +
-			"across context compaction and pass it to every work tool. Call it again to re-serve the " +
-			"orientation in full — and on a connection whose session has ended, it opens a new dialogue " +
+		Description: "Open a fresh dialogue session — one of the two doors, and the only tool that takes a " +
+			"project. Auto-starts the session shell (user-dialogue by default) and returns its opening " +
+			"serve: your orientation, the available moves, and the returned session handle. That handle " +
+			"is the dialogue's identity and binds the session to one project — retain it across context " +
+			"compaction and pass it to every other tool, reads included. Pass project when the composition " +
+			"serves several; omitted, a sole accessible project is inferred, and with several the response " +
+			"lists them (status project-required) instead of opening a session. Call it again to re-serve " +
+			"the orientation in full — and on a connection whose session has ended, it opens a new dialogue " +
 			"under a new handle, since a finished session is never re-served.",
 	}, s.startSession)
 
@@ -334,15 +357,15 @@ func (s *Server) registerTools() {
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "list_sessions",
-		Description: "List every session with open work — free discovery, no session needed. Each carries " +
-			"participant, label, last activity, an active/idle tag, and the holding client's name when a " +
-			"client currently holds it; active sessions are listed, never hidden. Attach to one with " +
-			"resume_session.",
+		Description: "List every session with open work across the principal's projects — free discovery, no " +
+			"session needed. Each carries its handle (project:session-id), participant, label, last " +
+			"activity, an active/idle tag, and the holding client's name when a client currently holds it; " +
+			"active sessions are listed, never hidden. Attach to one with resume_session.",
 	}, s.listSessions)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "resume_session",
-		Description: "The attach door, and the compaction escape. Pass a session handle (from list_sessions) " +
+		Description: "The attach door, and the compaction escape. Pass a session handle (project:session-id) " +
 			"to attach this connection to it — works on a fresh unbound connection, and switches away from " +
 			"a currently attached session (parking it when moves are open, concluding it when quiescent). " +
 			"Attaching to a session this connection did not open requires userWords (the user's verbatim " +
@@ -375,73 +398,130 @@ func (s *Server) registerTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "search",
 		Description: "Search graph entries: terms (text/regex), query (semantic phrase), or both (hybrid). " +
-			"Free read, never gated.",
+			"A free read within the session named by session (required): no move needed, never blocked " +
+			"by procedure state; it runs in that session's project and branch.",
 	}, s.search)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "view",
 		Description: "Run an sdd view layout pipeline over the graph — overview sections, topic counts, " +
-			"ranked lists. Free read, never gated.",
+			"ranked lists. A free read within the session named by session (required).",
 	}, s.view)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "show",
-		Description: "Read entries in full with their upstream and downstream reference chains. Use " +
-			"whenever the dialogue touches a specific entry — summaries are pointers, not facts.",
+		Description: "Read entries in full with their upstream and downstream reference chains, within the " +
+			"session named by session (required). Use whenever the dialogue touches a specific entry — " +
+			"summaries are pointers, not facts.",
 	}, s.show)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "read_attachment",
-		Description: "Read an attachment's content, paged: an entry's by ID and filename, or a file staged " +
-			"in the session (before any entry carries it) by session and handle. Never derive storage paths.",
+		Description: "Read an attachment's content, paged, within the session named by session (required): " +
+			"an entry's by ID and filename, or a file staged in the session (before any entry carries it) " +
+			"by handle. Never derive storage paths.",
 	}, s.readAttachment)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "info",
-		Description: "Session framing header: local participant, configured language, available search modes, and actionable recovery notices.",
+		Description: "Session framing header for the session named by session (required): project, local participant, configured language, available search modes, and actionable recovery notices.",
 	}, s.info)
 
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "registry",
-		Description: "Engine function contracts (predicates, queries, commands) — what procedure spec authors consult.",
+		Description: "Engine function contracts (predicates, queries, commands) — what procedure spec authors consult. Carries the session handle like every other tool.",
 	}, s.registryDocs)
 }
 
-// attachedSession resolves the session a work tool names, requiring that this
+// attachedSession resolves the session a tool names, requiring that this
 // connection is attached to it. The handle is the dialogue's identity — a
 // missing one names both doors with the open-session list inlined; a handle
 // this connection is not attached to funnels into resume_session, the single
-// attach point (d-cpt-9of).
+// attach point (d-cpt-9of). A bare session ID (no project prefix) is accepted
+// when it names the attached session.
 func (s *Server) attachedSession(ctx context.Context, req *mcp.CallToolRequest, session string) (*shellSession, error) {
 	if strings.TrimSpace(session) == "" {
 		return nil, s.noHandleError(ctx, req)
 	}
+	project, id := splitHandle(session)
 	bound := s.sessions.bound(req.Session)
-	if bound == nil || string(bound.root.ID()) != session {
+	if bound == nil || bound.root.ID() != id || (project != "" && project != bound.root.Project()) {
 		return nil, toolError("this connection is not attached to %s — attach with resume_session", session)
 	}
 	return bound, nil
 }
 
-// noHandleError is the typed rejection for a work tool called without a valid
+// handle renders the served handle of an attached session.
+func (ss *shellSession) handle() string {
+	return composeHandle(ss.root.Project(), ss.root.ID())
+}
+
+// projectFor resolves the project a door call addresses: the handle's own
+// prefix, else the pinned Options.Project, else empty — which the application
+// resolves to the sole accessible project or rejects as ambiguous.
+func (s *Server) projectFor(handleProject sdd.ProjectID) sdd.ProjectID {
+	if handleProject != "" {
+		return handleProject
+	}
+	return s.project
+}
+
+// openWorkListing is one session with open work, handle already composed.
+type openWorkListing struct {
+	handle  string
+	project sdd.ProjectID
+	summary sdd.WorkflowSessionSummary
+}
+
+// sessionsWithOpenWork lists the principal's sessions with open work: over the
+// pinned project when Options.Project is set, else over every readable ready
+// project the principal can reach.
+func (s *Server) sessionsWithOpenWork(ctx context.Context, identity sdd.RequestIdentity) ([]openWorkListing, error) {
+	projects := []sdd.ProjectID{s.project}
+	if s.project == "" {
+		list, err := s.app.Projects(ctx, identity)
+		if err != nil {
+			return nil, err
+		}
+		projects = projects[:0]
+		for _, candidate := range list.Projects {
+			if candidate.State == sdd.ProjectReady && candidate.CanRead {
+				projects = append(projects, candidate.ID)
+			}
+		}
+	}
+	var out []openWorkListing
+	for _, project := range projects {
+		items, err := s.app.ListWorkflowSessions(ctx, identity, project)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if len(item.Open) == 0 {
+				continue
+			}
+			out = append(out, openWorkListing{handle: composeHandle(project, item.Session), project: project, summary: item})
+		}
+	}
+	return out, nil
+}
+
+// noHandleError is the typed rejection for a tool called without a valid
 // session handle. It names both doors — start_session for a fresh session,
 // resume_session to attach to an existing one — and inlines the sessions with
 // open work (handle + label), so the follow-up call can already be the attach
 // (d-tac-dbk).
 func (s *Server) noHandleError(ctx context.Context, req *mcp.CallToolRequest) error {
-	msg := "no session handle — start_session opens a fresh session, resume_session attaches to an existing one (reads stay free)"
-	items, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
+	msg := "no session handle — every tool carries one: start_session opens a fresh session, resume_session attaches to an existing one"
+	items, err := s.sessionsWithOpenWork(ctx, s.requestIdentity(req))
 	if err != nil {
 		return err
 	}
 	var lines []string
 	for _, item := range items {
-		if len(item.Open) == 0 {
-			continue
-		}
-		line := string(item.Session)
-		if item.Label != "" {
-			line += " " + strconv.Quote(item.Label)
+		line := item.handle
+		if item.summary.Label != "" {
+			line += " " + strconv.Quote(item.summary.Label)
 		}
 		lines = append(lines, line)
 	}
@@ -488,10 +568,12 @@ func mcpClientVersion(session *mcp.ServerSession) string {
 // unbound — the door binds it after the shell procedure started.
 func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, args StartSessionArgs) (*mcp.CallToolResult, ServeResult, error) {
 	identity := s.requestIdentity(req)
+	requested := sdd.ProjectID(strings.TrimSpace(args.Project))
 	// A finished session is spent: the door mints a new dialogue under a new handle
 	// rather than re-serving the concluded one, which is the connection standing in
-	// as the dialogue's identity (s-tac-3be).
-	if current := s.sessions.bound(req.Session); current != nil && !current.root.Finished() {
+	// as the dialogue's identity (s-tac-3be). Naming another project is likewise a
+	// new dialogue, never a re-serve of the one this connection holds.
+	if current := s.sessions.bound(req.Session); current != nil && !current.root.Finished() && (requested == "" || requested == current.root.Project()) {
 		serve, err := current.root.Reopen(ctx, identity, args.Label)
 		if err != nil {
 			return nil, ServeResult{}, err
@@ -507,11 +589,20 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 		}
 		return nil, result, nil
 	}
-	workflow, serve, err := s.app.OpenWorkflow(ctx, identity, s.project, sdd.WorkflowOpenRequest{
+	// The door is the one tool that takes a project. Explicit wins; else the
+	// pinned project; else empty, and the application infers a sole accessible
+	// project or reports the ambiguity, which becomes the project listing
+	// (d-tac-1z6).
+	project := s.projectFor(requested)
+	workflow, serve, err := s.app.OpenWorkflow(ctx, identity, project, sdd.WorkflowOpenRequest{
 		MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
 		Shell: args.Shell, Label: args.Label,
 	})
 	if err != nil {
+		var appErr *sdd.ApplicationError
+		if project == "" && errors.As(err, &appErr) && appErr.Code == sdd.ErrorProjectRequired {
+			return s.serveProjects(ctx, identity)
+		}
 		return nil, ServeResult{}, err
 	}
 	ss := &shellSession{id: string(workflow.ID()), root: workflow, rootIdentity: identity}
@@ -528,6 +619,30 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 	}
 	if err := s.addDoorCount(ctx, req, ss, &result); err != nil {
 		return nil, ServeResult{}, err
+	}
+	return nil, result, nil
+}
+
+// serveProjects is start_session's answer when the principal reaches several
+// projects and named none: no session opens, the projects are listed and the
+// caller picks one.
+func (s *Server) serveProjects(ctx context.Context, identity sdd.RequestIdentity) (*mcp.CallToolResult, ServeResult, error) {
+	list, err := s.app.Projects(ctx, identity)
+	if err != nil {
+		return nil, ServeResult{}, err
+	}
+	result := ServeResult{
+		Status: StatusProjectRequired,
+		Goal:   "choose a project, then call start_session again with project set",
+		Instructions: "This composition serves several projects and none was named, so no session opened. " +
+			"Ask the user which project the dialogue is about when it is not evident, then call " +
+			"start_session with project set to its ID.",
+	}
+	for _, candidate := range list.Projects {
+		if candidate.State != sdd.ProjectReady || !candidate.CanRead {
+			continue
+		}
+		result.Projects = append(result.Projects, ProjectResult{ID: string(candidate.ID), DisplayName: candidate.DisplayName, CanWrite: candidate.CanWrite})
 	}
 	return nil, result, nil
 }
@@ -644,16 +759,18 @@ func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkAr
 func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
 	identity := s.requestIdentity(req)
 	current := s.sessions.bound(req.Session)
-	if current != nil && current.root.ID() == sdd.SessionID(args.Session) {
+	handleProject, id := splitHandle(args.Session)
+	if current != nil && current.root.ID() == id {
 		return nil, AbandonResult{}, toolError("session %s is the one this connection is in — the session shell concludes through its own junction (answer conclude)", args.Session)
 	}
-	result, err := s.app.AbandonWorkflowSession(ctx, identity, s.project, sdd.WorkflowResumeRequest{
-		SessionID: sdd.SessionID(args.Session), MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
+	project := s.projectFor(handleProject)
+	result, err := s.app.AbandonWorkflowSession(ctx, identity, project, sdd.WorkflowResumeRequest{
+		SessionID: id, MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
 	}, args.Reason)
 	if err != nil {
 		return nil, AbandonResult{}, err
 	}
-	out := AbandonResult{Abandoned: true, Session: string(result.Session), Label: result.Label, HeldMarkers: boundList(result.HeldMarkers, "held markers")}
+	out := AbandonResult{Abandoned: true, Session: composeHandle(project, result.Session), Label: result.Label, HeldMarkers: boundList(result.HeldMarkers, "held markers")}
 	for _, instance := range result.Discarded {
 		out.DiscardedThreads = append(out.DiscardedThreads, instance.Procedure+" at "+instance.Step)
 	}
@@ -678,20 +795,19 @@ func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, a
 }
 
 // listSessions is free discovery — no attached session required. It lists
-// every session with open work, active ones included (never hidden), each
-// tagged active or idle so the caller can weigh attaching (d-cpt-9of).
+// every session with open work across the principal's projects, active ones
+// included (never hidden), each tagged active or idle so the caller can weigh
+// attaching (d-cpt-9of).
 func (s *Server) listSessions(ctx context.Context, req *mcp.CallToolRequest, _ ListSessionsArgs) (*mcp.CallToolResult, ListSessionsResult, error) {
-	items, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
+	items, err := s.sessionsWithOpenWork(ctx, s.requestIdentity(req))
 	if err != nil {
 		return nil, ListSessionsResult{}, err
 	}
 	result := ListSessionsResult{}
-	for _, item := range items {
-		if len(item.Open) == 0 {
-			continue
-		}
+	for _, listing := range items {
+		item := listing.summary
 		desc := sessionDescriptor{
-			Session: string(item.Session), Label: item.Label, Participant: item.Participant,
+			Session: listing.handle, Project: string(listing.project), Label: item.Label, Participant: item.Participant,
 			Branch: item.Branch, Anchor: item.Anchor, Activity: activityTag(item.Active),
 		}
 		if item.Attachment != nil {
@@ -741,9 +857,10 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 		}
 	}
 
-	if args.Session != "" && (current == nil || args.Session != string(current.root.ID())) {
-		workflow, result, err := s.app.ResumeWorkflow(ctx, identity, s.project, sdd.WorkflowResumeRequest{
-			SessionID: sdd.SessionID(args.Session), MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
+	handleProject, id := splitHandle(args.Session)
+	if args.Session != "" && (current == nil || id != current.root.ID() || (handleProject != "" && handleProject != current.root.Project())) {
+		workflow, result, err := s.app.ResumeWorkflow(ctx, identity, s.projectFor(handleProject), sdd.WorkflowResumeRequest{
+			SessionID: id, MCPSessionID: mcpSessionID(req.Session), ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
 			UserWords: args.UserWords, Takeover: args.Takeover,
 		})
 		if err != nil {
@@ -860,23 +977,11 @@ func validAttachmentName(name string) error {
 	return nil
 }
 
-func (s *Server) attachedBranch(session *mcp.ServerSession) (string, bool) {
-	if attached := s.sessions.bound(session); attached != nil {
-		branch := attached.root.Branch()
-		return branch, branch != ""
-	}
-	return "", false
-}
-
-// readHint is the one-line breadcrumb every free read carries while no
-// session is bound: an agent that enters through a pasted entry ID gets its
-// data and the trail to the door. No path through the tool surface avoids a
-// breadcrumb (d-cpt-h99).
-func (s *Server) readHint(ms *mcp.ServerSession) string {
-	if s.sessions.bound(ms) != nil {
-		return ""
-	}
-	return "no dialogue session on this connection — start_session opens a fresh one, resume_session attaches to an existing one (list_sessions to discover); reads stay free"
+// readScope is what a free read takes from its session: the project it runs
+// in and the session's branch binding (d-tac-1z6).
+func (ss *shellSession) readScope() (project sdd.ProjectID, branch string, branchFromSession bool) {
+	branch = ss.root.Branch()
+	return ss.root.Project(), branch, branch != ""
 }
 
 // viewHintServedKey is the served-once sentinel for the first-view breadcrumb,
@@ -884,37 +989,18 @@ func (s *Server) readHint(ms *mcp.ServerSession) string {
 // blocks (cleared on disconnect and repeated start_session).
 const viewHintServedKey = "view-layout-grammar-hint"
 
-// viewHint is the single producer of the view tool's Hint field. It joins two
-// breadcrumbs that are otherwise mutually exclusive by session-boundness: the
-// door breadcrumb readHint serves while no session is bound, and a one-time
-// pointer to the view-grammar fact served on the first view call of a
-// connection. First-view is keyed to the connection (like readHint), so the
-// unbound free-reader cohort the fact exists for (s-prc-3kh) gets it too. In
-// the one overlapping cell — unbound and first view — both join, door first;
-// every other cell carries a single breadcrumb or none. This strengthens the
-// breadcrumb; it never gates the read (s-cpt-1dz, d-cpt-h99).
+// viewHint is the single producer of the view tool's Hint field: a one-time
+// pointer to the view-grammar fact on the first view call of a connection
+// (s-prc-3kh). It never gates the read (s-cpt-1dz, d-cpt-h99).
 func (s *Server) viewHint(ms *mcp.ServerSession) string {
-	door := s.readHint(ms)
-	var fact string
-	if !s.servedBefore(ms, viewHintServedKey) {
-		fact = "view layout grammar: show " + basefacts.ViewGrammarFactID +
-			" for the full filter/rank/macro vocabulary and the quoting rules"
+	if s.servedBefore(ms, viewHintServedKey) {
+		return ""
 	}
-	switch {
-	case door != "" && fact != "":
-		return door + " · " + fact
-	case fact != "":
-		return fact
-	default:
-		return door
-	}
+	return "view layout grammar: show " + basefacts.ViewGrammarFactID +
+		" for the full filter/rank/macro vocabulary and the quoting rules"
 }
 
-func (s *Server) logRootRead(ctx context.Context, req *mcp.CallToolRequest, tool string, full, summary []string) error {
-	ss := s.sessions.bound(req.Session)
-	if ss == nil {
-		return nil
-	}
+func (s *Server) logRootRead(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, tool string, full, summary []string) error {
 	identity := s.requestIdentity(req)
 	if err := ss.root.LogRead(ctx, identity, tool, full, summary); err != nil {
 		return err
@@ -927,6 +1013,10 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	if len(args.Terms) == 0 && args.Query == "" {
 		return nil, SearchResult{}, toolError("pass terms (text mode), query (vector mode), or both (hybrid)")
 	}
+	ss, err := s.attachedSession(ctx, req, args.Session)
+	if err != nil {
+		return nil, SearchResult{}, err
+	}
 	limit := args.Limit
 	if limit == 0 {
 		limit = defaultSearchHits
@@ -937,8 +1027,8 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	if args.MaxCitations != nil {
 		maxCitations = *args.MaxCitations
 	}
-	branch, branchFromSession := s.attachedBranch(req.Session)
-	result, err := s.app.Search(ctx, s.requestIdentity(req), s.project, sdd.SearchRequest{
+	project, branch, branchFromSession := ss.readScope()
+	result, err := s.app.Search(ctx, s.requestIdentity(req), project, sdd.SearchRequest{
 		Terms: args.Terms, Phrase: args.Query, Type: args.Type, Layer: args.Layer, Kind: args.Kind,
 		IncludeSuperseded: args.IncludeSuperseded, Limit: limit, MaxCitations: maxCitations,
 		Branch: branch, BranchFromSession: branchFromSession, Repos: args.Repos, AllRepos: args.AllRepos,
@@ -946,14 +1036,14 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	if err != nil {
 		return nil, SearchResult{}, toolError("searching: %v", err)
 	}
-	if err := s.logRootRead(ctx, req, "search", nil, result.EntryIDs); err != nil {
+	if err := s.logRootRead(ctx, req, ss, "search", nil, result.EntryIDs); err != nil {
 		return nil, SearchResult{}, err
 	}
 	out := result.Results
 	if strings.TrimSpace(out) == "" {
 		out = "(no entries matched — try another phrasing, or proceed if the topic is genuinely new)"
 	}
-	return nil, SearchResult{Results: out, Hint: s.readHint(req.Session)}, nil
+	return nil, SearchResult{Results: out}, nil
 
 }
 
@@ -961,8 +1051,12 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 	if strings.TrimSpace(args.Layout) == "" {
 		return nil, ViewResult{}, toolError("layout is required")
 	}
-	branch, branchFromSession := s.attachedBranch(req.Session)
-	result, err := s.app.View(ctx, s.requestIdentity(req), s.project, sdd.ViewRequest{
+	ss, err := s.attachedSession(ctx, req, args.Session)
+	if err != nil {
+		return nil, ViewResult{}, err
+	}
+	project, branch, branchFromSession := ss.readScope()
+	result, err := s.app.View(ctx, s.requestIdentity(req), project, sdd.ViewRequest{
 		Layout: args.Layout, Branch: branch, BranchFromSession: branchFromSession, Repos: args.Repos, AllRepos: args.AllRepos,
 	})
 	if err != nil {
@@ -1109,6 +1203,10 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
 	}
+	ss, err := s.attachedSession(ctx, req, args.Session)
+	if err != nil {
+		return nil, ShowResult{}, err
+	}
 	up := sdd.DefaultShowUpDepth
 	if args.Up != nil {
 		up = *args.Up
@@ -1117,17 +1215,17 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	if args.Down != nil {
 		down = *args.Down
 	}
-	branch, branchFromSession := s.attachedBranch(req.Session)
-	result, err := s.app.Show(ctx, s.requestIdentity(req), s.project, sdd.ShowRequest{
+	project, branch, branchFromSession := ss.readScope()
+	result, err := s.app.Show(ctx, s.requestIdentity(req), project, sdd.ShowRequest{
 		IDs: args.IDs, UpDepth: up, DownDepth: down, Branch: branch, BranchFromSession: branchFromSession,
 	})
 	if err != nil {
 		return nil, ShowResult{}, err
 	}
-	if err := s.logRootRead(ctx, req, "show", result.FullIDs, result.SummaryIDs); err != nil {
+	if err := s.logRootRead(ctx, req, ss, "show", result.FullIDs, result.SummaryIDs); err != nil {
 		return nil, ShowResult{}, err
 	}
-	return nil, ShowResult{Entries: result.Entries, Hint: s.readHint(req.Session)}, nil
+	return nil, ShowResult{Entries: result.Entries}, nil
 
 }
 
@@ -1136,14 +1234,17 @@ func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, a
 	if maxBytes == 0 {
 		maxBytes = 65536
 	}
+	if args.Handle != "" && args.ID != "" {
+		return nil, ReadAttachmentResult{}, toolError("pass id or handle, not both")
+	}
+	if args.Handle == "" && args.ID == "" {
+		return nil, ReadAttachmentResult{}, toolError("id is required (or handle, for a staged file)")
+	}
+	ss, err := s.attachedSession(ctx, req, args.Session)
+	if err != nil {
+		return nil, ReadAttachmentResult{}, err
+	}
 	if args.Handle != "" {
-		if args.ID != "" {
-			return nil, ReadAttachmentResult{}, toolError("pass id or handle, not both")
-		}
-		ss, err := s.attachedSession(ctx, req, args.Session)
-		if err != nil {
-			return nil, ReadAttachmentResult{}, err
-		}
 		page, staged, err := ss.root.ReadStagedAttachment(ctx, s.requestIdentity(req), args.Handle, args.Offset, maxBytes)
 		if err != nil {
 			return nil, ReadAttachmentResult{}, err
@@ -1153,20 +1254,17 @@ func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, a
 			TotalBytes: page.TotalSize, More: page.More, Available: staged,
 		}, nil
 	}
-	if args.ID == "" {
-		return nil, ReadAttachmentResult{}, toolError("id is required (or handle with session, for a staged file)")
-	}
-	result, err := s.app.ReadAttachment(ctx, s.requestIdentity(req), s.project, sdd.ReadAttachmentRequest{EntryID: args.ID, Filename: args.Name, Offset: args.Offset, MaxBytes: maxBytes})
+	result, err := s.app.ReadAttachment(ctx, s.requestIdentity(req), ss.root.Project(), sdd.ReadAttachmentRequest{EntryID: args.ID, Filename: args.Name, Offset: args.Offset, MaxBytes: maxBytes})
 	if err != nil {
 		return nil, ReadAttachmentResult{}, err
 	}
-	if err := s.logRootRead(ctx, req, "read_attachment", nil, []string{args.ID}); err != nil {
+	if err := s.logRootRead(ctx, req, ss, "read_attachment", nil, []string{args.ID}); err != nil {
 		return nil, ReadAttachmentResult{}, err
 	}
 	page := result.Page
 	output := ReadAttachmentResult{
 		Name: page.Filename, Content: string(page.Content), Offset: page.Offset, NextOffset: page.NextOffset,
-		TotalBytes: page.TotalSize, More: page.More, Available: result.Available, Hint: s.readHint(req.Session),
+		TotalBytes: page.TotalSize, More: page.More, Available: result.Available,
 	}
 	if s.local && s.localAttachmentPath != nil {
 		output.Path, err = s.localAttachmentPath(args.ID, page.Filename)
@@ -1178,24 +1276,31 @@ func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, a
 
 }
 
-func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, _ InfoArgs) (*mcp.CallToolResult, InfoResult, error) {
-	info, err := s.app.Info(ctx, s.requestIdentity(req), s.project, sdd.InfoRequest{})
+func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, args InfoArgs) (*mcp.CallToolResult, InfoResult, error) {
+	ss, err := s.attachedSession(ctx, req, args.Session)
+	if err != nil {
+		return nil, InfoResult{}, err
+	}
+	info, err := s.app.Info(ctx, s.requestIdentity(req), ss.root.Project(), sdd.InfoRequest{})
 	if err != nil {
 		return nil, InfoResult{}, err
 	}
 	return nil, InfoResult{
-		Participant: info.Participant, Language: info.Language, Search: info.Search,
-		Recovery: info.Recovery, Version: s.version, Hint: s.readHint(req.Session),
+		Project: string(info.Project.ID), Participant: info.Participant, Language: info.Language, Search: info.Search,
+		Recovery: info.Recovery, Version: s.version,
 	}, nil
 
 }
 
 func (s *Server) registryDocs(ctx context.Context, req *mcp.CallToolRequest, args RegistryArgs) (*mcp.CallToolResult, RegistryResult, error) {
+	if _, err := s.attachedSession(ctx, req, args.Session); err != nil {
+		return nil, RegistryResult{}, err
+	}
 	docs, err := sdd.WorkflowRegistryDocs(args.Class)
 	if err != nil {
 		return nil, RegistryResult{}, err
 	}
-	result := RegistryResult{Hint: s.readHint(req.Session)}
+	result := RegistryResult{}
 	for _, doc := range docs {
 		result.Functions = append(result.Functions, RegistryFuncResult{Name: doc.Name, Class: doc.Class, Doc: doc.Doc, Reads: doc.Reads, Writes: doc.Writes})
 	}
@@ -1234,7 +1339,8 @@ func (s *Server) composeFraming(ms *mcp.ServerSession, blocks []string) string {
 // later serve that does deliver.
 func (s *Server) serveResultBody(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res := ServeResult{
-		Session: string(serve.Session), Branch: serve.Branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
+		Session: composeHandle(ss.root.Project(), serve.Session), Project: string(ss.root.Project()),
+		Branch: serve.Branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
 		Step: serve.Step, Goal: serve.Goal, Instructions: s.composeInstructions(req.Session, serve), Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: capValues(serve.Produced), Execution: serve.Execution,
 		Collected: capValues(serve.Collected),
@@ -1307,7 +1413,7 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 			res.ReportSchema = reportSchemaStub(serve)
 		}
 	}
-	vocabulary, err := s.app.Vocabulary(ctx, s.requestIdentity(req), s.project)
+	vocabulary, err := s.app.Vocabulary(ctx, s.requestIdentity(req), ss.root.Project())
 	if err != nil {
 		return ServeResult{}, err
 	}
@@ -1359,7 +1465,8 @@ func attachNote(source sdd.WorkflowResumeResult) string {
 
 func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, source sdd.WorkflowResumeResult) (ResumeSessionResult, error) {
 	result := ResumeSessionResult{
-		Session: string(source.Session), Participant: source.Participant, Label: source.Label, Branch: source.Branch,
+		Session: composeHandle(ss.root.Project(), source.Session), Project: string(ss.root.Project()),
+		Participant: source.Participant, Label: source.Label, Branch: source.Branch,
 		Instructions: attachNote(source) + resumeInstructions,
 	}
 	framing, err := ss.root.Framing(ctx, s.requestIdentity(req))
@@ -1484,13 +1591,13 @@ func (s *Server) addDoorCount(ctx context.Context, req *mcp.CallToolRequest, ss 
 // open work, pointing at list_sessions. A count, never a listing — other
 // dialogues are the user's to ask about, not offered here (I6, A1).
 func (s *Server) otherWorkCount(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession) (string, error) {
-	sessions, err := s.app.ListWorkflowSessions(ctx, s.requestIdentity(req), s.project)
+	sessions, err := s.sessionsWithOpenWork(ctx, s.requestIdentity(req))
 	if err != nil {
 		return "", err
 	}
 	n := 0
 	for _, item := range sessions {
-		if item.Session == ss.root.ID() || len(item.Open) == 0 {
+		if item.handle == ss.handle() {
 			continue
 		}
 		n++

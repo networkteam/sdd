@@ -51,6 +51,17 @@ func (a *Application) Info(ctx context.Context, identity RequestIdentity, projec
 	}, nil
 }
 
+// Projects lists the projects the request's principal can reach, with
+// per-project access. It resolves no project: it is the read a shell needs
+// before a project is chosen (d-tac-1z6).
+func (a *Application) Projects(ctx context.Context, identity RequestIdentity) (ProjectList, error) {
+	principal, err := a.resolvePrincipal(ctx, identity)
+	if err != nil {
+		return ProjectList{}, err
+	}
+	return a.access.ListProjects(ctx, principal)
+}
+
 func (a *Application) Vocabulary(ctx context.Context, identity RequestIdentity, project ProjectID) (string, error) {
 	info, err := a.Info(ctx, identity, project, InfoRequest{})
 	if err != nil {
@@ -399,13 +410,21 @@ func (a *Application) Procedures(ctx context.Context, identity RequestIdentity, 
 	return ProcedureListResult{Project: runtime.options.Project, Procedures: strings.Join(lines, "\n")}, nil
 }
 
-func (a *Application) resolve(ctx context.Context, identity RequestIdentity, project ProjectID, required Access) (Principal, *ProjectRuntime, error) {
+func (a *Application) resolvePrincipal(ctx context.Context, identity RequestIdentity) (Principal, error) {
 	principal, err := a.access.ResolvePrincipal(ctx, identity)
 	if err != nil {
-		return Principal{}, nil, err
+		return Principal{}, err
 	}
 	if principal.Subject == "" || principal.Subject != identity.Subject {
-		return Principal{}, nil, &ApplicationError{Code: ErrorAuthenticationRequired, Message: "resolved principal does not match current request"}
+		return Principal{}, &ApplicationError{Code: ErrorAuthenticationRequired, Message: "resolved principal does not match current request"}
+	}
+	return principal, nil
+}
+
+func (a *Application) resolve(ctx context.Context, identity RequestIdentity, project ProjectID, required Access) (Principal, *ProjectRuntime, error) {
+	principal, err := a.resolvePrincipal(ctx, identity)
+	if err != nil {
+		return Principal{}, nil, err
 	}
 	if project == "" {
 		projects, err := a.access.ListProjects(ctx, principal)

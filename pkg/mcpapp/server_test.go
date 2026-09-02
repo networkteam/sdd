@@ -540,9 +540,10 @@ Downstream fixture.
 
 	env := newTestServer(t, nil, graphDir, "")
 	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
 
 	var shown mcpserver.ShowResult
-	call(t, cs, "show", map[string]any{"ids": []string{"20260820-100100-d-tac-mid"}}, &shown)
+	call(t, cs, "show", map[string]any{"session": session, "ids": []string{"20260820-100100-d-tac-mid"}}, &shown)
 	for _, heading := range []string{"# upstream", "# downstream"} {
 		if !strings.Contains(shown.Entries, heading) {
 			t.Fatalf("omitted depths should apply defaults and render %s:\n%s", heading, shown.Entries)
@@ -550,7 +551,7 @@ Downstream fixture.
 	}
 
 	call(t, cs, "show", map[string]any{
-		"ids": []string{"20260820-100100-d-tac-mid"}, "up": 0, "down": 0,
+		"session": session, "ids": []string{"20260820-100100-d-tac-mid"}, "up": 0, "down": 0,
 	}, &shown)
 	for _, heading := range []string{"# upstream", "# downstream"} {
 		if strings.Contains(shown.Entries, heading) {
@@ -589,9 +590,10 @@ Probe entry %02d: the flux capacitor drill needs observing.
 	}
 	env := newTestServer(t, nil, graphDir, "")
 	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
 
 	var res mcpserver.SearchResult
-	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}}, &res)
+	call(t, cs, "search", map[string]any{"session": session, "terms": []string{"flux capacitor"}}, &res)
 	if hits := strings.Count(res.Results, "-s-tac-h"); hits != 8 {
 		t.Fatalf("default search returned %d hits, want the cap of 8", hits)
 	}
@@ -599,12 +601,12 @@ Probe entry %02d: the flux capacitor drill needs observing.
 		t.Fatalf("default search must carry one citation per hit, got %d citation lines:\n%s", citations, res.Results)
 	}
 
-	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}, "max_citations": 0}, &res)
+	call(t, cs, "search", map[string]any{"session": session, "terms": []string{"flux capacitor"}, "max_citations": 0}, &res)
 	if strings.Contains(res.Results, "↳") {
 		t.Fatalf("explicit max_citations 0 must be header-only, got citations: %q", res.Results)
 	}
 
-	call(t, cs, "search", map[string]any{"terms": []string{"flux capacitor"}, "max_citations": 2, "limit": 12}, &res)
+	call(t, cs, "search", map[string]any{"session": session, "terms": []string{"flux capacitor"}, "max_citations": 2, "limit": 12}, &res)
 	if !strings.Contains(res.Results, "↳") {
 		t.Fatalf("explicit max_citations should render citation lines, got %q", res.Results)
 	}
@@ -801,20 +803,20 @@ Branch-only nebula routing evidence exists exclusively on the bound branch.
 	var binding mcpserver.BindBranchResult
 	call(t, boundClient, "bind_branch", map[string]any{"session": door.Session, "branch": branch}, &binding)
 
-	assertBranchReads := func(t *testing.T, client *mcp.ClientSession, seesBranch bool) {
+	assertBranchReads := func(t *testing.T, client *mcp.ClientSession, session string, seesBranch bool) {
 		t.Helper()
 		var showOutput string
 		if seesBranch {
 			var shown mcpserver.ShowResult
-			call(t, client, "show", map[string]any{"ids": []string{branchID}}, &shown)
+			call(t, client, "show", map[string]any{"session": session, "ids": []string{branchID}}, &shown)
 			showOutput = shown.Entries
 		} else {
-			showOutput = callExpectError(t, client, "show", map[string]any{"ids": []string{branchID}})
+			showOutput = callExpectError(t, client, "show", map[string]any{"session": session, "ids": []string{branchID}})
 		}
 		var searched mcpserver.SearchResult
-		call(t, client, "search", map[string]any{"terms": []string{"nebula routing evidence"}}, &searched)
+		call(t, client, "search", map[string]any{"session": session, "terms": []string{"nebula routing evidence"}}, &searched)
 		var viewed mcpserver.ViewResult
-		call(t, client, "view", map[string]any{"layout": "active:as-list"}, &viewed)
+		call(t, client, "view", map[string]any{"session": session, "layout": "active:as-list"}, &viewed)
 		for surface, output := range map[string]string{
 			"show": showOutput, "search": searched.Results, "view": viewed.Sections,
 		} {
@@ -823,14 +825,19 @@ Branch-only nebula routing evidence exists exclusively on the bound branch.
 			}
 		}
 	}
-	assertBranchReads(t, boundClient, true)
+	assertBranchReads(t, boundClient, door.Session, true)
 
+	// A connection with no session of its own cannot borrow the bound one:
+	// reads carry the handle of the session this connection is attached to.
 	unattached := connect(t, env.srv)
-	assertBranchReads(t, unattached, false)
+	msg := callExpectError(t, unattached, "show", map[string]any{"session": door.Session, "ids": []string{branchID}})
+	if !strings.Contains(msg, "not attached") {
+		t.Fatalf("an unattached connection reading with another connection's handle should be refused, got %q", msg)
+	}
 
 	unboundClient := connect(t, env.srv)
-	openSession(t, unboundClient)
-	assertBranchReads(t, unboundClient, false)
+	unboundDoor := openSession(t, unboundClient)
+	assertBranchReads(t, unboundClient, unboundDoor.Session, false)
 }
 
 func TestAttachedFreeReadDriftNamesSessionBindingOnEverySurface(t *testing.T) {
@@ -843,9 +850,9 @@ func TestAttachedFreeReadDriftNamesSessionBindingOnEverySurface(t *testing.T) {
 
 	env.targets.setError(branch, errors.New("target factory is temporarily unavailable"))
 	for name, args := range map[string]map[string]any{
-		"show":   {"ids": []string{fixtureGapID}},
-		"search": {"terms": []string{"oscillation"}},
-		"view":   {"layout": "active:as-list"},
+		"show":   {"session": door.Session, "ids": []string{fixtureGapID}},
+		"search": {"session": door.Session, "terms": []string{"oscillation"}},
+		"view":   {"session": door.Session, "layout": "active:as-list"},
 	} {
 		message := callExpectError(t, client, name, args)
 		for _, want := range []string{
@@ -883,7 +890,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "b5213dc77e174104d4df1ead8008f35653fede6e5a0d4df4987af8e5dbec5885"
+	const want = "1d36fc03ed8f7af9614c90872d0aaf9986d37c509bab7232c2cbe2b8dbf9e965"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1339,7 +1346,7 @@ func TestEmbeddedCaptureProcedure(t *testing.T) {
 	// The agent reads it through the same free tool; the gate passes on
 	// re-report.
 	var shown mcpserver.ShowResult
-	call(t, cs, "show", map[string]any{"ids": []string{fixtureGapID}}, &shown)
+	call(t, cs, "show", map[string]any{"session": session, "ids": []string{fixtureGapID}}, &shown)
 	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": assembleReport()}, &serve)
 	if serve.Step != "playback" || serve.PendingChooser == nil || serve.PendingChooser.Kind != "user" {
 		t.Fatalf("expected pending user chooser at playback, got step %q", serve.Step)
@@ -1566,7 +1573,7 @@ func TestRejectedWriteKeepsConnectionUsable(t *testing.T) {
 	// log through the binding — before the fix this failed with `invalid session
 	// ID ""` because the wiped binding's session ID had gone empty.
 	var show mcpserver.ShowResult
-	call(t, cs, "show", map[string]any{"ids": []string{fixtureGapID}}, &show)
+	call(t, cs, "show", map[string]any{"session": session, "ids": []string{fixtureGapID}}, &show)
 	if len(show.Entries) == 0 {
 		t.Fatalf("show after the rejected write returned no entries — the connection is poisoned")
 	}
@@ -2028,7 +2035,7 @@ func TestAbandonLeavesLogStanding(t *testing.T) {
 	if len(listed.Sessions) != 0 {
 		t.Fatalf("abandoned instance must not list as open, got %+v", listed.Sessions)
 	}
-	if _, err := os.Stat(filepath.Join(env.sessionsDir, serve.Session+".jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(env.sessionsDir, bareSessionID(serve.Session)+".jsonl")); err != nil {
 		t.Fatalf("session log must stay on disk: %v", err)
 	}
 }
@@ -2163,7 +2170,7 @@ func TestAbandonSessionByHandle_Parked(t *testing.T) {
 	if len(listed.Sessions) != 0 {
 		t.Fatalf("torn-down session must drop off the open list, got %+v", listed.Sessions)
 	}
-	if _, err := os.Stat(filepath.Join(env.sessionsDir, sessionID+".jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(env.sessionsDir, bareSessionID(sessionID)+".jsonl")); err != nil {
 		t.Fatalf("teardown closes the log, never deletes it: %v", err)
 	}
 }
@@ -2709,7 +2716,8 @@ func TestDoorAndReplayWirePayloads(t *testing.T) {
 func TestToolResultsCarryTheSpecEnvelope(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "info", Arguments: map[string]any{}})
+	session := openSession(t, cs).Session
+	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "info", Arguments: map[string]any{"session": session}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2973,9 +2981,10 @@ func TestChooserSequenceValidation(t *testing.T) {
 func TestReadAttachmentPaging(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
 
 	var page1 mcpserver.ReadAttachmentResult
-	call(t, cs, "read_attachment", map[string]any{"id": fixtureGapID, "max_bytes": 6}, &page1)
+	call(t, cs, "read_attachment", map[string]any{"session": session, "id": fixtureGapID, "max_bytes": 6}, &page1)
 	if page1.Name != "notes.md" || page1.Content != "012345" || !page1.More {
 		t.Fatalf("first page diverged: %+v", page1)
 	}
@@ -2987,7 +2996,7 @@ func TestReadAttachmentPaging(t *testing.T) {
 	}
 	var page2 mcpserver.ReadAttachmentResult
 	call(t, cs, "read_attachment", map[string]any{
-		"id": fixtureGapID, "name": "notes.md", "offset": page1.NextOffset, "max_bytes": 6,
+		"session": session, "id": fixtureGapID, "name": "notes.md", "offset": page1.NextOffset, "max_bytes": 6,
 	}, &page2)
 	if page2.Content != "6789" || page2.More {
 		t.Fatalf("second page diverged: %+v", page2)
@@ -3002,9 +3011,10 @@ func TestReadAttachmentPaging(t *testing.T) {
 func TestReadAttachmentLocalPath(t *testing.T) {
 	env := newTestServer(t, nil, "", "", func(o *mcpserver.Options) { o.LocalClient = true })
 	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
 
 	var res mcpserver.ReadAttachmentResult
-	call(t, cs, "read_attachment", map[string]any{"id": fixtureGapID}, &res)
+	call(t, cs, "read_attachment", map[string]any{"session": session, "id": fixtureGapID}, &res)
 	want, err := filepath.Abs(filepath.Join(env.graphDir, "2026/06/01-100000-s-tac-aaa/notes.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -3017,51 +3027,63 @@ func TestReadAttachmentLocalPath(t *testing.T) {
 	}
 }
 
-// TestFreeReads smoke-tests the ungated read tools, including the breadcrumb
-// they carry while no session is open.
+// TestFreeReads smoke-tests the read tools: free of any move or procedure
+// state, yet carrying the session handle like every other tool, since the
+// session is what names the project and branch a read runs in (d-tac-1z6).
 func TestFreeReads(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 
-	var info mcpserver.InfoResult
-	call(t, cs, "info", map[string]any{}, &info)
-	if info.Participant != "Tester" || info.Search != "text" {
-		t.Fatalf("info diverged: %+v", info)
+	// Without a session there is nothing to read in: the rejection names the doors.
+	for name, args := range map[string]map[string]any{
+		"info":            {},
+		"view":            {"layout": "active:as-counts"},
+		"show":            {"ids": []string{fixtureGapID}},
+		"search":          {"terms": []string{"oscillation"}},
+		"read_attachment": {"id": fixtureGapID},
+		"registry":        {"class": "command"},
+	} {
+		msg := callExpectError(t, cs, name, args)
+		if !strings.Contains(msg, "no session handle") || !strings.Contains(msg, "start_session") {
+			t.Fatalf("%s without a session must be refused naming the door, got %q", name, msg)
+		}
 	}
-	if !strings.Contains(info.Hint, "start_session") {
-		t.Fatalf("reads without a session must carry the door breadcrumb, got %q", info.Hint)
+
+	session := openSession(t, cs).Session
+
+	var info mcpserver.InfoResult
+	call(t, cs, "info", map[string]any{"session": session}, &info)
+	if info.Participant != "Tester" || info.Search != "text" || info.Project != "test" {
+		t.Fatalf("info diverged: %+v", info)
 	}
 
 	var view mcpserver.ViewResult
-	call(t, cs, "view", map[string]any{"layout": "active:as-counts"}, &view)
+	call(t, cs, "view", map[string]any{"session": session, "layout": "active:as-counts"}, &view)
 	if !strings.Contains(view.Sections, "testing/fixture") {
 		t.Fatalf("view should list the fixture topic, got %q", view.Sections)
 	}
-	if !strings.Contains(view.Hint, "start_session") {
-		t.Fatalf("view without a session must carry the door breadcrumb, got %q", view.Hint)
-	}
 
 	var show mcpserver.ShowResult
-	call(t, cs, "show", map[string]any{"ids": []string{fixtureGapID}}, &show)
+	call(t, cs, "show", map[string]any{"session": session, "ids": []string{fixtureGapID}}, &show)
 	if !strings.Contains(show.Entries, fixtureGapID) {
 		t.Fatalf("show should render the entry, got %q", show.Entries)
 	}
 
 	var search mcpserver.SearchResult
-	call(t, cs, "search", map[string]any{"terms": []string{"oscillation"}}, &search)
+	call(t, cs, "search", map[string]any{"session": session, "terms": []string{"oscillation"}}, &search)
 	if !strings.Contains(search.Results, fixtureGapID) {
 		t.Fatalf("search should find the fixture gap, got %q", search.Results)
 	}
 
-	// Once the session is open, the breadcrumb disappears.
-	openSession(t, cs)
-	call(t, cs, "info", map[string]any{}, &info)
-	if info.Hint != "" {
-		t.Fatalf("reads inside a session must carry no breadcrumb, got %q", info.Hint)
+	// The bare session ID names the attached session too — a handle carried
+	// from before the project prefix existed keeps working.
+	call(t, cs, "show", map[string]any{"session": bareSessionID(session), "ids": []string{fixtureGapID}}, &show)
+	if !strings.Contains(show.Entries, fixtureGapID) {
+		t.Fatalf("show with the bare session ID should render the entry, got %q", show.Entries)
 	}
 
 	var reg mcpserver.RegistryResult
-	call(t, cs, "registry", map[string]any{"class": "command"}, &reg)
+	call(t, cs, "registry", map[string]any{"session": session, "class": "command"}, &reg)
 	var names []string
 	for _, f := range reg.Functions {
 		names = append(names, f.Name)
@@ -3369,7 +3391,7 @@ func TestShellConcludeLeavesOpenThreadsBehind(t *testing.T) {
 	}
 
 	// The terminal record is durable, so collection can reclaim it after retention.
-	stored, err := env.sessions.Load(t.Context(), sdd.SessionID(session))
+	stored, err := env.sessions.Load(t.Context(), sdd.SessionID(bareSessionID(session)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3472,7 +3494,7 @@ func TestDoorAfterConcludeOpensFresh(t *testing.T) {
 func TestLeavePathsRecordNothingAcrossPaths(t *testing.T) {
 	end := func(t *testing.T, env testEnv, session string) *sdd.SessionEnd {
 		t.Helper()
-		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(session))
+		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(bareSessionID(session)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3649,13 +3671,22 @@ func TestParkedSessionsAcrossConnections(t *testing.T) {
 }
 
 // readSessionLog reads a session's JSONL event log from the sessions dir.
+// bareSessionID strips the project prefix off a served handle
+// (project:session-id), yielding the store's own session ID.
+func bareSessionID(handle string) string {
+	if at := strings.LastIndex(handle, ":s_"); at >= 0 {
+		return handle[at+1:]
+	}
+	return handle
+}
+
 func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	t.Helper()
 	store, err := localadapter.NewFilesystemSessionStoreAt(dir)
 	if err != nil {
 		return nil, err
 	}
-	stored, err := store.Load(t.Context(), sdd.SessionID(session))
+	stored, err := store.Load(t.Context(), sdd.SessionID(bareSessionID(session)))
 	if err != nil {
 		return nil, err
 	}
@@ -3740,7 +3771,7 @@ func TestResumeConsentDecisionTable(t *testing.T) {
 		if resumed.Session != a {
 			t.Fatalf("idle attach with userWords should land on %s, got %+v", a, resumed)
 		}
-		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(a))
+		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(bareSessionID(a)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3765,7 +3796,7 @@ func TestResumeConsentDecisionTable(t *testing.T) {
 		const words = "resume the parked dialogue"
 		var resumed mcpserver.ResumeSessionResult
 		call(t, cs2, "resume_session", map[string]any{"session": a, "userWords": words}, &resumed)
-		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(a))
+		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(bareSessionID(a)))
 		if err != nil {
 			t.Fatal(err)
 		}
