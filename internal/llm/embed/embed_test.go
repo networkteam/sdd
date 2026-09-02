@@ -1,36 +1,29 @@
-package embed
+package embed_test
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/networkteam/sdd/internal/llm"
+	localembed "github.com/networkteam/sdd/internal/llm/embed"
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/llm"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
-// fakeSink captures the CallStats an embedder records, for the
-// stat-recording assertions below.
-type fakeSink struct {
-	mu    sync.Mutex
-	calls []llm.CallStat
-}
-
-func (s *fakeSink) RecordCall(c llm.CallStat) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.calls = append(s.calls, c)
+func documents(texts ...string) embed.Request {
+	return embed.Request{Purpose: embed.PurposeDocument, Texts: texts}
 }
 
 func TestNew_NoProvider(t *testing.T) {
 	t.Parallel()
-	_, err := New(model.EmbeddingConfig{})
+	_, err := localembed.New(model.EmbeddingConfig{})
 	if err == nil || !strings.Contains(err.Error(), "embedding provider") {
 		t.Fatalf("expected provider-missing error, got %v", err)
 	}
@@ -38,7 +31,7 @@ func TestNew_NoProvider(t *testing.T) {
 
 func TestNew_NoModel(t *testing.T) {
 	t.Parallel()
-	_, err := New(model.EmbeddingConfig{Provider: "openai", APIKeys: map[string]string{"openai": "sk-x"}})
+	_, err := localembed.New(model.EmbeddingConfig{Provider: "openai", APIKeys: map[string]string{"openai": "sk-x"}})
 	if err == nil || !strings.Contains(err.Error(), "embedding.model") {
 		t.Fatalf("expected model-missing error, got %v", err)
 	}
@@ -46,9 +39,27 @@ func TestNew_NoModel(t *testing.T) {
 
 func TestNew_UnknownProvider(t *testing.T) {
 	t.Parallel()
-	_, err := New(model.EmbeddingConfig{Provider: "cohere", Model: "m"})
+	_, err := localembed.New(model.EmbeddingConfig{Provider: "cohere", Model: "m"})
 	if err == nil || !strings.Contains(err.Error(), "unknown embedding provider") {
 		t.Fatalf("expected unknown-provider error, got %v", err)
+	}
+}
+
+func TestBatchSize(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		cfg  model.EmbeddingConfig
+		want int
+	}{
+		{model.EmbeddingConfig{Provider: "openai"}, 100},
+		{model.EmbeddingConfig{Provider: "ollama"}, 64},
+		{model.EmbeddingConfig{Provider: "ollama", BatchSize: 16}, 16},
+		{model.EmbeddingConfig{Provider: "openai", BatchSize: -1}, 100},
+	}
+	for _, c := range cases {
+		if got := localembed.BatchSize(c.cfg); got != c.want {
+			t.Errorf("BatchSize(%+v) = %d, want %d", c.cfg, got, c.want)
+		}
 	}
 }
 
@@ -62,7 +73,11 @@ func TestOpenAIEmbedder_Embed(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
 			t.Errorf("auth header: got %q", got)
 		}
-		var body openaiEmbedRequest
+		var body struct {
+			Input      []string `json:"input"`
+			Model      string   `json:"model"`
+			Dimensions int      `json:"dimensions"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
@@ -82,140 +97,86 @@ func TestOpenAIEmbedder_Embed(t *testing.T) {
 				{"embedding": []float32{0.1, 0.2}},
 				{"embedding": []float32{0.3, 0.4}},
 			},
+			"usage": map[string]any{"prompt_tokens": 42},
 		})
 	}))
 	defer srv.Close()
 
-	emb, err := New(model.EmbeddingConfig{
-		Provider:   "openai",
-		Model:      "text-embedding-3-small",
-		Endpoint:   srv.URL,
-		APIKeys:    map[string]string{"openai": "test-key"},
-		Dimensions: 256,
-		// Disable rate limiting for the test by setting a high value.
-		RateLimitRPS: 1000,
+	emb, err := localembed.New(model.EmbeddingConfig{
+		Provider:     "openai",
+		Model:        "text-embedding-3-small",
+		Endpoint:     srv.URL,
+		APIKeys:      map[string]string{"openai": "test-key"},
+		Dimensions:   256,
+		RateLimitRPS: 1000, // effectively unlimited for the test
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := emb.EmbedDocuments(context.Background(), []string{"hello", "world"})
+	got, err := emb.Embed(context.Background(), documents("hello", "world"))
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
 	}
 	want := [][]float32{{0.1, 0.2}, {0.3, 0.4}}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %#v, want %#v", got, want)
+	if !reflect.DeepEqual(got.Vectors, want) {
+		t.Errorf("vectors: got %#v, want %#v", got.Vectors, want)
 	}
-	if emb.Dimensions() != 256 {
-		t.Errorf("Dimensions(): got %d", emb.Dimensions())
+	if got.Identity != (llm.Identity{Provider: "openai", Model: "text-embedding-3-small"}) {
+		t.Errorf("identity: got %+v", got.Identity)
+	}
+	if got.Usage.InputTokens != 42 {
+		t.Errorf("input tokens: got %d, want 42 (from usage.prompt_tokens)", got.Usage.InputTokens)
 	}
 	if emb.Fingerprint() != "openai/text-embedding-3-small/256" {
 		t.Errorf("Fingerprint(): got %q", emb.Fingerprint())
 	}
 }
 
-func TestOpenAIEmbedder_RecordsStat(t *testing.T) {
+func TestOpenAIEmbedder_TemplateByPurpose(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{"embedding": []float32{0.1, 0.2}},
-				{"embedding": []float32{0.3, 0.4}},
-			},
-			"usage": map[string]any{"prompt_tokens": 42},
-		})
-	}))
-	defer srv.Close()
-
-	emb, err := New(model.EmbeddingConfig{
-		Provider:     "openai",
-		Model:        "text-embedding-3-small",
-		Endpoint:     srv.URL,
-		APIKeys:      map[string]string{"openai": "test-key"},
-		RateLimitRPS: 1000,
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	sink := &fakeSink{}
-	ctx := llm.WithStatsSink(context.Background(), sink)
-	if _, err := emb.EmbedDocuments(ctx, []string{"hello", "world"}); err != nil {
-		t.Fatalf("EmbedDocuments: %v", err)
-	}
-
-	if len(sink.calls) != 1 {
-		t.Fatalf("recorded %d calls, want 1", len(sink.calls))
-	}
-	got := sink.calls[0]
-	if got.Purpose != "embed-documents" {
-		t.Errorf("op: got %q, want embed-documents", got.Purpose)
-	}
-	if got.Identity.Provider != "openai" {
-		t.Errorf("provider: got %q, want openai", got.Identity.Provider)
-	}
-	if got.Identity.Model != "text-embedding-3-small" {
-		t.Errorf("model: got %q", got.Identity.Model)
-	}
-	if got.Items != 2 {
-		t.Errorf("items: got %d, want 2", got.Items)
-	}
-	if got.Usage.InputTokens != 42 {
-		t.Errorf("input tokens: got %d, want 42 (from usage.prompt_tokens)", got.Usage.InputTokens)
-	}
-}
-
-func TestOllamaEmbedder_RecordsStat(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"embeddings":        [][]float32{{0.1, 0.2}},
-			"prompt_eval_count": 17,
-		})
-	}))
-	defer srv.Close()
-
-	emb, err := New(model.EmbeddingConfig{
-		Provider:       "ollama",
-		Model:          "qwen3-embedding:8b",
-		OllamaEndpoint: srv.URL,
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	sink := &fakeSink{}
-	ctx := llm.WithStatsSink(context.Background(), sink)
-	if _, err := emb.EmbedQueries(ctx, []string{"only one query"}); err != nil {
-		t.Fatalf("EmbedQueries: %v", err)
-	}
-
-	if len(sink.calls) != 1 {
-		t.Fatalf("recorded %d calls, want 1", len(sink.calls))
-	}
-	got := sink.calls[0]
-	if got.Purpose != "embed-queries" {
-		t.Errorf("op: got %q, want embed-queries", got.Purpose)
-	}
-	if got.Identity.Provider != "ollama" {
-		t.Errorf("provider: got %q, want ollama", got.Identity.Provider)
-	}
-	if got.Items != 1 {
-		t.Errorf("items: got %d, want 1", got.Items)
-	}
-	if got.Usage.InputTokens != 17 {
-		t.Errorf("input tokens: got %d, want 17 (from prompt_eval_count)", got.Usage.InputTokens)
-	}
-}
-
-func TestOpenAIEmbedder_HTTPError(t *testing.T) {
-	t.Parallel()
-
+	var inputs [][]string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Input []string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		inputs = append(inputs, body.Input)
+		out := make([]map[string]any, len(body.Input))
+		for i := range body.Input {
+			out[i] = map[string]any{"embedding": []float32{1}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": out})
+	}))
+	defer srv.Close()
+
+	emb, err := localembed.New(model.EmbeddingConfig{
+		Provider: "openai", Model: "m", Endpoint: srv.URL, APIKeys: map[string]string{"openai": "k"},
+		DocumentTemplate: "passage: {text}", QueryTemplate: "query: {text}", RateLimitRPS: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := emb.Embed(context.Background(), documents("a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := emb.Embed(context.Background(), embed.Request{Purpose: embed.PurposeQuery, Texts: []string{"b"}}); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"passage: a"}, {"query: b"}}
+	if !reflect.DeepEqual(inputs, want) {
+		t.Errorf("templated inputs: got %#v, want %#v", inputs, want)
+	}
+	if _, err := emb.Embed(context.Background(), embed.Request{Purpose: "embed-other", Texts: []string{"c"}}); err == nil {
+		t.Error("expected an unknown purpose to fail")
+	}
+}
+
+func TestOpenAIEmbedder_HTTPErrorIsAttributed(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": map[string]any{
@@ -227,7 +188,7 @@ func TestOpenAIEmbedder_HTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	emb, err := New(model.EmbeddingConfig{
+	emb, err := localembed.New(model.EmbeddingConfig{
 		Provider:     "openai",
 		Model:        "text-embedding-3-small",
 		Endpoint:     srv.URL,
@@ -237,9 +198,13 @@ func TestOpenAIEmbedder_HTTPError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = emb.EmbedDocuments(context.Background(), []string{"x"})
+	_, err = emb.Embed(context.Background(), documents("x"))
 	if err == nil || !strings.Contains(err.Error(), "invalid api key") {
 		t.Fatalf("expected error containing API message, got %v", err)
+	}
+	attributed, ok := errors.AsType[*llm.Error](err)
+	if !ok || attributed.Identity.Provider != "openai" {
+		t.Fatalf("expected an attributed *llm.Error, got %T %v", err, err)
 	}
 }
 
@@ -252,7 +217,10 @@ func TestOllamaEmbedder_Embed(t *testing.T) {
 		if r.URL.Path != "/api/embed" {
 			t.Errorf("path: got %q (expected /api/embed)", r.URL.Path)
 		}
-		var body ollamaEmbedRequest
+		var body struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
@@ -264,11 +232,11 @@ func TestOllamaEmbedder_Embed(t *testing.T) {
 			out[i] = []float32{0.5, float32(in[0])}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": out})
+		_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": out, "prompt_eval_count": 17})
 	}))
 	defer srv.Close()
 
-	emb, err := New(model.EmbeddingConfig{
+	emb, err := localembed.New(model.EmbeddingConfig{
 		Provider:       "ollama",
 		Model:          "nomic-embed-text",
 		OllamaEndpoint: srv.URL,
@@ -276,91 +244,49 @@ func TestOllamaEmbedder_Embed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := emb.EmbedDocuments(context.Background(), []string{"a", "b"})
+	got, err := emb.Embed(context.Background(), documents("a", "b"))
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
 	}
 	if calls != 1 {
 		t.Errorf("expected 1 batch HTTP call, got %d", calls)
 	}
-	if len(got) != 2 || len(got[0]) != 2 || len(got[1]) != 2 {
-		t.Fatalf("expected 2x2 embeddings, got %#v", got)
+	if len(got.Vectors) != 2 || len(got.Vectors[0]) != 2 || len(got.Vectors[1]) != 2 {
+		t.Fatalf("expected 2x2 embeddings, got %#v", got.Vectors)
 	}
-	if emb.Dimensions() != 2 {
-		t.Errorf("Dimensions(): got %d", emb.Dimensions())
+	if got.Identity != (llm.Identity{Provider: "ollama", Model: "nomic-embed-text"}) || got.Usage.InputTokens != 17 {
+		t.Errorf("identity/usage: got %+v %+v", got.Identity, got.Usage)
 	}
 	if emb.Fingerprint() != "ollama/nomic-embed-text" {
 		t.Errorf("Fingerprint(): got %q", emb.Fingerprint())
 	}
 }
 
-// TestOllamaEmbedder_FingerprintStableAcrossFirstCall pins that the
-// fingerprint observed before the first embed call equals the
-// fingerprint observed after — Ollama's dims are discovered from the
-// first response, so a fingerprint that included dims would shift
-// mid-session. The IndexHandler captures the fingerprint once per
-// build, so any shift would mark every prior row as drift on the next
-// run.
-func TestOllamaEmbedder_FingerprintStableAcrossFirstCall(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body ollamaEmbedRequest
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		out := make([][]float32, len(body.Input))
-		for i := range body.Input {
-			out[i] = []float32{0.1, 0.2, 0.3, 0.4} // 4-dim
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": out})
-	}))
-	defer srv.Close()
-
-	emb, err := New(model.EmbeddingConfig{
-		Provider:       "ollama",
-		Model:          "test-model",
-		OllamaEndpoint: srv.URL,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := emb.Fingerprint()
-	if _, err := emb.EmbedDocuments(context.Background(), []string{"warm up"}); err != nil {
-		t.Fatal(err)
-	}
-	after := emb.Fingerprint()
-	if before != after {
-		t.Errorf("fingerprint shifted across the first call:\n  before %q\n  after  %q", before, after)
-	}
-	if emb.Dimensions() != 4 {
-		t.Errorf("Dimensions(): got %d, want 4", emb.Dimensions())
-	}
-}
-
-// TestOllamaEmbedder_BatchSplit verifies large inputs are split into
-// sub-batches of ollamaBatchSize while preserving input order.
-func TestOllamaEmbedder_BatchSplit(t *testing.T) {
+// The adapter is a transport: one Embed is one request whatever the configured
+// batch size, since splitting is composed around it (embed.Batched).
+func TestOllamaEmbedder_OneRequestPerEmbed(t *testing.T) {
 	t.Parallel()
 
 	var calls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		var body ollamaEmbedRequest
+		var body struct {
+			Input []string `json:"input"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
 		out := make([][]float32, len(body.Input))
 		for i, in := range body.Input {
-			// Encode the input index as the first dim so we can verify order.
 			out[i] = []float32{float32(in[0]), float32(in[1])}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": out})
+		_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": out, "prompt_eval_count": len(body.Input)})
 	}))
 	defer srv.Close()
 
 	const batchSize = 16
-	emb, err := New(model.EmbeddingConfig{
+	emb, err := localembed.New(model.EmbeddingConfig{
 		Provider:       "ollama",
 		Model:          "m",
 		OllamaEndpoint: srv.URL,
@@ -370,34 +296,36 @@ func TestOllamaEmbedder_BatchSplit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Generate batchSize+5 unique inputs to trigger a second sub-batch.
 	n := batchSize + 5
 	inputs := make([]string, n)
 	for i := range inputs {
 		inputs[i] = fmt.Sprintf("a%c", 'a'+byte(i%26))
 	}
-	got, err := emb.EmbedDocuments(context.Background(), inputs)
+	got, err := emb.Embed(context.Background(), documents(inputs...))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != n {
-		t.Fatalf("got %d embeddings, want %d", len(got), n)
+	if len(got.Vectors) != n {
+		t.Fatalf("got %d embeddings, want %d", len(got.Vectors), n)
 	}
-	if calls != 2 {
-		t.Errorf("expected 2 batch calls (split at ollamaBatchSize), got %d", calls)
+	if calls != 1 {
+		t.Errorf("expected 1 request for %d inputs, got %d", n, calls)
+	}
+	if got.Usage.InputTokens != n {
+		t.Errorf("tokens: got %d, want %d", got.Usage.InputTokens, n)
 	}
 }
 
 func TestOllamaEmbedder_Error(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"error": "model not found"})
 	}))
 	defer srv.Close()
 
-	emb, err := New(model.EmbeddingConfig{
+	emb, err := localembed.New(model.EmbeddingConfig{
 		Provider:       "ollama",
 		Model:          "missing",
 		OllamaEndpoint: srv.URL,
@@ -405,7 +333,7 @@ func TestOllamaEmbedder_Error(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = emb.EmbedDocuments(context.Background(), []string{"x"})
+	_, err = emb.Embed(context.Background(), documents("x"))
 	if err == nil || !strings.Contains(err.Error(), "model not found") {
 		t.Fatalf("expected error mentioning model not found, got %v", err)
 	}

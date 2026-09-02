@@ -38,7 +38,7 @@ func (a *Application) Info(ctx context.Context, identity RequestIdentity, projec
 		return InfoResult{}, err
 	}
 	search := "text"
-	if runtime.options.Embeddings != nil && runtime.options.SearchIndex != nil {
+	if runtime.options.Embedder != nil && runtime.options.SearchIndex != nil {
 		search = "vector,text"
 	}
 	recoveries, err := listRecoveriesRuntime(ctx, runtime, false)
@@ -605,4 +605,4 @@ func publicProcedureSignature(head *model.Entry) (string, error) {
 	return "(" + strings.Join(parts, ", ") + ")", nil
 }
 
-var errVectorUnavailable = errors.New("vector search requires EmbeddingExecutor and SearchIndexStore")
+var errVectorUnavailable = errors.New("vector search requires an Embedder and a SearchIndexStore")

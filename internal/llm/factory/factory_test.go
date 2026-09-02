@@ -1,13 +1,10 @@
 package factory
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 
 	"github.com/networkteam/sdd/internal/model"
-	"github.com/networkteam/sdd/pkg/llm"
 )
 
 func TestNew_ClaudeCLIDefault(t *testing.T) {
@@ -41,6 +38,13 @@ func TestNew_UnknownProvider(t *testing.T) {
 	}
 }
 
+func TestNew_InvalidTimeout(t *testing.T) {
+	_, err := New(model.LLMConfig{Timeout: "soon"})
+	if err == nil || !strings.Contains(err.Error(), "parsing timeout") {
+		t.Fatalf("expected timeout parse error, got %v", err)
+	}
+}
+
 func TestNew_RemoteProviderMissingAPIKey(t *testing.T) {
 	for _, provider := range []string{"anthropic", "openai"} {
 		t.Run(provider, func(t *testing.T) {
@@ -55,8 +59,7 @@ func TestNew_RemoteProviderMissingAPIKey(t *testing.T) {
 	}
 }
 
-func TestNew_RemoteProviderWithRateLimit(t *testing.T) {
-	// Remote provider with rate_limit_rps set → wrapped in rateLimited.
+func TestCompose_RemoteProviderBuilds(t *testing.T) {
 	// gollm validates the API key format at construction time: anthropic
 	// keys need sk-ant- prefix and length > 20.
 	r, err := compose(model.LLMConfig{
@@ -68,24 +71,19 @@ func TestNew_RemoteProviderWithRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose(anthropic): %v", err)
 	}
-	if _, ok := r.(*rateLimited); !ok {
-		t.Errorf("expected *rateLimited wrapper for remote provider with RateLimitRPS > 0, got %T", r)
+	if r == nil {
+		t.Fatal("compose returned nil runner")
 	}
 }
 
-func TestNew_RemoteProviderAppliesDefaultRateLimit(t *testing.T) {
-	// No explicit RateLimitRPS → conservative per-model default should apply
-	// so tier-1 users on Anthropic/OpenAI don't immediately hit 429s.
-	r, err := compose(model.LLMConfig{
-		Provider: "anthropic",
-		Model:    "claude-3-5-sonnet",
-		APIKeys:  map[string]string{"anthropic": "sk-ant-testkey-aaaaaaaaaaaaaaaaaaaa"},
-	})
-	if err != nil {
-		t.Fatalf("compose(anthropic): %v", err)
+func TestEffectiveRPS(t *testing.T) {
+	// Remote providers are always capped: an explicit value wins, otherwise
+	// the per-model default applies so tier-1 users don't trip 429s.
+	if got := effectiveRPS(model.LLMConfig{Provider: "anthropic", Model: "claude-opus-4-7"}); got != 0.5 {
+		t.Errorf("default for opus = %v, want 0.5", got)
 	}
-	if _, ok := r.(*rateLimited); !ok {
-		t.Errorf("remote runner with RateLimitRPS=0 must be wrapped with provider default, got %T", r)
+	if got := effectiveRPS(model.LLMConfig{Provider: "anthropic", Model: "claude-opus-4-7", RateLimitRPS: 10}); got != 10 {
+		t.Errorf("explicit RateLimitRPS = %v, want 10", got)
 	}
 }
 
@@ -122,72 +120,5 @@ func TestProviderDefaultRPS(t *testing.T) {
 		if got != c.want {
 			t.Errorf("providerDefaultRPS(%q, %q) = %v; want %v", c.provider, c.model, got, c.want)
 		}
-	}
-}
-
-func TestNew_RemoteProviderExplicitOverridesDefault(t *testing.T) {
-	// Explicit RateLimitRPS takes precedence over the per-model default —
-	// higher-tier users can dial up throughput.
-	r, err := compose(model.LLMConfig{
-		Provider:     "anthropic",
-		Model:        "claude-opus-4-7", // default would be 0.5
-		APIKeys:      map[string]string{"anthropic": "sk-ant-testkey-aaaaaaaaaaaaaaaaaaaa"},
-		RateLimitRPS: 10,
-	})
-	if err != nil {
-		t.Fatalf("compose(anthropic): %v", err)
-	}
-	wrapped, ok := r.(*rateLimited)
-	if !ok {
-		t.Fatalf("expected *rateLimited wrapper, got %T", r)
-	}
-	// rate.Limiter doesn't expose its rate directly, but the burst size is
-	// derived from the RPS, so we can use it as an indirect signal that
-	// the explicit value (10) won rather than the default (0.5).
-	if wrapped.limiter.Burst() != 10 {
-		t.Errorf("expected burst 10 from explicit RateLimitRPS, got %d (default would be 1)", wrapped.limiter.Burst())
-	}
-}
-
-// fakeRunner is a minimal llm.Runner for testing the decorator pipeline.
-type fakeRunner struct {
-	calls int
-}
-
-func (f *fakeRunner) Run(_ context.Context, _ llm.Request) (llm.Result, error) {
-	f.calls++
-	return llm.Result{Text: "ok", Identity: llm.Identity{Provider: "fake", Model: "fake-model"}}, nil
-}
-
-func TestRateLimited_CallsInner(t *testing.T) {
-	inner := &fakeRunner{}
-	wrapped := newRateLimited(inner, 100) // generous rate; test passes instantly
-	out, err := wrapped.Run(context.Background(), llm.Request{UserPrompt: "hi"})
-	if err != nil {
-		t.Fatalf("rateLimited Run: %v", err)
-	}
-	if out.Text != "ok" {
-		t.Errorf("expected inner runner output, got %q", out.Text)
-	}
-	if inner.calls != 1 {
-		t.Errorf("expected inner runner called once, got %d", inner.calls)
-	}
-}
-
-func TestRateLimited_RespectsCancelledContext(t *testing.T) {
-	inner := &fakeRunner{}
-	// Very slow rate so Wait would block — we cancel before any slot opens.
-	wrapped := newRateLimited(inner, 0.01)
-	// Drain the initial burst slot so the next Run must wait.
-	_, _ = wrapped.Run(context.Background(), llm.Request{})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := wrapped.Run(ctx, llm.Request{})
-	if err == nil {
-		t.Fatal("expected error when context is cancelled before rate slot opens")
-	}
-	if !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "rate limiter") {
-		t.Errorf("error should signal rate limiter / cancellation, got %v", err)
 	}
 }

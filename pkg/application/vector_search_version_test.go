@@ -113,10 +113,8 @@ func TestVectorSearchLegacyStoreAnswersAndAccumulates(t *testing.T) {
 	// (the embedded base procedures the graph also carries are absent from this
 	// hand-seeded store, so they embed on first touch — that is orthogonal to
 	// the legacy-compat question, which is about the seeded entry's version).
-	for _, docID := range emb.docInputIDs {
-		if strings.HasPrefix(docID, id) {
-			t.Errorf("legacy-seeded entry was re-embedded (chunk %q); presence check must see its legacy version", docID)
-		}
+	if got := entryVersionCount(t, cacheRoot, id); got != 1 {
+		t.Errorf("legacy-seeded entry has %d versions after the first search, want 1; presence check must see its legacy version", got)
 	}
 	// The answer must come from the seeded legacy rows.
 	if !strings.Contains(res.Results, "legacy") {
@@ -132,9 +130,9 @@ func TestVectorSearchLegacyStoreAnswersAndAccumulates(t *testing.T) {
 	if emb.docEmbeds == 0 {
 		t.Fatal("changed entry embedded nothing — a new version was not added")
 	}
-	for _, docID := range emb.docInputIDs {
-		if !strings.HasPrefix(docID, id) {
-			t.Errorf("embedded a chunk %q not belonging to the changed entry %q", docID, id)
+	for _, text := range emb.docTexts {
+		if !strings.Contains(strings.ToLower(text), "alpha") {
+			t.Errorf("embedded a chunk %q not belonging to the changed entry %q", text, id)
 		}
 	}
 	if got := entryVersionCount(t, cacheRoot, id); got != 2 {
@@ -167,9 +165,9 @@ func TestVectorSearchSummaryRegenerationEmbedsOnceAndFiltersOldVersion(t *testin
 	if emb.docEmbeds == 0 {
 		t.Fatal("summary regeneration embedded nothing")
 	}
-	for _, docID := range emb.docInputIDs {
-		if !strings.HasPrefix(docID, id) {
-			t.Errorf("embedded a chunk %q not belonging to %q", docID, id)
+	for _, text := range emb.docTexts {
+		if !strings.Contains(strings.ToLower(text), "alpha") {
+			t.Errorf("embedded a chunk %q not belonging to %q", text, id)
 		}
 	}
 	if got := entryVersionCount(t, cacheRoot, id); got != 2 {

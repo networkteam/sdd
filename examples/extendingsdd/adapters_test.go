@@ -6,6 +6,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/pkg/application"
 	"github.com/networkteam/sdd/pkg/llm"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 	"github.com/networkteam/sdd/pkg/mcpapp"
 )
 
@@ -22,13 +23,11 @@ func (graphStore) ReadAttachmentPage(context.Context, string, string, int64, int
 	return sdd.AttachmentPage{}, nil
 }
 
-type embeddingExecutor struct{}
+type embedder struct{}
 
-func (embeddingExecutor) Spec(context.Context) (sdd.EmbeddingSpec, error) {
-	return sdd.EmbeddingSpec{Fingerprint: "example"}, nil
-}
-func (embeddingExecutor) Embed(context.Context, []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
-	return nil, nil
+func (embedder) Fingerprint() string { return "example" }
+func (embedder) Embed(context.Context, embed.Request) (embed.Result, error) {
+	return embed.Result{}, nil
 }
 
 type indexStore struct{}
@@ -73,7 +72,7 @@ var (
 	_ sdd.GraphStore        = graphStore{}
 	_ sdd.SessionStore      = (*memorySessionStore)(nil)
 	_ sdd.StagedBlobStore   = (*memoryStagedBlobStore)(nil)
-	_ sdd.EmbeddingExecutor = embeddingExecutor{}
+	_ embed.Embedder        = embedder{}
 	_ sdd.SearchIndexStore  = indexStore{}
 	_ llm.Runner            = llmRunner{}
 	_ sdd.AccessResolver    = accessResolver{}
@@ -86,7 +85,7 @@ func TestExternalCompositionCompilesAgainstPublicPorts(t *testing.T) {
 		Graph:       graphStore{},
 		Sessions:    newMemorySessionStore(),
 		StagedBlobs: newMemoryStagedBlobStore(nil),
-		Embeddings:  embeddingExecutor{},
+		Embedder:    embedder{},
 		SearchIndex: indexStore{},
 		LLM:         llmRunner{},
 	})

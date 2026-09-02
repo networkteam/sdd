@@ -19,11 +19,11 @@ import (
 	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/git"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 	mcpserver "github.com/networkteam/sdd/pkg/mcpapp"
 )
@@ -270,10 +270,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	cacheRoot := registry.CacheRoot()
 	baseRepoKey := persistentIndexRepoKey(cfg, stableRepoRoot)
 	baseIndex := localadapter.NewPersistentSearchIndexStore(project, cacheRoot, baseRepoKey)
-	var embeddings sdd.EmbeddingExecutor
-	if localEmbedder != nil {
-		embeddings = publicEmbeddingExecutor(localEmbedder)
-	}
+	embeddings := localEmbedder.Embedder
 	targets, err := newLocalMutationTargets(project, filepath.Dir(sddDir))
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
@@ -290,7 +287,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 			}
 			return nil
 		}),
-		Sessions: sessions, StagedBlobs: blobs, Embeddings: embeddings, SearchIndex: optionalSearchIndex(embeddings, baseIndex),
+		Sessions: sessions, StagedBlobs: blobs, Embedder: embeddings, SearchIndex: optionalSearchIndex(embeddings, baseIndex),
 		LLM: runner,
 	})
 	if err != nil {
@@ -310,11 +307,11 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		// connected-repository storage contract) and exclude embedded entries,
 		// so binary-shipped base facts embed once per machine in the base store,
 		// not once per connected repo.
-		memberEmbedder := optionalEmbeddingExecutor(crossEmbedder)
+		memberEmbedder := crossEmbedder.Embedder
 		memberIndex := localadapter.NewPersistentSearchIndexStore(sdd.ProjectID(dependency), cacheRoot, dependency)
 		member, runtimeErr := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: dependency}, Graph: memberGraph,
-			Sessions: sessions, StagedBlobs: blobs, Embeddings: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: runner,
+			Sessions: sessions, StagedBlobs: blobs, Embedder: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: runner,
 			ExcludeEmbeddedFromIndex: true,
 		})
 		if runtimeErr != nil {
@@ -398,54 +395,7 @@ func newLocalMutationTargets(project sdd.ProjectID, serverCheckout string) (*loc
 	})
 }
 
-func publicEmbeddingExecutor(embedder llm.Embedder) sdd.EmbeddingExecutor {
-	return sdd.EmbeddingExecutorFuncs{
-		SpecFunc: func(context.Context) (sdd.EmbeddingSpec, error) {
-			return sdd.EmbeddingSpec{Fingerprint: embedder.Fingerprint()}, nil
-		},
-		EmbedFunc: func(ctx context.Context, inputs []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
-			result := make([]sdd.EmbeddingVector, len(inputs))
-			for start := 0; start < len(inputs); {
-				purpose := inputs[start].Purpose
-				end := start + 1
-				for end < len(inputs) && inputs[end].Purpose == purpose {
-					end++
-				}
-				texts := make([]string, end-start)
-				for index := start; index < end; index++ {
-					texts[index-start] = inputs[index].Text
-				}
-				var vectors [][]float32
-				var err error
-				if purpose == sdd.EmbeddingQuery {
-					vectors, err = embedder.EmbedQueries(ctx, texts)
-				} else {
-					vectors, err = embedder.EmbedDocuments(ctx, texts)
-				}
-				if err != nil {
-					return nil, err
-				}
-				if len(vectors) != len(texts) {
-					return nil, fmt.Errorf("embedding provider returned %d vectors for %d inputs", len(vectors), len(texts))
-				}
-				for index := start; index < end; index++ {
-					result[index] = sdd.EmbeddingVector{ID: inputs[index].ID, Values: vectors[index-start]}
-				}
-				start = end
-			}
-			return result, nil
-		},
-	}
-}
-
-func optionalEmbeddingExecutor(embedder llm.Embedder) sdd.EmbeddingExecutor {
-	if embedder == nil {
-		return nil
-	}
-	return publicEmbeddingExecutor(embedder)
-}
-
-func optionalSearchIndex(embeddings sdd.EmbeddingExecutor, index sdd.SearchIndexStore) sdd.SearchIndexStore {
+func optionalSearchIndex(embeddings embed.Embedder, index sdd.SearchIndexStore) sdd.SearchIndexStore {
 	if embeddings == nil {
 		return nil
 	}

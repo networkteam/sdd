@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	internalllm "github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llmstats"
 	"github.com/networkteam/sdd/pkg/llm"
 )
@@ -37,7 +36,7 @@ func recordThrough(t *testing.T, runner llm.Runner, purpose llm.Purpose) []map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed := internalllm.Observed(runner, sink)
+	observed := llm.Observed(runner, sink)
 	_, _ = observed.Run(context.Background(), llm.Request{Purpose: purpose, UserPrompt: "p"})
 
 	raw, err := os.ReadFile(filepath.Join(dir, "llm.jsonl"))

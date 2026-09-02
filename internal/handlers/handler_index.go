@@ -11,9 +11,9 @@ import (
 	"github.com/networkteam/sdd/internal/chunking"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/index"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/textsplitter"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 	"github.com/networkteam/slogutils"
 )
 
@@ -33,7 +33,7 @@ import (
 type IndexHandler struct {
 	graphDir    string
 	indexDir    string
-	embedder    llm.Embedder
+	embedder    IndexEmbedder
 	splitter    *textsplitter.Splitter
 	attachments chunking.AttachmentReader
 	reader      Reader
@@ -46,6 +46,13 @@ type IndexHandler struct {
 	excludeEmbedded bool
 }
 
+// IndexEmbedder is the embedder the CLI index path runs on, with the transport
+// batch size it buckets work by so progress advances once per round-trip.
+type IndexEmbedder struct {
+	embed.Embedder
+	BatchSize int
+}
+
 // IndexHandlerOptions configures NewIndexHandler. Required fields are
 // GraphDir, IndexDir, Embedder, Reader. Splitter defaults to
 // textsplitter.NewSplitter() with default options when nil; Now defaults
@@ -54,7 +61,7 @@ type IndexHandler struct {
 type IndexHandlerOptions struct {
 	GraphDir string
 	IndexDir string
-	Embedder llm.Embedder
+	Embedder IndexEmbedder
 	Splitter *textsplitter.Splitter
 	Reader   Reader
 	Now      func() time.Time
@@ -122,7 +129,7 @@ func (h *IndexHandler) LazyFill(ctx context.Context, cmd *command.LazyFillIndexC
 // entries; force bypasses that check.
 //
 // Work is packed into buckets sized to the embedder's BatchSize so each
-// EmbedDocuments call corresponds to a single transport round-trip on
+// Embed call corresponds to a single transport round-trip on
 // the model — progress callbacks fire per bucket (≈ per HTTP call)
 // instead of waiting for one giant cross-entry batch to return. Each
 // bucket holds entries whose total chunk count fits within BatchSize;
@@ -160,7 +167,7 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 	}
 
 	fingerprint := h.embedder.Fingerprint()
-	batchSize := h.embedder.BatchSize()
+	batchSize := h.embedder.BatchSize
 	if batchSize <= 0 {
 		batchSize = 1 // defensive — no embedder should report 0, but a bucket of 1 still terminates
 	}
@@ -288,7 +295,7 @@ func (h *IndexHandler) collectGarbage(ctx context.Context, idx *index.Index, man
 }
 
 // indexBucket embeds and upserts a single bucket of entries. All chunks
-// across the bucket are embedded in one EmbedDocuments call — that's
+// across the bucket are embedded in one Embed call — that's
 // one transport round-trip on the model when the bucket is sized to
 // the embedder's BatchSize. After the call returns, every entry in
 // the bucket has all its embeddings ready and is upserted as a unit;
@@ -324,8 +331,7 @@ func (h *IndexHandler) indexBucket(ctx context.Context, idx *index.Index, bucket
 		}
 	}
 
-	// Flatten chunks across the bucket while remembering which entry each
-	// embedding belongs to.
+	// Flatten chunks across the bucket while remembering which entry 	// embedding belongs to.
 	type ownedChunk struct {
 		entryID   string
 		entryHash string
@@ -369,10 +375,11 @@ func (h *IndexHandler) indexBucket(ctx context.Context, idx *index.Index, bucket
 	for i, c := range allChunks {
 		texts[i] = c.chunk.Text
 	}
-	embeddings, err := h.embedder.EmbedDocuments(ctx, texts)
+	embedded, err := h.embedder.Embed(ctx, embed.Request{Purpose: embed.PurposeDocument, Texts: texts})
 	if err != nil {
 		return fmt.Errorf("embed bucket: %w", err)
 	}
+	embeddings := embedded.Vectors
 	if len(embeddings) != len(texts) {
 		return fmt.Errorf("embedder returned %d embeddings for %d inputs", len(embeddings), len(texts))
 	}

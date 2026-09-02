@@ -11,6 +11,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/pkg/application"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -21,14 +22,14 @@ import (
 // non-zero document-embed count.
 
 // countingEmbeddings records how many document and query inputs it embedded,
-// and the IDs of the document inputs, so a test can prove which entries were
+// and the document texts, so a test can prove which entries were
 // (re-)embedded. Vectors key off the "alpha"/"beta" tokens so ranking is
 // deterministic; length is constant so chromem never sees a dimension change.
 type countingEmbeddings struct {
 	mu          sync.Mutex
 	docEmbeds   int
 	queryEmbeds int
-	docInputIDs []string
+	docTexts    []string
 }
 
 type branchVectorTargets struct {
@@ -66,30 +67,28 @@ func (s failingAttachmentGraphStore) ReadAttachmentPage(context.Context, string,
 	return sdd.AttachmentPage{}, s.err
 }
 
-func (e *countingEmbeddings) Spec(context.Context) (sdd.EmbeddingSpec, error) {
-	return sdd.EmbeddingSpec{Fingerprint: "counter/v1"}, nil
-}
+func (e *countingEmbeddings) Fingerprint() string { return "counter/v1" }
 
-func (e *countingEmbeddings) Embed(_ context.Context, inputs []sdd.EmbeddingInput) ([]sdd.EmbeddingVector, error) {
+func (e *countingEmbeddings) Embed(_ context.Context, req embed.Request) (embed.Result, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := make([]sdd.EmbeddingVector, len(inputs))
-	for i, in := range inputs {
-		if in.Purpose == sdd.EmbeddingQuery {
+	out := make([][]float32, len(req.Texts))
+	for i, text := range req.Texts {
+		if req.Purpose == embed.PurposeQuery {
 			e.queryEmbeds++
 		} else {
 			e.docEmbeds++
-			e.docInputIDs = append(e.docInputIDs, in.ID)
+			e.docTexts = append(e.docTexts, text)
 		}
-		out[i] = sdd.EmbeddingVector{ID: in.ID, Values: keywordVec(in.Text)}
+		out[i] = keywordVec(text)
 	}
-	return out, nil
+	return embed.Result{Vectors: out}, nil
 }
 
 func (e *countingEmbeddings) reset() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.docEmbeds, e.queryEmbeds, e.docInputIDs = 0, 0, nil
+	e.docEmbeds, e.queryEmbeds, e.docTexts = 0, 0, nil
 }
 
 func keywordVec(text string) []float32 {
@@ -119,7 +118,7 @@ func writeCounterEntry(t *testing.T, graphDir, id, summary, body string) {
 
 const counterProject = sdd.ProjectID("counter")
 
-func newCounterApp(t *testing.T, graphDir, cacheRoot string, embeddings sdd.EmbeddingExecutor) *sdd.Application {
+func newCounterApp(t *testing.T, graphDir, cacheRoot string, embeddings embed.Embedder) *sdd.Application {
 	t.Helper()
 	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: counterProject, GraphDir: graphDir})
 	if err != nil {
@@ -138,7 +137,7 @@ func newCounterApp(t *testing.T, graphDir, cacheRoot string, embeddings sdd.Embe
 		Graph:       graph,
 		Sessions:    sessions,
 		StagedBlobs: blobs,
-		Embeddings:  embeddings,
+		Embedder:    embeddings,
 		SearchIndex: localadapter.NewPersistentSearchIndexStore(counterProject, cacheRoot, "counter/repo"),
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
@@ -235,10 +234,13 @@ func TestVectorSearchNewEntryEmbedsOnlyItsChunks(t *testing.T) {
 	if emb.docEmbeds == 0 {
 		t.Fatal("adding an entry embedded nothing")
 	}
-	for _, id := range emb.docInputIDs {
-		if !strings.HasPrefix(id, newID) {
-			t.Errorf("embedded a chunk %q not belonging to the new entry %q", id, newID)
+	for _, text := range emb.docTexts {
+		if !strings.Contains(strings.ToLower(text), "gamma") {
+			t.Errorf("embedded a chunk %q not belonging to the new entry %q", text, newID)
 		}
+	}
+	if got := entryVersionCount(t, cacheRoot, newID); got != 1 {
+		t.Errorf("new entry has %d versions, want 1", got)
 	}
 }
 
@@ -370,7 +372,7 @@ func TestBranchVectorAndHybridSearchUseSelectedAttachmentAuthorityAndRelease(t *
 	}
 }
 
-func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAcquirer, cacheRoot string, embeddings sdd.EmbeddingExecutor) *sdd.Application {
+func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAcquirer, cacheRoot string, embeddings embed.Embedder) *sdd.Application {
 	t.Helper()
 	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
 	if err != nil {
@@ -383,7 +385,7 @@ func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAc
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: counterProject, DisplayName: "Counter"}, DefaultBranch: "main",
 		Graph: base, Targets: targets, Sessions: sessions, StagedBlobs: blobs,
-		Embeddings:  embeddings,
+		Embedder:    embeddings,
 		SearchIndex: localadapter.NewPersistentSearchIndexStore(counterProject, cacheRoot, "counter/branch"),
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil

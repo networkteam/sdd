@@ -24,11 +24,11 @@ import (
 	"testing"
 	"time"
 
-	internalllm "github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llm/factory"
 	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/pkg/llm"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 // summarizeCase is one summarization specimen: the entry to summarize and the
@@ -147,7 +147,7 @@ func judgeRunner(t *testing.T) llm.Runner {
 	if err != nil {
 		t.Fatalf("building judge runner: %v", err)
 	}
-	return internalllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})
+	return pkgllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})
 }
 
 // judgeSummary asks the judge to verify one summary against the exact source

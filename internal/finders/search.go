@@ -12,10 +12,10 @@ import (
 
 	"github.com/networkteam/sdd/internal/chunking"
 	"github.com/networkteam/sdd/internal/index"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 // SearchFinder is the read-side handler for sdd search. It composes
@@ -28,7 +28,7 @@ import (
 type SearchFinder struct {
 	graph      *model.Graph // the graph filtered and resolved against
 	graphDir   string
-	embedder   llm.Embedder    // nil disables vector and hybrid modes
+	embedder   embed.Embedder  // nil disables vector and hybrid modes
 	indexStore *index.Index    // nil disables vector and hybrid modes
 	repos      *repos.Registry // nil disables cross-repo search
 }
@@ -42,7 +42,7 @@ type SearchFinder struct {
 type SearchFinderOptions struct {
 	Graph      *model.Graph
 	GraphDir   string
-	Embedder   llm.Embedder
+	Embedder   embed.Embedder
 	IndexStore *index.Index
 	Repos      *repos.Registry
 }
@@ -238,10 +238,11 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 	if q.Phrase == "" {
 		return nil, errors.New("vector search requires a non-empty --query phrase")
 	}
-	embeddings, err := f.embedder.EmbedQueries(ctx, []string{q.Phrase})
+	embedded, err := f.embedder.Embed(ctx, embed.Request{Purpose: embed.PurposeQuery, Texts: []string{q.Phrase}})
 	if err != nil {
 		return nil, fmt.Errorf("embedding query phrase: %w", err)
 	}
+	embeddings := embedded.Vectors
 	if len(embeddings) != 1 {
 		return nil, fmt.Errorf("embedder returned %d vectors for 1 input", len(embeddings))
 	}

@@ -13,17 +13,18 @@
 package llmops_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
-	internalllm "github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llmstats"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
+	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
 var (
@@ -35,7 +36,7 @@ var (
 )
 
 // evalFileSink returns the process-wide run sink, creating it on first use.
-func evalFileSink(t *testing.T) internalllm.StatsSink {
+func evalFileSink(t *testing.T) pkgllm.StatsSink {
 	t.Helper()
 	evalSinkOnce.Do(func() {
 		dir := os.Getenv("SDD_EVAL_STATS_DIR")
@@ -61,10 +62,10 @@ func evalFileSink(t *testing.T) internalllm.StatsSink {
 // sits next to the test that made it.
 type tLogSink struct{ t *testing.T }
 
-func (s tLogSink) RecordCall(stat internalllm.CallStat) {
+func (s tLogSink) RecordCall(ctx context.Context, stat pkgllm.CallStat) {
 	line := fmt.Sprintf("llm call: op=%s provider=%s model=%s dur=%s in=%d out=%d cache_read=%d cache_create=%d",
 		stat.Purpose, stat.Identity.Provider, stat.Identity.String(),
-		(time.Duration(stat.DurationMS) * time.Millisecond).Round(time.Millisecond),
+		stat.Duration.Round(time.Millisecond),
 		stat.Usage.InputTokens, stat.Usage.OutputTokens,
 		stat.Usage.CacheReadTokens, stat.Usage.CacheCreateTokens)
 	if stat.Error != "" {
@@ -73,11 +74,11 @@ func (s tLogSink) RecordCall(stat internalllm.CallStat) {
 	s.t.Log(line)
 }
 
-type multiSink []internalllm.StatsSink
+type multiSink []pkgllm.StatsSink
 
-func (m multiSink) RecordCall(stat internalllm.CallStat) {
+func (m multiSink) RecordCall(ctx context.Context, stat pkgllm.CallStat) {
 	for _, s := range m {
-		s.RecordCall(stat)
+		s.RecordCall(ctx, stat)
 	}
 }
 

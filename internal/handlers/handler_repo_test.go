@@ -230,7 +230,7 @@ func TestBuildConnectedIndexes_FreshensAndFills(t *testing.T) {
 		OnPlanned:      func(n int) { planned += n },
 		OnEntryIndexed: func(_ string, n int) { indexed += n },
 	}
-	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, emb, fill); err != nil {
+	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, indexEmbedder(emb), fill); err != nil {
 		t.Fatalf("BuildConnectedIndexes: %v", err)
 	}
 
@@ -298,13 +298,13 @@ func TestBuildConnectedIndexes_ForceRebuildsMembers(t *testing.T) {
 	emb := &fakeEmbedder{}
 
 	// First fill populates the member index + manifest.
-	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, emb, &command.BuildConnectedIndexesCmd{}); err != nil {
+	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, indexEmbedder(emb), &command.BuildConnectedIndexesCmd{}); err != nil {
 		t.Fatalf("initial lazy fill: %v", err)
 	}
 
 	// A second lazy fill over the up-to-date index plans nothing.
 	lazyPlanned := 0
-	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, emb,
+	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, indexEmbedder(emb),
 		&command.BuildConnectedIndexesCmd{OnPlanned: func(n int) { lazyPlanned += n }}); err != nil {
 		t.Fatalf("second lazy fill: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestBuildConnectedIndexes_ForceRebuildsMembers(t *testing.T) {
 
 	// A forced fill re-embeds every member entry despite the current manifest.
 	forcePlanned := 0
-	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, emb,
+	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, indexEmbedder(emb),
 		&command.BuildConnectedIndexesCmd{Force: true, OnPlanned: func(n int) { forcePlanned += n }}); err != nil {
 		t.Fatalf("forced fill: %v", err)
 	}

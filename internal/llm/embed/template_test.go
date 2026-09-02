@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/networkteam/sdd/internal/model"
+	pkgembed "github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 func TestApplyTemplate(t *testing.T) {
@@ -82,7 +83,7 @@ func TestAppendDocTemplateHash(t *testing.T) {
 }
 
 // TestEmbedder_DocumentTemplateAppliedAtTransport verifies that the
-// document template lands on every input passed through EmbedDocuments —
+// document template lands on every input embedded for documents —
 // the HTTP server captures the post-template payload and we assert on it.
 // Mirror coverage lives below for queries.
 func TestEmbedder_DocumentTemplateAppliedAtTransport(t *testing.T) {
@@ -116,7 +117,7 @@ func TestEmbedder_DocumentTemplateAppliedAtTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := emb.EmbedDocuments(context.Background(), []string{"alpha", "beta"}); err != nil {
+	if _, err := emb.Embed(context.Background(), pkgembed.Request{Purpose: pkgembed.PurposeDocument, Texts: []string{"alpha", "beta"}}); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(captured, []string{"DOC: alpha", "DOC: beta"}) {
@@ -124,7 +125,7 @@ func TestEmbedder_DocumentTemplateAppliedAtTransport(t *testing.T) {
 	}
 
 	captured = nil
-	if _, err := emb.EmbedQueries(context.Background(), []string{"gamma"}); err != nil {
+	if _, err := emb.Embed(context.Background(), pkgembed.Request{Purpose: pkgembed.PurposeQuery, Texts: []string{"gamma"}}); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(captured, []string{"QUERY: gamma"}) {
@@ -198,10 +199,10 @@ func TestEmbedder_OllamaTemplateApplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := emb.EmbedDocuments(context.Background(), []string{"x"}); err != nil {
+	if _, err := emb.Embed(context.Background(), pkgembed.Request{Purpose: pkgembed.PurposeDocument, Texts: []string{"x"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := emb.EmbedQueries(context.Background(), []string{"y"}); err != nil {
+	if _, err := emb.Embed(context.Background(), pkgembed.Request{Purpose: pkgembed.PurposeQuery, Texts: []string{"y"}}); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"search_document: x", "search_query: y"}

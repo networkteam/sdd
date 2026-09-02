@@ -1,10 +1,11 @@
 package finders_test
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/networkteam/sdd/internal/finders"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/llmstats"
 	"github.com/networkteam/sdd/internal/query"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
@@ -30,8 +31,8 @@ func TestStatsReadsAndFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sink.RecordCall(llm.CallStat{Purpose: "preflight", Identity: pkgllm.Identity{Provider: "anthropic", Model: "m"}, Usage: pkgllm.Usage{InputTokens: 100}, DurationMS: 100})
-	sink.RecordCall(llm.CallStat{Purpose: "embed-documents", Identity: pkgllm.Identity{Provider: "ollama", Model: "q"}, Items: 4, Usage: pkgllm.Usage{InputTokens: 40}, DurationMS: 200})
+	sink.RecordCall(context.Background(), pkgllm.CallStat{Purpose: "preflight", Identity: pkgllm.Identity{Provider: "anthropic", Model: "m"}, Usage: pkgllm.Usage{InputTokens: 100}, Duration: 100 * time.Millisecond})
+	sink.RecordCall(context.Background(), pkgllm.CallStat{Purpose: "embed-documents", Identity: pkgllm.Identity{Provider: "ollama", Model: "q"}, Items: 4, Usage: pkgllm.Usage{InputTokens: 40}, Duration: 200 * time.Millisecond})
 
 	f := finders.New(finders.Options{})
 

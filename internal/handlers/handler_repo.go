@@ -12,7 +12,6 @@ import (
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/index"
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
@@ -455,7 +454,7 @@ func referencedRepoIDs(refs []model.Ref) []string {
 // embedder. The finder read (finders.MultiSearch) then runs pure. fill is
 // optional: the CLI passes progress callbacks so the member builds render
 // through the output coordinator; the MCP server passes nil (non-TTY slog).
-func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuery, embedder llm.Embedder, fill *command.BuildConnectedIndexesCmd) error {
+func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuery, embedder IndexEmbedder, fill *command.BuildConnectedIndexesCmd) error {
 	if h.repos == nil {
 		if q.AllRepos || len(q.Repos) > 0 {
 			return errNoRepos
@@ -468,7 +467,7 @@ func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuer
 	}
 	// Text-only search needs fresh caches but no embedding; the vector path
 	// freshens and fills in one pass through BuildConnectedIndexes.
-	if q.Phrase == "" || embedder == nil {
+	if q.Phrase == "" || embedder.Embedder == nil {
 		fresh := command.EnsureReposFreshCmd{RepoIDs: repoIDs}
 		if fill != nil {
 			fresh.OnPhase = fill.OnPhase
@@ -489,7 +488,7 @@ func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuer
 // fill.Force is set (only `sdd index --repo/--all-repos --force`), each member
 // store is fully rebuilt rather than lazily reconciled, repairing stale or
 // corrupt connected indexes.
-func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, embedder llm.Embedder, fill *command.BuildConnectedIndexesCmd) error {
+func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, embedder IndexEmbedder, fill *command.BuildConnectedIndexesCmd) error {
 	if h.repos == nil {
 		return errNoRepos
 	}
@@ -503,7 +502,7 @@ func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, e
 	if _, err := h.EnsureReposFresh(ctx, fresh); err != nil {
 		return err
 	}
-	if embedder == nil {
+	if embedder.Embedder == nil {
 		return nil
 	}
 	if fill == nil {

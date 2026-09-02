@@ -196,8 +196,8 @@ type EmbeddingConfig struct {
 	// openai, 64 for ollama). Override when working with very large or
 	// very small inputs to balance throughput against per-call timeout.
 	BatchSize int `yaml:"batch_size,omitempty"`
-	// QueryTemplate is applied to every text passed through
-	// EmbedQueries before the transport call. The literal `{text}` is
+	// QueryTemplate is applied to every text of a query-purpose embed
+	// before the transport call. The literal `{text}` is
 	// replaced with the input. Empty disables the transformation
 	// (matches OpenAI's prefix-agnostic behavior). Used by retrieval
 	// (sdd search). Changing this is a free-tweak — query template
@@ -210,7 +210,7 @@ type EmbeddingConfig struct {
 	//     Query:{text}
 	QueryTemplate string `yaml:"query_template,omitempty"`
 	// DocumentTemplate is applied to every text passed through
-	// EmbedDocuments before the transport call. Same `{text}`
+	// document-purpose embed before the transport call. Same `{text}`
 	// substitution as QueryTemplate. Empty disables. Used by indexing
 	// (sdd index, sdd search lazy-fill).
 	//

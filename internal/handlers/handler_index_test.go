@@ -16,6 +16,7 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/pkg/llm"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 // withoutEmbedded filters the embedded base-procedure IDs out of a callback
@@ -52,17 +53,11 @@ type fakeEmbedder struct {
 	fingerprint string
 }
 
-func (f *fakeEmbedder) EmbedDocuments(_ context.Context, texts []string) ([][]float32, error) {
-	return f.embed(texts)
-}
-func (f *fakeEmbedder) EmbedQueries(_ context.Context, texts []string) ([][]float32, error) {
-	return f.embed(texts)
-}
-func (f *fakeEmbedder) embed(texts []string) ([][]float32, error) {
+func (f *fakeEmbedder) Embed(_ context.Context, req embed.Request) (embed.Result, error) {
 	f.calls++
-	f.totalInputs += len(texts)
-	out := make([][]float32, len(texts))
-	for i, t := range texts {
+	f.totalInputs += len(req.Texts)
+	out := make([][]float32, len(req.Texts))
+	for i, t := range req.Texts {
 		h := sha256.Sum256([]byte(t))
 		v := make([]float32, 4)
 		for j := 0; j < 4; j++ {
@@ -71,15 +66,18 @@ func (f *fakeEmbedder) embed(texts []string) ([][]float32, error) {
 		}
 		out[i] = v
 	}
-	return out, nil
+	return embed.Result{Vectors: out}, nil
 }
-func (f *fakeEmbedder) Dimensions() int { return 4 }
 
-// BatchSize is sized to hold the whole shipped base-procedure/base-fact set
+// fakeBatchSize is sized to hold the whole shipped base-procedure/base-fact set
 // plus these tests' small project fixtures in a single embed round-trip, so the
 // batch-count assertions stay stable as the base set grows (e.g. adding the
 // bootstrap procedure). Raise it if the embedded set ever outgrows this.
-func (f *fakeEmbedder) BatchSize() int { return 128 }
+const fakeBatchSize = 128
+
+func indexEmbedder(f *fakeEmbedder) IndexEmbedder {
+	return IndexEmbedder{Embedder: f, BatchSize: fakeBatchSize}
+}
 func (f *fakeEmbedder) Fingerprint() string {
 	if f.fingerprint == "" {
 		return "fake/v1/4"
@@ -138,7 +136,7 @@ func TestIndexHandler_Build(t *testing.T) {
 	h := NewIndexHandler(IndexHandlerOptions{
 		GraphDir: graphDir,
 		IndexDir: indexDir,
-		Embedder: emb,
+		Embedder: indexEmbedder(emb),
 		Reader:   readFinderFor(t),
 	})
 
@@ -154,7 +152,7 @@ func TestIndexHandler_Build(t *testing.T) {
 	if got := withoutEmbedded(t, indexed); len(got) != 2 {
 		t.Errorf("expected 2 project entries indexed, got %d (%v)", len(got), got)
 	}
-	wantCalls := (emb.totalInputs + emb.BatchSize() - 1) / emb.BatchSize()
+	wantCalls := (emb.totalInputs + fakeBatchSize - 1) / fakeBatchSize
 	if emb.calls != wantCalls {
 		t.Errorf("batched embed calls = %d, want %d for %d inputs", emb.calls, wantCalls, emb.totalInputs)
 	}
@@ -189,7 +187,7 @@ func TestIndexHandler_BuildFiresOnBatchStart(t *testing.T) {
 	h := NewIndexHandler(IndexHandlerOptions{
 		GraphDir: graphDir,
 		IndexDir: indexDir,
-		Embedder: emb,
+		Embedder: indexEmbedder(emb),
 		Reader:   readFinderFor(t),
 	})
 
@@ -248,7 +246,7 @@ func TestIndexHandler_BuildSkipsUnchanged(t *testing.T) {
 	h := NewIndexHandler(IndexHandlerOptions{
 		GraphDir: graphDir,
 		IndexDir: indexDir,
-		Embedder: emb,
+		Embedder: indexEmbedder(emb),
 		Reader:   readFinderFor(t),
 	})
 
@@ -285,7 +283,7 @@ func TestIndexHandler_BuildForceReindexes(t *testing.T) {
 	h := NewIndexHandler(IndexHandlerOptions{
 		GraphDir: graphDir,
 		IndexDir: indexDir,
-		Embedder: emb,
+		Embedder: indexEmbedder(emb),
 		Reader:   readFinderFor(t),
 	})
 
@@ -314,7 +312,7 @@ func TestIndexHandler_LazyFillCoversMissingEntries(t *testing.T) {
 	h := NewIndexHandler(IndexHandlerOptions{
 		GraphDir: graphDir,
 		IndexDir: indexDir,
-		Embedder: emb,
+		Embedder: indexEmbedder(emb),
 		Reader:   readFinderFor(t),
 	})
 
@@ -355,7 +353,7 @@ func TestIndexHandler_BuildPicksUpEntryEdits(t *testing.T) {
 	h := NewIndexHandler(IndexHandlerOptions{
 		GraphDir: graphDir,
 		IndexDir: indexDir,
-		Embedder: emb,
+		Embedder: indexEmbedder(emb),
 		Reader:   readFinderFor(t),
 	})
 	if err := h.Build(context.Background(), &command.BuildIndexCmd{}); err != nil {
@@ -400,7 +398,7 @@ func TestIndexHandler_GarbageCollectsStaleVersions(t *testing.T) {
 	h := NewIndexHandler(IndexHandlerOptions{
 		GraphDir: graphDir,
 		IndexDir: indexDir,
-		Embedder: emb,
+		Embedder: indexEmbedder(emb),
 		Reader:   readFinderFor(t),
 		Now:      func() time.Time { return clock },
 	})

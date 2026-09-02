@@ -1,19 +1,16 @@
-// Package embed provides Embedder implementations for OpenAI-compatible
-// (`/v1/embeddings`) and Ollama (`/api/embeddings`) endpoints, plus a
-// factory that dispatches by configured provider and wraps remote
-// providers with a rate.Limiter (paralleling the chat-runner factory).
+// Package embed is the local host's embed.Embedder composition: it resolves
+// model.EmbeddingConfig — a host-private schema that never goes public — into
+// one pkg/llm/embed Embedder (provider adapter, timeout, rate limit),
+// paralleling the chat-runner factory.
 package embed
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
-	"golang.org/x/time/rate"
-
-	"github.com/networkteam/sdd/internal/llm"
 	"github.com/networkteam/sdd/internal/model"
+	pkgembed "github.com/networkteam/sdd/pkg/llm/embed"
 )
 
 // Per-provider default batch sizes when EmbeddingConfig.BatchSize is zero.
@@ -26,14 +23,14 @@ const (
 	defaultOllamaBatchSize = 64
 )
 
-// New constructs an Embedder from cfg. Returns an error when Provider is
-// unrecognised or required fields (Model, API key for remote providers)
-// are missing. Remote providers ("openai") are wrapped with a rate.Limiter
-// using cfg.RateLimitRPS or a conservative provider default. The batch
-// size flows from cfg.BatchSize (zero → provider default) so command-line
-// flags / config overrides reach the transport without env-var sniffing
-// in the package.
-func New(cfg model.EmbeddingConfig) (llm.Embedder, error) {
+// New constructs the per-round-trip embedder from cfg: the provider adapter,
+// which sends one request per Embed, bounded by cfg.Timeout and, for remote
+// providers ("openai"), rate-limited by cfg.RateLimitRPS or a conservative
+// provider default. The caller composes embed.Batched around it with
+// BatchSize(cfg) (20260902-154750-d-tac-o1s), so deadline and limiter apply
+// to each request. Returns an error when Provider is unrecognised or required
+// fields (Model, API key for remote providers) are missing.
+func New(cfg model.EmbeddingConfig) (pkgembed.Embedder, error) {
 	if cfg.Provider == "" {
 		return nil, fmt.Errorf("no embedding provider configured — run `sdd config set embedding.provider <provider>`")
 	}
@@ -41,15 +38,13 @@ func New(cfg model.EmbeddingConfig) (llm.Embedder, error) {
 		return nil, fmt.Errorf("embedding.model is required")
 	}
 
-	timeout := resolveTimeout(cfg.Timeout)
-
-	var inner llm.Embedder
+	var adapter pkgembed.Embedder
 	var err error
 	switch cfg.Provider {
 	case "openai":
-		inner, err = newOpenAI(cfg, timeout, resolveBatchSize(cfg.BatchSize, defaultOpenAIBatchSize))
+		adapter, err = newOpenAI(cfg)
 	case "ollama":
-		inner = newOllama(cfg, timeout, resolveBatchSize(cfg.BatchSize, defaultOllamaBatchSize))
+		adapter = newOllama(cfg)
 	default:
 		return nil, fmt.Errorf("unknown embedding provider %q (supported: openai, ollama)", cfg.Provider)
 	}
@@ -57,16 +52,33 @@ func New(cfg model.EmbeddingConfig) (llm.Embedder, error) {
 		return nil, err
 	}
 
+	embedder := pkgembed.Bounded(adapter, resolveTimeout(cfg.Timeout))
 	if isRemote(cfg.Provider) {
 		rps := cfg.RateLimitRPS
 		if rps == 0 {
 			rps = providerDefaultRPS(cfg.Provider, cfg.Model)
 		}
 		if rps > 0 {
-			inner = newRateLimited(inner, rps)
+			embedder = pkgembed.RateLimited(embedder, rps)
 		}
 	}
-	return inner, nil
+	return embedder, nil
+}
+
+// BatchSize resolves the number of texts one request carries: cfg.BatchSize
+// when positive, else the provider default. The composition site hands it to
+// embed.Batched, and the CLI indexer buckets its work by it so a bucket is at
+// most one request.
+func BatchSize(cfg model.EmbeddingConfig) int {
+	if cfg.BatchSize > 0 {
+		return cfg.BatchSize
+	}
+	switch cfg.Provider {
+	case "ollama":
+		return defaultOllamaBatchSize
+	default:
+		return defaultOpenAIBatchSize
+	}
 }
 
 func isRemote(provider string) bool {
@@ -92,16 +104,6 @@ func providerDefaultRPS(provider, modelName string) float64 {
 	}
 }
 
-// resolveBatchSize returns cfg.BatchSize if positive, otherwise the
-// provider-specific fallback. Negative values fall back too (treat as
-// "unset") rather than erroring — the CLI surface validates earlier.
-func resolveBatchSize(cfg, fallback int) int {
-	if cfg > 0 {
-		return cfg
-	}
-	return fallback
-}
-
 // resolveTimeout parses the configured Go duration string, falling back to
 // 2m when empty or unparseable. Embedding calls are batch-shaped — a
 // single call over the default 64-input batch can take ~90s on a local
@@ -121,38 +123,14 @@ func resolveTimeout(raw string) time.Duration {
 	return d
 }
 
-// rateLimited wraps an Embedder with a token-bucket limiter so parallel
-// batch operations don't exceed provider rate limits.
-type rateLimited struct {
-	inner   llm.Embedder
-	limiter *rate.Limiter
-}
-
-func newRateLimited(inner llm.Embedder, rps float64) llm.Embedder {
-	burst := int(rps)
-	if burst < 1 {
-		burst = 1
-	}
-	return &rateLimited{
-		inner:   inner,
-		limiter: rate.NewLimiter(rate.Limit(rps), burst),
+// templateFor selects the configured template for the request's purpose.
+func templateFor(purpose pkgembed.Purpose, document, query string) (string, error) {
+	switch purpose {
+	case pkgembed.PurposeDocument:
+		return document, nil
+	case pkgembed.PurposeQuery:
+		return query, nil
+	default:
+		return "", fmt.Errorf("unknown embedding purpose %q", purpose)
 	}
 }
-
-func (r *rateLimited) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
-	if err := r.limiter.Wait(ctx); err != nil {
-		return nil, fmt.Errorf("rate limiter: %w", err)
-	}
-	return r.inner.EmbedDocuments(ctx, texts)
-}
-
-func (r *rateLimited) EmbedQueries(ctx context.Context, texts []string) ([][]float32, error) {
-	if err := r.limiter.Wait(ctx); err != nil {
-		return nil, fmt.Errorf("rate limiter: %w", err)
-	}
-	return r.inner.EmbedQueries(ctx, texts)
-}
-
-func (r *rateLimited) Dimensions() int     { return r.inner.Dimensions() }
-func (r *rateLimited) Fingerprint() string { return r.inner.Fingerprint() }
-func (r *rateLimited) BatchSize() int      { return r.inner.BatchSize() }

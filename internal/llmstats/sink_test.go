@@ -2,12 +2,13 @@ package llmstats
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	"github.com/networkteam/sdd/internal/llm"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
@@ -18,7 +19,7 @@ func TestFileSinkRecordCall(t *testing.T) {
 		t.Fatalf("NewFileSink: %v", err)
 	}
 
-	sink.RecordCall(llm.CallStat{
+	sink.RecordCall(context.Background(), pkgllm.CallStat{
 		Purpose:  "preflight",
 		Identity: pkgllm.Identity{Provider: "anthropic", Model: "claude-sonnet-4-6"},
 		Usage: pkgllm.Usage{
@@ -26,13 +27,13 @@ func TestFileSinkRecordCall(t *testing.T) {
 			OutputTokens:    8,
 			CacheReadTokens: 6163,
 		},
-		DurationMS: 1245,
+		Duration: 1245 * time.Millisecond,
 	})
-	sink.RecordCall(llm.CallStat{
-		Purpose:    "summarize",
-		Identity:   pkgllm.Identity{Model: "claude-sonnet-4-6"},
-		Usage:      pkgllm.Usage{InputTokens: 1865, OutputTokens: 139},
-		DurationMS: 3373,
+	sink.RecordCall(context.Background(), pkgllm.CallStat{
+		Purpose:  "summarize",
+		Identity: pkgllm.Identity{Model: "claude-sonnet-4-6"},
+		Usage:    pkgllm.Usage{InputTokens: 1865, OutputTokens: 139},
+		Duration: 3373 * time.Millisecond,
 	})
 
 	f, err := os.Open(filepath.Join(dir, "llm.jsonl"))
