@@ -275,7 +275,7 @@ The HTTP identity test anchors its real mutation here.
 	callIdentityTool(t, clientSession, "start_session", map[string]any{}, &door)
 	session := door.Session
 	var shown ShowResult
-	callIdentityTool(t, clientSession, "show", map[string]any{"ids": []string{"20260713-120000-s-tac-idt"}}, &shown)
+	callIdentityTool(t, clientSession, "show", map[string]any{"session": session, "ids": []string{"20260713-120000-s-tac-idt"}}, &shown)
 	if !strings.Contains(shown.Entries, "anchors its real mutation") {
 		t.Fatalf("identity test anchor was not served through the real application: %q", shown.Entries)
 	}
@@ -301,7 +301,7 @@ The HTTP identity test anchors its real mutation here.
 		t.Fatalf("capture mutation reached %q, want verifySummary", capture.Step)
 	}
 	var search SearchResult
-	callIdentityTool(t, clientSession, "search", map[string]any{"terms": []string{"durable", "mutation"}, "max_citations": 1}, &search)
+	callIdentityTool(t, clientSession, "search", map[string]any{"session": session, "terms": []string{"durable", "mutation"}, "max_citations": 1}, &search)
 	if !strings.Contains(search.Results, "real HTTP identity path") {
 		t.Fatalf("durable mutation not visible through the application: %q", search.Results)
 	}

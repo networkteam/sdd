@@ -139,7 +139,17 @@ func TestServeStdioTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect to stdio server: %v\nstderr:\n%s", err, stderr.String())
 	}
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "info", Arguments: map[string]any{}})
+	door, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "start_session", Arguments: map[string]any{}})
+	if err != nil || door.IsError {
+		_ = session.Close()
+		t.Fatalf("start_session over stdio: %v %+v\nstderr:\n%s", err, door, stderr.String())
+	}
+	handle, _ := door.StructuredContent.(map[string]any)["session"].(string)
+	if handle == "" {
+		_ = session.Close()
+		t.Fatalf("start_session served no session handle: %+v", door.StructuredContent)
+	}
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "info", Arguments: map[string]any{"session": handle}})
 	if err != nil {
 		_ = session.Close()
 		t.Fatalf("call info over stdio: %v\nstderr:\n%s", err, stderr.String())
