@@ -31,7 +31,7 @@ func recoverCmd() *cli.Command {
 			&cli.BoolFlag{Name: "yes", Usage: "Confirm the explicitly selected recovery verb non-interactively"},
 		},
 		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
-			application, project, identity, err := buildLocalRecoveryApplication(ctx, cmd)
+			application, project, identity, err := buildLocalStoreApplication(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -109,7 +109,10 @@ func recoverCmd() *cli.Command {
 	}
 }
 
-func buildLocalRecoveryApplication(ctx context.Context, cmd *cli.Command) (*sdd.Application, sdd.ProjectID, sdd.RequestIdentity, error) {
+// buildLocalStoreApplication composes the application over the project's
+// stores alone — no LLM, no index — for the maintenance commands that act on
+// sessions and pending writes.
+func buildLocalStoreApplication(ctx context.Context, cmd *cli.Command) (*sdd.Application, sdd.ProjectID, sdd.RequestIdentity, error) {
 	graphDir, err := resolveGraphDir(cmd)
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
@@ -123,7 +126,7 @@ func buildLocalRecoveryApplication(ctx context.Context, cmd *cli.Command) (*sdd.
 		return nil, "", sdd.RequestIdentity{}, err
 	}
 	if cfg == nil || cfg.DefaultBranch == "" {
-		return nil, "", sdd.RequestIdentity{}, fmt.Errorf("default_branch is required in .sdd/config.yaml before recovering mutations")
+		return nil, "", sdd.RequestIdentity{}, fmt.Errorf("default_branch is required in .sdd/config.yaml")
 	}
 	locations, err := repos.DefaultLocations()
 	if err != nil {

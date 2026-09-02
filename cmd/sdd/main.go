@@ -374,6 +374,7 @@ func main() {
 			indexCmd(),
 			searchCmd(),
 			serveCmd(),
+			sessionsCmd(),
 			recoverCmd(),
 			syncCmd(),
 			repoCmd(),
