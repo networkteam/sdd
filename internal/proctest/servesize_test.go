@@ -151,7 +151,7 @@ func walkAll(t *testing.T, world *proctest.World, rec *recorder, anchor string) 
 	t.Helper()
 	ctx := t.Context()
 
-	workflow, door, err := world.App.OpenWorkflow(ctx, world.Identity, "proctest", sdd.WorkflowOpenRequest{MCPSessionID: "servesize-door"})
+	workflow, door, err := world.App.OpenWorkflow(ctx, world.Identity, "proctest", sdd.WorkflowOpenRequest{ClientName: "servesize-door"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestServeSizeCalibration(t *testing.T) {
 	rec := &recorder{}
 	ctx := t.Context()
 
-	workflow, door, err := world.App.OpenWorkflow(ctx, world.Identity, "proctest", sdd.WorkflowOpenRequest{MCPSessionID: "calibration-door"})
+	workflow, door, err := world.App.OpenWorkflow(ctx, world.Identity, "proctest", sdd.WorkflowOpenRequest{ClientName: "calibration-door"})
 	if err != nil {
 		t.Fatal(err)
 	}

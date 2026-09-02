@@ -183,18 +183,17 @@ func (f *failOnceFinalizer) Finalize(context.Context, sdd.AppliedMutation) error
 }
 
 // openBinding creates a durable session with an attachment and returns the
-// matching write binding. verifyBinding matches the binding's MCP session id
-// against the stored attachment, so both carry "mcp".
+// matching write binding.
 func openBinding(t *testing.T, sessions sdd.SessionStore, subject string, id sdd.SessionID) sdd.SessionBinding {
 	t.Helper()
 	created, err := sessions.Create(t.Context(), sdd.SessionMetadata{
 		ID: id, Subject: subject, Project: "example", Participant: subject,
-		Attachment: &sdd.Attachment{Subject: subject, MCPSessionID: "mcp", LastActivity: time.Now().UTC().Round(0)},
+		Attachment: &sdd.Attachment{Subject: subject, ClientName: "mcp", LastActivity: time.Now().UTC().Round(0)},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sdd.SessionBinding{SessionID: id, Subject: subject, Project: "example", MCPSessionID: "mcp", Version: created.Version}
+	return sdd.SessionBinding{SessionID: id, Subject: subject, Project: "example", Version: created.Version}
 }
 
 // TestIncumbentContinuityHoldsWithoutExpiry proves I3 by construction: with
@@ -216,29 +215,6 @@ func TestIncumbentContinuityHoldsWithoutExpiry(t *testing.T) {
 	r2, err := application.ApplyPrepared(t.Context(), identity, "example", r1.Binding, second)
 	if err != nil || r2.Apply.State != sdd.MutationApplied {
 		t.Fatalf("incumbent second apply after elapsed time = %+v, %v", r2, err)
-	}
-}
-
-// TestReleaseClearsTheStampWithoutEndingTheSession covers d-cpt-rw7: stepping
-// away clears the live stamp — so status derives from the store alone — and
-// records nothing, because a connection going away is not an act on the
-// dialogue.
-func TestReleaseClearsTheStampWithoutEndingTheSession(t *testing.T) {
-	application, sessions, _, _ := newDurableApplication(t, time.Now, nil, nil)
-	identity := sdd.RequestIdentity{Subject: "christopher"}
-	binding := openBinding(t, sessions, identity.Subject, "release-stamp")
-	if err := application.ReleaseSession(t.Context(), identity, "example", binding); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := sessions.Load(t.Context(), "release-stamp")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.Metadata.Attachment != nil {
-		t.Fatalf("attachment not cleared: %+v", stored.Metadata.Attachment)
-	}
-	if stored.Metadata.Ended != nil {
-		t.Fatalf("release ended the session: %+v", stored.Metadata.Ended)
 	}
 }
 
@@ -795,7 +771,7 @@ func TestSessionReplayFailsClosedForUnsupportedCodec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = application.ResumeWorkflow(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, "example", sdd.WorkflowResumeRequest{SessionID: "future", MCPSessionID: "mcp"})
+	_, _, err = application.ResumeWorkflow(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, "example", sdd.WorkflowResumeRequest{SessionID: "future", ClientName: "mcp"})
 	var migration *sdd.ApplicationError
 	if !errors.As(err, &migration) || migration.Code != sdd.ErrorMigrationRequired || migration.Version != 99 {
 		t.Fatalf("unsupported codec error = %#v", err)

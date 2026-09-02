@@ -77,7 +77,7 @@ func TestFilesystemSessionStoreConformance(t *testing.T) {
 			Store: store,
 			Metadata: sdd.SessionMetadata{
 				ID: "session-1", Subject: "christopher", Project: "example", Participant: "Christopher",
-				Attachment: &sdd.Attachment{Subject: "christopher", MCPSessionID: "mcp-1", ClientName: "test-client", LastActivity: time.Now().UTC().Round(0)},
+				Attachment: &sdd.Attachment{Subject: "christopher", ClientName: "test-client", LastActivity: time.Now().UTC().Round(0)},
 			},
 			Append: sdd.SessionAppend{Events: []sdd.StoredEvent{{CodecVersion: 1, Code: "started", Payload: json.RawMessage(`{"instance":"i_1"}`)}}},
 		}
@@ -244,7 +244,11 @@ func TestMutationFinalizerConformance(t *testing.T) {
 type accessResolver struct{}
 
 func (accessResolver) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
-	return sdd.Principal{Subject: identity.Subject, Participant: "Christopher"}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+
+func (accessResolver) ResolveParticipant(context.Context, sdd.Principal, sdd.ProjectID) (string, error) {
+	return "Christopher", nil
 }
 func (accessResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {
 	return sdd.ProjectList{Projects: []sdd.ProjectSummary{{ProjectRef: sdd.ProjectRef{ID: "example"}, CanRead: true, State: sdd.ProjectReady}}}, nil
@@ -260,8 +264,9 @@ func TestAccessResolverConformance(t *testing.T) {
 	sddtest.RunAccessResolverTests(t, func(*testing.T) sddtest.AccessResolverFixture {
 		return sddtest.AccessResolverFixture{
 			Resolver: accessResolver{}, Identity: sdd.RequestIdentity{Subject: "christopher"},
-			Principal: sdd.Principal{Subject: "christopher", Participant: "Christopher"},
-			Project:   "example", Dependency: "example.org/dependency", ProjectCount: 1,
+			Principal:   sdd.Principal{Subject: "christopher"},
+			Participant: "Christopher",
+			Project:     "example", Dependency: "example.org/dependency", ProjectCount: 1,
 		}
 	})
 }
@@ -274,7 +279,7 @@ func TestSessionAttachmentMetadataRoundTrips(t *testing.T) {
 	now := time.Now().UTC().Round(0)
 	metadata := sdd.SessionMetadata{
 		ID: "attached", Subject: "christopher", Project: "example",
-		Attachment: &sdd.Attachment{Subject: "christopher", MCPSessionID: "mcp-1", ClientName: "test-client", LastActivity: now},
+		Attachment: &sdd.Attachment{Subject: "christopher", ClientName: "test-client", LastActivity: now},
 	}
 	created, err := store.Create(t.Context(), metadata)
 	if err != nil {
@@ -284,7 +289,7 @@ func TestSessionAttachmentMetadataRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Version != created.Version || loaded.Metadata.Attachment == nil || loaded.Metadata.Attachment.MCPSessionID != "mcp-1" {
+	if loaded.Version != created.Version || loaded.Metadata.Attachment == nil || loaded.Metadata.Attachment.ClientName != "test-client" {
 		t.Fatalf("attachment did not round trip: %+v", loaded)
 	}
 }

@@ -91,7 +91,7 @@ func TestConcludeWritesTerminalRecordInOneAppend(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			application, recorder := newConcludeApp(t, now)
 			identity := sdd.RequestIdentity{Subject: "christopher"}
-			w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+			w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-1"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -141,7 +141,7 @@ func TestConcludedSessionIsNoLongerOpenWork(t *testing.T) {
 	now := time.Date(2026, 7, 31, 9, 0, 0, 0, time.UTC)
 	application, _ := newConcludeApp(t, now)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestConcludedSessionRefusesRevival(t *testing.T) {
 	now := time.Date(2026, 7, 31, 9, 0, 0, 0, time.UTC)
 	application, _ := newConcludeApp(t, now)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestConcludedSessionRefusesRevival(t *testing.T) {
 	_, refusals["start_procedure"] = w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"})
 	_, refusals["next"] = w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: shell.Instance, Report: map[string]any{"body": "one"}})
 	_, _, refusals["resume_session"] = application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{
-		SessionID: w.ID(), MCPSessionID: "mcp-2", UserWords: "pick the concluded dialogue back up",
+		SessionID: w.ID(), ClientName: "mcp-2",
 	})
 	for name, err := range refusals {
 		var appErr *sdd.ApplicationError
@@ -205,49 +205,4 @@ func TestConcludedSessionRefusesRevival(t *testing.T) {
 			t.Fatalf("%s refusal must name the new-session path, got %q", name, err.Error())
 		}
 	}
-}
-
-// TestQuiescentLeaveEndsTheSessionAndOpenWorkParks pins the second conclude write
-// site against the park rule: a shell-only session left behind is genuinely ended
-// (and so collectable), while a session with an open move parks — parked is not
-// ended.
-func TestQuiescentLeaveEndsTheSessionAndOpenWorkParks(t *testing.T) {
-	now := time.Date(2026, 7, 31, 9, 0, 0, 0, time.UTC)
-
-	t.Run("quiescent", func(t *testing.T) {
-		application, recorder := newConcludeApp(t, now)
-		identity := sdd.RequestIdentity{Subject: "christopher"}
-		w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := w.Leave(t.Context(), identity); err != nil {
-			t.Fatal(err)
-		}
-		end, withAct := recorder.firstEnd(t, shell.Instance)
-		if end == nil || end.Act != sdd.SessionConcluded {
-			t.Fatalf("leaving a quiescent session should record a concluded end, got %+v", end)
-		}
-		if !withAct {
-			t.Fatal("the auto-conclude's terminal record landed in an append of its own")
-		}
-	})
-
-	t.Run("open move parks", func(t *testing.T) {
-		application, recorder := newConcludeApp(t, now)
-		identity := sdd.RequestIdentity{Subject: "christopher"}
-		w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"}); err != nil {
-			t.Fatal(err)
-		}
-		if err := w.Leave(t.Context(), identity); err != nil {
-			t.Fatal(err)
-		}
-		if end, _ := recorder.firstEnd(t, shell.Instance); end != nil {
-			t.Fatalf("leaving a session with open work must end nothing, got %+v", end)
-		}
-	})
 }

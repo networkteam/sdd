@@ -164,7 +164,11 @@ func (a *observingAccess) ResolvePrincipal(_ context.Context, identity sdd.Reque
 	}
 	a.currentScopes[identity.Subject] = append([]string(nil), identity.Scopes...)
 	a.mu.Unlock()
-	return sdd.Principal{Subject: identity.Subject, Participant: "Christopher"}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+
+func (a *observingAccess) ResolveParticipant(context.Context, sdd.Principal, sdd.ProjectID) (string, error) {
+	return "Christopher", nil
 }
 
 func (a *observingAccess) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {

@@ -56,7 +56,7 @@ func newBranchBindingApplicationWithStore(t *testing.T, validator sdd.BranchVali
 	return application, sessions
 }
 
-// advancingBranchConflictStore simulates two same-attachment writers winning
+// advancingBranchConflictStore simulates two writers of the same handle winning
 // immediately before this workflow's two CAS attempts. Each injected conflict
 // leaves a newer authoritative branch and version in the underlying store.
 type advancingBranchConflictStore struct {
@@ -115,7 +115,7 @@ func TestWorkflowSessionBindBranchPersistsTypedEventsAndClears(t *testing.T) {
 		return nil
 	}))
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestWorkflowSessionBindBranchValidationFailureDoesNotMutate(t *testing.T) {
 		return validationErr
 	}))
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestWorkflowSessionBindBranchValidationFailureDoesNotMutate(t *testing.T) {
 func TestWorkflowSessionBindBranchNoCapabilityIsTypedAndClearStillWorks(t *testing.T) {
 	application, sessions := newBranchBindingApplication(t, nil)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,37 +241,37 @@ func TestWorkflowSessionBindBranchNoCapabilityIsTypedAndClearStillWorks(t *testi
 	assertBranchEvent(t, cleared.Events[len(cleared.Events)-1], sdd.BranchClearedEventCode, "")
 }
 
-func TestWorkflowSessionBindBranchVerifiesAttachmentBeforeValidation(t *testing.T) {
+func TestWorkflowSessionBindBranchVerifiesSessionBeforeValidation(t *testing.T) {
 	validations := 0
 	application, _ := newBranchBindingApplication(t, sdd.BranchValidatorFunc(func(context.Context, sdd.MutationTarget) error {
 		validations++
 		return nil
 	}))
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	displaced, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{
-		SessionID: displaced.ID(), MCPSessionID: "mcp-b", UserWords: "take this session over", Takeover: true,
-	}); err != nil {
+	if _, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{
+		SessionID: workflow.ID(), ClientName: "mcp-b",
+	}, "torn down"); err != nil {
 		t.Fatal(err)
 	}
 
-	err = displaced.BindBranch(t.Context(), identity, "feature", false)
+	err = workflow.BindBranch(t.Context(), identity, "feature", false)
 	var appErr *sdd.ApplicationError
-	if !errors.As(err, &appErr) || appErr.Code != sdd.ErrorSessionDisplaced {
-		t.Fatalf("displaced bind error = %#v", err)
+	if !errors.As(err, &appErr) || appErr.Code != sdd.ErrorSessionEnded {
+		t.Fatalf("ended-session bind error = %#v", err)
 	}
 	if validations != 0 {
-		t.Fatalf("displaced session reached branch validation %d time(s)", validations)
+		t.Fatalf("ended session reached branch validation %d time(s)", validations)
 	}
 }
 
 func TestWorkflowBranchProjectsFromStoreOnResumeAndList(t *testing.T) {
 	application, _ := newBranchBindingApplication(t, sdd.BranchValidatorFunc(func(context.Context, sdd.MutationTarget) error { return nil }))
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func TestWorkflowBranchProjectsFromStoreOnResumeAndList(t *testing.T) {
 	}
 
 	resumed, result, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{
-		SessionID: workflow.ID(), MCPSessionID: "mcp-a",
+		SessionID: workflow.ID(), ClientName: "mcp-a",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -307,7 +307,7 @@ func TestWorkflowReorientationRefreshesBranchAfterTerminalCASConflict(t *testing
 		},
 	)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,15 +326,14 @@ func TestWorkflowReorientationRefreshesBranchAfterTerminalCASConflict(t *testing
 		t.Fatalf("setup did not leave the expected stale cache: stored=%q cached=%q", stored.Metadata.Branch, workflow.Branch())
 	}
 
-	// MCP same-session reorientation calls StillHeld before ServeAll. That held
-	// check is the convergence point: it refreshes only after confirming this
-	// connection remains the current attachment.
-	held, err := workflow.StillHeld(t.Context(), identity)
-	if err != nil {
+	// Reorientation appends its own event; that append loses the CAS against the
+	// authoritative version, and the resync it triggers is the convergence point.
+	if err := workflow.Reorient(t.Context(), identity); err != nil {
 		t.Fatal(err)
 	}
-	if !held {
-		t.Fatal("same attachment should still be held")
+	stored, err = sessions.Load(t.Context(), workflow.ID())
+	if err != nil {
+		t.Fatal(err)
 	}
 	resumed, err := workflow.ServeAll(t.Context(), identity)
 	if err != nil {

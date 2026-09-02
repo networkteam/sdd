@@ -37,7 +37,10 @@ func (r *runtimeAccessResolver) ResolvePrincipal(_ context.Context, identity sdd
 	r.mu.Lock()
 	r.identities = append(r.identities, identity)
 	r.mu.Unlock()
-	return sdd.Principal{Subject: identity.Subject, Participant: "Christopher"}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+func (r *runtimeAccessResolver) ResolveParticipant(context.Context, sdd.Principal, sdd.ProjectID) (string, error) {
+	return "Christopher", nil
 }
 func (r *runtimeAccessResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {
 	return sdd.ProjectList{Projects: []sdd.ProjectSummary{{ProjectRef: r.runtime.Project(), CanRead: true, CanWrite: true, State: sdd.ProjectReady}}}, nil

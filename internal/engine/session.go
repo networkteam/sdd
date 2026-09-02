@@ -25,8 +25,8 @@ type EventType string
 
 const (
 	// EventSessionMeta is the session-level header line (no instance):
-	// participant identity, so a log is self-describing for list_sessions
-	// descriptors without resolving any procedure spec.
+	// participant identity, so a log is self-describing for session listings
+	// without resolving any procedure spec.
 	EventSessionMeta EventType = "session_meta"
 	// EventLabeled carries a human-meaningful session label (no instance):
 	// the dialogue's subject, agent-supplied and updatable as it sharpens.
@@ -50,6 +50,15 @@ const (
 	// the session junction — state kept, resumable through next. Forensic
 	// only: a resuming agent can tell a shelved move from one that drifted.
 	EventParked EventType = "parked"
+	// EventServedBlocks records the content hashes of rendered blocks served
+	// to the session's consumer in full, so what the consumer already holds is
+	// derived from the ledger rather than from the transport (d-cpt-aen). No
+	// instance — the served set is session-level like the read set.
+	EventServedBlocks EventType = "served_blocks"
+	// EventReoriented records that the consumer asked for the session's
+	// position — the declaration that it needs re-serving. It resets the
+	// served set; blocks accumulate again after it.
+	EventReoriented EventType = "reoriented"
 )
 
 // ReadDepth classifies how deeply an entry was served: full means the body
@@ -214,6 +223,9 @@ type Session struct {
 	// design: a parent's inspections count for children dispatched in the same
 	// session, and replay restores the set from the logged read events.
 	reads map[string]ReadDepth
+	// served folds the served-block events since the last reorientation: the
+	// content hashes the session's consumer holds in full.
+	served map[string]bool
 	// sinkErr carries a deferred log-append failure; surfaced by the next
 	// advance call so a durability problem can't pass silently.
 	sinkErr error
@@ -237,6 +249,7 @@ func (e *Engine) NewSession(id, participant string, sink EventSink, opts ...Sess
 		now:         time.Now,
 		instances:   map[string]*Instance{},
 		reads:       map[string]ReadDepth{},
+		served:      map[string]bool{},
 	}
 	for _, o := range opts {
 		o(s)
@@ -303,6 +316,36 @@ func (s *Session) foldReads(ids []string, depth ReadDepth) []string {
 // at (empty when never served).
 func (s *Session) ReadDepthOf(id string) ReadDepth {
 	return s.reads[id]
+}
+
+// ServedBefore reports whether a block with this content hash was served in
+// full since the last reorientation.
+func (s *Session) ServedBefore(hash string) bool {
+	return s.served[hash]
+}
+
+// RecordServed logs the content hashes of blocks just served in full and folds
+// them into the served set. Hashes already held or empty append nothing.
+func (s *Session) RecordServed(hashes []string) {
+	var fresh []string
+	for _, hash := range hashes {
+		if hash == "" || s.served[hash] {
+			continue
+		}
+		s.served[hash] = true
+		fresh = append(fresh, hash)
+	}
+	if len(fresh) == 0 {
+		return
+	}
+	s.appendEvent("", EventServedBlocks, map[string]any{"hashes": fresh})
+}
+
+// Reorient records the consumer's request for the session's position and
+// clears the served set, so the position re-serves in full.
+func (s *Session) Reorient() {
+	s.served = map[string]bool{}
+	s.appendEvent("", EventReoriented, nil)
 }
 
 // Park records that a running move was deliberately parked back to the
@@ -892,6 +935,18 @@ func (s *Session) applyEvent(ev Event, resolve SpecResolver) error {
 				}
 			}
 		}
+
+	case EventServedBlocks:
+		if hashes, ok := ev.Data["hashes"].([]any); ok {
+			for _, v := range hashes {
+				if hash, ok := v.(string); ok && hash != "" {
+					s.served[hash] = true
+				}
+			}
+		}
+
+	case EventReoriented:
+		s.served = map[string]bool{}
 
 	case EventServed, EventParked:
 		// Forensic only — no state effect.

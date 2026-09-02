@@ -11,11 +11,11 @@ type RequestIdentity struct {
 	Attributes map[string]any
 }
 
-// Principal is the stable identity and graph participant resolved from a
-// current request. It is binding and audit data, never cached authorization.
+// Principal is the stable identity resolved from a current request. It is
+// binding and audit data, never cached authorization. The participant the
+// subject appears as is resolved separately, per project (s-cpt-ny6).
 type Principal struct {
-	Subject     string
-	Participant string
+	Subject string
 }
 
 // ProjectID is a composition's stable project identity.
@@ -68,9 +68,15 @@ type ProjectList struct {
 // AccessResolver is the single identity, project-access, and dependency
 // authorization boundary. Implementations must resolve current authorization
 // from ctx on every call; previously returned principals and runtimes are not
-// proof of current access.
+// proof of current access. Every call arrives inside a request: the
+// application never calls the resolver from a connection lifecycle.
 type AccessResolver interface {
 	ResolvePrincipal(context.Context, RequestIdentity) (Principal, error)
+	// ResolveParticipant names the graph participant the principal appears as
+	// in the project — the name framing, authorship, and WIP markers carry. It
+	// is asked once the project is known, because a person may appear under a
+	// different name per project (s-cpt-ny6).
+	ResolveParticipant(context.Context, Principal, ProjectID) (string, error)
 	ListProjects(context.Context, Principal) (ProjectList, error)
 	ResolveProject(context.Context, Principal, ProjectID, Access) (*ProjectRuntime, error)
 	ResolveDependency(context.Context, Principal, ProjectID, string) (*ProjectRuntime, error)

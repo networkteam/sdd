@@ -29,7 +29,11 @@ func (a *compositionAccess) ResolvePrincipal(_ context.Context, identity sdd.Req
 	if identity.Subject == "" {
 		return sdd.Principal{}, &sdd.ApplicationError{Code: sdd.ErrorAuthenticationRequired, Message: "identity required"}
 	}
-	return sdd.Principal{Subject: identity.Subject, Participant: identity.Subject}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+
+func (a *compositionAccess) ResolveParticipant(_ context.Context, principal sdd.Principal, _ sdd.ProjectID) (string, error) {
+	return principal.Subject, nil
 }
 
 func (a *compositionAccess) ListProjects(_ context.Context, principal sdd.Principal) (sdd.ProjectList, error) {
@@ -163,7 +167,7 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 		t.Fatalf("authorized dependency show = %+v, %v", shown, err)
 	}
 
-	workflow, _, err := application.OpenWorkflow(t.Context(), reader, "project-a", sdd.WorkflowOpenRequest{MCPSessionID: "reader-mcp"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), reader, "project-a", sdd.WorkflowOpenRequest{ClientName: "reader-mcp"})
 	if err != nil {
 		t.Fatalf("read-only dialogue open: %v", err)
 	}
@@ -174,17 +178,17 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 		t.Fatalf("read-only mutation = %v", err)
 	}
 
-	aliceWorkflow, _, err := application.OpenWorkflow(t.Context(), alice, "project-a", sdd.WorkflowOpenRequest{MCPSessionID: "alice-mcp"})
+	aliceWorkflow, _, err := application.OpenWorkflow(t.Context(), alice, "project-a", sdd.WorkflowOpenRequest{ClientName: "alice-mcp"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := application.ResumeWorkflow(t.Context(), alice, "project-b", sdd.WorkflowResumeRequest{
-		SessionID: aliceWorkflow.ID(), MCPSessionID: "alice-other-project",
+		SessionID: aliceWorkflow.ID(), ClientName: "alice-other-project",
 	}); applicationErrorCode(err) != sdd.ErrorSessionOwnership {
 		t.Fatalf("project binding changed = %v", err)
 	}
 	if _, _, err := application.ResumeWorkflow(t.Context(), carol, "project-a", sdd.WorkflowResumeRequest{
-		SessionID: aliceWorkflow.ID(), MCPSessionID: "carol-mcp",
+		SessionID: aliceWorkflow.ID(), ClientName: "carol-mcp",
 	}); applicationErrorCode(err) != sdd.ErrorSessionOwnership {
 		t.Fatalf("principal binding changed = %v", err)
 	}

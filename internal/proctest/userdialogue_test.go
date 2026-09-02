@@ -20,7 +20,7 @@ import (
 // harness if more suites need the opening serve.
 func openShell(t *testing.T, world *proctest.World, connID string) (*proctest.Session, *sdd.WorkflowServe) {
 	t.Helper()
-	workflow, serve, err := world.App.OpenWorkflow(t.Context(), world.Identity, "proctest", sdd.WorkflowOpenRequest{MCPSessionID: connID})
+	workflow, serve, err := world.App.OpenWorkflow(t.Context(), world.Identity, "proctest", sdd.WorkflowOpenRequest{ClientName: connID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestUserDialogue_ConcludeCarriesNoDischargeGate(t *testing.T) {
 
 	// The teaching half of leaving threads behind: the agent names what is
 	// open before the offer, since the answer is final.
-	for _, want := range []string{"name each of those threads", "left behind", "stays listed and resumable"} {
+	for _, want := range []string{"name each of those threads", "left behind", "stays resumable by its handle"} {
 		if !strings.Contains(serve.Instructions, want) {
 			t.Errorf("the opening serve should teach ending the session; missing %q", want)
 		}

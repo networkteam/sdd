@@ -73,7 +73,7 @@ func newCollectFixture(t *testing.T) collectFixture {
 func (f collectFixture) writeSession(t *testing.T, id sdd.SessionID, ended time.Time, act sdd.SessionEndAct) {
 	t.Helper()
 	attachment := sdd.Attachment{
-		Subject: collectSubject, ClientName: "test", MCPSessionID: "c-" + string(id),
+		Subject: collectSubject, ClientName: "test",
 		LastActivity: f.now.Add(-72 * time.Hour),
 	}
 	metadata := sdd.SessionMetadata{

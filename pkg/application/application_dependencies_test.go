@@ -70,7 +70,10 @@ type multiAccessResolver struct {
 }
 
 func (r *multiAccessResolver) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
-	return sdd.Principal{Subject: identity.Subject, Participant: "Christopher"}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+func (r *multiAccessResolver) ResolveParticipant(context.Context, sdd.Principal, sdd.ProjectID) (string, error) {
+	return "Christopher", nil
 }
 func (r *multiAccessResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {
 	return sdd.ProjectList{Projects: []sdd.ProjectSummary{{ProjectRef: r.base.Project(), CanRead: true, State: sdd.ProjectReady}}}, nil

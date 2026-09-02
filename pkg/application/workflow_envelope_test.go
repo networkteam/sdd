@@ -16,7 +16,7 @@ func TestAdvanceRefusesTopLevelFieldBesideChooserAnswer(t *testing.T) {
 	now := time.Date(2026, 8, 26, 9, 0, 0, 0, time.UTC)
 	application, _ := newConcludeApp(t, now)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-envelope"})
+	w, shell, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-envelope"})
 	if err != nil {
 		t.Fatal(err)
 	}

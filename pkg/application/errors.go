@@ -20,9 +20,7 @@ const (
 	ErrorBranchUnavailable      ErrorCode = "branch_unavailable"
 	ErrorSessionOwnership       ErrorCode = "session_ownership_mismatch"
 	ErrorSessionConflict        ErrorCode = "session_conflict"
-	ErrorSessionDisplaced       ErrorCode = "session_displaced"
 	ErrorSessionEnded           ErrorCode = "session_ended"
-	ErrorConsentRequired        ErrorCode = "consent_required"
 	ErrorGraphConflict          ErrorCode = "graph_conflict"
 	ErrorMigrationRequired      ErrorCode = "migration_required"
 	ErrorRecoveryRequired       ErrorCode = "recovery_required"
@@ -37,12 +35,9 @@ type ApplicationError struct {
 	Revision   string
 	Version    uint32
 	Cause      error
-	// Attachment and Ended carry the interpreted conflict on an
-	// ErrorSessionDisplaced, ErrorConsentRequired or ErrorSessionEnded: who holds
-	// the session now, or the act that ended it, so the caller can be told
-	// who/when/why.
-	Attachment *Attachment
-	Ended      *SessionEnd
+	// Ended carries the act that ended the session on an ErrorSessionEnded, so
+	// the caller can be told who/when/why.
+	Ended *SessionEnd
 }
 
 func (e *ApplicationError) Error() string {

@@ -84,7 +84,7 @@ func runSupersedeCapture(t *testing.T, supersedes []any) *model.Entry {
 		t.Fatal(err)
 	}
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "supersede-workflow"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "supersede-workflow"})
 	if err != nil {
 		t.Fatal(err)
 	}

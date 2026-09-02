@@ -12,9 +12,11 @@ import (
 )
 
 type AccessResolverFixture struct {
-	Resolver     sdd.AccessResolver
-	Identity     sdd.RequestIdentity
-	Principal    sdd.Principal
+	Resolver  sdd.AccessResolver
+	Identity  sdd.RequestIdentity
+	Principal sdd.Principal
+	// Participant is the name the principal must resolve to in Project.
+	Participant  string
 	Project      sdd.ProjectID
 	Dependency   string
 	ProjectCount int
@@ -39,6 +41,13 @@ func RunAccessResolverTests(t *testing.T, factory func(*testing.T) AccessResolve
 	}
 	if _, err := fixture.Resolver.ResolveProject(t.Context(), principal, fixture.Project, sdd.AccessRead); err != nil {
 		t.Fatalf("ResolveProject(read): %v", err)
+	}
+	participant, err := fixture.Resolver.ResolveParticipant(t.Context(), principal, fixture.Project)
+	if err != nil {
+		t.Fatalf("ResolveParticipant: %v", err)
+	}
+	if participant != fixture.Participant {
+		t.Fatalf("ResolveParticipant = %q, want %q", participant, fixture.Participant)
 	}
 	if fixture.Dependency != "" {
 		if _, err := fixture.Resolver.ResolveDependency(t.Context(), principal, fixture.Project, fixture.Dependency); err != nil {
@@ -150,7 +159,7 @@ func RunSessionStoreTests(t *testing.T, factory func(*testing.T) SessionStoreFix
 	}
 	if want := fixture.Metadata.Attachment; want != nil {
 		got := loaded.Metadata.Attachment
-		if got == nil || got.MCPSessionID != want.MCPSessionID || got.ClientName != want.ClientName {
+		if got == nil || got.Subject != want.Subject || got.ClientName != want.ClientName {
 			t.Fatalf("attachment did not round-trip: got %+v, want %+v", got, want)
 		}
 	}

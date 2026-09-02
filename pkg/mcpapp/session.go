@@ -1,107 +1,87 @@
 package mcpapp
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"sync"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	sdd "github.com/networkteam/sdd/pkg/application"
 )
 
-// shellSession is the connection-local handle for a durable root workflow.
-// Authorization proof is never stored here; rootIdentity is only the most
-// recent request identity used when a disconnect has no request context.
+// shellSession is the server's in-memory replay of one durable session, keyed
+// by session ID and shared by every connection that presents its handle. It
+// holds no authorization: the handle is the capability, the store is the
+// authority, and this is a cache (d-cpt-aen). mu serializes the tool calls
+// that drive it.
 type shellSession struct {
-	id           string
-	root         *sdd.WorkflowSession
-	rootIdentity sdd.RequestIdentity
+	mu   sync.Mutex
+	root *sdd.WorkflowSession
+	// pending are the content hashes of blocks the call in flight served in
+	// full, recorded into the session ledger when the call's result is
+	// composed; seen dedups within the call.
+	pending []string
+	seen    map[string]bool
 }
 
-// sessionStore owns only MCP connection bindings. Durable session state,
-// attachment stamps, labels, and workflow events live behind Application ports.
-type sessionStore struct {
-	mu      sync.Mutex
-	byMCP   map[*mcp.ServerSession]*shellSession
-	watched map[*mcp.ServerSession]bool
-}
-
-func newSessionStore() *sessionStore {
-	return &sessionStore{
-		byMCP:   make(map[*mcp.ServerSession]*shellSession),
-		watched: make(map[*mcp.ServerSession]bool),
+// servedBefore reports whether the session's consumer already holds a block
+// with these exact bytes — from the ledger, or earlier in this call — and
+// marks it served when not.
+func (ss *shellSession) servedBefore(block string) bool {
+	hash := blockHash(block)
+	if ss.root.ServedBefore(hash) || ss.seen[hash] {
+		return true
 	}
-}
-
-func (st *sessionStore) markWatched(session *mcp.ServerSession) bool {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	if st.watched[session] {
-		return false
+	if ss.seen == nil {
+		ss.seen = map[string]bool{}
 	}
-	st.watched[session] = true
-	return true
+	ss.seen[hash] = true
+	ss.pending = append(ss.pending, hash)
+	return false
 }
 
-func (st *sessionStore) bound(session *mcp.ServerSession) *shellSession {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	return st.byMCP[session]
+// flushServed records what this call served in full into the session ledger.
+func (ss *shellSession) flushServed(ctx context.Context, identity sdd.RequestIdentity) error {
+	hashes := ss.pending
+	ss.pending, ss.seen = nil, nil
+	return ss.root.RecordServed(ctx, identity, hashes)
 }
 
-func (st *sessionStore) bind(session *mcp.ServerSession, workflow *shellSession) *shellSession {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	previous := st.byMCP[session]
-	st.byMCP[session] = workflow
-	if previous == workflow {
-		return nil
+func blockHash(block string) string {
+	sum := sha256.Sum256([]byte(block))
+	return hex.EncodeToString(sum[:])
+}
+
+// sessionCache holds the loaded sessions by ID.
+type sessionCache struct {
+	mu   sync.Mutex
+	byID map[sdd.SessionID]*shellSession
+}
+
+func newSessionCache() *sessionCache {
+	return &sessionCache{byID: map[sdd.SessionID]*shellSession{}}
+}
+
+func (c *sessionCache) get(id sdd.SessionID) *shellSession {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.byID[id]
+}
+
+// put caches a freshly loaded session, returning whichever load won when two
+// raced for the same ID.
+func (c *sessionCache) put(ss *shellSession) *shellSession {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if existing := c.byID[ss.root.ID()]; existing != nil {
+		return existing
 	}
-	return previous
+	c.byID[ss.root.ID()] = ss
+	return ss
 }
 
-func (st *sessionStore) unbind(session *mcp.ServerSession) *shellSession {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	workflow := st.byMCP[session]
-	delete(st.byMCP, session)
-	delete(st.watched, session)
-	return workflow
-}
-
-func (st *sessionStore) liveIDs() map[string]bool {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	result := make(map[string]bool, len(st.byMCP))
-	for _, workflow := range st.byMCP {
-		result[workflow.id] = true
-	}
-	return result
-}
-
-func (st *sessionStore) connections() []*mcp.ServerSession {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	result := make([]*mcp.ServerSession, 0, len(st.watched))
-	for session := range st.watched {
-		result = append(result, session)
-	}
-	return result
-}
-
-type sessionDescriptor struct {
-	Session      string               `json:"session" jsonschema:"session handle (project:session-id); pass to resume_session"`
-	Project      string               `json:"project,omitempty" jsonschema:"the project the session is bound to"`
-	Label        string               `json:"label,omitempty" jsonschema:"the session's subject — agent-supplied, falling back to the first line of the most recent drafted body; blank when nothing was drafted"`
-	Participant  string               `json:"participant,omitempty"`
-	Branch       string               `json:"branch,omitempty" jsonschema:"the session's declared branch binding"`
-	Anchor       string               `json:"anchor,omitempty" jsonschema:"entry the session's work is anchored on, when a procedure param carried one"`
-	Open         []instanceDescriptor `json:"open_instances" jsonschema:"running move instances with their current step (the session shell is not listed)"`
-	ClientName   string               `json:"client_name,omitempty" jsonschema:"name of the client whose attachment last drove the session, when one has"`
-	LastActivity string               `json:"last_activity,omitempty"`
-	Activity     string               `json:"activity" jsonschema:"active (an attachment stamped within the recency window) or idle — a hint for whether attaching may interrupt someone"`
-}
-
-type instanceDescriptor struct {
-	Instance  string `json:"instance"`
-	Procedure string `json:"procedure"`
-	Step      string `json:"step,omitempty"`
+func (c *sessionCache) evict(id sdd.SessionID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.byID, id)
 }

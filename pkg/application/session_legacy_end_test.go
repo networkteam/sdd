@@ -116,7 +116,7 @@ func TestLegacyEndIsDerivedFromTheShellsTerminalEvent(t *testing.T) {
 			f.writeLegacyLog(t, "s_legacy", tc.ended, tc.events...)
 
 			_, _, err := f.app.ResumeWorkflow(t.Context(), f.identity, f.project, sdd.WorkflowResumeRequest{
-				SessionID: "s_legacy", MCPSessionID: "mcp-1", UserWords: "pick the old dialogue back up",
+				SessionID: "s_legacy", ClientName: "mcp-1",
 			})
 			var appErr *sdd.ApplicationError
 			ended := errors.As(err, &appErr) && appErr.Code == sdd.ErrorSessionEnded

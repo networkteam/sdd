@@ -16,7 +16,11 @@ import (
 type rootAccess struct{ runtime *sdd.ProjectRuntime }
 
 func (r rootAccess) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
-	return sdd.Principal{Subject: identity.Subject, Participant: "Tester"}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+
+func (rootAccess) ResolveParticipant(context.Context, sdd.Principal, sdd.ProjectID) (string, error) {
+	return "Tester", nil
 }
 
 func (r rootAccess) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {

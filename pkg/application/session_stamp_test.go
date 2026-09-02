@@ -117,7 +117,7 @@ func newStampWorkflowApp(t *testing.T, graphDir, sessionsDir string, now func() 
 func TestEngineOperationAppendsOnceAndServesDoNotWrite(t *testing.T) {
 	application, sessions, _, _ := newStampWorkflowApp(t, "", "", time.Now)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,12 +137,9 @@ func TestEngineOperationAppendsOnceAndServesDoNotWrite(t *testing.T) {
 		t.Fatalf("advance performed %d session-store appends, want exactly 1 (no bind round-trip)", got)
 	}
 
-	// Serves are pure reads: reopening the shell, re-serving it, and serving
-	// all open work must not touch the session store.
+	// Serves are pure reads: re-serving the shell and serving all open work
+	// must not touch the session store.
 	before = sessions.appends.Load()
-	if _, err := w.Reopen(t.Context(), identity, ""); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := w.ServeShell(t.Context(), identity); err != nil {
 		t.Fatal(err)
 	}
@@ -154,52 +151,66 @@ func TestEngineOperationAppendsOnceAndServesDoNotWrite(t *testing.T) {
 	}
 }
 
-// TestDisplacedWriterFailsTypedImmediately covers I2 and the fail-loud rule:
-// once another client displaces the attachment, the displaced writer's very
-// next write fails typed synchronously — not a phantom success that surfaces
-// only on a later call — and nothing is persisted.
-func TestDisplacedWriterFailsTypedImmediately(t *testing.T) {
+// TestSecondClientLoadsAndBothMayWrite covers d-cpt-aen: the handle is the
+// capability, so a second client presenting the session ID loads it without
+// consent or takeover, both consumers may write (the version race between them
+// is absorbed), and the stamp records the client that last attached — not a
+// lock that the other's write would trip.
+func TestSecondClientLoadsAndBothMayWrite(t *testing.T) {
 	application, sessions, _, _ := newStampWorkflowApp(t, "", "", time.Now)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	first, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	serve, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"})
+	serve, err := first.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Another client attaches to the same session, displacing A's attachment. The
-	// session was just opened, so A's attachment reads recent: the consenting
-	// attach carries the user's words and takes over.
-	if _, _, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b", UserWords: "pick up where the other one left off", Takeover: true}); err != nil {
+	second, result, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: first.ID(), ClientName: "mcp-b"})
+	if err != nil {
+		t.Fatalf("a second client presenting the handle should load the session, got %v", err)
+	}
+	if result.Session != first.ID() || len(result.Open) != 2 {
+		t.Fatalf("resume result = %+v, want the session with its shell and one open move", result)
+	}
+	stored, err := sessions.Load(t.Context(), first.ID())
+	if err != nil {
 		t.Fatal(err)
 	}
-	// A's next write — a non-completing advance — must fail typed on this call,
-	// with zero durable appends, naming the displacement (not a bare ownership
-	// violation).
-	before := sessions.appends.Load()
-	_, advErr := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}})
-	if advErr == nil {
-		t.Fatal("displaced writer's advance should fail, got success")
+	if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.ClientName != "mcp-b" {
+		t.Fatalf("the stamp should record the client that last attached, got %+v", stored.Metadata.Attachment)
 	}
-	var appErr *sdd.ApplicationError
-	if !errors.As(advErr, &appErr) || appErr.Code != sdd.ErrorSessionDisplaced {
-		t.Fatalf("displaced advance error = %v, want typed ErrorSessionDisplaced on the first call", advErr)
+
+	// The first client's binding is now one version behind; its write resyncs
+	// and lands rather than failing.
+	if _, err := first.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}}); err != nil {
+		t.Fatalf("the first client's write after another attached should land, got %v", err)
 	}
-	if got := sessions.appends.Load() - before; got != 0 {
-		t.Fatalf("displaced advance persisted %d appends, want 0", got)
+	// And the second's, behind the first's write, lands the same way.
+	done, err := second.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"anchor": "two"}})
+	if err != nil {
+		t.Fatalf("the second client's write should land, got %v", err)
+	}
+	if done.Status != "completed" {
+		t.Fatalf("the second client's advance should complete the move, got %s at %q", done.Status, done.Step)
+	}
+	stored, err = sessions.Load(t.Context(), first.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.ClientName != "mcp-b" {
+		t.Fatalf("writes bump the stamp's activity but keep the last-attached client, got %+v", stored.Metadata.Attachment)
 	}
 }
 
 // TestSameWriterVersionRaceRetriesInvisibly covers decision 12's benign race:
-// when the stored version advances under a writer whose attachment is unchanged,
-// the next append resyncs and retries once — no error surfaces and the write
-// lands.
+// when the stored version advances under a writer, the next append resyncs and
+// retries once — no error surfaces and the write lands.
 func TestSameWriterVersionRaceRetriesInvisibly(t *testing.T) {
 	application, sessions, _, _ := newStampWorkflowApp(t, "", "", time.Now)
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,8 +218,7 @@ func TestSameWriterVersionRaceRetriesInvisibly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Advance the stored version behind the binding's back, keeping the same
-	// attachment: a benign same-writer version drift, not a displacement.
+	// Advance the stored version behind the binding's back.
 	stored, err := sessions.Load(t.Context(), w.ID())
 	if err != nil {
 		t.Fatal(err)
@@ -217,11 +227,11 @@ func TestSameWriterVersionRaceRetriesInvisibly(t *testing.T) {
 	if _, err := sessions.Append(t.Context(), w.ID(), stored.Version, sdd.SessionAppend{Metadata: &metadata}); err != nil {
 		t.Fatal(err)
 	}
-	// The binding's observed version is now stale. A same-writer advance must
-	// resync and retry invisibly — no error, and the write persists.
+	// The binding's observed version is now stale. The advance must resync and
+	// retry invisibly — no error, and the write persists.
 	before := sessions.appends.Load()
 	if _, err := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}}); err != nil {
-		t.Fatalf("same-writer version race should retry invisibly, got %v", err)
+		t.Fatalf("version race should retry invisibly, got %v", err)
 	}
 	if got := sessions.appends.Load() - before; got == 0 {
 		t.Fatal("the retried advance did not persist its append")
@@ -252,7 +262,7 @@ func TestSameWriterSecondConflictSurfaces(t *testing.T) {
 		return conflict
 	})
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,68 +296,59 @@ func (s *failOnceSessionStore) Append(ctx context.Context, id sdd.SessionID, ver
 	return s.SessionStore.Append(ctx, id, version, appendData)
 }
 
-// TestConsentedAttachRetriesPastRace covers the consent-check→append race: a
-// consenting attach that loses the append to a racing writer reloads, re-checks
-// consent, and retries once — the user who did everything right never sees a raw
-// version conflict; the attach lands.
-func TestConsentedAttachRetriesPastRace(t *testing.T) {
-	t0 := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
-	now := t0
+// TestLoadStampRetriesPastRace covers the load→stamp race: a load whose stamp
+// append loses to a racing writer reloads and retries once — the client never
+// sees a raw version conflict; the load lands with its stamp.
+func TestLoadStampRetriesPastRace(t *testing.T) {
 	failOnce := &failOnceSessionStore{}
-	application, sessions, _, _ := newStampWorkflowApp(t, "", "", func() time.Time { return now }, func(s sdd.SessionStore) sdd.SessionStore {
+	application, sessions, _, _ := newStampWorkflowApp(t, "", "", time.Now, func(s sdd.SessionStore) sdd.SessionStore {
 		failOnce.SessionStore = s
 		return failOnce
 	})
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"}); err != nil {
 		t.Fatal(err)
 	}
-	// Idle so the foreign attach needs only the user's words; arm one lost race.
-	now = t0.Add(sdd.SessionRecencyWindow + time.Minute)
 	failOnce.armed.Store(true)
-	_, result, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b", UserWords: "pick this up"})
+	_, result, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"})
 	if err != nil {
-		t.Fatalf("consented attach should retry past a version race, got %v", err)
+		t.Fatalf("load should retry past a version race, got %v", err)
 	}
 	if result.Session != w.ID() {
-		t.Fatalf("attach after retry should land on %s, got %s", w.ID(), result.Session)
+		t.Fatalf("load after retry should land on %s, got %s", w.ID(), result.Session)
 	}
 	stored, err := sessions.Load(t.Context(), w.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.MCPSessionID != "mcp-b" {
-		t.Fatalf("the retried claim should leave mcp-b as the attachment, got %+v", stored.Metadata.Attachment)
+	if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.ClientName != "mcp-b" {
+		t.Fatalf("the retried stamp should record mcp-b, got %+v", stored.Metadata.Attachment)
 	}
 }
 
-// TestAbandonMidTeardownLeavesVictimAttachmentIntact is the regression for 1a:
-// teardown never becomes the attachment, so a failure at its final append
-// leaves the victim's attachment untouched — no phantom hold, no abandon record.
-func TestAbandonMidTeardownLeavesVictimAttachmentIntact(t *testing.T) {
-	t0 := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
-	now := t0
+// TestAbandonMidTeardownLeavesSessionIntact: teardown writes nothing before its
+// final append, so a failure there leaves the session as it was — the stamp
+// untouched, no abandon record.
+func TestAbandonMidTeardownLeavesSessionIntact(t *testing.T) {
 	conflict := &conflictSessionStore{}
-	application, sessions, _, _ := newStampWorkflowApp(t, "", "", func() time.Time { return now }, func(s sdd.SessionStore) sdd.SessionStore {
+	application, sessions, _, _ := newStampWorkflowApp(t, "", "", time.Now, func(s sdd.SessionStore) sdd.SessionStore {
 		conflict.SessionStore = s
 		return conflict
 	})
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"}); err != nil {
 		t.Fatal(err)
 	}
-	// Idle so teardown is allowed; then force its final append to fail.
-	now = t0.Add(sdd.SessionRecencyWindow + time.Minute)
 	conflict.fail.Store(true)
-	if _, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b"}, "boom"); err == nil {
+	if _, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"}, "boom"); err == nil {
 		t.Fatal("expected the teardown's final append to fail")
 	}
 	conflict.fail.Store(false)
@@ -355,23 +356,24 @@ func TestAbandonMidTeardownLeavesVictimAttachmentIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.MCPSessionID != "mcp-a" {
-		t.Fatalf("a failed teardown must leave the victim's attachment intact, got %+v", stored.Metadata.Attachment)
+	if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.ClientName != "mcp-a" {
+		t.Fatalf("a failed teardown must leave the stamp intact, got %+v", stored.Metadata.Attachment)
 	}
 	if stored.Metadata.Ended != nil {
 		t.Fatalf("a failed teardown must record no abandon, got %+v", stored.Metadata.Ended)
 	}
 }
 
-// TestAbandonedWhileAttachedNamesActorTimeReason covers D1: after a session is
-// torn down by handle, the still-attached client's next write fails typed and
-// the interpreted error names who abandoned it, when, and why.
-func TestAbandonedWhileAttachedNamesActorTimeReason(t *testing.T) {
-	t0 := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
-	now := t0
-	application, sessions, _, _ := newStampWorkflowApp(t, "", "", func() time.Time { return now })
+// TestAbandonByHandleNamesActorTimeReason covers D1 under d-cpt-aen: holding
+// the handle is enough to tear a session down, however recently it was acted
+// on. A client still holding the loaded session hears the ending on its next
+// write — typed, naming who abandoned it, when, and why — and no client can
+// load the torn-down handle again.
+func TestAbandonByHandleNamesActorTimeReason(t *testing.T) {
+	now := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
+	application, _, _, _ := newStampWorkflowApp(t, "", "", func() time.Time { return now })
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-a"})
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,38 +381,31 @@ func TestAbandonedWhileAttachedNamesActorTimeReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Time passes past the recency window so the attachment reads idle: an active
-	// session would refuse teardown. Another connection then tears it down.
-	now = t0.Add(sdd.SessionRecencyWindow + time.Minute)
-	if _, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-b"}, "stale branch"); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := sessions.Load(t.Context(), w.ID())
+	// The stamp is fresh: an "actively driven" session is no bar to teardown.
+	result, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"}, "stale branch")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Attaching to a torn-down handle is refused: an ended dialogue is kept to be
-	// read, never resumed.
-	_, _, reopenErr := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), MCPSessionID: "mcp-c", UserWords: "reopen the torn-down handle"})
-	var reopenAppErr *sdd.ApplicationError
-	if !errors.As(reopenErr, &reopenAppErr) || reopenAppErr.Code != sdd.ErrorSessionEnded {
-		t.Fatalf("reopening a torn-down handle = %v, want typed ErrorSessionEnded", reopenErr)
+	if !result.Abandoned || len(result.Discarded) != 1 {
+		t.Fatalf("teardown result = %+v, want the one open move discarded", result)
 	}
-	// The terminal record wins over a newer stamp (item 5): the victim's write must
-	// hear the abandon, not "taken over". No served path can stamp an ended session
-	// any more, so the precondition is written directly.
-	newer := stored.Metadata
-	newer.Attachment = &sdd.Attachment{Subject: newer.Subject, MCPSessionID: "mcp-c", LastActivity: now}
-	if _, err := sessions.Append(t.Context(), w.ID(), stored.Version, sdd.SessionAppend{Metadata: &newer}); err != nil {
-		t.Fatal(err)
+
+	_, _, loadErr := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-c"})
+	var loadAppErr *sdd.ApplicationError
+	if !errors.As(loadErr, &loadAppErr) || loadAppErr.Code != sdd.ErrorSessionEnded {
+		t.Fatalf("loading a torn-down handle = %v, want typed ErrorSessionEnded", loadErr)
 	}
+
 	_, advErr := w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: serve.Instance, Report: map[string]any{"body": "one"}})
 	var appErr *sdd.ApplicationError
-	if !errors.As(advErr, &appErr) || appErr.Code != sdd.ErrorSessionDisplaced {
-		t.Fatalf("abandoned-while-attached advance error = %v, want ErrorSessionDisplaced", advErr)
+	if !errors.As(advErr, &appErr) || appErr.Code != sdd.ErrorSessionEnded {
+		t.Fatalf("write on a torn-down session = %v, want ErrorSessionEnded", advErr)
+	}
+	if appErr.Ended == nil || appErr.Ended.Act != sdd.SessionAbandoned {
+		t.Fatalf("the refusal should carry the abandon record, got %+v", appErr.Ended)
 	}
 	msg := advErr.Error()
-	for _, want := range []string{"abandoned by " + stored.Metadata.Participant, now.Format(time.RFC3339), "reason: stale branch"} {
+	for _, want := range []string{"abandoned by Christopher", now.Format(time.RFC3339), "reason: stale branch"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("abandon message %q missing %q (actor/time/reason)", msg, want)
 		}
@@ -425,7 +420,7 @@ func TestAttachmentActiveClampsClockSkew(t *testing.T) {
 	now := t0
 	application, _, graphDir, sessionsDir := newStampWorkflowApp(t, "", "", func() time.Time { return now })
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,24 +441,24 @@ func TestAttachmentActiveClampsClockSkew(t *testing.T) {
 }
 
 // TestKillWithoutGoodbyeClassifiesIdle covers AC9/I7: session status is derived
-// from the store alone. A runtime that wrote events and open work but never
-// recorded a leave leaves the attachment stamp present; a fresh runtime whose
-// clock has moved past the recency window lists the session as idle with its
-// open work — no liveness flag, no expiry.
+// from the store alone. A runtime that wrote events and open work and then died
+// leaves the attachment stamp present; a fresh runtime whose clock has moved
+// past the recency window lists the session as idle with its open work — no
+// liveness flag, no expiry, nothing ended.
 func TestKillWithoutGoodbyeClassifiesIdle(t *testing.T) {
 	t0 := time.Date(2026, 7, 13, 5, 0, 0, 0, time.UTC)
 	now := t0
 	application, _, graphDir, sessionsDir := newStampWorkflowApp(t, "", "", func() time.Time { return now })
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-1"})
+	w, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "terminal-test"}); err != nil {
 		t.Fatal(err)
 	}
-	// The server dies here: no Leave/Release is ever called. A fresh runtime
-	// opens over the same store with its clock moved past the recency window.
+	// The server dies here. A fresh runtime opens over the same store with its
+	// clock moved past the recency window.
 	now = t0.Add(sdd.SessionRecencyWindow + time.Minute)
 	revived, _, _, _ := newStampWorkflowApp(t, graphDir, sessionsDir, func() time.Time { return now })
 	sessionsList, err := revived.ListWorkflowSessions(t.Context(), identity, "example")
@@ -478,7 +473,7 @@ func TestKillWithoutGoodbyeClassifiesIdle(t *testing.T) {
 		t.Fatal("the killed session should still list its open work")
 	}
 	if got.Attachment == nil {
-		t.Fatal("the attachment stamp should survive a kill without a leave event")
+		t.Fatal("the attachment stamp should survive a kill")
 	}
 	if got.Active {
 		t.Fatal("a stale stamp past the recency window should classify idle, not active")

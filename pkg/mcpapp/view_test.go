@@ -11,14 +11,14 @@ import (
 )
 
 // TestViewFirstHitHint covers the view-tool breadcrumb (AC8): the first view
-// call on a connection carries the pointer to the view-grammar fact, later
-// calls carry nothing. The pointer is keyed to the connection, so a second
-// connection pays it again.
+// call in a session carries the pointer to the view-grammar fact, later calls
+// carry nothing. The pointer is keyed to the session, so a second session pays
+// it again.
 func TestViewFirstHitHint(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	const factMark = "view layout grammar"
 
-	for _, name := range []string{"first connection", "second connection"} {
+	for _, name := range []string{"first session", "second session"} {
 		cs := connect(t, env.srv)
 		session := openSession(t, cs).Session
 		var v1, v2 mcpserver.ViewResult

@@ -194,7 +194,11 @@ type accessResolver struct {
 }
 
 func (r *accessResolver) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
-	return sdd.Principal{Subject: identity.Subject, Participant: r.participant}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+
+func (r *accessResolver) ResolveParticipant(context.Context, sdd.Principal, sdd.ProjectID) (string, error) {
+	return r.participant, nil
 }
 
 func (r *accessResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {
@@ -272,22 +276,23 @@ type Session struct {
 	ID    sdd.SessionID
 }
 
-// Open opens a fresh workflow session under the connection id.
+// Open opens a fresh workflow session; connID names the client for the
+// attachment stamp.
 func (w *World) Open(t *testing.T, connID string) *Session {
 	t.Helper()
-	workflow, serve, err := w.App.OpenWorkflow(t.Context(), w.Identity, "proctest", sdd.WorkflowOpenRequest{MCPSessionID: connID})
+	workflow, serve, err := w.App.OpenWorkflow(t.Context(), w.Identity, "proctest", sdd.WorkflowOpenRequest{ClientName: connID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &Session{World: w, WF: workflow, ID: serve.Session}
 }
 
-// Resume re-attaches to a session from another connection (takeover), as a
-// re-attached or restarted client would.
+// Resume loads a session by ID from another client, as a re-attached or
+// restarted client would.
 func (w *World) Resume(t *testing.T, sessionID sdd.SessionID, connID string) (*Session, sdd.WorkflowResumeResult) {
 	t.Helper()
 	workflow, result, err := w.App.ResumeWorkflow(t.Context(), w.Identity, "proctest", sdd.WorkflowResumeRequest{
-		SessionID: sessionID, MCPSessionID: connID, UserWords: "proctest re-attach", Takeover: true,
+		SessionID: sessionID, ClientName: connID,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -48,7 +48,11 @@ func (r *failAtPrincipalResolver) ResolvePrincipal(_ context.Context, identity s
 	if r.failAt != 0 && r.calls == r.failAt {
 		return sdd.Principal{}, errors.New("injected shell authorization failure")
 	}
-	return sdd.Principal{Subject: identity.Subject, Participant: "Christopher"}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+
+func (r *failAtPrincipalResolver) ResolveParticipant(context.Context, sdd.Principal, sdd.ProjectID) (string, error) {
+	return "Christopher", nil
 }
 
 func (r *failAtPrincipalResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {
@@ -78,7 +82,7 @@ func TestTerminalWorkflowActionsSurfaceShellServeFailure(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			application, resolver := newShellFailureApplication(t)
 			identity := sdd.RequestIdentity{Subject: "christopher"}
-			workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "mcp-" + action})
+			workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "mcp-" + action})
 			if err != nil {
 				t.Fatal(err)
 			}

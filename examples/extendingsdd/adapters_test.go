@@ -51,7 +51,11 @@ func (llmRunner) Run(context.Context, llm.Request) (llm.Result, error) {
 type accessResolver struct{ runtime *sdd.ProjectRuntime }
 
 func (accessResolver) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
-	return sdd.Principal{Subject: identity.Subject, Participant: "Example"}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+
+func (accessResolver) ResolveParticipant(context.Context, sdd.Principal, sdd.ProjectID) (string, error) {
+	return "Example", nil
 }
 func (accessResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {
 	return sdd.ProjectList{}, nil

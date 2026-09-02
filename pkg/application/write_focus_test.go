@@ -199,7 +199,7 @@ func TestWorkflowCaptureFocusPersistsThroughRealNewEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "focus-workflow"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "focus-workflow"})
 	if err != nil {
 		t.Fatal(err)
 	}

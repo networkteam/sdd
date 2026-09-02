@@ -88,8 +88,9 @@ summary: This project's own working principles replace the shipped posture.
 }
 
 // TestSupersedingPrinciplesMidSessionReservesTheLane pins the re-entry half
-// (d-tac-41n AC3): with nothing changed a reorient stubs the lane, and once the
-// principles are superseded mid-session the changed lane re-serves on its own.
+// (d-tac-41n AC3): with nothing changed a later serve stubs the lane, and once
+// the principles are superseded mid-session the changed lane re-serves on its
+// own.
 func TestSupersedingPrinciplesMidSessionReservesTheLane(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
@@ -98,10 +99,10 @@ func TestSupersedingPrinciplesMidSessionReservesTheLane(t *testing.T) {
 		t.Fatalf("precondition: the door serves the principles, got %q", door.Framing)
 	}
 
-	var converged mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &converged)
-	if strings.Contains(converged.Framing, "## Working principles") {
-		t.Fatalf("an unchanged principles lane must stub like any other, got %q", converged.Framing)
+	var unchanged mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &unchanged)
+	if strings.Contains(unchanged.Framing, "## Working principles") {
+		t.Fatalf("an unchanged principles lane must stub like any other, got %q", unchanged.Framing)
 	}
 
 	path := filepath.Join(env.graphDir, "2026/08/11-090000-s-prc-own.md")
@@ -128,8 +129,8 @@ summary: A locally superseded posture, written mid-session.
 		t.Fatal(err)
 	}
 
-	var afterWrite mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &afterWrite)
+	var afterWrite mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &afterWrite)
 	if !strings.Contains(afterWrite.Framing, "House rules") {
 		t.Fatalf("the changed principles lane must re-serve with the new words, got %q", afterWrite.Framing)
 	}

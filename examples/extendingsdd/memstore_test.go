@@ -22,7 +22,7 @@ func TestExternalSessionStoreConformance(t *testing.T) {
 			Metadata: sdd.SessionMetadata{
 				ID: "session-1", Subject: "example-user", Project: "example", Participant: "Example",
 				Attachment: &sdd.Attachment{
-					Subject: "example-user", MCPSessionID: "mcp-1", ClientName: "test-client",
+					Subject: "example-user", ClientName: "test-client",
 					LastActivity: time.Now().UTC().Round(0),
 				},
 			},
@@ -90,7 +90,7 @@ func (f collectFixture) writeSession(t *testing.T, id sdd.SessionID, ended time.
 	metadata := sdd.SessionMetadata{
 		ID: id, Subject: collectSubject, Project: f.project, Participant: "Example",
 		Attachment: &sdd.Attachment{
-			Subject: collectSubject, ClientName: "test", MCPSessionID: "c-" + string(id),
+			Subject: collectSubject, ClientName: "c-" + string(id),
 			LastActivity: f.now.Add(-72 * time.Hour),
 		},
 		UpdatedAt: f.now.Add(-72 * time.Hour),

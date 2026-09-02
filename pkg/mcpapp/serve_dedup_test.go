@@ -30,7 +30,7 @@ func withheldLanes(t *testing.T, instructions string) []string {
 	}
 	names, _, found := strings.Cut(rest, " — resume_session")
 	if !found {
-		t.Fatalf("withheld-lanes line lacks its fullReplay breadcrumb: %q", instructions)
+		t.Fatalf("withheld-lanes line lacks its resume_session breadcrumb: %q", instructions)
 	}
 	return strings.Split(names, ", ")
 }
@@ -173,8 +173,8 @@ func TestCaptureLanesDedupAcrossInstances(t *testing.T) {
 // TestReportSchemaDedup pins schema dedup on canonical bytes: the first
 // capture serve carries the full report schema, an identical schema on a
 // second capture instance's assemble collapses to the served-earlier stub
-// naming the step, and fullReplay wipes the memory so the position re-serves
-// the schema in full.
+// naming the step, and resume_session resets the memory so the position
+// re-serves the schema in full.
 func TestReportSchemaDedup(t *testing.T) {
 	env := newTestServer(t, nil, t.TempDir(), "")
 	cs := connect(t, env.srv)
@@ -192,7 +192,7 @@ func TestReportSchemaDedup(t *testing.T) {
 	}
 
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{"fullReplay": true}, &resumed)
+	call(t, cs, "resume_session", map[string]any{"session": session}, &resumed)
 	fullCaptures := 0
 	for _, open := range resumed.Open {
 		if open.Procedure != "capture" {
@@ -204,7 +204,7 @@ func TestReportSchemaDedup(t *testing.T) {
 		}
 	}
 	if fullCaptures == 0 {
-		t.Fatalf("fullReplay must re-serve the capture report schema in full, got %+v", resumed.Open)
+		t.Fatalf("resume_session must re-serve the capture report schema in full, got %+v", resumed.Open)
 	}
 }
 
@@ -236,14 +236,12 @@ func TestAnchoredCaptureStaticLanesStillDedup(t *testing.T) {
 // onto base_junction carries no report schema on the wire — neither the full
 // schema nor a served-earlier stub — and after base landings the schema stays
 // re-servable in full. The strict poisoning flow (a base serve recording
-// schema bytes this connection never received top-level, stubbing a later
-// delivering serve) is unreachable through the tool surface: every attach
-// path — the start_session door as much as a resume_session attach — serves
-// the shell junction top-level, recording its schema, before any base landing
-// can occur, and every served-memory wipe (fullReplay, a repeated
-// start_session) re-serves it in the same call. So this pins the observable
-// halves: the wire shape of both base landings, and the full re-serve after
-// them.
+// schema bytes the session's consumer never received top-level, stubbing a
+// later delivering serve) is unreachable through the tool surface: both doors
+// serve the shell junction top-level, recording its schema, before any base
+// landing can occur, and the served-memory reset (resume_session) re-serves it
+// in the same call. So this pins the observable halves: the wire shape of both
+// base landings, and the full re-serve after them.
 func TestSchemaNotRecordedOnBaseServes(t *testing.T) {
 	env := newTestServer(t, nil, t.TempDir(), "")
 	cs := connect(t, env.srv)
@@ -273,10 +271,10 @@ func TestSchemaNotRecordedOnBaseServes(t *testing.T) {
 		t.Fatalf("an abandon base_junction serve must carry no report schema, got %v", schema)
 	}
 
-	// The base landings left the schema memory intact: a full replay serves
+	// The base landings left the schema memory intact: a reorientation serves
 	// the shell junction schema in full again.
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{"fullReplay": true}, &resumed)
+	call(t, cs, "resume_session", map[string]any{"session": door.Session}, &resumed)
 	shell := openServe(t, resumed, "user-dialogue")
 	requireFullReportSchema(t, "replayed shell junction", shell.ReportSchema)
 }

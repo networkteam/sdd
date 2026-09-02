@@ -1,7 +1,6 @@
 package application
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -10,11 +9,6 @@ import (
 // attachmentTimeFormat renders an attachment's last activity or ending in a
 // stable, unambiguous form for the interpreted-conflict and consent messages.
 const attachmentTimeFormat = time.RFC3339
-
-// RecordedStateOnlyNote is the single statement of the takeover fidelity limit,
-// composed into the consent refusal and the successful-attach note so both
-// runtime surfaces read identically.
-const RecordedStateOnlyNote = "Only recorded session state resumes — step position, collected fields, staged files — not the other conversation's context."
 
 // reorientSuffix is the shared next-step guidance appended to displacement and
 // surfaced-conflict messages.
@@ -42,57 +36,29 @@ func SupportedSessionCodecVersion(version uint32) bool {
 	return version >= FirstSessionCodecVersion && version <= SessionCodecVersion
 }
 
-// SessionRecencyWindow is the single threshold separating an active attachment
-// from an idle one. Erring long is cheap, so it is generous.
+// SessionRecencyWindow is the single threshold separating an active session
+// from an idle one in listings — a hint derived from the last-activity stamp,
+// never a gate. Erring long is cheap, so it is generous.
 const SessionRecencyWindow = 15 * time.Minute
 
 // ChooserKind classifies who answers a pending chooser, mirrored from the
 // engine for the served workflow response.
 type ChooserKind string
 
-// SessionBinding is a connection's write token for a durable session: identity
-// plus the attachment it drives and the version it last observed. Append CAS on
-// the version is the sole integrity mechanism.
+// SessionBinding is a loaded session's write token: identity plus the version
+// it last observed. Append CAS on the version is the sole integrity mechanism;
+// possession of the handle is the whole authorization (d-cpt-aen).
 type SessionBinding struct {
-	SessionID    SessionID
-	Subject      string
-	Project      ProjectID
-	MCPSessionID string
-	Version      uint64
+	SessionID SessionID
+	Subject   string
+	Project   ProjectID
+	Version   uint64
 }
 
-// ReleaseSession clears this connection's own live attachment stamp so the
-// session stops reading held. Nothing is recorded: stepping away is transport,
-// not an act on the dialogue (d-cpt-rw7). Releasing means "clear MY stamp", so
-// when the current attachment is absent or belongs to another MCP session —
-// already displaced, ended, or taken over — it is a no-op.
-func (a *Application) ReleaseSession(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding) error {
-	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
-	if err != nil {
-		return err
-	}
-	stored, err := runtime.options.Sessions.Load(ctx, binding.SessionID)
-	if err != nil {
-		return err
-	}
-	if err := validateStoredSession(stored); err != nil {
-		return err
-	}
-	current := stored.Metadata.Attachment
-	if current == nil || current.MCPSessionID != binding.MCPSessionID {
-		return nil
-	}
-	metadata := stored.Metadata
-	metadata.Attachment = nil
-	metadata.UpdatedAt = runtime.options.Now().UTC().Round(0)
-	_, err = runtime.options.Sessions.Append(ctx, binding.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
-	return err
-}
-
-// attachmentActive reports whether an attachment counts as active: present and
-// stamped within the recency window on either side of now. A stale stamp (a
-// server killed without a leave event) reads idle, and so does a far-future
-// stamp from clock skew — activity outside [-window, +window) is not "now".
+// attachmentActive reports whether a session reads active: stamped within the
+// recency window on either side of now. A stale stamp reads idle, and so does
+// a far-future stamp from clock skew — activity outside [-window, +window) is
+// not "now".
 func attachmentActive(att *Attachment, now time.Time) bool {
 	if att == nil {
 		return false
@@ -102,11 +68,7 @@ func attachmentActive(att *Attachment, now time.Time) bool {
 }
 
 func sessionBindingFrom(stored StoredSession) SessionBinding {
-	binding := SessionBinding{SessionID: stored.Metadata.ID, Subject: stored.Metadata.Subject, Project: stored.Metadata.Project, Version: stored.Version}
-	if stored.Metadata.Attachment != nil {
-		binding.MCPSessionID = stored.Metadata.Attachment.MCPSessionID
-	}
-	return binding
+	return SessionBinding{SessionID: stored.Metadata.ID, Subject: stored.Metadata.Subject, Project: stored.Metadata.Project, Version: stored.Version}
 }
 
 func validateStoredSession(stored StoredSession) error {
@@ -118,14 +80,12 @@ func validateStoredSession(stored StoredSession) error {
 	return nil
 }
 
-// verifyBinding enforces subject/project immutability, the attachment-identity
-// check (my MCP session is still the current attachment), and the version CAS.
-// A displaced writer fails typed as ErrorSessionDisplaced (naming who advanced
-// the session and how); a genuine identity/project violation is
-// ErrorSessionOwnership; a benign same-writer version race is
-// ErrorSessionConflict.
+// verifyBinding enforces subject/project immutability, refuses a dialogue that
+// has ended, and applies the version CAS. A benign same-writer version race is
+// ErrorSessionConflict; a genuine identity/project violation is
+// ErrorSessionOwnership.
 func verifyBinding(stored StoredSession, binding SessionBinding) error {
-	if err := verifyAttachment(stored, binding); err != nil {
+	if err := verifyOwnership(stored, binding); err != nil {
 		return err
 	}
 	if stored.Version != binding.Version {
@@ -134,10 +94,10 @@ func verifyBinding(stored StoredSession, binding SessionBinding) error {
 	return nil
 }
 
-// verifyAttachment checks immutable identity and that this binding's MCP session
-// is still the current attachment, without the version CAS. It is the shared
-// front half of verifyBinding and the resync retry.
-func verifyAttachment(stored StoredSession, binding SessionBinding) error {
+// verifyOwnership checks immutable identity and that the dialogue has not
+// ended, without the version CAS. It is the shared front half of verifyBinding
+// and the resync retry.
+func verifyOwnership(stored StoredSession, binding SessionBinding) error {
 	if err := validateStoredSession(stored); err != nil {
 		return err
 	}
@@ -145,31 +105,10 @@ func verifyAttachment(stored StoredSession, binding SessionBinding) error {
 	if m.ID != binding.SessionID || m.Subject != binding.Subject || m.Project != binding.Project {
 		return &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
 	}
-	if att := m.Attachment; att == nil || att.MCPSessionID != binding.MCPSessionID {
-		return displacedError(stored)
+	if end := m.Ended; end != nil {
+		return endedSessionError(m, *end)
 	}
 	return nil
-}
-
-// displacedError interprets a lost attachment for the writer that lost it: how
-// its world ended (abandoned, concluded) or who holds it now (a takeover). The
-// terminal record wins even when a newer attachment exists, so a writer whose
-// dialogue was destroyed hears that, not "taken over" by whoever reopened
-// afterward.
-func displacedError(stored StoredSession) error {
-	m := stored.Metadata
-	if end := m.Ended; end != nil {
-		return &ApplicationError{Code: ErrorSessionDisplaced, Ended: end, Message: endedMessage(m, *end)}
-	}
-	if att := m.Attachment; att != nil {
-		return &ApplicationError{
-			Code: ErrorSessionDisplaced, Attachment: att,
-			Message: fmt.Sprintf("taken over by %s at %s; your position may be stale — %s",
-				ClientLabel(att.ClientName), att.LastActivity.Format(attachmentTimeFormat), reorientSuffix),
-		}
-	}
-	return &ApplicationError{Code: ErrorSessionDisplaced,
-		Message: fmt.Sprintf("this session's attachment was displaced — %s", reorientSuffix)}
 }
 
 // endedMessage tells a writer whose dialogue is over how it ended, naming
@@ -190,15 +129,6 @@ func endedMessage(m SessionMetadata, end SessionEnd) string {
 // over, naming how it ended and the one path that works instead.
 func endedSessionError(m SessionMetadata, end SessionEnd) error {
 	return &ApplicationError{Code: ErrorSessionEnded, Ended: &end, Message: endedMessage(m, end)}
-}
-
-// ClientLabel names a client for a conflict or consent message, falling back
-// when the transport carried no client name (e.g. bare stdio).
-func ClientLabel(name string) string {
-	if strings.TrimSpace(name) == "" {
-		return "another client"
-	}
-	return name
 }
 
 // actorLabel names who acted on the session for an abandon message. A log with

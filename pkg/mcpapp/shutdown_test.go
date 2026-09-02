@@ -11,7 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestShutdownClosesTrackedSessionsAndRejectsNewOnes(t *testing.T) {
+func TestShutdownClosesLiveSessionsAndRejectsNewOnes(t *testing.T) {
 	server := newLifecycleTestServer()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverSession, err := server.Connect(t.Context(), serverTransport)
@@ -93,8 +93,8 @@ func TestShutdownContextBoundsInFlightSessionDrain(t *testing.T) {
 }
 
 func newLifecycleTestServer() *Server {
-	server := &Server{sessions: newSessionStore(), servedBlocks: map[*mcp.ServerSession]map[[32]byte]bool{}}
+	server := &Server{sessions: newSessionCache()}
 	server.mcp = mcp.NewServer(&mcp.Implementation{Name: "lifecycle-test", Version: "test"}, nil)
-	server.mcp.AddReceivingMiddleware(server.trackSessionMiddleware)
+	server.mcp.AddReceivingMiddleware(server.refuseWhileClosing)
 	return server
 }

@@ -51,7 +51,7 @@ func TestCaptureOverviewGroundingSurvivesServerRestart(t *testing.T) {
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs2, "resume_session", map[string]any{"session": door.Session, "userWords": "continue the capture session"}, &resumed)
+	call(t, cs2, "resume_session", map[string]any{"session": door.Session}, &resumed)
 
 	var reServed *mcpserver.ServeResult
 	for i := range resumed.Open {

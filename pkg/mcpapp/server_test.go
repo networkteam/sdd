@@ -385,18 +385,9 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 // connect attaches an in-memory client session to the server.
 func connect(t *testing.T, srv *mcpserver.Server) *mcp.ClientSession {
 	t.Helper()
-	cs, _ := connectPair(t, srv)
-	return cs
-}
-
-// connectPair connects like connect but also returns the server session, so a
-// test can drive the server-side lifecycle (Disconnect/Shutdown) directly.
-func connectPair(t *testing.T, srv *mcpserver.Server) (*mcp.ClientSession, *mcp.ServerSession) {
-	t.Helper()
 	ctx := t.Context()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	serverSession, err := srv.Connect(ctx, serverTransport)
-	if err != nil {
+	if _, err := srv.Connect(ctx, serverTransport); err != nil {
 		t.Fatal(err)
 	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
@@ -404,11 +395,8 @@ func connectPair(t *testing.T, srv *mcpserver.Server) (*mcp.ClientSession, *mcp.
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		_ = srv.Disconnect(context.Background(), serverSession)
-		_ = cs.Close()
-	})
-	return cs, serverSession
+	t.Cleanup(func() { _ = cs.Close() })
+	return cs
 }
 
 // openSession enters through the door: start_session opens the dialogue
@@ -616,7 +604,7 @@ Probe entry %02d: the flux capacitor drill needs observing.
 }
 
 // TestVocabularyBlockForNonEnglishGraphs serves the bundled translation
-// table exactly once per connection when the graph language is non-English —
+// table exactly once per session when the graph language is non-English —
 // locale rendering's engine-surface home (d-tac-dbk, s-tac-fgy).
 func TestVocabularyBlockForNonEnglishGraphs(t *testing.T) {
 	env := newTestServerConfig(t, nil, "", "", "de")
@@ -632,7 +620,7 @@ func TestVocabularyBlockForNonEnglishGraphs(t *testing.T) {
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &serve)
 	if serve.Vocabulary != "" {
-		t.Fatalf("the vocabulary serves once per connection, got it again: %q", serve.Vocabulary)
+		t.Fatalf("the vocabulary serves once per session, got it again: %q", serve.Vocabulary)
 	}
 }
 
@@ -674,7 +662,7 @@ func TestToolSurfaceMatchesSpec(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{
-		"abandon", "bind_branch", "info", "list_sessions", "next", "park", "read_attachment",
+		"abandon", "bind_branch", "info", "next", "park", "read_attachment",
 		"registry", "resume_session", "search", "show", "stage_attachment",
 		"start_procedure", "start_session", "view",
 	}
@@ -694,42 +682,28 @@ func TestBindBranchToolPersistsAndProjectsAcrossResume(t *testing.T) {
 		t.Fatalf("bind result = %+v", bound)
 	}
 
-	// A fresh start_session call re-serves this connection's current door and
-	// carries the now-durable branch in the session info.
-	var reopened mcpserver.ServeResult
-	call(t, cs, "start_session", map[string]any{}, &reopened)
-	if reopened.Session != door.Session || reopened.Branch != "feature/session" {
-		t.Fatalf("door projection = %+v", reopened)
+	// A reorientation carries the now-durable branch in the session info.
+	var reoriented mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{"session": door.Session}, &reoriented)
+	if reoriented.Session != door.Session || reoriented.Branch != "feature/session" {
+		t.Fatalf("reorientation projection = %+v", reoriented)
 	}
-	if !strings.Contains(reopened.Framing, "Branch binding: feature/session") {
-		t.Fatalf("bound door framing = %q", reopened.Framing)
+	if !strings.Contains(reoriented.Framing, "Branch binding: feature/session") {
+		t.Fatalf("bound framing = %q", reoriented.Framing)
 	}
 
-	// Keep one move open so the dialogue appears in discovery.
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &serve)
 
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
-	var listed mcpserver.ListSessionsResult
-	call(t, cs2, "list_sessions", map[string]any{}, &listed)
-	if len(listed.Sessions) != 1 || listed.Sessions[0].Branch != "feature/session" {
-		t.Fatalf("list projection after restart = %+v", listed.Sessions)
-	}
-
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs2, "resume_session", map[string]any{
-		"session": door.Session, "userWords": "resume the bound branch session",
-	}, &resumed)
+	call(t, cs2, "resume_session", map[string]any{"session": door.Session}, &resumed)
 	if resumed.Branch != "feature/session" {
-		t.Fatalf("resume projection = %+v", resumed)
+		t.Fatalf("resume projection after restart = %+v", resumed)
 	}
 	if !strings.Contains(resumed.Framing, "Branch binding: feature/session") {
-		t.Fatalf("fresh resume framing = %q", resumed.Framing)
-	}
-	call(t, cs2, "resume_session", map[string]any{}, &resumed)
-	if resumed.Branch != "feature/session" {
-		t.Fatalf("reorientation projection = %+v", resumed)
+		t.Fatalf("resume framing after restart = %q", resumed.Framing)
 	}
 
 	var cleared mcpserver.BindBranchResult
@@ -739,7 +713,7 @@ func TestBindBranchToolPersistsAndProjectsAcrossResume(t *testing.T) {
 	}
 }
 
-func TestBindBranchToolValidatesArgumentsAndAttachment(t *testing.T) {
+func TestBindBranchToolValidatesArguments(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	door := openSession(t, cs)
@@ -759,10 +733,12 @@ func TestBindBranchToolValidatesArgumentsAndAttachment(t *testing.T) {
 		}
 	}
 
-	unbound := connect(t, env.srv)
-	msg := callExpectError(t, unbound, "bind_branch", map[string]any{"session": door.Session, "branch": "feature"})
-	if !strings.Contains(msg, "not attached") || !strings.Contains(msg, "resume_session") {
-		t.Fatalf("attachment-gate error = %q", msg)
+	// The handle is the capability: another connection presenting it binds.
+	other := connect(t, env.srv)
+	var bound mcpserver.BindBranchResult
+	call(t, other, "bind_branch", map[string]any{"session": door.Session, "branch": "feature"}, &bound)
+	if bound.Branch != "feature" || bound.Status != "bound" {
+		t.Fatalf("bind from a second connection = %+v", bound)
 	}
 }
 
@@ -827,13 +803,8 @@ Branch-only nebula routing evidence exists exclusively on the bound branch.
 	}
 	assertBranchReads(t, boundClient, door.Session, true)
 
-	// A connection with no session of its own cannot borrow the bound one:
-	// reads carry the handle of the session this connection is attached to.
-	unattached := connect(t, env.srv)
-	msg := callExpectError(t, unattached, "show", map[string]any{"session": door.Session, "ids": []string{branchID}})
-	if !strings.Contains(msg, "not attached") {
-		t.Fatalf("an unattached connection reading with another connection's handle should be refused, got %q", msg)
-	}
+	// Another connection presenting the handle reads in the bound branch too.
+	assertBranchReads(t, connect(t, env.srv), door.Session, true)
 
 	unboundClient := connect(t, env.srv)
 	unboundDoor := openSession(t, unboundClient)
@@ -890,7 +861,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "1d36fc03ed8f7af9614c90872d0aaf9986d37c509bab7232c2cbe2b8dbf9e965"
+	const want = "d21bd9a4921bd60901924d77c5b8ba64d648f86b846933eda786f34f51680c78"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1578,60 +1549,36 @@ func TestRejectedWriteKeepsConnectionUsable(t *testing.T) {
 		t.Fatalf("show after the rejected write returned no entries — the connection is poisoned")
 	}
 
-	// resume_session with no args reorients the attached session — the recovery
-	// tool the poisoned-binding error recommends, yet the one the wipe broke: its
+	// resume_session reorients the session — the recovery tool the
+	// poisoned-binding error recommends, yet the one the wipe broke: its
 	// still-held pre-check called Load("") and died with `invalid session ID ""`.
 	// It must re-serve the SAME session, proving the binding is fully intact, not
 	// merely non-empty.
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &resumed)
+	call(t, cs, "resume_session", map[string]any{"session": session}, &resumed)
 	if resumed.Session != session {
 		t.Fatalf("resume_session after the rejected write should re-serve %s, got %q", session, resumed.Session)
 	}
 }
 
-// TestSessionResumeAcrossServers drives a capture to the playback chooser,
-// then re-hosts the sessions dir on a fresh server (the restart): the
-// session lists with its open instance, resumes by log replay, serves the
-// full unit text again (new agent consumer), and completes.
-// TestSessionLabelFallbackAndValidation covers the label's derivation ladder
-// on the descriptor — blank before anything is drafted, first line of the
-// most recent drafted body as fallback, explicit label winning — and the
-// single-line/length validation on the loop tools.
-func TestSessionLabelFallbackAndValidation(t *testing.T) {
+// TestSessionLabelCarriedAndValidated covers the label on the loop tools: a
+// label set on next rides the resume projection, and multi-line or oversized
+// labels are rejected.
+func TestSessionLabelCarriedAndValidated(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
-
-	// The descriptor is observed from a peer — a fresh server over the same
-	// sessions dir, where this session reads as idle — so the label-derivation
-	// assertions are isolated from this connection's own live hold.
-	descriptor := func() mcpserver.ListSessionsResult {
-		t.Helper()
-		peer := newTestServer(t, nil, env.graphDir, env.sessionsDir)
-		pcs := connect(t, peer.srv)
-		openSession(t, pcs)
-		var listed mcpserver.ListSessionsResult
-		call(t, pcs, "list_sessions", map[string]any{}, &listed)
-		return listed
-	}
-
-	listed := descriptor()
-	if len(listed.Sessions) != 1 || listed.Sessions[0].Label != "" {
-		t.Fatalf("nothing drafted and no label supplied — label must be blank, got %+v", listed.Sessions)
-	}
-
-	// A drafted body backfills the label from its first line.
 	call(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": assembleReport()}, &serve)
-	listed = descriptor()
-	if !strings.HasPrefix(listed.Sessions[0].Label, "Test capture entry") {
-		t.Fatalf("label should fall back to the drafted body's first line, got %q", listed.Sessions[0].Label)
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, cs, "resume_session", map[string]any{"session": session}, &resumed)
+	if resumed.Label != "" {
+		t.Fatalf("no label supplied — the projection carries none, got %q", resumed.Label)
 	}
 
-	// An explicit label wins over the derived fallback.
 	call(t, cs, "next", map[string]any{
 		"session":  session,
 		"instance": serve.Instance,
@@ -1639,9 +1586,9 @@ func TestSessionLabelFallbackAndValidation(t *testing.T) {
 			"fields": map[string]any{"confidence": "medium"}},
 		"label": "Oscillation gap capture",
 	}, &serve)
-	listed = descriptor()
-	if listed.Sessions[0].Label != "Oscillation gap capture" {
-		t.Fatalf("explicit label must win over the fallback, got %q", listed.Sessions[0].Label)
+	call(t, cs, "resume_session", map[string]any{"session": session}, &resumed)
+	if resumed.Label != "Oscillation gap capture" {
+		t.Fatalf("the label set on next must ride the resume projection, got %q", resumed.Label)
 	}
 
 	// Validation: multi-line and oversized labels are rejected.
@@ -1659,6 +1606,10 @@ func TestSessionLabelFallbackAndValidation(t *testing.T) {
 	}
 }
 
+// TestSessionResumeAcrossServers drives a capture to the playback chooser,
+// then re-hosts the sessions dir on a fresh server (the restart): the session
+// resumes by log replay from a connection that never opened it, serves the
+// complete position in full, and completes.
 func TestSessionResumeAcrossServers(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
@@ -1683,38 +1634,17 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	}
 	sessionID := serve.Session
 
-	// Restart: same graph and sessions dirs, fresh server and connection —
-	// the reconnect pays orientation exactly once, at its own door.
+	// Restart: same graph and sessions dirs, fresh server and connection.
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
-	door := openSession(t, cs2)
-	if door.Framing == "" {
-		t.Fatal("a fresh connection's door serve should carry the framing")
-	}
-
-	var listed mcpserver.ListSessionsResult
-	call(t, cs2, "list_sessions", map[string]any{}, &listed)
-	if len(listed.Sessions) != 1 {
-		t.Fatalf("expected one open session, got %+v", listed.Sessions)
-	}
-	desc := listed.Sessions[0]
-	if desc.Session != sessionID || desc.Participant != "Tester" || desc.Anchor != fixtureGapID {
-		t.Fatalf("descriptor diverged: %+v", desc)
-	}
-	if desc.Label != "Capture: oscillation gap in integration tests" {
-		t.Fatalf("descriptor should carry the last supplied label across restart, got %q", desc.Label)
-	}
-	if len(desc.Open) != 1 || desc.Open[0].Procedure != "capture" || desc.Open[0].Step != "playback" {
-		t.Fatalf("open instance descriptor diverged (the shell must not list): %+v", desc.Open)
-	}
 
 	var resumed mcpserver.ResumeSessionResult
-	// A fresh connection did not open this session: attaching to it is a foreign
-	// attach and carries the user's ask; the session reads idle across the clock
-	// gap, so userWords alone suffices.
-	call(t, cs2, "resume_session", map[string]any{"session": sessionID, "userWords": "pick the oscillation capture back up"}, &resumed)
+	call(t, cs2, "resume_session", map[string]any{"session": sessionID}, &resumed)
 	if resumed.Label != "Capture: oscillation gap in integration tests" {
 		t.Fatalf("resume briefing should carry the session label, got %q", resumed.Label)
+	}
+	if resumed.Participant != "Tester" {
+		t.Fatalf("resume briefing should carry the participant, got %q", resumed.Participant)
 	}
 	// Two running instances rehydrate: the session shell and the capture.
 	var rehydrated, shellServe *mcpserver.ServeResult
@@ -1732,17 +1662,17 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 	if rehydrated.Step != "playback" || rehydrated.PendingChooser == nil {
 		t.Fatalf("resume should rehydrate the pending chooser at playback, got %+v", rehydrated)
 	}
-	// Served-once memory is per connection: this connection never saw the
-	// playback unit, so it serves in full — the report evidence persisted
-	// through the log replay.
-	if !strings.Contains(rehydrated.Instructions, "Play back to the user") {
-		t.Fatalf("resume should serve the full unit text again, got %q", rehydrated.Instructions)
+	if rehydrated.Collected["anchor"] != fixtureGapID {
+		t.Fatalf("resume should project the collected anchor, got %+v", rehydrated.Collected)
 	}
-	// This connection already paid orientation at its own door, and the
-	// graph hasn't moved — identical framing bytes dedup to nothing on the
-	// resume (the s-tac-w3v reconnect double-pay drops to once).
-	if resumed.Framing != "" {
-		t.Fatalf("a connection that paid orientation must not re-pay it on resume, got %q", resumed.Framing)
+	// A reorientation serves the complete position in full: the playback unit
+	// with the report evidence that persisted through the log replay, and the
+	// framing.
+	if !strings.Contains(rehydrated.Instructions, "Play back to the user") {
+		t.Fatalf("resume should serve the full unit text, got %q", rehydrated.Instructions)
+	}
+	if resumed.Framing == "" {
+		t.Fatal("resume should serve the framing in full")
 	}
 
 	call(t, cs2, "next", map[string]any{"session": sessionID, "instance": rehydrated.Instance, "report": map[string]any{
@@ -1756,16 +1686,10 @@ func TestSessionResumeAcrossServers(t *testing.T) {
 		t.Fatalf("expected completion after resume, got %s at %q", serve.Status, serve.Step)
 	}
 
-	var listedAfter mcpserver.ListSessionsResult
-	call(t, cs2, "list_sessions", map[string]any{}, &listedAfter)
-	if len(listedAfter.Sessions) != 0 {
-		t.Fatalf("completed session must drop off the open list, got %+v", listedAfter.Sessions)
-	}
-
-	// Re-knocking on the door clears the connection's served-once memory —
-	// the orientation re-serves in full, on demand.
-	if reshell := openSession(t, cs2); reshell.Framing == "" {
-		t.Fatal("a repeated start_session should re-serve the framing in full")
+	// The door always opens a fresh dialogue: a new handle, framing in full.
+	fresh := openSession(t, cs2)
+	if fresh.Session == sessionID || fresh.Framing == "" {
+		t.Fatalf("start_session should open a new session with its framing, got %s (framing %d bytes)", fresh.Session, len(fresh.Framing))
 	}
 }
 
@@ -1811,14 +1735,12 @@ func TestResumeProjectsCollectedState(t *testing.T) {
 	}
 	sessionID := serve.Session
 
-	// A fresh server + connection resumes from the persisted log alone, then
-	// attaches with the user's verbatim ask.
+	// A fresh server + connection resumes from the persisted log alone.
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
-	openSession(t, cs2)
 
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs2, "resume_session", map[string]any{"session": sessionID, "userWords": "pick the capture back up"}, &resumed)
+	call(t, cs2, "resume_session", map[string]any{"session": sessionID}, &resumed)
 
 	var capture, shell *mcpserver.ServeResult
 	for i := range resumed.Open {
@@ -1916,10 +1838,9 @@ func TestResumeCollectedRespectsInstanceBudget(t *testing.T) {
 
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
-	openSession(t, cs2)
 
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs2, "resume_session", map[string]any{"session": sessionID, "userWords": "pick the capture back up"}, &resumed)
+	call(t, cs2, "resume_session", map[string]any{"session": sessionID}, &resumed)
 
 	var capture *mcpserver.ServeResult
 	for i := range resumed.Open {
@@ -1983,10 +1904,9 @@ func TestResumeOmitsWholeInstancesPastTheBudget(t *testing.T) {
 
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
-	openSession(t, cs2)
 
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs2, "resume_session", map[string]any{"session": sessionID, "userWords": "pick the captures back up"}, &resumed)
+	call(t, cs2, "resume_session", map[string]any{"session": sessionID}, &resumed)
 
 	// Eleven open instances (shell + ten captures) cannot all fit: the count
 	// cap alone guarantees omission.
@@ -2012,7 +1932,7 @@ func TestResumeOmitsWholeInstancesPastTheBudget(t *testing.T) {
 }
 
 // TestAbandonLeavesLogStanding abandons a running instance and checks the
-// session drops off the open list without any implicit cleanup of its log.
+// move leaves the open threads without any implicit cleanup of the log.
 func TestAbandonLeavesLogStanding(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
@@ -2029,11 +1949,8 @@ func TestAbandonLeavesLogStanding(t *testing.T) {
 	if abandoned.Base == nil || abandoned.Base.Procedure != "user-dialogue" {
 		t.Fatalf("abandon should land back on the session shell, got %+v", abandoned.Base)
 	}
-
-	var listed mcpserver.ListSessionsResult
-	call(t, cs, "list_sessions", map[string]any{}, &listed)
-	if len(listed.Sessions) != 0 {
-		t.Fatalf("abandoned instance must not list as open, got %+v", listed.Sessions)
+	if abandoned.Base.OpenThreads != "" {
+		t.Fatalf("the abandoned move must not list as an open thread, got %q", abandoned.Base.OpenThreads)
 	}
 	if _, err := os.Stat(filepath.Join(env.sessionsDir, bareSessionID(serve.Session)+".jsonl")); err != nil {
 		t.Fatalf("session log must stay on disk: %v", err)
@@ -2089,13 +2006,12 @@ func TestParkMove(t *testing.T) {
 		t.Fatal("parking should log a parked event")
 	}
 
-	// Restart: the parked draft survives — session lists, and next resumes
-	// the move with its seeded state intact.
+	// Restart: the parked draft survives — the session resumes with the move
+	// at its step and its seeded state intact.
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
-	openSession(t, cs2)
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs2, "resume_session", map[string]any{"session": serve.Session, "userWords": "resume the parked draft"}, &resumed)
+	call(t, cs2, "resume_session", map[string]any{"session": serve.Session}, &resumed)
 	var capServe *mcpserver.ServeResult
 	for i := range resumed.Open {
 		if resumed.Open[i].Procedure == "capture" {
@@ -2128,9 +2044,9 @@ func TestParkMove(t *testing.T) {
 }
 
 // TestAbandonSessionByHandle_Parked tears down a parked-on-disk session in
-// one unbound call — no resume, no framing (d-tac-dbk; baseline was six
-// calls + ~28KB framing per session). The response names the label and the
-// discarded threads, and the session drops off the open list.
+// one call — no resume, no framing (d-tac-dbk; baseline was six calls +
+// ~28KB framing per session). The response names the label and the discarded
+// threads, and the session no longer resumes.
 func TestAbandonSessionByHandle_Parked(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
@@ -2148,7 +2064,7 @@ func TestAbandonSessionByHandle_Parked(t *testing.T) {
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
 
-	// One call, no session bound, no framing anywhere in the response.
+	// One call, no framing anywhere in the response.
 	var down mcpserver.AbandonResult
 	call(t, cs2, "abandon", map[string]any{"session": sessionID, "reason": "stale"}, &down)
 	if !down.Abandoned || down.Session != sessionID {
@@ -2161,64 +2077,43 @@ func TestAbandonSessionByHandle_Parked(t *testing.T) {
 		t.Fatalf("teardown should name the discarded threads, got %v", down.DiscardedThreads)
 	}
 	if down.Base != nil {
-		t.Fatalf("an unbound teardown has no dialogue to land, got %+v", down.Base)
+		t.Fatalf("a teardown has no dialogue to land, got %+v", down.Base)
 	}
 
-	openSession(t, cs2)
-	var listed mcpserver.ListSessionsResult
-	call(t, cs2, "list_sessions", map[string]any{}, &listed)
-	if len(listed.Sessions) != 0 {
-		t.Fatalf("torn-down session must drop off the open list, got %+v", listed.Sessions)
+	if msg := callExpectError(t, cs2, "resume_session", map[string]any{"session": sessionID}); !strings.Contains(msg, "torn down") {
+		t.Fatalf("a torn-down session must not resume, got %q", msg)
 	}
 	if _, err := os.Stat(filepath.Join(env.sessionsDir, bareSessionID(sessionID)+".jsonl")); err != nil {
 		t.Fatalf("teardown closes the log, never deletes it: %v", err)
 	}
 }
 
-// TestAbandonSessionByHandle_InMemory tears down a session parked in memory
-// (left behind by a client disconnect with an open move) and lands the
-// bound caller back on their own shell junction.
-func TestAbandonSessionByHandle_InMemory(t *testing.T) {
+// TestAbandonSessionByHandle_Cached tears down a session this server holds
+// replayed, from a connection that never drove it: the handle is the whole
+// authorization, and the connection that opened it finds it ended.
+func TestAbandonSessionByHandle_Cached(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	session := openSession(t, cs).Session
 
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "parked draft"}, &serve)
-	parkedID := serve.Session
-	_ = cs.Close() // disconnect with an open move: the session parks in memory
-
-	cs2 := connect(t, env.srv)
-	openSession(t, cs2)
-	// The disconnect watcher parks asynchronously — wait until it lists.
-	var listed mcpserver.ListSessionsResult
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		call(t, cs2, "list_sessions", map[string]any{}, &listed)
-		if len(listed.Sessions) == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("disconnected session never parked, got %+v", listed.Sessions)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "live draft"}, &serve)
 
 	var down mcpserver.AbandonResult
-	call(t, cs2, "abandon", map[string]any{"session": parkedID, "reason": "not needed"}, &down)
-	if !down.Abandoned || down.Session != parkedID || down.Label != "parked draft" {
+	call(t, connect(t, env.srv), "abandon", map[string]any{"session": session, "reason": "not needed"}, &down)
+	if !down.Abandoned || down.Session != session || down.Label != "live draft" {
 		t.Fatalf("teardown diverged: %+v", down)
 	}
 	if len(down.DiscardedThreads) != 1 || !strings.Contains(down.DiscardedThreads[0], "capture at") {
 		t.Fatalf("teardown should name the discarded threads, got %v", down.DiscardedThreads)
 	}
-	if down.Base == nil || down.Base.Procedure != "user-dialogue" {
-		t.Fatalf("a bound caller lands back on their shell junction, got %+v", down.Base)
+	if down.Base != nil {
+		t.Fatalf("a teardown has no dialogue to land, got %+v", down.Base)
 	}
 
-	call(t, cs2, "list_sessions", map[string]any{}, &listed)
-	if len(listed.Sessions) != 0 {
-		t.Fatalf("torn-down session must drop off the open list, got %+v", listed.Sessions)
+	msg := callExpectError(t, cs, "next", map[string]any{"session": session, "instance": serve.Instance, "report": assembleReport()})
+	if !strings.Contains(msg, "torn down") || !strings.Contains(msg, "start_session") {
+		t.Fatalf("a move against the torn-down session should refuse naming the way on, got %q", msg)
 	}
 }
 
@@ -2273,108 +2168,105 @@ func TestAbandonSessionByHandle_Rejections(t *testing.T) {
 	if msg := callExpectError(t, cs, "abandon", map[string]any{}); !strings.Contains(msg, "pass instance") {
 		t.Fatalf("neither instance nor session should be rejected, got %q", msg)
 	}
-	// Instance mode requires the session the move belongs to; a handle this
-	// connection is not attached to funnels into resume_session.
-	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": "i_1", "session": "s_x"}); !strings.Contains(msg, "not attached to s_x") {
-		t.Fatalf("a move abandon naming an unattached session should funnel to resume_session, got %q", msg)
+	// Instance mode requires the session the move belongs to; an unknown handle
+	// is named as such.
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": "i_1", "session": "s_x"}); !strings.Contains(msg, "unknown session") {
+		t.Fatalf("a move abandon naming an unknown session should name it, got %q", msg)
 	}
 	// Instance set but session omitted is a work-tool call missing its handle:
 	// it names both doors, not the pass-one-of message.
 	if msg := callExpectError(t, cs, "abandon", map[string]any{"instance": "i_1"}); !strings.Contains(msg, "start_session") || !strings.Contains(msg, "resume_session") {
 		t.Fatalf("a move abandon without a session handle should name both doors, got %q", msg)
 	}
-	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": serve.Session}); !strings.Contains(msg, "own junction") {
-		t.Fatalf("tearing down the bound session should point at conclude, got %q", msg)
-	}
 	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": "s_nope"}); !strings.Contains(msg, "unknown session") {
 		t.Fatalf("unknown session should be named, got %q", msg)
 	}
-
-	// Tearing down a session another connection is actively driving is refused:
-	// destruction must not be cheaper than attachment (I5). The refusal names the
-	// holder and points at the alternatives.
-	cs2 := connect(t, env.srv)
-	other := openSession(t, cs2)
-	msg := callExpectError(t, cs, "abandon", map[string]any{"session": other.Session})
-	for _, want := range []string{"test-client", "actively driven", "take it over"} {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("recent teardown refusal %q missing %q", msg, want)
-		}
+	if msg := callExpectError(t, cs, "abandon", map[string]any{"session": serve.Session, "instance": "i_99"}); !strings.Contains(msg, "not found") {
+		t.Fatalf("an unknown instance should be named, got %q", msg)
 	}
 }
 
-// TestUnboundRejectionInlinesParkedSessions pins the discovery half of the
-// teardown flow: a stateful call with no session bound is rejected with the
-// parked-sessions list inline (handle + label), so the agent's next call can
-// already be the resume or the teardown.
-func TestUnboundRejectionInlinesParkedSessions(t *testing.T) {
+// TestNoHandleRejectionNamesDoorsOnly pins the no-handle rejection: a tool
+// called without a session handle names both doors and lists no session —
+// handles are issued, never published (d-cpt-aen).
+func TestNoHandleRejectionNamesDoorsOnly(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	session := openSession(t, cs).Session
 	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "the parked one"}, &serve)
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "the open one"}, &serve)
 
-	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
-	cs2 := connect(t, env2.srv)
-	msg := callExpectError(t, cs2, "next", map[string]any{"instance": "i_2", "report": map[string]any{"x": "y"}})
-	if !strings.Contains(msg, "start_session") || !strings.Contains(msg, "resume_session") {
-		t.Fatalf("a work tool without a handle should name both doors, got %q", msg)
+	requireNoListing := func(t *testing.T, tool, msg string) {
+		t.Helper()
+		if strings.Contains(msg, bareSessionID(session)) || strings.Contains(msg, "the open one") {
+			t.Fatalf("%s without a handle must list no session, got %q", tool, msg)
+		}
 	}
-	if !strings.Contains(msg, serve.Session) || !strings.Contains(msg, "the parked one") {
-		t.Fatalf("the no-handle rejection should inline the open session (handle + label), got %q", msg)
+	for _, cs := range []*mcp.ClientSession{cs, connect(t, env.srv)} {
+		msg := callExpectError(t, cs, "next", map[string]any{"instance": serve.Instance, "report": map[string]any{"x": "y"}})
+		if !strings.Contains(msg, "start_session") || !strings.Contains(msg, "resume_session") {
+			t.Fatalf("next without a handle should name both doors, got %q", msg)
+		}
+		requireNoListing(t, "next", msg)
+
+		// resume_session's handle is required by schema: the rejection names the
+		// missing argument, never a session to put there.
+		msg = callExpectError(t, cs, "resume_session", map[string]any{})
+		if !strings.Contains(msg, "session") {
+			t.Fatalf("resume_session without a handle should name the missing argument, got %q", msg)
+		}
+		requireNoListing(t, "resume_session", msg)
 	}
 }
 
-// TestWorkToolWrongSessionFunnels: every work tool naming a session this
-// connection is not attached to funnels into resume_session — the single attach
-// point (d-cpt-9of). The handle must name the connection's own attachment.
-func TestWorkToolWrongSessionFunnels(t *testing.T) {
+// TestWorkToolUnknownSessionNamed: every work tool naming a session the store
+// does not hold fails naming it — never the no-handle door error.
+func TestWorkToolUnknownSessionNamed(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	session := openSession(t, cs).Session
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &serve)
 
-	const foreign = "s_not-mine"
+	const unknown = "s_not-issued"
 	cases := map[string]map[string]any{
-		"start_procedure":  {"session": foreign, "canonical": "capture"},
-		"next":             {"session": foreign, "instance": serve.Instance, "report": assembleReport()},
-		"park":             {"session": foreign, "instance": serve.Instance},
-		"bind_branch":      {"session": foreign, "branch": "feature"},
-		"stage_attachment": {"session": foreign, "name": "a.md", "content": "x"},
-		"abandon":          {"session": foreign, "instance": serve.Instance},
+		"start_procedure":  {"session": unknown, "canonical": "capture"},
+		"next":             {"session": unknown, "instance": serve.Instance, "report": assembleReport()},
+		"park":             {"session": unknown, "instance": serve.Instance},
+		"bind_branch":      {"session": unknown, "branch": "feature"},
+		"stage_attachment": {"session": unknown, "name": "a.md", "content": "x"},
+		"abandon":          {"session": unknown, "instance": serve.Instance},
+		"resume_session":   {"session": unknown},
+		"show":             {"session": unknown, "ids": []string{fixtureGapID}},
 	}
 	for tool, args := range cases {
 		msg := callExpectError(t, cs, tool, args)
-		if !strings.Contains(msg, "not attached to "+foreign) || !strings.Contains(msg, "resume_session") {
-			t.Fatalf("%s naming a foreign session should funnel to resume_session, got %q", tool, msg)
+		if !strings.Contains(msg, "unknown session") || !strings.Contains(msg, unknown) {
+			t.Fatalf("%s naming an unknown session should name it, got %q", tool, msg)
 		}
 	}
 }
 
-// TestNamedResumeOnUnboundConnection: resume_session by explicit handle attaches
-// and serves the session's position on a fresh, never-opened connection — the
-// slice-2 attach door works unbound (d-cpt-9of). Consent for a foreign session
-// arrives in slice 4; here the session is parked on disk with no live holder.
-func TestNamedResumeOnUnboundConnection(t *testing.T) {
+// TestNamedResumeOnFreshConnection: resume_session by handle serves the
+// session's position on a fresh connection to a fresh server — presenting the
+// handle is the whole authorization (d-cpt-aen), and the same handle then
+// advances the move.
+func TestNamedResumeOnFreshConnection(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	session := openSession(t, cs).Session
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{
-		"session": session, "canonical": "capture", "label": "resume me unbound",
+		"session": session, "canonical": "capture", "label": "resume me elsewhere",
 	}, &serve)
 	handle := serve.Session
 
-	// Fresh server, fresh connection, never opened a session: attach by handle.
 	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
 	cs2 := connect(t, env2.srv)
 	var resumed mcpserver.ResumeSessionResult
-	// Foreign attach on a fresh connection: the session reads idle across the
-	// clock gap, so the user's ask (userWords) alone consents.
-	call(t, cs2, "resume_session", map[string]any{"session": handle, "userWords": "attach to that unbound session"}, &resumed)
+	call(t, cs2, "resume_session", map[string]any{"session": handle}, &resumed)
 	if resumed.Session != handle {
-		t.Fatalf("named resume on an unbound connection should attach to %s, got %s", handle, resumed.Session)
+		t.Fatalf("named resume should serve %s, got %s", handle, resumed.Session)
 	}
 	var capServe *mcpserver.ServeResult
 	for i := range resumed.Open {
@@ -2383,91 +2275,71 @@ func TestNamedResumeOnUnboundConnection(t *testing.T) {
 		}
 	}
 	if capServe == nil || capServe.Step != serve.Step {
-		t.Fatalf("attach should serve the parked move at its step, got %+v", resumed.Open)
+		t.Fatalf("resume should serve the open move at its step, got %+v", resumed.Open)
 	}
 	if len(capServe.ReportSchema) == 0 {
-		t.Fatalf("attach should serve the running move's report schema, got %+v", capServe)
+		t.Fatalf("resume should serve the running move's report schema, got %+v", capServe)
 	}
 
-	// The connection is now attached: a work tool with the same handle advances.
 	call(t, cs2, "next", map[string]any{"session": handle, "instance": capServe.Instance, "report": assembleReport()}, &serve)
 	if serve.Step != "playback" {
-		t.Fatalf("the attached connection should advance the move, got %q", serve.Step)
+		t.Fatalf("the handle should advance the move from the new connection, got %q", serve.Step)
 	}
 }
 
-// TestSwitchParksSessionWithOpenMove: switching a connection to another session
-// applies the leave rule to the one it leaves — a session with an open move is
-// parked (not concluded), its move kept and resumable (d-cpt-9of decision 6).
-// The target B is seeded on an earlier server so its attachment reads idle to
-// the later server that does the switch (the per-server clock gap exceeds the
-// recency window), so the consenting switch needs only the user's words.
-func TestSwitchParksSessionWithOpenMove(t *testing.T) {
-	seed := newTestServer(t, nil, "", "")
-	csSeed := connect(t, seed.srv)
-	sessionB := openSession(t, csSeed).Session
-	var serveB mcpserver.ServeResult
-	call(t, csSeed, "start_procedure", map[string]any{"session": sessionB, "canonical": "capture", "label": "target B"}, &serveB)
-
-	// Later server over the same store: A is opened here with an open move.
-	env := newTestServer(t, nil, seed.graphDir, seed.sessionsDir)
-	csA := connect(t, env.srv)
-	sessionA := openSession(t, csA).Session
-	var serveA mcpserver.ServeResult
-	call(t, csA, "start_procedure", map[string]any{"session": sessionA, "canonical": "capture", "label": "left-behind A"}, &serveA)
-
-	// Switch csA to B: A is left with an open move, so the leave rule parks it.
-	// B reads idle across the clock gap, so the user's ask alone consents.
-	var resumed mcpserver.ResumeSessionResult
-	call(t, csA, "resume_session", map[string]any{"session": sessionB, "userWords": "switch to target B"}, &resumed)
-	if resumed.Session != sessionB {
-		t.Fatalf("switch should attach to B, got %s", resumed.Session)
+// TestOneConnectionDrivesTwoSessions: nothing ties a connection to one
+// dialogue — two start_session calls mint two handles, and the connection
+// drives both by handle with each keeping its own moves.
+func TestOneConnectionDrivesTwoSessions(t *testing.T) {
+	env := newTestServer(t, nil, "", "")
+	cs := connect(t, env.srv)
+	a := openSession(t, cs)
+	b := openSession(t, cs)
+	if a.Session == b.Session {
+		t.Fatalf("two start_session calls must mint two handles, both %s", a.Session)
+	}
+	if b.Framing == "" {
+		t.Fatal("a new session serves its framing in full")
 	}
 
-	// A is parked, not concluded: it lists with its open capture still standing.
-	var listed mcpserver.ListSessionsResult
-	call(t, csA, "list_sessions", map[string]any{}, &listed)
-	found := false
-	for _, s := range listed.Sessions {
-		if s.Session == sessionA {
-			found = true
-			if len(s.Open) != 1 || s.Open[0].Procedure != "capture" || s.Open[0].Step != serveA.Step {
-				t.Fatalf("the parked session should keep its open capture at its step, got %+v", s.Open)
+	var moveA, moveB mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": a.Session, "canonical": "capture", "label": "A"}, &moveA)
+	call(t, cs, "start_procedure", map[string]any{"session": b.Session, "canonical": "catch-up", "label": "B"}, &moveB)
+
+	for _, want := range []struct {
+		handle    string
+		procedure string
+		instance  string
+	}{{a.Session, "capture", moveA.Instance}, {b.Session, "catch-up", moveB.Instance}} {
+		var resumed mcpserver.ResumeSessionResult
+		call(t, cs, "resume_session", map[string]any{"session": want.handle}, &resumed)
+		if resumed.Session != want.handle {
+			t.Fatalf("resume should serve %s, got %s", want.handle, resumed.Session)
+		}
+		var procedures []string
+		for _, open := range resumed.Open {
+			if open.Procedure != "user-dialogue" {
+				procedures = append(procedures, open.Procedure)
+				if open.Instance != want.instance {
+					t.Fatalf("%s should carry its own move %s, got %s", want.handle, want.instance, open.Instance)
+				}
 			}
 		}
-	}
-	if !found {
-		t.Fatalf("the switched-away session should be parked and listed, got %+v", listed.Sessions)
-	}
-
-	// A's move is resumable: switching back re-serves the capture at its step.
-	// A was parked with its attachment released, so switching back is a foreign
-	// attach onto an unheld session — the user's ask consents.
-	var reA mcpserver.ResumeSessionResult
-	call(t, csA, "resume_session", map[string]any{"session": sessionA, "userWords": "go back to the left-behind work"}, &reA)
-	var capA *mcpserver.ServeResult
-	for i := range reA.Open {
-		if reA.Open[i].Procedure == "capture" {
-			capA = &reA.Open[i]
+		if len(procedures) != 1 || procedures[0] != want.procedure {
+			t.Fatalf("%s should carry only its own %s move, got %v", want.handle, want.procedure, procedures)
 		}
-	}
-	if capA == nil || capA.Instance != serveA.Instance || capA.Step != serveA.Step {
-		t.Fatalf("the parked move should resume intact at its step, got %+v", reA.Open)
 	}
 }
 
-// TestResumeReorientsCurrentSession drives the post-compaction reach path
-// (s-cpt-h31, d-tac-zm2): a connection that has lost its handles calls
-// resume_session with no session and gets its live position back — every
-// running move at its current step, each with the report schema to continue
-// it (the field the observed thrash had to reconstruct from memory). Passing
-// the connection's own session id behaves identically instead of erroring.
-func TestResumeReorientsCurrentSession(t *testing.T) {
+// TestResumeServesPositionInFull pins the reorientation (d-cpt-aen):
+// resume_session with the handle re-serves every running move at its current
+// step with the schema to continue it and the framing, in full, however often
+// it is called.
+func TestResumeServesPositionInFull(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	session := openSession(t, cs).Session
 
-	// A move is in flight, standing at a step that serves a report schema.
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{
 		"session":   session,
@@ -2479,61 +2351,37 @@ func TestResumeReorientsCurrentSession(t *testing.T) {
 		t.Fatalf("precondition: the capture step should serve a report schema, got %+v", serve)
 	}
 
-	assertReoriented := func(label string, resumed mcpserver.ResumeSessionResult) {
-		t.Helper()
+	var prevSize int
+	for i := range 3 {
+		var resumed mcpserver.ResumeSessionResult
+		call(t, cs, "resume_session", map[string]any{"session": session}, &resumed)
 		if resumed.Session != serve.Session {
-			t.Fatalf("%s: should re-serve the bound session %s, got %s", label, serve.Session, resumed.Session)
+			t.Fatalf("resume %d: should re-serve %s, got %s", i, serve.Session, resumed.Session)
+		}
+		if resumed.Framing == "" {
+			t.Fatalf("resume %d: a reorientation serves the framing in full", i)
 		}
 		var capServe, shellServe *mcpserver.ServeResult
-		for i := range resumed.Open {
-			switch resumed.Open[i].Procedure {
+		for j := range resumed.Open {
+			switch resumed.Open[j].Procedure {
 			case "capture":
-				capServe = &resumed.Open[i]
+				capServe = &resumed.Open[j]
 			case "user-dialogue":
-				shellServe = &resumed.Open[i]
+				shellServe = &resumed.Open[j]
 			}
 		}
-		if shellServe == nil {
-			t.Fatalf("%s: reorientation should re-serve the shell too, got %+v", label, resumed.Open)
+		if shellServe == nil || !strings.Contains(shellServe.Instructions, "Standing goal") {
+			t.Fatalf("resume %d: the shell should re-serve its orientation in full, got %+v", i, shellServe)
 		}
 		if capServe == nil || capServe.Instance != serve.Instance || capServe.Step != serve.Step {
-			t.Fatalf("%s: reorientation should re-serve the in-flight move at its step, got %+v", label, resumed.Open)
+			t.Fatalf("resume %d: the in-flight move should re-serve at its step, got %+v", i, resumed.Open)
 		}
-		if len(capServe.ReportSchema) == 0 {
-			t.Fatalf("%s: reorientation must return the running move's report schema, got %+v", label, capServe)
+		requireFullReportSchema(t, "resumed capture", capServe.ReportSchema)
+		size := jsonSize(t, resumed)
+		if i > 0 && size != prevSize {
+			t.Fatalf("resume %d: a reorientation is the same complete position every time, got %d bytes after %d", i, size, prevSize)
 		}
-	}
-
-	// No handle at all — the compacted-agent case.
-	var resumed mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &resumed)
-	assertReoriented("no session", resumed)
-
-	// The connection's own session id resolves to the same re-serve.
-	var resumedByID mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{"session": serve.Session}, &resumedByID)
-	assertReoriented("current id", resumedByID)
-}
-
-// TestResumeNoSessionUnboundListsParked: with nothing bound to the
-// connection, a no-session resume_session still bootstraps — the rejection
-// names the parked sessions to resume by handle, the reach path's unbound
-// entry (d-tac-zm2 AC2).
-func TestResumeNoSessionUnboundListsParked(t *testing.T) {
-	env := newTestServer(t, nil, "", "")
-	cs := connect(t, env.srv)
-	session := openSession(t, cs).Session
-	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "parked work"}, &serve)
-
-	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
-	cs2 := connect(t, env2.srv)
-	msg := callExpectError(t, cs2, "resume_session", map[string]any{})
-	if !strings.Contains(msg, "start_session") || !strings.Contains(msg, "resume_session") {
-		t.Fatalf("unbound no-session resume should name both doors, got %q", msg)
-	}
-	if !strings.Contains(msg, serve.Session) || !strings.Contains(msg, "parked work") {
-		t.Fatalf("unbound no-session resume should inline the open session, got %q", msg)
+		prevSize = size
 	}
 }
 
@@ -2548,77 +2396,81 @@ func jsonSize(t *testing.T, v any) int {
 	return len(raw)
 }
 
-// TestConvergingReorientation pins I6: repeated no-args resumes converge —
-// blocks this connection already saw stub, so payloads are monotonically
-// non-increasing and framing is never re-served (the replay-amplification the
-// old clear-and-replay produced). Removing the forgetConnection from the
-// same-session path is what makes this hold.
-func TestConvergingReorientation(t *testing.T) {
+// TestServedMemoryIsPerSession pins the served-once memory's home (d-cpt-aen):
+// it is derived from the session ledger, so a second connection presenting the
+// handle is stubbed for what the session's consumer already holds, a
+// reorientation resets it so the complete position serves in full, and
+// afterwards the memory accumulates again.
+func TestServedMemoryIsPerSession(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
-	cs := connect(t, env.srv)
-	session := openSession(t, cs).Session
-	var serve mcpserver.ServeResult
-	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "converge"}, &serve)
+	csA := connect(t, env.srv)
+	door := openSession(t, csA)
+	if door.Framing == "" {
+		t.Fatal("precondition: the door serves the framing in full")
+	}
+	var first mcpserver.ServeResult
+	call(t, csA, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &first)
+	requireFullReportSchema(t, "first capture", first.ReportSchema)
+	if !strings.Contains(first.Instructions, "Existing topics:") {
+		t.Fatalf("the first capture serves its unit in full, got %q", first.Instructions)
+	}
 
-	var prev mcpserver.ResumeSessionResult
-	var prevSize int
-	for i := range 3 {
-		var resumed mcpserver.ResumeSessionResult
-		call(t, cs, "resume_session", map[string]any{}, &resumed)
-		// Framing was already served at the door — a reorient never re-pays it.
-		if resumed.Framing != "" {
-			t.Fatalf("reorient %d re-served framing (%d bytes) — convergence broken", i, len(resumed.Framing))
-		}
-		size := jsonSize(t, resumed)
-		if i > 0 && size > prevSize {
-			t.Fatalf("reorient %d payload grew (%d > %d) — reorientation must be non-increasing", i, size, prevSize)
-		}
-		prev, prevSize = resumed, size
+	// Connection B, same server: what A received is stubbed for B.
+	csB := connect(t, env.srv)
+	var second mcpserver.ServeResult
+	call(t, csB, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &second)
+	if second.Framing != "" {
+		t.Fatalf("the framing was served to this session already, got it again on another connection: %q", second.Framing)
 	}
-	// The move is still re-served at its step so a converged reorient stays
-	// actionable — convergence trims repetition, not the position.
-	found := false
-	for _, open := range prev.Open {
-		if open.Instance == serve.Instance {
-			found = true
-		}
+	requireStubReportSchema(t, "second capture from another connection", second.ReportSchema)
+	if !strings.Contains(second.Instructions, "served earlier this session") {
+		t.Fatalf("the identical unit should stub, got %q", second.Instructions)
 	}
-	if !found {
-		t.Fatalf("a converged reorient must still re-serve the in-flight move, got %+v", prev.Open)
+
+	// B reorients: everything serves in full again — the two identical capture
+	// positions dedup against each other within the one call, so the first
+	// carries the full schema and unit.
+	var resumed mcpserver.ResumeSessionResult
+	call(t, csB, "resume_session", map[string]any{"session": door.Session}, &resumed)
+	if resumed.Framing == "" {
+		t.Fatal("a reorientation serves the framing in full")
 	}
+	resumedCapture := openServe(t, resumed, "capture")
+	requireFullReportSchema(t, "resumed capture", resumedCapture.ReportSchema)
+	if !strings.Contains(resumedCapture.Instructions, "Existing topics:") {
+		t.Fatalf("a reorientation serves the unit in full, got %q", resumedCapture.Instructions)
+	}
+
+	// Then the memory accumulates again, for either connection.
+	var third mcpserver.ServeResult
+	call(t, csA, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &third)
+	if third.Framing != "" {
+		t.Fatalf("the framing re-served on resume should stub again, got %q", third.Framing)
+	}
+	requireStubReportSchema(t, "capture after resume", third.ReportSchema)
 }
 
-// TestFullReplayReservesOnce pins the compaction escape: a no-args reorient
-// converges (framing stubbed), fullReplay serves the complete position exactly
-// once, and the next no-args reorient converges again — and the converged
-// response never exceeds the full replay (I6: a reorientation never exceeds the
-// original serve).
-func TestFullReplayReservesOnce(t *testing.T) {
+// TestServedMemorySurvivesServerRestart: the ledger carries the served-once
+// memory, so a second server over the same store stubs what an earlier one
+// served, without any reorientation in between.
+func TestServedMemorySurvivesServerRestart(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
-	session := openSession(t, cs).Session
-	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "replay"}, &mcpserver.ServeResult{})
+	door := openSession(t, cs)
+	var first mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &first)
+	requireFullReportSchema(t, "first capture", first.ReportSchema)
 
-	var converged mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &converged)
-	if converged.Framing != "" {
-		t.Fatalf("a plain reorient should stub framing, got %d bytes", len(converged.Framing))
+	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+	cs2 := connect(t, env2.srv)
+	var second mcpserver.ServeResult
+	call(t, cs2, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &second)
+	if second.Framing != "" {
+		t.Fatalf("framing served before the restart must stub after it, got %q", second.Framing)
 	}
-
-	var full mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{"fullReplay": true}, &full)
-	if full.Framing == "" {
-		t.Fatal("fullReplay must re-serve the complete framing")
-	}
-	if jsonSize(t, converged) > jsonSize(t, full) {
-		t.Fatalf("a converged reorient (%d) must not exceed the full replay (%d)", jsonSize(t, converged), jsonSize(t, full))
-	}
-
-	// Full replay is one-shot: the very next no-args reorient converges again.
-	var again mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &again)
-	if again.Framing != "" {
-		t.Fatalf("fullReplay must be one-shot — the next reorient should stub framing, got %d bytes", len(again.Framing))
+	requireStubReportSchema(t, "capture after restart", second.ReportSchema)
+	if !strings.Contains(second.Instructions, "served earlier this session") {
+		t.Fatalf("the unit served before the restart must stub after it, got %q", second.Instructions)
 	}
 }
 
@@ -2664,7 +2516,7 @@ func TestShellWithoutFramingServesInfoOnly(t *testing.T) {
 
 // TestDoorAndReplayWirePayloads measures the two heaviest automatic MCP
 // payloads as JSON wire bytes over the realistic fixture — the door serve,
-// and a fullReplay reorientation with a running move (dedup cleared,
+// and a resume_session reorientation with a running move (dedup reset,
 // everything re-served at once). It replaces TestDoorPayloadUnder25KB, whose
 // fixture populated none of the scaling lanes and so was structurally blind
 // to the breach it existed to catch (s-tac-ayj). The ceilings document the
@@ -2698,11 +2550,11 @@ func TestDoorAndReplayWirePayloads(t *testing.T) {
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "catch-up", "label": "wire measurement"}, &serve)
 	var full mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{"fullReplay": true}, &full)
+	call(t, cs, "resume_session", map[string]any{"session": door.Session}, &full)
 	replaySize := jsonSize(t, full)
-	t.Logf("fullReplay wire payload with one running move: %d bytes", replaySize)
+	t.Logf("resume_session wire payload with one running move: %d bytes", replaySize)
 	if replaySize > replayWireCeilingBytes {
-		t.Errorf("fullReplay wire payload is %d bytes, over the %d ceiling", replaySize, replayWireCeilingBytes)
+		t.Errorf("resume_session wire payload is %d bytes, over the %d ceiling", replaySize, replayWireCeilingBytes)
 	}
 }
 
@@ -2789,33 +2641,32 @@ func runCaptureToCompletion(t *testing.T, cs *mcp.ClientSession, session, label 
 }
 
 // TestFramingLaneDedupAfterWrite pins per-lane framing dedup (I6, AC8): after a
-// graph write changes only the recent-moves lane, a reorient re-serves THAT
-// lane alone — the stable info block stays stubbed — so the reorientation stays
-// under the original serve. Under whole-block hashing the entire framing would
+// graph write changes only the recent-moves lane, the next serve re-serves THAT
+// lane alone — the stable info block stays stubbed — so the re-serve stays
+// under the original. Under whole-block hashing the entire framing would
 // re-serve on any write, the reproduced regression.
 func TestFramingLaneDedupAfterWrite(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
-	// Connection B: the reorienting connection.
 	csB := connect(t, env.srv)
 	door := openSession(t, csB)
 	if !strings.Contains(door.Framing, "Local participant:") || !strings.Contains(door.Framing, "Recent graph movement") {
 		t.Fatalf("the door should serve the full framing, got %q", door.Framing)
 	}
-	var converged mcpserver.ResumeSessionResult
-	call(t, csB, "resume_session", map[string]any{}, &converged)
-	if converged.Framing != "" {
-		t.Fatalf("with nothing changed, a reorient converges to empty framing, got %q", converged.Framing)
+	var unchanged mcpserver.ServeResult
+	call(t, csB, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &unchanged)
+	if unchanged.Framing != "" {
+		t.Fatalf("with nothing changed, a later serve carries no framing, got %q", unchanged.Framing)
 	}
 
-	// Connection A writes an entry — the recent-moves lane now changes for B.
+	// Another session writes an entry — the recent-moves lane now changes for B.
 	csA := connect(t, env.srv)
 	sessionA := openSession(t, csA).Session
 	if id := runCaptureToCompletion(t, csA, sessionA, "churn write"); id == "" {
 		t.Fatal("precondition: the capture should produce an entry")
 	}
 
-	var afterWrite mcpserver.ResumeSessionResult
-	call(t, csB, "resume_session", map[string]any{}, &afterWrite)
+	var afterWrite mcpserver.ServeResult
+	call(t, csB, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &afterWrite)
 	if !strings.Contains(afterWrite.Framing, "Recent graph movement") {
 		t.Fatalf("the changed recent-moves lane must re-serve, got %q", afterWrite.Framing)
 	}
@@ -2823,7 +2674,7 @@ func TestFramingLaneDedupAfterWrite(t *testing.T) {
 		t.Fatalf("the unchanged info block must stay stubbed (per-lane dedup), got %q", afterWrite.Framing)
 	}
 	if len(afterWrite.Framing) >= len(door.Framing) {
-		t.Fatalf("a post-write reorient (%d) must stay under the original serve (%d)", len(afterWrite.Framing), len(door.Framing))
+		t.Fatalf("a post-write re-serve (%d) must stay under the original serve (%d)", len(afterWrite.Framing), len(door.Framing))
 	}
 }
 
@@ -2897,10 +2748,10 @@ Body.
 			t.Fatalf("precondition: the door must serve the %q section, got %q", want, door.Framing)
 		}
 	}
-	var converged mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &converged)
-	if converged.Framing != "" {
-		t.Fatalf("with nothing changed, a reorient converges to empty framing, got %q", converged.Framing)
+	var unchanged mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &unchanged)
+	if unchanged.Framing != "" {
+		t.Fatalf("with nothing changed, a later serve carries no framing, got %q", unchanged.Framing)
 	}
 
 	// A second actor changes the participants section and nothing else.
@@ -2916,8 +2767,8 @@ summary: A second actor, written after the door served, so only the participants
 Body.
 `)
 
-	var afterWrite mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &afterWrite)
+	var afterWrite mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &afterWrite)
 	if !strings.Contains(afterWrite.Framing, "Grace") {
 		t.Fatalf("the changed participants section must re-serve, got %q", afterWrite.Framing)
 	}
@@ -2928,33 +2779,32 @@ Body.
 	}
 }
 
-// TestReorientCarriesCompactionBreadcrumb pins the B4 self-trigger: a compacted
-// agent's reorient stubs blocks it already saw, and those stubs (both the resume
-// instructions and the per-step reminder) must name the fullReplay escape — a
-// bare "served earlier, follow them" is useless to an amnesiac.
-func TestReorientCarriesCompactionBreadcrumb(t *testing.T) {
+// TestStubsCarryCompactionBreadcrumb pins the B4 self-trigger: every stub of a
+// block the session's consumer already holds — the per-step reminder, the
+// report-schema stub, the resume instructions — names the resume_session
+// escape with the handle. A bare "served earlier, follow them" is useless to an
+// amnesiac.
+func TestStubsCarryCompactionBreadcrumb(t *testing.T) {
 	env := newTestServer(t, nil, "", "")
 	cs := connect(t, env.srv)
 	session := openSession(t, cs).Session
 	var serve mcpserver.ServeResult
 	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "breadcrumb"}, &serve)
 
+	const breadcrumb = "resume_session with this session's handle"
+	var second mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture"}, &second)
+	if !strings.Contains(second.Instructions, "served earlier this session") || !strings.Contains(second.Instructions, breadcrumb) {
+		t.Fatalf("a stubbed per-step reminder must carry the compaction breadcrumb, got %q", second.Instructions)
+	}
+	if stub, _ := second.ReportSchema["served_earlier"].(string); !strings.Contains(stub, breadcrumb) {
+		t.Fatalf("a report-schema stub must carry the compaction breadcrumb, got %q", stub)
+	}
+
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{}, &resumed)
-	if !strings.Contains(resumed.Instructions, "fullReplay") {
-		t.Fatalf("resume instructions should point a compaction victim at fullReplay, got %q", resumed.Instructions)
-	}
-	var reminder *mcpserver.ServeResult
-	for i := range resumed.Open {
-		if resumed.Open[i].Instance == serve.Instance {
-			reminder = &resumed.Open[i]
-		}
-	}
-	if reminder == nil {
-		t.Fatalf("the reorient should re-serve the in-flight move, got %+v", resumed.Open)
-	}
-	if !strings.Contains(reminder.Instructions, "served earlier this session") || !strings.Contains(reminder.Instructions, "fullReplay") {
-		t.Fatalf("a stubbed per-step reminder must carry the compaction breadcrumb, got %q", reminder.Instructions)
+	call(t, cs, "resume_session", map[string]any{"session": session}, &resumed)
+	if !strings.Contains(resumed.Instructions, "resume_session with this handle") {
+		t.Fatalf("resume instructions should point a compaction victim at resume_session, got %q", resumed.Instructions)
 	}
 }
 
@@ -3252,11 +3102,8 @@ func TestDoorGatingAndShellLifecycle(t *testing.T) {
 		}
 	}
 
-	// Discovery is free: list_sessions works on the fresh unbound connection,
-	// and a named resume of an unknown handle fails on its own terms — never
-	// the no-handle door error.
-	var discovered mcpserver.ListSessionsResult
-	call(t, cs, "list_sessions", map[string]any{}, &discovered)
+	// A named resume of an unknown handle fails on its own terms — never the
+	// no-handle door error.
 	if msg := callExpectError(t, cs, "resume_session", map[string]any{"session": "s_nope"}); !strings.Contains(msg, "unknown session") {
 		t.Fatalf("a named resume of an unknown handle should name it, got %q", msg)
 	}
@@ -3288,10 +3135,11 @@ func TestDoorGatingAndShellLifecycle(t *testing.T) {
 		t.Fatal("the opening serve should carry the framing block")
 	}
 
-	// Knocking again re-serves the orientation in full.
-	reshell := openSession(t, cs)
-	if reshell.Instance != shell.Instance || !strings.Contains(reshell.Instructions, "Standing goal") {
-		t.Fatalf("start_session on an open session should re-serve the same shell in full, got %q", reshell.Instructions)
+	// Knocking again opens a fresh dialogue under a new handle, orientation in
+	// full; the first session is untouched.
+	other := openSession(t, cs)
+	if other.Session == session || !strings.Contains(other.Instructions, "Standing goal") || other.Framing == "" {
+		t.Fatalf("a second start_session should open a new session served in full, got %s: %q", other.Session, other.Instructions)
 	}
 
 	// Shells never start through the move path.
@@ -3400,14 +3248,12 @@ func TestShellConcludeLeavesOpenThreadsBehind(t *testing.T) {
 	}
 
 	// Ended-ness is the authority: the dropped thread is still a running instance
-	// in the log, yet the session is no longer open work anywhere.
-	var listed mcpserver.ListSessionsResult
-	call(t, cs, "list_sessions", map[string]any{}, &listed)
-	if len(listed.Sessions) != 0 {
-		t.Fatalf("a concluded session must not list as open work, got %+v", listed.Sessions)
+	// in the log, yet the session is no longer reachable as open work.
+	if msg := callExpectError(t, cs, "resume_session", map[string]any{"session": session}); !strings.Contains(msg, "concluded") || !strings.Contains(msg, "start_session") {
+		t.Fatalf("a concluded session must not resume, and the refusal names the way on, got %q", msg)
 	}
 	msg := callExpectError(t, cs, "start_procedure", map[string]any{"canonical": "capture"})
-	if strings.Contains(msg, session) {
+	if strings.Contains(msg, bareSessionID(session)) {
 		t.Fatalf("the no-handle rejection must not offer a concluded session, got %q", msg)
 	}
 
@@ -3449,7 +3295,7 @@ func TestDoorAfterConcludeOpensFresh(t *testing.T) {
 	// A move against the concluded handle is refused with that same way on,
 	// rather than silently reviving the completed session.
 	msg := callExpectError(t, cs, "start_procedure", map[string]any{"session": spent, "canonical": "capture"})
-	if !strings.Contains(msg, "start_session") || !strings.Contains(msg, "ended") {
+	if !strings.Contains(msg, "start_session") || !strings.Contains(msg, "concluded") {
 		t.Fatalf("a move against a concluded session should refuse naming the new-session path, got %q", msg)
 	}
 
@@ -3471,7 +3317,7 @@ func TestDoorAfterConcludeOpensFresh(t *testing.T) {
 		t.Fatalf("the move should stand at playback before the resume, got %q", move.Step)
 	}
 	var resumed mcpserver.ResumeSessionResult
-	call(t, cs, "resume_session", map[string]any{"session": fresh.Session, "userWords": "carry on with the capture", "takeover": true}, &resumed)
+	call(t, cs, "resume_session", map[string]any{"session": fresh.Session}, &resumed)
 	var projected *mcpserver.ServeResult
 	for i := range resumed.Open {
 		if resumed.Open[i].Instance == move.Instance {
@@ -3486,69 +3332,47 @@ func TestDoorAfterConcludeOpensFresh(t *testing.T) {
 	}
 }
 
-// TestLeavePathsRecordNothingAcrossPaths pins d-cpt-rw7 at the real call sites:
-// every way a connection steps away from work in progress — switching, shutting
-// down, dropping the socket — clears the live stamp and ends nothing. The two
-// participant acts among them do record: a teardown by handle abandons, and the
-// auto-conclude of a shell-only session concludes it.
-func TestLeavePathsRecordNothingAcrossPaths(t *testing.T) {
+// TestConnectionEventsEndNothing pins d-cpt-rw7 and d-cpt-aen at the real call
+// sites: a dialogue ends only by a participant act. Shutting the server down or
+// dropping a connection ends nothing — the session resumes by handle from a new
+// connection with its shell still running — while a teardown by handle records
+// the terminal abandon.
+func TestConnectionEventsEndNothing(t *testing.T) {
 	end := func(t *testing.T, env testEnv, session string) *sdd.SessionEnd {
 		t.Helper()
 		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(bareSessionID(session)))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if stored.Metadata.Attachment != nil {
-			t.Fatalf("session %s still reads held: %+v", session, stored.Metadata.Attachment)
-		}
 		return stored.Metadata.Ended
 	}
-	startMove := func(t *testing.T, cs *mcp.ClientSession, session string) {
+	startMove := func(t *testing.T, cs *mcp.ClientSession, session string) mcpserver.ServeResult {
 		t.Helper()
 		var serve mcpserver.ServeResult
 		call(t, cs, "start_procedure", map[string]any{"session": session, "canonical": "capture", "label": "work"}, &serve)
+		return serve
 	}
-
-	t.Run("switch away from a session with an open move ends nothing", func(t *testing.T) {
-		env := newTestServer(t, nil, "", "")
-		other := connect(t, env.srv)
-		b := openSession(t, other).Session // a second session to attach away to
-		cs := connect(t, env.srv)
-		a := openSession(t, cs).Session
-		startMove(t, cs, a)
+	requireRunning := func(t *testing.T, cs *mcp.ClientSession, session string, move mcpserver.ServeResult) {
+		t.Helper()
 		var resumed mcpserver.ResumeSessionResult
-		// b was just opened on this server, so it reads active: the switch takes it over.
-		call(t, cs, "resume_session", map[string]any{"session": b, "userWords": "move to the other dialogue", "takeover": true}, &resumed) // switch away from a
-		if got := end(t, env, a); got != nil {
-			t.Fatalf("switch away (open move) ended the session: %+v", got)
+		call(t, cs, "resume_session", map[string]any{"session": session}, &resumed)
+		var shell, capture bool
+		for _, open := range resumed.Open {
+			shell = shell || open.Procedure == "user-dialogue" && open.Status == "running"
+			capture = capture || open.Instance == move.Instance && open.Step == move.Step
 		}
-	})
-
-	t.Run("switch away from a quiescent session concludes it", func(t *testing.T) {
-		env := newTestServer(t, nil, "", "")
-		other := connect(t, env.srv)
-		b := openSession(t, other).Session
-		cs := connect(t, env.srv)
-		a := openSession(t, cs).Session // no move — quiescent
-		var resumed mcpserver.ResumeSessionResult
-		call(t, cs, "resume_session", map[string]any{"session": b, "userWords": "move to the other dialogue", "takeover": true}, &resumed) // switch away; shell auto-concludes
-		got := end(t, env, a)
-		if got == nil || got.Act != sdd.SessionConcluded {
-			t.Fatalf("switch away (quiescent) = %+v, want a terminal conclude — an auto-concluded session is genuinely ended", got)
+		if !shell || !capture {
+			t.Fatalf("the session should resume with its shell running and its move at %s, got %+v", move.Step, resumed.Open)
 		}
-	})
+	}
 
 	t.Run("abandon by handle records the terminal abandon", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		csA := connect(t, env.srv)
 		a := openSession(t, csA).Session
 		startMove(t, csA, a)
-		// A later server reads a as idle, so teardown by handle proceeds (a recent
-		// session would be refused).
-		env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
-		csB := connect(t, env2.srv)
 		var torn mcpserver.AbandonResult
-		call(t, csB, "abandon", map[string]any{"session": a}, &torn)
+		call(t, connect(t, env.srv), "abandon", map[string]any{"session": a}, &torn)
 		got := end(t, env, a)
 		if got == nil || got.Act != sdd.SessionAbandoned {
 			t.Fatalf("teardown by handle = %+v, want a terminal abandon", got)
@@ -3559,118 +3383,32 @@ func TestLeavePathsRecordNothingAcrossPaths(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
 		cs := connect(t, env.srv)
 		a := openSession(t, cs).Session
-		startMove(t, cs, a)
+		move := startMove(t, cs, a)
 		if err := env.srv.Shutdown(t.Context()); err != nil {
 			t.Fatalf("shutdown: %v", err)
 		}
 		if got := end(t, env, a); got != nil {
 			t.Fatalf("shutdown ended the session: %+v", got)
 		}
+		env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
+		requireRunning(t, connect(t, env2.srv), a, move)
 	})
 
 	t.Run("disconnect ends nothing", func(t *testing.T) {
 		env := newTestServer(t, nil, "", "")
-		cs, ss := connectPair(t, env.srv)
+		cs := connect(t, env.srv)
 		a := openSession(t, cs).Session
-		startMove(t, cs, a)
-		if err := env.srv.Disconnect(t.Context(), ss); err != nil {
-			t.Fatalf("disconnect: %v", err)
+		move := startMove(t, cs, a)
+		if err := cs.Close(); err != nil {
+			t.Fatalf("close: %v", err)
 		}
 		if got := end(t, env, a); got != nil {
 			t.Fatalf("disconnect ended the session: %+v", got)
 		}
+		requireRunning(t, connect(t, env.srv), a, move)
 	})
 }
 
-// TestParkedSessionsAcrossConnections pins the leave rule and the discovery
-// contract: every session with open work is discoverable through list_sessions
-// (an active one labeled active with its client, never hidden), while a serve
-// never pushes other dialogues — session entry carries a one-line count of
-// them instead (I6, A1). Attaching to one a live client holds still refuses;
-// switching away from a quiescent session auto-ends it.
-func TestParkedSessionsAcrossConnections(t *testing.T) {
-	env := newTestServer(t, nil, "", "")
-
-	// Server 1, connection A: start a capture (stays live-bound here).
-	csA := connect(t, env.srv)
-	sessionA := openSession(t, csA).Session
-	var serveA mcpserver.ServeResult
-	call(t, csA, "start_procedure", map[string]any{"session": sessionA, "canonical": "capture", "label": "parked capture A"}, &serveA)
-
-	// Connection B on the same server: A is active. The door serve carries a
-	// one-line count of the other open dialogue — never its label or handle —
-	// and list_sessions is where the full labeled listing lives.
-	csB := connect(t, env.srv)
-	shellB := openSession(t, csB)
-	if !strings.Contains(shellB.OpenThreads, "1 other open dialogue") || !strings.Contains(shellB.OpenThreads, "list_sessions") {
-		t.Fatalf("session entry should carry a one-line count of other open dialogues, got %q", shellB.OpenThreads)
-	}
-	if strings.Contains(shellB.OpenThreads, sessionA) || strings.Contains(shellB.OpenThreads, "parked capture A") {
-		t.Fatalf("other dialogues must never be listed on a serve, got %q", shellB.OpenThreads)
-	}
-	var listed mcpserver.ListSessionsResult
-	call(t, csB, "list_sessions", map[string]any{}, &listed)
-	if len(listed.Sessions) != 1 || listed.Sessions[0].Session != sessionA {
-		t.Fatalf("the active session must list, got %+v", listed.Sessions)
-	}
-	if listed.Sessions[0].Activity != "active" || listed.Sessions[0].ClientName != "test-client" {
-		t.Fatalf("an active session should list as active with its client name, got %+v", listed.Sessions[0])
-	}
-	// Attaching to an active session takes it over: the user's ask plus takeover
-	// consent it, and the response names the displaced holder and the fidelity
-	// limit. The displaced client, A, learns of the takeover at its next append:
-	// it fails typed rather than corrupting the shared session log.
-	var claimed mcpserver.ResumeSessionResult
-	call(t, csB, "resume_session", map[string]any{"session": sessionA, "userWords": "take over the stuck capture", "takeover": true}, &claimed)
-	if claimed.Session != sessionA {
-		t.Fatalf("attaching to an active session should succeed and displace, got %+v", claimed)
-	}
-	if !strings.Contains(claimed.Instructions, "Attached over") || !strings.Contains(claimed.Instructions, "recorded session state") {
-		t.Fatalf("a takeover response should name the displaced holder and the fidelity limit, got %q", claimed.Instructions)
-	}
-	if msg := callExpectError(t, csA, "stage_attachment", map[string]any{"session": sessionA, "name": "note.md", "content": "x"}); !strings.Contains(msg, "taken over") {
-		t.Fatalf("a displaced client's next append should fail typed naming the takeover, got %q", msg)
-	}
-
-	// A fresh server over the same sessions dir sees A as parked: the door
-	// carries the other-work count (never the label), and resuming A auto-ends
-	// the quiescent session the connection came from.
-	env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
-	csC := connect(t, env2.srv)
-	shellC := openSession(t, csC)
-	if !strings.Contains(shellC.OpenThreads, "1 other open dialogue") || !strings.Contains(shellC.OpenThreads, "list_sessions") {
-		t.Fatalf("the door should carry the other-work count, got %q", shellC.OpenThreads)
-	}
-	if strings.Contains(shellC.OpenThreads, sessionA) || strings.Contains(shellC.OpenThreads, "parked capture A") {
-		t.Fatalf("other dialogues must never be listed on a serve, got %q", shellC.OpenThreads)
-	}
-
-	var resumed mcpserver.ResumeSessionResult
-	// A reads idle from this later server, so the user's ask alone consents.
-	call(t, csC, "resume_session", map[string]any{"session": sessionA, "userWords": "resume the parked capture"}, &resumed)
-	if resumed.Session != sessionA {
-		t.Fatalf("resume diverged: %+v", resumed)
-	}
-	// The fresh session C stepped away from was quiescent: its shell is
-	// auto-ended in the log — a closed tab leaves no corpse.
-	events, err := readSessionLog(t, env.sessionsDir, shellC.Session)
-	if err != nil {
-		t.Fatal(err)
-	}
-	autoEnded := false
-	for _, ev := range events {
-		if ev.Event == engine.EventAbandoned && ev.Instance == shellC.Instance {
-			if reason, _ := ev.Data["reason"].(string); strings.Contains(reason, "auto-concluded") {
-				autoEnded = true
-			}
-		}
-	}
-	if !autoEnded {
-		t.Fatalf("leaving a quiescent session should auto-end its shell, events: %+v", events)
-	}
-}
-
-// readSessionLog reads a session's JSONL event log from the sessions dir.
 // bareSessionID strips the project prefix off a served handle
 // (project:session-id), yielding the store's own session ID.
 func bareSessionID(handle string) string {
@@ -3680,6 +3418,7 @@ func bareSessionID(handle string) string {
 	return handle
 }
 
+// readSessionLog reads a session's JSONL event log from the sessions dir.
 func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	t.Helper()
 	store, err := localadapter.NewFilesystemSessionStoreAt(dir)
@@ -3702,164 +3441,6 @@ func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 		events = append(events, event)
 	}
 	return events, nil
-}
-
-func TestResumeConsentDecisionTable(t *testing.T) {
-	t.Run("foreign attach without userWords is rejected (mwd)", func(t *testing.T) {
-		env := newTestServer(t, nil, "", "")
-		cs1 := connect(t, env.srv)
-		a := openSession(t, cs1).Session
-		cs2 := connect(t, env.srv)
-		msg := callExpectError(t, cs2, "resume_session", map[string]any{"session": a})
-		if !strings.Contains(msg, "userWords") || !strings.Contains(msg, "verbatim") {
-			t.Fatalf("missing-userWords rejection should name what is required, got %q", msg)
-		}
-	})
-
-	t.Run("recent attach without takeover refuses naming the holder", func(t *testing.T) {
-		env := newTestServer(t, nil, "", "")
-		cs1 := connect(t, env.srv)
-		a := openSession(t, cs1).Session
-		cs2 := connect(t, env.srv)
-		msg := callExpectError(t, cs2, "resume_session", map[string]any{"session": a, "userWords": "take it over"})
-		for _, want := range []string{"test-client", "last active", "takeover", "recorded session state"} {
-			if !strings.Contains(msg, want) {
-				t.Fatalf("recent refusal %q missing %q (holder/activity/fidelity)", msg, want)
-			}
-		}
-	})
-
-	t.Run("recent attach with takeover lands, naming displacement and fidelity", func(t *testing.T) {
-		env := newTestServer(t, nil, "", "")
-		cs1 := connect(t, env.srv)
-		a := openSession(t, cs1).Session
-		cs2 := connect(t, env.srv)
-		var resumed mcpserver.ResumeSessionResult
-		call(t, cs2, "resume_session", map[string]any{"session": a, "userWords": "take it over", "takeover": true}, &resumed)
-		if resumed.Session != a {
-			t.Fatalf("takeover attach should land on %s, got %+v", a, resumed)
-		}
-		if !strings.Contains(resumed.Instructions, "Attached over") || !strings.Contains(resumed.Instructions, "recorded session state") {
-			t.Fatalf("takeover response should name the displaced holder and fidelity limit, got %q", resumed.Instructions)
-		}
-	})
-
-	t.Run("missing userWords rejected against an idle target too", func(t *testing.T) {
-		env := newTestServer(t, nil, "", "")
-		cs1 := connect(t, env.srv)
-		a := openSession(t, cs1).Session
-		// A later server reads a as idle: userWords is still required — consent is
-		// about crossing dialogues, not about liveness.
-		env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
-		cs2 := connect(t, env2.srv)
-		msg := callExpectError(t, cs2, "resume_session", map[string]any{"session": a})
-		if !strings.Contains(msg, "userWords") || !strings.Contains(msg, "verbatim") {
-			t.Fatalf("missing-userWords rejection should hold for an idle target, got %q", msg)
-		}
-	})
-
-	t.Run("idle attach with userWords lands, current attachment carries the words", func(t *testing.T) {
-		env := newTestServer(t, nil, "", "")
-		cs1 := connect(t, env.srv)
-		a := openSession(t, cs1).Session
-		// A later server over the same store reads a's attachment as idle.
-		env2 := newTestServer(t, nil, env.graphDir, env.sessionsDir)
-		cs2 := connect(t, env2.srv)
-		const words = "pick the earlier thread back up"
-		var resumed mcpserver.ResumeSessionResult
-		call(t, cs2, "resume_session", map[string]any{"session": a, "userWords": words}, &resumed)
-		if resumed.Session != a {
-			t.Fatalf("idle attach with userWords should land on %s, got %+v", a, resumed)
-		}
-		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(bareSessionID(a)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.UserWords != words {
-			t.Fatalf("the live stamp should carry the consenting words, attachment: %+v", stored.Metadata.Attachment)
-		}
-	})
-
-	t.Run("parked (no-attachment) attach with userWords records the words durably (row a)", func(t *testing.T) {
-		env := newTestServer(t, nil, "", "")
-		cs, ss := connectPair(t, env.srv)
-		a := openSession(t, cs).Session
-		// Open work is what makes leaving a park rather than an auto-conclude.
-		var move mcpserver.ServeResult
-		call(t, cs, "start_procedure", map[string]any{"session": a, "canonical": "capture"}, &move)
-		// The holder disconnects: a's attachment is released to none — a parked
-		// session with no current attachment, the most common attach target.
-		if err := env.srv.Disconnect(t.Context(), ss); err != nil {
-			t.Fatalf("disconnect: %v", err)
-		}
-		cs2 := connect(t, env.srv)
-		const words = "resume the parked dialogue"
-		var resumed mcpserver.ResumeSessionResult
-		call(t, cs2, "resume_session", map[string]any{"session": a, "userWords": words}, &resumed)
-		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(bareSessionID(a)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if stored.Metadata.Attachment == nil || stored.Metadata.Attachment.UserWords != words {
-			t.Fatalf("attaching a parked session should stamp the consenting words on the live attachment, got %+v", stored.Metadata.Attachment)
-		}
-	})
-}
-
-// TestDisplacedWriterReorientsEndToEnd pins the 2sp regression over MCP: after a
-// consented takeover, the displaced connection's next write fails typed naming
-// who advanced the session and when. The displaced writer itself then reorients
-// — its cached binding is stale, so a no-args reorient points it at re-attach,
-// and re-attaching with the user's ask takes the session back and continues.
-// Divergence surfaces at the write and reorientation succeeds, instead of the
-// old silent lockout.
-func TestDisplacedWriterReorientsEndToEnd(t *testing.T) {
-	env := newTestServer(t, nil, "", "")
-	csA := connect(t, env.srv)
-	a := openSession(t, csA).Session
-	var serveA mcpserver.ServeResult
-	call(t, csA, "start_procedure", map[string]any{"session": a, "canonical": "capture", "label": "branch A"}, &serveA)
-
-	// csB takes over the active session with the user's ask.
-	csB := connect(t, env.srv)
-	var claimed mcpserver.ResumeSessionResult
-	call(t, csB, "resume_session", map[string]any{"session": a, "userWords": "take over the branch", "takeover": true}, &claimed)
-
-	// csA's next write learns of the divergence: typed, naming who and when.
-	msg := callExpectError(t, csA, "next", map[string]any{"session": a, "instance": serveA.Instance, "report": assembleReport()})
-	if !strings.Contains(msg, "taken over") || !strings.Contains(msg, "2026") {
-		t.Fatalf("displaced write should name the takeover and when, got %q", msg)
-	}
-
-	// The displaced writer's no-args reorient no longer serves its poisoned,
-	// stale in-memory session — the store shows it is not the holder, so it is
-	// pointed back at the doors to re-establish.
-	reorientMsg := callExpectError(t, csA, "resume_session", map[string]any{})
-	if !strings.Contains(reorientMsg, "resume_session") || !strings.Contains(reorientMsg, a) {
-		t.Fatalf("a displaced writer's no-args reorient should point at re-attach, got %q", reorientMsg)
-	}
-
-	// csA reorients for real: re-attach with the user's ask (a is active under
-	// csB, so takeover) and continue the move.
-	var reA mcpserver.ResumeSessionResult
-	call(t, csA, "resume_session", map[string]any{"session": a, "userWords": "come back to branch A", "takeover": true}, &reA)
-	if reA.Session != a {
-		t.Fatalf("reorientation should re-attach to %s, got %+v", a, reA)
-	}
-	var capA *mcpserver.ServeResult
-	for i := range reA.Open {
-		if reA.Open[i].Procedure == "capture" {
-			capA = &reA.Open[i]
-		}
-	}
-	if capA == nil {
-		t.Fatalf("reorientation should re-serve the capture, got %+v", reA.Open)
-	}
-	var serve mcpserver.ServeResult
-	call(t, csA, "next", map[string]any{"session": a, "instance": capA.Instance, "report": assembleReport()}, &serve)
-	if serve.Step != "playback" {
-		t.Fatalf("the reoriented writer should advance the move, got %q", serve.Step)
-	}
 }
 
 // TestEmbeddedCatchupProcedure drives the shipped catch-up base entry over

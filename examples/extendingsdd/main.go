@@ -27,7 +27,13 @@ func (r externalAccess) ResolvePrincipal(_ context.Context, identity sdd.Request
 	if identity.Subject == "" {
 		return sdd.Principal{}, &sdd.ApplicationError{Code: sdd.ErrorAuthenticationRequired, Message: "identity required"}
 	}
-	return sdd.Principal{Subject: identity.Subject, Participant: identity.Subject}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+
+// ResolveParticipant is where a composition applies a per-project participant
+// name; this example appears under the account's subject everywhere.
+func (r externalAccess) ResolveParticipant(_ context.Context, principal sdd.Principal, _ sdd.ProjectID) (string, error) {
+	return principal.Subject, nil
 }
 
 func (r externalAccess) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {

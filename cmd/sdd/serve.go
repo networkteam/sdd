@@ -196,7 +196,13 @@ func (a *localRuntimeAccess) ResolvePrincipal(_ context.Context, identity sdd.Re
 	if identity.Subject == "" {
 		return sdd.Principal{}, &sdd.ApplicationError{Code: sdd.ErrorAuthenticationRequired, Message: "request identity is required"}
 	}
-	return sdd.Principal{Subject: identity.Subject, Participant: a.participant}, nil
+	return sdd.Principal{Subject: identity.Subject}, nil
+}
+
+// ResolveParticipant returns the configured participant: one local process
+// serves one project, so the name is the same for it.
+func (a *localRuntimeAccess) ResolveParticipant(context.Context, sdd.Principal, sdd.ProjectID) (string, error) {
+	return a.participant, nil
 }
 
 func (a *localRuntimeAccess) ListProjects(context.Context, sdd.Principal) (sdd.ProjectList, error) {

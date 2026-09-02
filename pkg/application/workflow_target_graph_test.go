@@ -49,7 +49,11 @@ func (a *workflowTargetAcquirer) Acquire(_ context.Context, target MutationTarge
 type workflowTargetAccess struct{ runtime *ProjectRuntime }
 
 func (a workflowTargetAccess) ResolvePrincipal(_ context.Context, identity RequestIdentity) (Principal, error) {
-	return Principal{Subject: identity.Subject, Participant: "Christopher"}, nil
+	return Principal{Subject: identity.Subject}, nil
+}
+
+func (a workflowTargetAccess) ResolveParticipant(context.Context, Principal, ProjectID) (string, error) {
+	return "Christopher", nil
 }
 func (a workflowTargetAccess) ListProjects(context.Context, Principal) (ProjectList, error) {
 	return ProjectList{}, nil

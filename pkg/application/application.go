@@ -45,10 +45,24 @@ func (a *Application) Info(ctx context.Context, identity RequestIdentity, projec
 	if err != nil {
 		return InfoResult{}, err
 	}
+	participant, err := a.participantFor(ctx, principal, runtime)
+	if err != nil {
+		return InfoResult{}, err
+	}
 	return InfoResult{
-		Project: runtime.options.Project, Participant: principal.Participant, Language: runtime.options.Language,
+		Project: runtime.options.Project, Participant: participant, Language: runtime.options.Language,
 		Search: search, Recovery: renderRecoveryNotices(recoveries.Items),
 	}, nil
+}
+
+// participantFor resolves the participant the principal appears as in the
+// resolved project.
+func (a *Application) participantFor(ctx context.Context, principal Principal, runtime *ProjectRuntime) (string, error) {
+	participant, err := a.access.ResolveParticipant(ctx, principal, runtime.options.Project.ID)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(participant), nil
 }
 
 // Projects lists the projects the request's principal can reach, with

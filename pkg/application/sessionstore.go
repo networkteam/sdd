@@ -32,17 +32,15 @@ type SessionMetadata struct {
 	UpdatedAt time.Time
 }
 
-// Attachment is the ephemeral stamp of the client currently driving the
-// session: integrity comes from CAS on append, and status is derived from
-// LastActivity recency. UserWords records the user's verbatim ask that
-// authorized this attachment.
+// Attachment is the stamp of the client that last attached to the session and
+// when the session was last acted on. It is a record, not a lock: the handle
+// is the capability, integrity comes from CAS on append, and staleness is
+// derived from LastActivity (d-cpt-aen).
 type Attachment struct {
 	Subject       string
 	ClientName    string
 	ClientVersion string
-	MCPSessionID  string
 	LastActivity  time.Time
-	UserWords     string `json:",omitempty"`
 }
 
 // SessionEnd records the participant act that ended a session, written once and

@@ -183,8 +183,12 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		return CreateEntryResult{}, &ValidationError{Warnings: warnings}
 	}
 	if len(entry.Participants) == 0 {
-		if principal.Participant != "" {
-			entry.Participants = []string{principal.Participant}
+		participant, err := a.participantFor(ctx, principal, runtime)
+		if err != nil {
+			return CreateEntryResult{}, err
+		}
+		if participant != "" {
+			entry.Participants = []string{participant}
 		}
 	}
 	// Attachment truth is established before the gate: staged handles resolve
@@ -339,18 +343,22 @@ func (a *Application) StartWIP(ctx context.Context, identity RequestIdentity, pr
 	if err != nil {
 		return "", MutationResult{}, err
 	}
-	if principal.Participant == "" {
-		return "", MutationResult{}, fmt.Errorf("sdd: resolved principal participant is required to start WIP")
+	participant, err := a.participantFor(ctx, principal, runtime)
+	if err != nil {
+		return "", MutationResult{}, err
+	}
+	if participant == "" {
+		return "", MutationResult{}, fmt.Errorf("sdd: resolved participant is required to start WIP")
 	}
 	marker := &model.WIPMarker{
-		ID: model.GenerateWIPMarkerID(principal.Participant), Entry: entryID, Participant: principal.Participant,
+		ID: model.GenerateWIPMarkerID(participant), Entry: entryID, Participant: participant,
 		Exclusive: true, Content: description, Time: runtime.options.Now(),
 	}
 	target, err = resolveMutationTarget(runtime, target)
 	if err != nil {
 		return "", MutationResult{}, err
 	}
-	result, err := a.applyDocumentMutation(ctx, identity, runtime, binding, target, "wip-start-"+marker.ID, fmt.Sprintf("sdd: wip start %s (%s)", entryID, principal.Participant), DocumentChange{
+	result, err := a.applyDocumentMutation(ctx, identity, runtime, binding, target, "wip-start-"+marker.ID, fmt.Sprintf("sdd: wip start %s (%s)", entryID, participant), DocumentChange{
 		LogicalPath: filepath.ToSlash(model.WIPMarkerPath(marker.ID)), CanonicalBytes: []byte(model.FormatWIPMarker(marker)),
 	})
 	return marker.ID, result, err

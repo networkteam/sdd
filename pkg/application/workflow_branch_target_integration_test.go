@@ -119,7 +119,7 @@ Branch-targeted workflow reads need to follow the written artifact.
 		t.Fatal(err)
 	}
 	identity := sdd.RequestIdentity{Subject: "christopher"}
-	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "branch-target"})
+	workflow, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "branch-target"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ This reference exists only on the bound work branch.
 		t.Fatalf("unbound read leaked configured default target: %q", defaultRead.Results)
 	}
 
-	bound, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "bound-capture"})
+	bound, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "bound-capture"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ This reference exists only on the bound work branch.
 		t.Fatalf("summary replacement did not use the bound target:\n%s", boundBytes)
 	}
 
-	unbound, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "unbound-capture"})
+	unbound, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "unbound-capture"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ This reference exists only on the bound work branch.
 	// A rejected default-target attempt must not pin that target into the
 	// instance. Binding the session before retrying must route the eventual
 	// artifact and its summary read to work.
-	retry, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{MCPSessionID: "rejected-then-bound"})
+	retry, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "rejected-then-bound"})
 	if err != nil {
 		t.Fatal(err)
 	}
