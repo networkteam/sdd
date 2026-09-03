@@ -114,46 +114,60 @@ func (s *FilesystemSessionStore) Load(_ context.Context, id app.SessionID) (app.
 	return readSessionLog(located, name, id)
 }
 
-func (s *FilesystemSessionStore) List(_ context.Context, filter app.SessionFilter) ([]app.StoredSession, error) {
+// List walks the logs in ID order from the cursor and reads only until the page
+// is full, so a bounded pass over a large store costs a bounded number of log
+// reads. A session present in several locations is read from the first, the
+// write-preference order.
+func (s *FilesystemSessionStore) List(_ context.Context, filter app.SessionFilter) (app.SessionPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	sessions := make([]app.StoredSession, 0)
-	seen := make(map[app.SessionID]struct{})
+	type candidate struct {
+		location StoreLocation
+		name     string
+	}
+	candidates := map[app.SessionID]candidate{}
+	var ids []app.SessionID
 	for _, location := range s.locations {
 		names, err := listSessionLogs(location.Sessions)
 		if err != nil {
-			return nil, err
+			return app.SessionPage{}, err
 		}
 		for _, name := range names {
 			id := app.SessionID(strings.TrimSuffix(name, sessionLogSuffix))
-			if _, duplicate := seen[id]; duplicate {
+			if _, duplicate := candidates[id]; duplicate || (filter.After != "" && id <= filter.After) {
 				continue
 			}
-			lock, err := lockSession(location.Sessions, name)
-			if err != nil {
-				return nil, err
-			}
-			stored, err := readSessionLog(location, name, id)
-			unlock(lock)
-			if err != nil {
-				// A log this binary cannot read may belong to a newer version.
-				// Skipping it keeps every other session listed; it is never
-				// treated as garbage.
-				continue
-			}
-			seen[id] = struct{}{}
-			if filter.Subject != "" && stored.Metadata.Subject != filter.Subject {
-				continue
-			}
-			if filter.Project != "" && stored.Metadata.Project != filter.Project {
-				continue
-			}
-			sessions = append(sessions, stored)
+			candidates[id] = candidate{location: location, name: name}
+			ids = append(ids, id)
 		}
 	}
-	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Metadata.ID < sessions[j].Metadata.ID })
-	return sessions, nil
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	page := app.SessionPage{Sessions: make([]app.StoredSession, 0)}
+	for i, id := range ids {
+		if filter.Limit > 0 && len(page.Sessions) >= filter.Limit {
+			page.Next = ids[i-1]
+			break
+		}
+		found := candidates[id]
+		lock, err := lockSession(found.location.Sessions, found.name)
+		if err != nil {
+			return app.SessionPage{}, err
+		}
+		stored, err := readSessionLog(found.location, found.name, id)
+		unlock(lock)
+		if err != nil {
+			// A log this binary cannot read may belong to a newer version.
+			// Skipping it keeps every other session listed; it is never
+			// treated as garbage.
+			continue
+		}
+		if filter.Matches(stored.Metadata) {
+			page.Sessions = append(page.Sessions, stored)
+		}
+	}
+	return page, nil
 }
 
 func (s *FilesystemSessionStore) Append(

@@ -900,14 +900,14 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 	if err != nil {
 		return nil, err
 	}
-	stored, err := a.sessions.List(ctx, SessionFilter{Subject: principal.Subject, Project: runtime.options.Project.ID})
+	page, err := a.sessions.List(ctx, SessionFilter{Subject: principal.Subject, Project: runtime.options.Project.ID})
 	if err != nil {
 		return nil, err
 	}
 	now := a.now().UTC()
-	result := make([]WorkflowSessionSummary, 0, len(stored))
+	result := make([]WorkflowSessionSummary, 0, len(page.Sessions))
 	log := slogutils.FromContext(ctx)
-	for _, item := range stored {
+	for _, item := range page.Sessions {
 		// A session this binary cannot read may have been written by a newer
 		// one. Skipping it keeps every other session listed and resumable
 		// rather than making one log take the whole listing down.

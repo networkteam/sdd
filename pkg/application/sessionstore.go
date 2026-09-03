@@ -124,15 +124,26 @@ func (s legacyEndStore) Load(ctx context.Context, id SessionID) (StoredSession, 
 	return stored, nil
 }
 
-func (s legacyEndStore) List(ctx context.Context, filter SessionFilter) ([]StoredSession, error) {
-	stored, err := s.SessionStore.List(ctx, filter)
+// List selects on the ending itself: the store sees no EndedBefore, because a
+// legacy log's ending is derived here and the store's metadata says nothing.
+// The page keeps the store's cursor, so a page thinned by this selection still
+// advances the sweep.
+func (s legacyEndStore) List(ctx context.Context, filter SessionFilter) (SessionPage, error) {
+	inner := filter
+	inner.EndedBefore = nil
+	page, err := s.SessionStore.List(ctx, inner)
 	if err != nil {
-		return nil, err
+		return SessionPage{}, err
 	}
-	for i := range stored {
-		deriveLegacyEnd(&stored[i])
+	kept := page.Sessions[:0]
+	for i := range page.Sessions {
+		deriveLegacyEnd(&page.Sessions[i])
+		if filter.Matches(page.Sessions[i].Metadata) {
+			kept = append(kept, page.Sessions[i])
+		}
 	}
-	return stored, nil
+	page.Sessions = kept
+	return page, nil
 }
 
 // deriveLegacyEnd recovers the terminal record from what the log states about
@@ -198,9 +209,42 @@ type StoredSession struct {
 	Events   []StoredEvent
 }
 
+// SessionFilter selects the sessions List returns. Subject and Project match
+// metadata; EndedBefore selects sessions whose recorded ending lies before the
+// instant, from metadata alone. After and Limit page the result in session-ID
+// order — IDs are time-prefixed and unique, so ID order is a cursor every store
+// honors; a zero Limit means every match.
 type SessionFilter struct {
-	Subject string
-	Project ProjectID
+	Subject     string
+	Project     ProjectID
+	EndedBefore *time.Time
+	After       SessionID
+	Limit       int
+}
+
+// Matches reports whether metadata passes the filter's selection — the part a
+// store applies per session, leaving After and Limit to its enumeration.
+func (f SessionFilter) Matches(m SessionMetadata) bool {
+	if f.Subject != "" && m.Subject != f.Subject {
+		return false
+	}
+	if f.Project != "" && m.Project != f.Project {
+		return false
+	}
+	if f.EndedBefore != nil && (m.Ended == nil || !m.Ended.EndedAt.Before(*f.EndedBefore)) {
+		return false
+	}
+	return true
+}
+
+// SessionPage is one List result. Next is the cursor to continue from, empty
+// once the store is exhausted. A page may hold fewer sessions than Limit, or
+// none, while Next is still set: the store stopped at Limit before the filter
+// admitted enough, so a consumer loops until Next is empty rather than reading
+// exhaustion off the page length.
+type SessionPage struct {
+	Sessions []StoredSession
+	Next     SessionID
 }
 
 type SessionAppend struct {
@@ -216,14 +260,16 @@ type SessionAppend struct {
 // metadata a newer one wrote is undetected there — only a session the newer
 // engine actually advanced fails closed, through StoredEvent.CodecVersion.
 //
-// List is also the enumeration collection sweeps over, and Delete is what makes
-// them possible against any implementation rather than only the local one.
-// Delete must be idempotent: removing a session that is already gone is
-// success, since two sweeps may derive the same target set.
+// List is also the enumeration collection sweeps over, paged by the filter's
+// cursor so a sweep converges over repeated calls instead of loading every
+// session, and Delete is what makes sweeps possible against any implementation
+// rather than only the local one. Delete must be idempotent: removing a session
+// that is already gone is success, since two sweeps may derive the same target
+// set.
 type SessionStore interface {
 	Create(context.Context, SessionMetadata) (StoredSession, error)
 	Load(context.Context, SessionID) (StoredSession, error)
-	List(context.Context, SessionFilter) ([]StoredSession, error)
+	List(context.Context, SessionFilter) (SessionPage, error)
 	Append(context.Context, SessionID, uint64, SessionAppend) (uint64, error)
 	Delete(context.Context, SessionID) error
 }

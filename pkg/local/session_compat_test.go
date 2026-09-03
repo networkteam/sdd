@@ -113,14 +113,14 @@ func TestEveryReleasedFormatIsLiveInEveryLocation(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				listed, err := store.List(t.Context(), sdd.SessionFilter{})
+				page, err := store.List(t.Context(), sdd.SessionFilter{})
 				if err != nil {
 					t.Fatalf("List: %v", err)
 				}
-				if len(listed) != 1 || listed[0].Metadata.ID != compatSessionID {
-					t.Fatalf("List = %+v, want the session found in %s", listed, target.Name)
+				if len(page.Sessions) != 1 || page.Sessions[0].Metadata.ID != compatSessionID {
+					t.Fatalf("List = %+v, want the session found in %s", page.Sessions, target.Name)
 				}
-				if got := listed[0].Metadata.Participant; got != format.wantParticipant {
+				if got := page.Sessions[0].Metadata.Participant; got != format.wantParticipant {
 					t.Fatalf("participant = %q, want %q", got, format.wantParticipant)
 				}
 
@@ -197,12 +197,12 @@ func TestUnreadableSessionIsSkippedNotFatal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listed, err := store.List(t.Context(), sdd.SessionFilter{})
+	page, err := store.List(t.Context(), sdd.SessionFilter{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	ids := make([]string, 0, len(listed))
-	for _, item := range listed {
+	ids := make([]string, 0, len(page.Sessions))
+	for _, item := range page.Sessions {
 		ids = append(ids, string(item.Metadata.ID))
 	}
 	if !slices.Equal(ids, []string{"s_readable"}) {

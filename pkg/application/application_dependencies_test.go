@@ -44,8 +44,10 @@ func (noBlobStore) Open(context.Context, sdd.SessionRef, string) (io.ReadCloser,
 }
 func (noBlobStore) Retain(context.Context, sdd.SessionRef, string, []string) error { return nil }
 func (noBlobStore) Release(context.Context, sdd.SessionRef, string) error          { return nil }
-func (noBlobStore) StagedSessions(context.Context) ([]sdd.SessionRef, error)       { return nil, nil }
-func (noBlobStore) DeleteStaged(context.Context, sdd.SessionRef) error             { return nil }
+func (noBlobStore) StagedSessions(context.Context, sdd.SessionRef, int) (sdd.StagedSessionPage, error) {
+	return sdd.StagedSessionPage{}, nil
+}
+func (noBlobStore) DeleteStaged(context.Context, sdd.SessionRef) error { return nil }
 
 type noSessionStore struct{}
 
@@ -55,8 +57,8 @@ func (noSessionStore) Create(context.Context, sdd.SessionMetadata) (sdd.StoredSe
 func (noSessionStore) Load(context.Context, sdd.SessionID) (sdd.StoredSession, error) {
 	return sdd.StoredSession{}, nil
 }
-func (noSessionStore) List(context.Context, sdd.SessionFilter) ([]sdd.StoredSession, error) {
-	return nil, nil
+func (noSessionStore) List(context.Context, sdd.SessionFilter) (sdd.SessionPage, error) {
+	return sdd.SessionPage{}, nil
 }
 func (noSessionStore) Append(context.Context, sdd.SessionID, uint64, sdd.SessionAppend) (uint64, error) {
 	return 0, nil

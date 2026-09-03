@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -12,6 +13,35 @@ import (
 type SessionRef struct {
 	Subject string
 	Session SessionID
+}
+
+// Compare orders refs by session, then subject — the order StagedSessions
+// enumerates in, so a session-ID cursor from the session store lines up.
+func (r SessionRef) Compare(other SessionRef) int {
+	if r.Session != other.Session {
+		return strings.Compare(string(r.Session), string(other.Session))
+	}
+	return strings.Compare(r.Subject, other.Subject)
+}
+
+// AtOrBefore reports whether r lies at or before cursor in enumeration order,
+// which is what a paged StagedSessions skips. A cursor naming only a session
+// covers every subject of that session.
+func (r SessionRef) AtOrBefore(cursor SessionRef) bool {
+	if cursor.Session == "" {
+		return false
+	}
+	if r.Session != cursor.Session {
+		return r.Session < cursor.Session
+	}
+	return cursor.Subject == "" || r.Subject <= cursor.Subject
+}
+
+// StagedSessionPage is one StagedSessions result. Next is the cursor to
+// continue from, empty once the store is exhausted.
+type StagedSessionPage struct {
+	Sessions []SessionRef
+	Next     SessionRef
 }
 
 type StagedBlob struct {
@@ -29,14 +59,16 @@ type StagedBlob struct {
 //
 // StagedSessions and DeleteStaged put reclamation inside the published contract,
 // so a sweep enumerates staging areas and drops the ones whose session is gone
-// through this interface rather than through local-only code. DeleteStaged must
-// be idempotent, and removes a session's blobs together with its retentions.
+// through this interface rather than through local-only code. StagedSessions
+// pages in SessionRef order after the cursor (SessionRef.AtOrBefore), a zero
+// limit meaning every area. DeleteStaged must be idempotent, and removes a
+// session's blobs together with its retentions.
 type StagedBlobStore interface {
 	Stage(context.Context, SessionRef, string, io.Reader) (StagedBlob, error)
 	Stat(context.Context, SessionRef, string) (StagedBlob, error)
 	Open(context.Context, SessionRef, string) (io.ReadCloser, error)
 	Retain(context.Context, SessionRef, string, []string) error
 	Release(context.Context, SessionRef, string) error
-	StagedSessions(context.Context) ([]SessionRef, error)
+	StagedSessions(ctx context.Context, after SessionRef, limit int) (StagedSessionPage, error)
 	DeleteStaged(context.Context, SessionRef) error
 }

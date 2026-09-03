@@ -5,7 +5,9 @@ import (
 	"context"
 	"io"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
 	"github.com/networkteam/sdd/pkg/llm/embed"
@@ -167,8 +169,61 @@ func RunSessionStoreTests(t *testing.T, factory func(*testing.T) SessionStoreFix
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(listed) == 0 {
+	if len(listed.Sessions) == 0 {
 		t.Fatal("List did not return the created session")
+	}
+
+	// Collection pages through List: ID order is the cursor, Next names where a
+	// page stopped, and EndedBefore selects on the recorded ending alone.
+	second, third := fixture.Metadata, fixture.Metadata
+	second.ID += "-page-b"
+	third.ID += "-page-c"
+	for _, metadata := range []sdd.SessionMetadata{second, third} {
+		if _, err := fixture.Store.Create(t.Context(), metadata); err != nil {
+			t.Fatalf("Create(%s): %v", metadata.ID, err)
+		}
+	}
+	endedAt := time.Now().UTC().Round(0)
+	ended := third
+	ended.Ended = &sdd.SessionEnd{Act: sdd.SessionConcluded, EndedAt: endedAt}
+	if _, err := fixture.Store.Append(t.Context(), third.ID, 1, sdd.SessionAppend{Metadata: &ended}); err != nil {
+		t.Fatalf("ending %s: %v", third.ID, err)
+	}
+	var paged []sdd.SessionID
+	for cursor := sdd.SessionID(""); ; {
+		page, err := fixture.Store.List(t.Context(), sdd.SessionFilter{Project: fixture.Metadata.Project, After: cursor, Limit: 1})
+		if err != nil {
+			t.Fatalf("List page after %q: %v", cursor, err)
+		}
+		if len(page.Sessions) > 1 {
+			t.Fatalf("List page holds %d sessions, want at most the Limit of 1", len(page.Sessions))
+		}
+		for _, item := range page.Sessions {
+			paged = append(paged, item.Metadata.ID)
+		}
+		if page.Next == "" {
+			break
+		}
+		if page.Next <= cursor {
+			t.Fatalf("List Next %q did not advance past %q", page.Next, cursor)
+		}
+		cursor = page.Next
+	}
+	if !slices.IsSortedFunc(paged, func(a, b sdd.SessionID) int { return strings.Compare(string(a), string(b)) }) {
+		t.Fatalf("List pages out of ID order: %v", paged)
+	}
+	for _, id := range []sdd.SessionID{fixture.Metadata.ID, second.ID, third.ID} {
+		if !slices.Contains(paged, id) {
+			t.Fatalf("List pages = %v, missing %s", paged, id)
+		}
+	}
+	before := endedAt.Add(time.Second)
+	endedPage, err := fixture.Store.List(t.Context(), sdd.SessionFilter{Project: fixture.Metadata.Project, EndedBefore: &before})
+	if err != nil {
+		t.Fatalf("List EndedBefore: %v", err)
+	}
+	if len(endedPage.Sessions) != 1 || endedPage.Sessions[0].Metadata.ID != third.ID {
+		t.Fatalf("List EndedBefore = %+v, want only the ended session %s", endedPage.Sessions, third.ID)
 	}
 
 	// Collection reaches deletion through this contract, so an implementation
@@ -186,7 +241,7 @@ func RunSessionStoreTests(t *testing.T, factory func(*testing.T) SessionStoreFix
 	if err != nil {
 		t.Fatalf("List after Delete: %v", err)
 	}
-	for _, item := range remaining {
+	for _, item := range remaining.Sessions {
 		if item.Metadata.ID == fixture.Metadata.ID {
 			t.Fatal("List still returns the deleted session")
 		}
@@ -231,12 +286,38 @@ func RunStagedBlobStoreTests(t *testing.T, factory func(*testing.T) StagedBlobSt
 	// contract, so an implementation must surface the session it staged for and
 	// must delete a retained blob rather than refusing while a retention holds
 	// it — the sweep's rules decide what is safe to remove, not the store's.
-	refs, err := fixture.Store.StagedSessions(t.Context())
+	// Enumeration pages in SessionRef order after a cursor.
+	other := fixture.Session
+	other.Session += "-page-b"
+	if _, err := fixture.Store.Stage(t.Context(), other, fixture.Filename, bytes.NewReader(fixture.Content)); err != nil {
+		t.Fatalf("Stage(%+v): %v", other, err)
+	}
+	all, err := fixture.Store.StagedSessions(t.Context(), sdd.SessionRef{}, 0)
 	if err != nil {
 		t.Fatalf("StagedSessions: %v", err)
 	}
-	if !slices.Contains(refs, fixture.Session) {
-		t.Fatalf("StagedSessions = %+v, want it to contain %+v", refs, fixture.Session)
+	if !slices.Contains(all.Sessions, fixture.Session) || !slices.Contains(all.Sessions, other) || all.Next != (sdd.SessionRef{}) {
+		t.Fatalf("StagedSessions = %+v, want both %+v and %+v with no Next", all, fixture.Session, other)
+	}
+	if !slices.IsSortedFunc(all.Sessions, sdd.SessionRef.Compare) {
+		t.Fatalf("StagedSessions out of SessionRef order: %+v", all.Sessions)
+	}
+	first, err := fixture.Store.StagedSessions(t.Context(), sdd.SessionRef{}, 1)
+	if err != nil {
+		t.Fatalf("StagedSessions page: %v", err)
+	}
+	if len(first.Sessions) != 1 || first.Next != first.Sessions[0] {
+		t.Fatalf("StagedSessions page = %+v, want one area with Next naming it", first)
+	}
+	rest, err := fixture.Store.StagedSessions(t.Context(), first.Next, 0)
+	if err != nil {
+		t.Fatalf("StagedSessions after cursor: %v", err)
+	}
+	if slices.Contains(rest.Sessions, first.Sessions[0]) || len(rest.Sessions) != len(all.Sessions)-1 {
+		t.Fatalf("StagedSessions after %+v = %+v, want the remaining %d areas", first.Next, rest, len(all.Sessions)-1)
+	}
+	if err := fixture.Store.DeleteStaged(t.Context(), other); err != nil {
+		t.Fatalf("DeleteStaged(%+v): %v", other, err)
 	}
 	if err := fixture.Store.DeleteStaged(t.Context(), fixture.Session); err != nil {
 		t.Fatalf("DeleteStaged: %v", err)
@@ -247,11 +328,11 @@ func RunStagedBlobStoreTests(t *testing.T, factory func(*testing.T) StagedBlobSt
 	if err := fixture.Store.DeleteStaged(t.Context(), fixture.Session); err != nil {
 		t.Fatalf("second DeleteStaged = %v, want idempotent success", err)
 	}
-	afterRefs, err := fixture.Store.StagedSessions(t.Context())
+	afterRefs, err := fixture.Store.StagedSessions(t.Context(), sdd.SessionRef{}, 0)
 	if err != nil {
 		t.Fatalf("StagedSessions after DeleteStaged: %v", err)
 	}
-	if slices.Contains(afterRefs, fixture.Session) {
+	if slices.Contains(afterRefs.Sessions, fixture.Session) {
 		t.Fatal("StagedSessions still returns the deleted session")
 	}
 

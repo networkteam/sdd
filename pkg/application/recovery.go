@@ -158,12 +158,12 @@ func (a *Application) ListRecoveries(ctx context.Context, identity RequestIdenti
 }
 
 func (a *Application) listRecoveries(ctx context.Context, runtime *ProjectRuntime, includeClosed bool) (RecoveryList, error) {
-	sessions, err := a.sessions.List(ctx, SessionFilter{Project: runtime.options.Project.ID})
+	page, err := a.sessions.List(ctx, SessionFilter{Project: runtime.options.Project.ID})
 	if err != nil {
 		return RecoveryList{}, err
 	}
 	result := RecoveryList{Project: runtime.options.Project}
-	for _, stored := range sessions {
+	for _, stored := range page.Sessions {
 		ids, err := mutationIDs(stored.Events)
 		if err != nil {
 			return RecoveryList{}, err

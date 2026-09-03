@@ -114,13 +114,27 @@ func (f collectFixture) collect(t *testing.T, retention time.Duration) sdd.Colle
 
 func (f collectFixture) listedIDs(t *testing.T) []string {
 	t.Helper()
-	listed, err := f.sessions.List(t.Context(), sdd.SessionFilter{})
+	page, err := f.sessions.List(t.Context(), sdd.SessionFilter{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	ids := make([]string, 0, len(listed))
-	for _, item := range listed {
+	ids := make([]string, 0, len(page.Sessions))
+	for _, item := range page.Sessions {
 		ids = append(ids, string(item.Metadata.ID))
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+func (f collectFixture) stagedIDs(t *testing.T) []string {
+	t.Helper()
+	page, err := f.blobs.StagedSessions(t.Context(), sdd.SessionRef{}, 0)
+	if err != nil {
+		t.Fatalf("StagedSessions: %v", err)
+	}
+	ids := make([]string, 0, len(page.Sessions))
+	for _, ref := range page.Sessions {
+		ids = append(ids, string(ref.Session))
 	}
 	slices.Sort(ids)
 	return ids
@@ -159,16 +173,7 @@ func TestCollectRemovesOnlyEndedSessionsPastRetention(t *testing.T) {
 	if _, err := f.blobs.Stat(t.Context(), sdd.SessionRef{Subject: collectSubject, Session: "s_old"}, ""); err == nil {
 		t.Fatal("expected the removed session's staged blobs to be gone")
 	}
-	owners, err := f.blobs.StagedSessions(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var kept []string
-	for _, owner := range owners {
-		kept = append(kept, string(owner.Session))
-	}
-	slices.Sort(kept)
-	if !slices.Equal(kept, []string{"s_open", "s_recent"}) {
+	if kept := f.stagedIDs(t); !slices.Equal(kept, []string{"s_open", "s_recent"}) {
 		t.Fatalf("staged owners = %v, want only the surviving sessions", kept)
 	}
 }
@@ -191,12 +196,60 @@ func TestCollectRemovesOrphanedStagedBlobs(t *testing.T) {
 	if !slices.Equal(removed, []string{"s_vanished"}) {
 		t.Fatalf("removed owners = %v, want only the orphan", removed)
 	}
-	owners, err := f.blobs.StagedSessions(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(owners) != 1 || owners[0].Session != "s_live" {
+	if owners := f.stagedIDs(t); !slices.Equal(owners, []string{"s_live"}) {
 		t.Fatalf("remaining owners = %+v, want the live session's", owners)
+	}
+}
+
+// TestCollectPagesToConvergence pins the bounded shape: one pass processes a
+// page of each store and names where it stopped, repeating until Next is empty
+// removes everything due, and a session the pass keeps never starves the pages
+// after it.
+func TestCollectPagesToConvergence(t *testing.T) {
+	f := newCollectFixture(t)
+	for _, id := range []sdd.SessionID{"s_a", "s_b", "s_c", "s_d", "s_e"} {
+		f.writeSession(t, id, f.now.Add(-30*24*time.Hour), sdd.SessionConcluded)
+		f.stage(t, id)
+	}
+	f.writeSession(t, "s_live", time.Time{}, "")
+	f.stage(t, "s_live")
+	f.stage(t, "s_orphan")
+
+	var removed []string
+	passes := 0
+	cmd := sdd.CollectSessionsCmd{Retention: time.Hour, Limit: 2}
+	for {
+		result, err := f.app.CollectSessions(t.Context(), cmd)
+		if err != nil {
+			t.Fatalf("CollectSessions after %q: %v", cmd.After, err)
+		}
+		passes++
+		if len(result.RemovedSessions) > cmd.Limit {
+			t.Fatalf("pass removed %d sessions, want at most the Limit of %d", len(result.RemovedSessions), cmd.Limit)
+		}
+		for _, id := range result.RemovedSessions {
+			removed = append(removed, string(id))
+		}
+		if result.Next == "" {
+			break
+		}
+		if result.Next <= cmd.After {
+			t.Fatalf("Next %q did not advance past %q", result.Next, cmd.After)
+		}
+		cmd.After = result.Next
+	}
+	slices.Sort(removed)
+	if !slices.Equal(removed, []string{"s_a", "s_b", "s_c", "s_d", "s_e"}) {
+		t.Fatalf("removed = %v over %d passes, want every ended session", removed, passes)
+	}
+	if passes < 3 {
+		t.Fatalf("converged in %d passes, want the Limit of 2 to need at least 3", passes)
+	}
+	if got := f.listedIDs(t); !slices.Equal(got, []string{"s_live"}) {
+		t.Fatalf("remaining sessions = %v, want only the live one", got)
+	}
+	if got := f.stagedIDs(t); !slices.Equal(got, []string{"s_live"}) {
+		t.Fatalf("remaining staged = %v, want only the live session's (orphan collected)", got)
 	}
 }
 

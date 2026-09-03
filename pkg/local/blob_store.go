@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -190,7 +191,7 @@ func (s *FilesystemStagedBlobStore) Release(_ context.Context, ref app.SessionRe
 
 // StagedSessions enumerates every staging area across all locations, read
 // straight from the paths.
-func (s *FilesystemStagedBlobStore) StagedSessions(_ context.Context) ([]app.SessionRef, error) {
+func (s *FilesystemStagedBlobStore) StagedSessions(_ context.Context, after app.SessionRef, limit int) (app.StagedSessionPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -202,11 +203,11 @@ func (s *FilesystemStagedBlobStore) StagedSessions(_ context.Context) ([]app.Ses
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return app.StagedSessionPage{}, err
 		}
 		subjects, readErr := fs.ReadDir(root.FS(), ".")
 		if readErr != nil {
-			return nil, errors.Join(readErr, root.Close())
+			return app.StagedSessionPage{}, errors.Join(readErr, root.Close())
 		}
 		for _, subject := range subjects {
 			if !subject.IsDir() || strings.HasPrefix(subject.Name(), ".") {
@@ -214,14 +215,14 @@ func (s *FilesystemStagedBlobStore) StagedSessions(_ context.Context) ([]app.Ses
 			}
 			sessions, err := fs.ReadDir(root.FS(), subject.Name())
 			if err != nil {
-				return nil, errors.Join(err, root.Close())
+				return app.StagedSessionPage{}, errors.Join(err, root.Close())
 			}
 			for _, session := range sessions {
 				if !session.IsDir() || strings.HasPrefix(session.Name(), ".") {
 					continue
 				}
 				ref := app.SessionRef{Subject: subject.Name(), Session: app.SessionID(session.Name())}
-				if _, duplicate := seen[ref]; duplicate {
+				if _, duplicate := seen[ref]; duplicate || ref.AtOrBefore(after) {
 					continue
 				}
 				seen[ref] = struct{}{}
@@ -229,10 +230,21 @@ func (s *FilesystemStagedBlobStore) StagedSessions(_ context.Context) ([]app.Ses
 			}
 		}
 		if err := root.Close(); err != nil {
-			return nil, err
+			return app.StagedSessionPage{}, err
 		}
 	}
-	return refs, nil
+	return pageStagedSessions(refs, limit), nil
+}
+
+// pageStagedSessions orders the refs and cuts one page, naming where it stopped.
+func pageStagedSessions(refs []app.SessionRef, limit int) app.StagedSessionPage {
+	sort.Slice(refs, func(i, j int) bool { return refs[i].Compare(refs[j]) < 0 })
+	page := app.StagedSessionPage{Sessions: refs}
+	if limit > 0 && len(refs) > limit {
+		page.Sessions = refs[:limit]
+		page.Next = refs[limit-1]
+	}
+	return page
 }
 
 // DeleteStaged removes a session's staged blobs and retentions together. An

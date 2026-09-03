@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -55,23 +54,29 @@ func (s *memorySessionStore) Load(_ context.Context, id sdd.SessionID) (sdd.Stor
 	return cloneSession(stored), nil
 }
 
-func (s *memorySessionStore) List(_ context.Context, filter sdd.SessionFilter) ([]sdd.StoredSession, error) {
+// List pages in ID order from the cursor: the page holds the matches among the
+// IDs it walked, and Next names the last ID walked when Limit stopped it.
+func (s *memorySessionStore) List(_ context.Context, filter sdd.SessionFilter) (sdd.SessionPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var listed []sdd.StoredSession
-	for _, stored := range s.sessions {
-		if filter.Subject != "" && stored.Metadata.Subject != filter.Subject {
-			continue
+	ids := make([]sdd.SessionID, 0, len(s.sessions))
+	for id := range s.sessions {
+		if filter.After == "" || id > filter.After {
+			ids = append(ids, id)
 		}
-		if filter.Project != "" && stored.Metadata.Project != filter.Project {
-			continue
-		}
-		listed = append(listed, cloneSession(stored))
 	}
-	slices.SortFunc(listed, func(a, b sdd.StoredSession) int {
-		return cmpID(a.Metadata.ID, b.Metadata.ID)
-	})
-	return listed, nil
+	slices.SortFunc(ids, cmpID)
+	page := sdd.SessionPage{}
+	for i, id := range ids {
+		if filter.Limit > 0 && len(page.Sessions) >= filter.Limit {
+			page.Next = ids[i-1]
+			break
+		}
+		if stored := s.sessions[id]; filter.Matches(stored.Metadata) {
+			page.Sessions = append(page.Sessions, cloneSession(stored))
+		}
+	}
+	return page, nil
 }
 
 func (s *memorySessionStore) Append(
@@ -235,20 +240,22 @@ func (s *memoryStagedBlobStore) Release(_ context.Context, session sdd.SessionRe
 	return nil
 }
 
-func (s *memoryStagedBlobStore) StagedSessions(context.Context) ([]sdd.SessionRef, error) {
+func (s *memoryStagedBlobStore) StagedSessions(_ context.Context, after sdd.SessionRef, limit int) (sdd.StagedSessionPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	refs := make([]sdd.SessionRef, 0, len(s.areas))
 	for ref := range s.areas {
-		refs = append(refs, ref)
-	}
-	slices.SortFunc(refs, func(a, b sdd.SessionRef) int {
-		if subjects := strings.Compare(a.Subject, b.Subject); subjects != 0 {
-			return subjects
+		if !ref.AtOrBefore(after) {
+			refs = append(refs, ref)
 		}
-		return cmpID(a.Session, b.Session)
-	})
-	return refs, nil
+	}
+	slices.SortFunc(refs, sdd.SessionRef.Compare)
+	page := sdd.StagedSessionPage{Sessions: refs}
+	if limit > 0 && len(refs) > limit {
+		page.Sessions = refs[:limit]
+		page.Next = refs[limit-1]
+	}
+	return page, nil
 }
 
 // DeleteStaged removes a session's blobs together with its retentions, and is

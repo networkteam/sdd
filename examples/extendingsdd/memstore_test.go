@@ -128,12 +128,12 @@ func (f collectFixture) collect(t *testing.T, retention time.Duration) sdd.Colle
 
 func (f collectFixture) listedIDs(t *testing.T) []string {
 	t.Helper()
-	listed, err := f.sessions.List(t.Context(), sdd.SessionFilter{})
+	page, err := f.sessions.List(t.Context(), sdd.SessionFilter{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	ids := make([]string, 0, len(listed))
-	for _, item := range listed {
+	ids := make([]string, 0, len(page.Sessions))
+	for _, item := range page.Sessions {
 		ids = append(ids, string(item.Metadata.ID))
 	}
 	slices.Sort(ids)
@@ -142,12 +142,12 @@ func (f collectFixture) listedIDs(t *testing.T) []string {
 
 func (f collectFixture) stagedIDs(t *testing.T) []string {
 	t.Helper()
-	refs, err := f.blobs.StagedSessions(t.Context())
+	page, err := f.blobs.StagedSessions(t.Context(), sdd.SessionRef{}, 0)
 	if err != nil {
 		t.Fatalf("StagedSessions: %v", err)
 	}
-	ids := make([]string, 0, len(refs))
-	for _, ref := range refs {
+	ids := make([]string, 0, len(page.Sessions))
+	for _, ref := range page.Sessions {
 		ids = append(ids, string(ref.Session))
 	}
 	slices.Sort(ids)

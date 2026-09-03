@@ -10,19 +10,25 @@ import (
 
 // CollectSessionsCmd asks for one reclamation pass over the composition's
 // session store. Retention is how long an ended session is kept; zero means
-// remove as soon as it has ended.
+// remove as soon as it has ended. Limit bounds the page one pass processes
+// (zero: everything) and After is the cursor a previous pass returned as Next,
+// so the sweep converges over repeated calls instead of loading every session.
 type CollectSessionsCmd struct {
 	Retention time.Duration
+	Limit     int
+	After     SessionID
 }
 
 // CollectSessionsResult reports what one pass did. Nothing here is actionable —
 // the pass either removed something or deliberately left it, and the skips say
-// which sessions it could not read so a caller can log them.
+// which sessions it could not read so a caller can log them. Next is where the
+// pass stopped: pass it back as After, and stop when it is empty.
 type CollectSessionsResult struct {
 	RemovedSessions []SessionID
 	RemovedStaged   []SessionRef
 	DrainedIntents  int
 	Skipped         []SessionID
+	Next            SessionID
 }
 
 // CollectSessions removes the sessions that are safe to remove and drains the
@@ -40,22 +46,27 @@ type CollectSessionsResult struct {
 // not ended, one inside its retention window, one an in-flight declaration
 // still claims, or one this binary cannot read — an unreadable log may belong
 // to a newer version, so it is left alone rather than treated as garbage.
+//
+// One pass walks one page of each store from the cursor; a session the pass
+// keeps does not starve later pages because the cursor moves past it. The two
+// enumerations share the cursor, so Next is the earlier of where they stopped:
+// the later one re-enumerates a few areas next pass, which is idempotent.
 func (a *Application) CollectSessions(ctx context.Context, cmd CollectSessionsCmd) (CollectSessionsResult, error) {
 	sessions := a.sessions
 	blobs := a.blobs
 
 	// List already skips a log this binary cannot read, which is why an
 	// unreadable session is never a collection candidate.
-	stored, err := sessions.List(ctx, SessionFilter{})
+	endedBefore := a.now().UTC().Add(-cmd.Retention)
+	page, err := sessions.List(ctx, SessionFilter{EndedBefore: &endedBefore, After: cmd.After, Limit: cmd.Limit})
 	if err != nil {
 		return CollectSessionsResult{}, err
 	}
 
 	log := slogutils.FromContext(ctx)
-	now := a.now().UTC()
 	result := CollectSessionsResult{}
 
-	for _, session := range stored {
+	for _, session := range page.Sessions {
 		id := session.Metadata.ID
 		drained, claimed, err := a.drainDeclarations(ctx, session)
 		result.DrainedIntents += drained
@@ -68,8 +79,9 @@ func (a *Application) CollectSessions(ctx context.Context, cmd CollectSessionsCm
 		if claimed {
 			continue
 		}
-		end := session.Metadata.Ended
-		if end == nil || now.Sub(end.EndedAt.UTC()) <= cmd.Retention {
+		// The filter already selected on the ending; a store that ignores it
+		// still never loses a live or in-window session here.
+		if end := session.Metadata.Ended; end == nil || !end.EndedAt.Before(endedBefore) {
 			continue
 		}
 		if err := sessions.Delete(ctx, id); err != nil {
@@ -83,38 +95,56 @@ func (a *Application) CollectSessions(ctx context.Context, cmd CollectSessionsCm
 		result.RemovedStaged = append(result.RemovedStaged, ref)
 	}
 
-	orphans, err := collectOrphanStaging(ctx, sessions, blobs)
+	orphans, next, err := collectOrphanStaging(ctx, sessions, blobs, cmd)
 	if err != nil {
 		return result, err
 	}
 	result.RemovedStaged = append(result.RemovedStaged, orphans...)
+	result.Next = earlierCursor(page.Next, next.Session)
 	return result, nil
 }
 
-// collectOrphanStaging removes staging areas whose session is gone. Absence is
-// distinguished from unreadability deliberately: a session this binary cannot
-// decode still exists, so its staged blobs are not orphans.
+// earlierCursor merges the two enumerations' stopping points: an exhausted one
+// (empty) defers to the other, otherwise the earlier wins so nothing is skipped.
+func earlierCursor(a, b SessionID) SessionID {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	case a < b:
+		return a
+	default:
+		return b
+	}
+}
+
+// collectOrphanStaging removes staging areas whose session is gone, one page
+// from the cursor. Absence is distinguished from unreadability deliberately: a
+// session this binary cannot decode still exists, so its staged blobs are not
+// orphans.
 func collectOrphanStaging(
 	ctx context.Context,
 	sessions SessionStore,
 	blobs StagedBlobStore,
-) ([]SessionRef, error) {
-	refs, err := blobs.StagedSessions(ctx)
+	cmd CollectSessionsCmd,
+) ([]SessionRef, SessionRef, error) {
+	page, err := blobs.StagedSessions(ctx, SessionRef{Session: cmd.After}, cmd.Limit)
 	if err != nil {
-		return nil, err
+		return nil, SessionRef{}, err
 	}
 	var removed []SessionRef
-	for _, ref := range refs {
+	for _, ref := range page.Sessions {
 		_, err := sessions.Load(ctx, ref.Session)
 		if err == nil || !errors.Is(err, ErrSessionNotFound) {
 			continue
 		}
 		if err := blobs.DeleteStaged(ctx, ref); err != nil {
-			return removed, err
+			return removed, SessionRef{}, err
 		}
 		removed = append(removed, ref)
 	}
-	return removed, nil
+	return removed, page.Next, nil
 }
 
 // discardUnroutable retires one declaration from before the convergence rule.

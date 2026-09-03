@@ -135,10 +135,11 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 	if err != nil || string(content) != "root-owned attachment" {
 		t.Fatalf("root runtime attachment = %q, %v", content, err)
 	}
-	stored, err := sessions.List(t.Context(), sdd.SessionFilter{Subject: "tester", Project: "root-test"})
+	page, err := sessions.List(t.Context(), sdd.SessionFilter{Subject: "tester", Project: "root-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	stored := page.Sessions
 	if len(stored) != 1 || len(stored[0].Events) == 0 {
 		t.Fatalf("root runtime did not durably append workflow events: %+v", stored)
 	}

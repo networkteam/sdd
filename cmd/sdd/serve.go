@@ -349,17 +349,31 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 // leaves the agent with a dead pipe and no way to act, which is worse than the
 // unreclaimed disk it would be reporting. So startup logs and serves.
 func collectSessions(ctx context.Context, application *sdd.Application, retention time.Duration) {
-	result, err := application.CollectSessions(ctx, sdd.CollectSessionsCmd{Retention: retention})
-	if err != nil {
-		slogutils.FromContext(ctx).Warn("session collection did not complete", "err", err)
-		return
+	const pageSize = 200
+	log := slogutils.FromContext(ctx)
+	cmd := sdd.CollectSessionsCmd{Retention: retention, Limit: pageSize}
+	var total sdd.CollectSessionsResult
+	for {
+		result, err := application.CollectSessions(ctx, cmd)
+		if err != nil {
+			log.Warn("session collection did not complete", "err", err, "after", cmd.After)
+			return
+		}
+		total.RemovedSessions = append(total.RemovedSessions, result.RemovedSessions...)
+		total.RemovedStaged = append(total.RemovedStaged, result.RemovedStaged...)
+		total.DrainedIntents += result.DrainedIntents
+		total.Skipped = append(total.Skipped, result.Skipped...)
+		if result.Next == "" {
+			break
+		}
+		cmd.After = result.Next
 	}
-	if len(result.RemovedSessions) > 0 || len(result.RemovedStaged) > 0 || result.DrainedIntents > 0 {
-		slogutils.FromContext(ctx).Info("collected session scaffolding",
-			"sessions", len(result.RemovedSessions),
-			"staged_sessions", len(result.RemovedStaged),
-			"drained_intents", result.DrainedIntents,
-			"skipped", len(result.Skipped),
+	if len(total.RemovedSessions) > 0 || len(total.RemovedStaged) > 0 || total.DrainedIntents > 0 {
+		log.Info("collected session scaffolding",
+			"sessions", len(total.RemovedSessions),
+			"staged_sessions", len(total.RemovedStaged),
+			"drained_intents", total.DrainedIntents,
+			"skipped", len(total.Skipped),
 		)
 	}
 }

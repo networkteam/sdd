@@ -360,12 +360,12 @@ func TestFilesystemSessionStoreReadsEveryReleasedFormatAndSkipsUnreadable(t *tes
 		t.Fatal(err)
 	}
 
-	listed, err := store.List(t.Context(), sdd.SessionFilter{})
+	page, err := store.List(t.Context(), sdd.SessionFilter{})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	ids := make([]string, 0, len(listed))
-	for _, item := range listed {
+	ids := make([]string, 0, len(page.Sessions))
+	for _, item := range page.Sessions {
 		ids = append(ids, string(item.Metadata.ID))
 	}
 	if !slices.Equal(ids, []string{"current", "legacy"}) {
