@@ -28,11 +28,16 @@ import (
 const (
 	WorkflowEventCode      = "workflow_event"
 	workflowStagedBlobCode = "workflow_staged_blob"
-	BranchBoundEventCode   = "branchBound"
-	BranchClearedEventCode = "branchCleared"
-	DefaultShellCanonical  = "user-dialogue"
-	WorkflowMaxLabelLength = 120
-	ExecutionForkPreferred = "fork-preferred"
+	// workflowInstanceProjectCode records the project an instance targets when
+	// it is not the home project — an application-owned fact the engine never
+	// sees, keyed by instance like the branch binding is keyed by session
+	// (d-cpt-yjc).
+	workflowInstanceProjectCode = "workflow_instance_project"
+	BranchBoundEventCode        = "branchBound"
+	BranchClearedEventCode      = "branchCleared"
+	DefaultShellCanonical       = "user-dialogue"
+	WorkflowMaxLabelLength      = 120
+	ExecutionForkPreferred      = "fork-preferred"
 )
 
 type WorkflowOpenRequest struct {
@@ -56,6 +61,9 @@ type WorkflowStartRequest struct {
 	Params    map[string]any
 	Label     string
 	Parent    string
+	// Project pins the project the new instance targets. Empty leaves it to
+	// the dispatching parent's project, else the home project.
+	Project ProjectID
 }
 
 type WorkflowAdvanceRequest struct {
@@ -76,7 +84,10 @@ type WorkflowChooser struct {
 }
 
 type WorkflowServe struct {
-	Session        SessionID
+	Session SessionID
+	// Project is the project the served instance targets — the home project
+	// unless the move was started in a dependency (d-cpt-yjc).
+	Project        ProjectID
 	Branch         string
 	Instance       string
 	Procedure      string
@@ -184,6 +195,12 @@ type WorkflowSession struct {
 	sink     *workflowSink
 	shell    string
 	staged   map[string]string
+	// instanceProjects holds the recorded per-instance targets; an instance
+	// absent here derives its project from its parent, then the home.
+	instanceProjects map[string]ProjectID
+	// startProject is the project the instance being started targets, which
+	// the sink records in the same append as the engine's start event.
+	startProject ProjectID
 }
 
 func (a *Application) OpenWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, request WorkflowOpenRequest) (*WorkflowSession, *WorkflowServe, error) {
@@ -266,6 +283,9 @@ func (a *Application) LoadWorkflow(ctx context.Context, identity RequestIdentity
 	if err := w.restoreStagedBlobs(stored.Events); err != nil {
 		return nil, err
 	}
+	if err := w.restoreInstanceProjects(stored.Events); err != nil {
+		return nil, err
+	}
 	events, err := decodeWorkflowEvents(stored.Events)
 	if err != nil {
 		return nil, err
@@ -328,7 +348,10 @@ func newAttachment(subject, clientName, clientVersion string, now time.Time) *At
 }
 
 func (a *Application) newWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, binding SessionBinding, branch string) (*WorkflowSession, error) {
-	w := &WorkflowSession{app: a, project: project, identity: identity, ctx: ctx, binding: binding, branch: branch, staged: map[string]string{}}
+	w := &WorkflowSession{
+		app: a, project: project, identity: identity, ctx: ctx, binding: binding, branch: branch,
+		staged: map[string]string{}, instanceProjects: map[string]ProjectID{},
+	}
 	w.graphs = &workflowGraphs{workflow: w}
 	w.sink = &workflowSink{workflow: w}
 	registry, err := w.buildRegistry()
@@ -433,7 +456,16 @@ func (w *WorkflowSession) Start(ctx context.Context, identity RequestIdentity, r
 	if parent == "" {
 		parent = w.shell
 	}
+	// The target is settled before the instance exists, so a project the
+	// session may not work in refuses the start rather than leaving an
+	// instance behind that derives the wrong one.
+	project, err := w.startProjectFor(request.Project)
+	if err != nil {
+		return nil, err
+	}
+	w.startProject = project
 	serve, err := w.session.Start(spec, request.Params, parent)
+	w.startProject = ""
 	if err != nil {
 		return nil, err
 	}
@@ -1082,7 +1114,8 @@ func (w *WorkflowSession) loadProcedure(canonical string) (*engine.Spec, error) 
 
 func (w *WorkflowSession) publicServe(serve *engine.Serve) *WorkflowServe {
 	result := &WorkflowServe{
-		Session: w.ID(), Branch: w.branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: string(serve.Status),
+		Session: w.ID(), Project: w.instanceProject(serve.Instance), Branch: w.branch,
+		Instance: serve.Instance, Procedure: serve.Procedure, Status: string(serve.Status),
 		Step: serve.Step, Goal: serve.Goal, Instructions: serve.Instructions, Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: serve.Produced, Diagnostics: append([]string(nil), serve.Diagnostics...),
 		InstructionLanes: append([]types.ServeLane(nil), serve.Lanes...),
@@ -1131,34 +1164,45 @@ func (g *workflowGraphs) Current() (*model.Graph, error) {
 	return snapshot.graph, nil
 }
 
-// CurrentFor resolves the graph authority carried by a procedure instance.
+// CurrentFor resolves the graph authority carried by a procedure instance: the
+// project it targets, on the branch its state or the session binding names.
 func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
 	target, fromBinding := g.workflow.effectiveTarget(store)
-	if target == (MutationTarget{}) {
+	if target.Branch == "" && target.Project == g.workflow.project {
 		return g.Current()
 	}
 	return g.currentTarget(target, fromBinding)
 }
 
 func (g *workflowGraphs) currentTarget(target MutationTarget, fromBinding bool) (*model.Graph, error) {
-	_, runtime, err := g.workflow.app.resolve(g.workflow.ctx, g.workflow.identity, g.workflow.project, AccessRead)
-	if err != nil {
-		return nil, err
-	}
-	target, err = resolveMutationTarget(runtime, target)
+	runtime, err := g.workflow.targetRuntime(target.Project, AccessRead)
 	if err != nil {
 		return nil, err
 	}
 	if snapshot := g.targets[target]; snapshot != nil {
 		return snapshot.graph, nil
 	}
-	// A cache miss deliberately uses the same short-lived acquisition as a
-	// write snapshot. Local acquisition is a checkout lookup; remote target
-	// acquirers may clone, so remote compositions should accelerate this seam
-	// with their read cache while preserving explicit target authority.
-	snapshot, err := snapshotMutationTarget(g.workflow.ctx, runtime, target)
-	if err != nil {
-		return nil, withSessionBindingTargetError(g.workflow.branch, fromBinding, err)
+	var snapshot *Snapshot
+	if target.Branch == "" {
+		// Another project's view on its configured default: its graph as the
+		// store serves it, no acquisition — reads in it need no write authority.
+		snapshot, err = runtime.options.Graph.Current(g.workflow.ctx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		resolved, err := resolveMutationTarget(runtime, target)
+		if err != nil {
+			return nil, err
+		}
+		// A cache miss deliberately uses the same short-lived acquisition as a
+		// write snapshot. Local acquisition is a checkout lookup; remote target
+		// acquirers may clone, so remote compositions should accelerate this seam
+		// with their read cache while preserving explicit target authority.
+		snapshot, err = snapshotMutationTarget(g.workflow.ctx, runtime, resolved)
+		if err != nil {
+			return nil, withSessionBindingTargetError(g.workflow.branch, fromBinding, err)
+		}
 	}
 	snapshot, err = g.workflow.app.snapshotWithDependenciesFrom(g.workflow.ctx, g.workflow.identity, runtime, snapshot)
 	if err != nil {
@@ -1189,15 +1233,39 @@ func (s *workflowSink) Append(event engine.Event) error {
 	if err != nil {
 		return err
 	}
-	return s.workflow.appendStoredEvent(WorkflowEventCode, payload)
+	events := []StoredEvent{{CodecVersion: SessionCodecVersion, Code: WorkflowEventCode, Payload: payload}}
+	// The started instance's target lands in the same append as its start, so
+	// no instance ever exists without the project it was started in.
+	w := s.workflow
+	if event.Event == engine.EventStarted && w.startProject != "" {
+		project := w.startProject
+		w.startProject = ""
+		record, err := instanceProjectRecord(event.Instance, project)
+		if err != nil {
+			return err
+		}
+		events = append(events, record)
+		if err := w.appendStoredEvents(events); err != nil {
+			return err
+		}
+		w.instanceProjects[event.Instance] = project
+		return nil
+	}
+	return w.appendStoredEvents(events)
 }
 
-// appendStoredEvent appends the session's own event with the activity stamp.
-// A version race (another consumer of the same handle appended under us) is
-// absorbed once: resync the observed version and retry; a second conflict
-// surfaces with the way on.
+// appendStoredEvent appends one of the session's own events with the activity
+// stamp.
 func (w *WorkflowSession) appendStoredEvent(code string, payload json.RawMessage) error {
-	err := w.appendStoredEventOnce(code, payload)
+	return w.appendStoredEvents([]StoredEvent{{CodecVersion: SessionCodecVersion, Code: code, Payload: payload}})
+}
+
+// appendStoredEvents appends the session's own events in one CAS append with
+// the activity stamp. A version race (another consumer of the same handle
+// appended under us) is absorbed once: resync the observed version and retry;
+// a second conflict surfaces with the way on.
+func (w *WorkflowSession) appendStoredEvents(events []StoredEvent) error {
+	err := w.appendStoredEventsOnce(events)
 	var appErr *ApplicationError
 	if !errors.As(err, &appErr) || appErr.Code != ErrorSessionConflict {
 		return err
@@ -1205,7 +1273,7 @@ func (w *WorkflowSession) appendStoredEvent(code string, payload json.RawMessage
 	if err := w.resyncBindingVersion(); err != nil {
 		return err
 	}
-	err = w.appendStoredEventOnce(code, payload)
+	err = w.appendStoredEventsOnce(events)
 	if errors.As(err, &appErr) && appErr.Code == ErrorSessionConflict {
 		// The retry lost too — surface the conflict with a next step rather than a
 		// dead-end "version changed".
@@ -1230,7 +1298,7 @@ func (w *WorkflowSession) resyncBindingVersion() error {
 	return nil
 }
 
-func (w *WorkflowSession) appendStoredEventOnce(code string, payload json.RawMessage) error {
+func (w *WorkflowSession) appendStoredEventsOnce(events []StoredEvent) error {
 	principal, _, stored, err := w.app.resolveSession(w.ctx, w.identity, w.ID(), AccessRead)
 	if err != nil {
 		return err
@@ -1246,9 +1314,12 @@ func (w *WorkflowSession) appendStoredEventOnce(code string, payload json.RawMes
 		attachment.LastActivity = now
 		metadata.Attachment = &attachment
 	}
-	if code == WorkflowEventCode {
+	for _, stored := range events {
+		if stored.Code != WorkflowEventCode {
+			continue
+		}
 		var event engine.Event
-		if err := json.Unmarshal(payload, &event); err != nil {
+		if err := json.Unmarshal(stored.Payload, &event); err != nil {
 			return err
 		}
 		switch event.Event {
@@ -1267,10 +1338,7 @@ func (w *WorkflowSession) appendStoredEventOnce(code string, payload json.RawMes
 	if metadata.Subject != principal.Subject {
 		return &ApplicationError{Code: ErrorSessionOwnership, Message: "session subject changed"}
 	}
-	next, err := w.app.sessions.Append(w.ctx, w.ID(), stored.Version, SessionAppend{
-		Metadata: &metadata,
-		Events:   []StoredEvent{{CodecVersion: SessionCodecVersion, Code: code, Payload: payload}},
-	})
+	next, err := w.app.sessions.Append(w.ctx, w.ID(), stored.Version, SessionAppend{Metadata: &metadata, Events: events})
 	if err != nil {
 		return err
 	}

@@ -393,12 +393,18 @@ func (a *Application) applyDocumentMutation(ctx context.Context, identity Reques
 	return MutationResult{Project: runtime.options.Project, Binding: transition.Binding}, err
 }
 
+// resolveMutationTarget completes a target against the runtime it is written
+// through: an empty branch means the runtime's configured default, and a named
+// project must be the runtime's own.
 func resolveMutationTarget(runtime *ProjectRuntime, requested MutationTarget) (MutationTarget, error) {
-	if requested.Project == "" && requested.Branch == "" {
-		return runtime.defaultMutationTarget()
-	}
 	if requested.Project == "" {
 		requested.Project = runtime.options.Project.ID
+	}
+	if requested.Branch == "" {
+		if requested.Project != runtime.options.Project.ID {
+			return MutationTarget{}, &ApplicationError{Code: ErrorWriteDenied, Message: "mutation target project must equal the session project"}
+		}
+		return runtime.defaultMutationTarget()
 	}
 	if err := requested.Validate(runtime.options.Project.ID); err != nil {
 		return MutationTarget{}, err

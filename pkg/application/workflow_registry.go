@@ -113,7 +113,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 				omitRecovery = true
 			}
 			target, fromBinding := w.effectiveTarget(ctx.Store)
-			result, err := w.app.View(w.ctx, w.identity, w.project, ViewRequest{Layout: layout, Branch: target.Branch, Budget: servedViewBudget, OmitRecovery: omitRecovery})
+			result, err := w.app.View(w.ctx, w.identity, target.Project, ViewRequest{Layout: layout, Branch: target.Branch, Budget: servedViewBudget, OmitRecovery: omitRecovery})
 			if err != nil {
 				return nil, w.withSessionBindingTargetError(err, fromBinding)
 			}
@@ -164,7 +164,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 				}
 			}
 			target, fromBinding := w.effectiveTarget(ctx.Store)
-			result, err := w.app.Show(w.ctx, w.identity, w.project, ShowRequest{
+			result, err := w.app.Show(w.ctx, w.identity, target.Project, ShowRequest{
 				IDs: ids, UpDepth: workflowIntArg(args, "up", query.DefaultUpDepth), DownDepth: workflowIntArg(args, "down", query.DefaultDownDepth),
 				Branch: target.Branch,
 				Budget: serveChainBudget,
@@ -191,8 +191,8 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 	if err := registry.RegisterQuery(engine.Query{
 		Doc:       engine.FuncDoc{Name: "procedureList", Doc: "The live playbook moves, one line each: canonical, a compact signature of its accepted start params, and the first sentence of the head entry's summary. Shell-class procedures are excluded — they enter through start_session."},
 		ServeSafe: true,
-		Fn: func(*engine.Context, map[string]any) (any, error) {
-			result, err := w.app.Procedures(w.ctx, w.identity, w.project, ProcedureListRequest{})
+		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
+			result, err := w.app.Procedures(w.ctx, w.identity, w.projectFor(ctx.Store), ProcedureListRequest{})
 			if err != nil {
 				return nil, err
 			}
@@ -275,7 +275,10 @@ func (w *WorkflowSession) registerWorkflowWrites(registry *engine.Registry) erro
 				return fmt.Errorf("replaceSummary: correctedSummary is not set")
 			}
 			target, fromBinding := w.effectiveTarget(ctx.Store)
-			result, err := w.app.ReplaceSummary(w.ctx, w.identity, w.project, w.binding, target, id, text)
+			if err := w.authorizeTarget(target.Project, AccessWrite); err != nil {
+				return err
+			}
+			result, err := w.app.ReplaceSummary(w.ctx, w.identity, target.Project, w.binding, target, id, text)
 			err = w.withSessionBindingTargetError(err, fromBinding)
 			if err == nil {
 				w.binding = result.Binding
@@ -295,11 +298,11 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 				return fmt.Errorf("wipStart: anchor is not set")
 			}
 			description, _ := workflowStoreString(ctx.Store, "wipDescription")
-			target := w.mutationTarget(ctx.Store, "baseBranch")
-			if target == (MutationTarget{}) {
-				return fmt.Errorf("WIP write requires an explicit baseBranch")
+			target, err := w.wipTarget(ctx.Store)
+			if err != nil {
+				return err
 			}
-			marker, result, err := w.app.StartWIP(w.ctx, w.identity, w.project, w.binding, target, anchor, description)
+			marker, result, err := w.app.StartWIP(w.ctx, w.identity, target.Project, w.binding, target, anchor, description)
 			if err != nil {
 				return err
 			}
@@ -317,11 +320,11 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 			if !ok {
 				return fmt.Errorf("wipDone: wipMarker is not set")
 			}
-			target := w.mutationTarget(ctx.Store, "baseBranch")
-			if target == (MutationTarget{}) {
-				return fmt.Errorf("WIP write requires an explicit baseBranch")
+			target, err := w.wipTarget(ctx.Store)
+			if err != nil {
+				return err
 			}
-			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, target, marker)
+			result, err := w.app.FinishWIP(w.ctx, w.identity, target.Project, w.binding, target, marker)
 			if err != nil {
 				return err
 			}
@@ -339,7 +342,11 @@ func (w *WorkflowSession) registerWorkflowWIP(registry *engine.Registry) error {
 			if !ok {
 				return fmt.Errorf("wipRemove: staleMarker is not set")
 			}
-			result, err := w.app.FinishWIP(w.ctx, w.identity, w.project, w.binding, MutationTarget{}, marker)
+			project := w.projectFor(ctx.Store)
+			if err := w.authorizeTarget(project, AccessWrite); err != nil {
+				return err
+			}
+			result, err := w.app.FinishWIP(w.ctx, w.identity, project, w.binding, MutationTarget{}, marker)
 			if err == nil {
 				w.binding = result.Binding
 			}
@@ -365,7 +372,7 @@ func (w *WorkflowSession) runWorkflowWritingGuide(ctx *engine.Context) error {
 			return fmt.Errorf("writingGuide: %s is not set", field)
 		}
 	}
-	findings, err := w.app.WritingGuideCheck(w.ctx, w.identity, w.project, w.draftFromStore(ctx.Store))
+	findings, err := w.app.WritingGuideCheck(w.ctx, w.identity, w.projectFor(ctx.Store), w.draftFromStore(ctx.Store))
 	if err != nil {
 		return fmt.Errorf("writingGuide: %w", err)
 	}
@@ -475,7 +482,10 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	if override, ok := ctx.Store.Get("preflightOverride"); ok {
 		draft.SkipPreflight, _ = override.(bool)
 	}
-	result, err := w.app.CreateEntry(w.ctx, w.identity, w.project, w.binding, draft)
+	if err := w.authorizeTarget(target.Project, AccessWrite); err != nil {
+		return err
+	}
+	result, err := w.app.CreateEntry(w.ctx, w.identity, target.Project, w.binding, draft)
 	err = w.withSessionBindingTargetError(err, fromBinding)
 	// A structural validation failure re-serves as high findings instead of
 	// wedging the instance: the write step's `otherwise` routes to
@@ -530,12 +540,18 @@ func (w *WorkflowSession) runWorkflowNewEntry(ctx *engine.Context) error {
 	return nil
 }
 
-func (w *WorkflowSession) mutationTarget(store *engine.Store, branchField string) MutationTarget {
-	branch, _ := workflowStoreString(store, branchField)
+// wipTarget is the WIP marker's authority: the instance's project on the
+// explicit baseBranch its state names.
+func (w *WorkflowSession) wipTarget(store *engine.Store) (MutationTarget, error) {
+	branch, _ := workflowStoreString(store, "baseBranch")
 	if branch == "" {
-		return MutationTarget{}
+		return MutationTarget{}, fmt.Errorf("WIP write requires an explicit baseBranch")
 	}
-	return MutationTarget{Project: w.project, Branch: branch}
+	target := MutationTarget{Project: w.projectFor(store), Branch: branch}
+	if err := w.authorizeTarget(target.Project, AccessWrite); err != nil {
+		return MutationTarget{}, err
+	}
+	return target, nil
 }
 
 // workflowBranchFields is the application-owned registry of procedure state
@@ -546,22 +562,24 @@ func (w *WorkflowSession) mutationTarget(store *engine.Store, branchField string
 // the session binding.
 var workflowBranchFields = [...]string{"captureBranch", "resolvedCaptureBranch", "workBranch"}
 
-// effectiveTarget is the sole branch precedence rule, shared by graph reads and
-// graph writes (20260722-112853-d-tac-ln1): an explicit procedure-state branch
-// wins, then the durable session binding — reported by the second result — then
-// a zero target lets the application resolve configured default_branch. No cwd
-// or other ambient state participates, and the engine stays unaware of what
-// these fields mean.
+// effectiveTarget is the sole target precedence rule, shared by graph reads
+// and graph writes: the project is the instance's (d-cpt-yjc); the branch is
+// an explicit procedure-state branch, then the durable session binding —
+// reported by the second result, and a fact about the home checkout only
+// (20260722-112853-d-tac-ln1) — then empty, which lets the application resolve
+// the target project's configured default_branch. No cwd or other ambient
+// state participates, and the engine stays unaware of what these fields mean.
 func (w *WorkflowSession) effectiveTarget(store *engine.Store) (MutationTarget, bool) {
+	project := w.projectFor(store)
 	for _, field := range workflowBranchFields {
-		if target := w.mutationTarget(store, field); target != (MutationTarget{}) {
-			return target, false
+		if branch, _ := workflowStoreString(store, field); branch != "" {
+			return MutationTarget{Project: project, Branch: branch}, false
 		}
 	}
-	if w.branch != "" {
-		return MutationTarget{Project: w.project, Branch: w.branch}, true
+	if w.branch != "" && project == w.project {
+		return MutationTarget{Project: project, Branch: w.branch}, true
 	}
-	return MutationTarget{}, false
+	return MutationTarget{Project: project}, false
 }
 
 // concreteEffectiveTarget resolves the configured default without mutating
@@ -569,14 +587,15 @@ func (w *WorkflowSession) effectiveTarget(store *engine.Store) (MutationTarget, 
 // resolvedCaptureBranch only after CreateEntry reports that an artifact was
 // actually written.
 func (w *WorkflowSession) concreteEffectiveTarget(store *engine.Store) (MutationTarget, bool, bool, error) {
-	if target, fromBinding := w.effectiveTarget(store); target != (MutationTarget{}) {
+	target, fromBinding := w.effectiveTarget(store)
+	if target.Branch != "" {
 		return target, fromBinding, false, nil
 	}
-	_, runtime, err := w.app.resolve(w.ctx, w.identity, w.project, AccessRead)
+	runtime, err := w.targetRuntime(target.Project, AccessRead)
 	if err != nil {
 		return MutationTarget{}, false, false, err
 	}
-	target, err := runtime.defaultMutationTarget()
+	target, err = runtime.defaultMutationTarget()
 	if err != nil {
 		return MutationTarget{}, false, false, err
 	}

@@ -52,6 +52,7 @@ type StartProcedureArgs struct {
 	Params    map[string]any `json:"params,omitempty" jsonschema:"typed start inputs per the procedure's declaration: declared params, plus any declared state field the caller wants to seed at start (e.g. a known anchor)"`
 	Label     string         `json:"label,omitempty" jsonschema:"short single-line subject label for the session (the dialogue); set it early, update when the subject sharpens"`
 	Parent    string         `json:"parent,omitempty" jsonschema:"instance handle of the spawning instance, when this is a sub-move (e.g. a capture dispatched from an engage); records lineage in the session log"`
+	Project   string         `json:"project,omitempty" jsonschema:"project the move works in, when not the session's home project: it must lie in the home project's declared dependency closure and be one the principal can read. Omitted, a foreign anchor selects its project, else the parent's, else the home project"`
 }
 
 type NextArgs struct {
@@ -111,7 +112,7 @@ type ChooserResult struct {
 // stands, what advances it, and the material to work with.
 type ServeResult struct {
 	Session        string            `json:"session,omitempty" jsonschema:"session handle (the session ID); sessions survive restarts and resume via resume_session. Pass it to every other tool"`
-	Project        string            `json:"project,omitempty" jsonschema:"the project this session is bound to"`
+	Project        string            `json:"project,omitempty" jsonschema:"the project this instance works in — the session's home project unless the move was started in a dependency"`
 	Projects       []ProjectResult   `json:"projects,omitempty" jsonschema:"start_session only: the principal's accessible projects, served with status project-required when several exist and none was passed — no session opened yet"`
 	Branch         string            `json:"branch,omitempty" jsonschema:"the session's declared branch binding"`
 	Instance       string            `json:"instance,omitempty"`
@@ -200,6 +201,7 @@ type StageAttachmentResult struct {
 
 type SearchArgs struct {
 	Session           string   `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the read runs in that session's project and branch"`
+	Project           string   `json:"project,omitempty" jsonschema:"project to read in; defaults to the session's home project. Another project must lie in the home project's declared dependency closure and be one the principal can read"`
 	Terms             []string `json:"terms,omitempty" jsonschema:"text mode: regex terms combined with AND"`
 	Query             string   `json:"query,omitempty" jsonschema:"vector mode: free-form phrase (requires a configured embedding provider); both together run hybrid"`
 	Type              string   `json:"type,omitempty" jsonschema:"filter: s/signal or d/decision"`
@@ -218,6 +220,7 @@ type SearchResult struct {
 
 type ViewArgs struct {
 	Session  string   `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the read runs in that session's project and branch"`
+	Project  string   `json:"project,omitempty" jsonschema:"project to read in; defaults to the session's home project. Another project must lie in the home project's declared dependency closure and be one the principal can read"`
 	Layout   string   `json:"layout" jsonschema:"sdd view layout pipeline, e.g. 'active:as-counts' or 'top(15)'"`
 	Repos    []string `json:"repos,omitempty" jsonschema:"also render the layout over these connected repos' graphs (additive to the local graph)"`
 	AllRepos bool     `json:"all_repos,omitempty" jsonschema:"also render the layout over every connected repo"`
@@ -230,6 +233,7 @@ type ViewResult struct {
 
 type ShowArgs struct {
 	Session string   `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the read runs in that session's project and branch"`
+	Project string   `json:"project,omitempty" jsonschema:"project to read in; defaults to the session's home project. Another project must lie in the home project's declared dependency closure and be one the principal can read"`
 	IDs     []string `json:"ids" jsonschema:"entry IDs to show; accepts an unambiguous short ID ({type}-{layer}-{suffix}) and resolves it to the full entry"`
 	Up      *int     `json:"up,omitempty" jsonschema:"upstream chain depth; omitted = default 2, 0 = no upstream"`
 	Down    *int     `json:"down,omitempty" jsonschema:"downstream chain depth; omitted = default 1, 0 = no downstream"`
@@ -241,6 +245,7 @@ type ShowResult struct {
 
 type ReadAttachmentArgs struct {
 	Session  string `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the read runs in that session's project, and a staged file is read from that session"`
+	Project  string `json:"project,omitempty" jsonschema:"project to read the entry's attachment in; defaults to the session's home project. Another project must lie in the home project's declared dependency closure and be one the principal can read"`
 	ID       string `json:"id,omitempty" jsonschema:"full ID of the entry whose attachment to read; omit when reading a staged file by handle"`
 	Name     string `json:"name,omitempty" jsonschema:"attachment filename; optional when the entry has exactly one"`
 	Offset   int64  `json:"offset,omitempty" jsonschema:"byte position to continue from (next_offset of the previous page)"`
@@ -261,6 +266,7 @@ type ReadAttachmentResult struct {
 
 type InfoArgs struct {
 	Session string `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the header describes that session's project"`
+	Project string `json:"project,omitempty" jsonschema:"project to describe; defaults to the session's home project. Another project must lie in the home project's declared dependency closure and be one the principal can read"`
 }
 
 type InfoResult struct {
@@ -515,7 +521,10 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 	}
 	defer ss.mu.Unlock()
 	identity := s.requestIdentity(req)
-	serve, err := ss.root.Start(ctx, identity, sdd.WorkflowStartRequest{Canonical: args.Canonical, Params: args.Params, Label: args.Label, Parent: args.Parent})
+	serve, err := ss.root.Start(ctx, identity, sdd.WorkflowStartRequest{
+		Canonical: args.Canonical, Params: args.Params, Label: args.Label, Parent: args.Parent,
+		Project: sdd.ProjectID(strings.TrimSpace(args.Project)),
+	})
 	if err != nil {
 		return nil, ServeResult{}, err
 	}
@@ -749,10 +758,10 @@ func validAttachmentName(name string) error {
 }
 
 // readScope is what a free read takes from its session: the project it runs
-// in and the session's branch binding (d-tac-1z6).
-func (ss *shellSession) readScope() (project sdd.ProjectID, branch string, branchFromSession bool) {
-	branch = ss.root.Branch()
-	return ss.root.Project(), branch, branch != ""
+// in — the home project with the session's branch binding, or a project the
+// caller names that the session may work in (d-tac-1z6, d-cpt-yjc).
+func (s *Server) readScope(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, project string) (sdd.ProjectID, string, bool, error) {
+	return ss.root.ReadScope(ctx, s.requestIdentity(req), sdd.ProjectID(strings.TrimSpace(project)))
 }
 
 // viewHintServedKey is the served-once sentinel for the first-view breadcrumb,
@@ -793,7 +802,10 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	if args.MaxCitations != nil {
 		maxCitations = *args.MaxCitations
 	}
-	project, branch, branchFromSession := ss.readScope()
+	project, branch, branchFromSession, err := s.readScope(ctx, req, ss, args.Project)
+	if err != nil {
+		return nil, SearchResult{}, err
+	}
 	result, err := s.app.Search(ctx, s.requestIdentity(req), project, sdd.SearchRequest{
 		Terms: args.Terms, Phrase: args.Query, Type: args.Type, Layer: args.Layer, Kind: args.Kind,
 		IncludeSuperseded: args.IncludeSuperseded, Limit: limit, MaxCitations: maxCitations,
@@ -822,7 +834,10 @@ func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewAr
 		return nil, ViewResult{}, err
 	}
 	defer ss.mu.Unlock()
-	project, branch, branchFromSession := ss.readScope()
+	project, branch, branchFromSession, err := s.readScope(ctx, req, ss, args.Project)
+	if err != nil {
+		return nil, ViewResult{}, err
+	}
 	result, err := s.app.View(ctx, s.requestIdentity(req), project, sdd.ViewRequest{
 		Layout: args.Layout, Branch: branch, BranchFromSession: branchFromSession, Repos: args.Repos, AllRepos: args.AllRepos,
 	})
@@ -987,7 +1002,10 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 	if args.Down != nil {
 		down = *args.Down
 	}
-	project, branch, branchFromSession := ss.readScope()
+	project, branch, branchFromSession, err := s.readScope(ctx, req, ss, args.Project)
+	if err != nil {
+		return nil, ShowResult{}, err
+	}
 	result, err := s.app.Show(ctx, s.requestIdentity(req), project, sdd.ShowRequest{
 		IDs: args.IDs, UpDepth: up, DownDepth: down, Branch: branch, BranchFromSession: branchFromSession,
 	})
@@ -1027,7 +1045,11 @@ func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, a
 			TotalBytes: page.TotalSize, More: page.More, Available: staged,
 		}, nil
 	}
-	result, err := s.app.ReadAttachment(ctx, s.requestIdentity(req), ss.root.Project(), sdd.ReadAttachmentRequest{EntryID: args.ID, Filename: args.Name, Offset: args.Offset, MaxBytes: maxBytes})
+	project, _, _, err := s.readScope(ctx, req, ss, args.Project)
+	if err != nil {
+		return nil, ReadAttachmentResult{}, err
+	}
+	result, err := s.app.ReadAttachment(ctx, s.requestIdentity(req), project, sdd.ReadAttachmentRequest{EntryID: args.ID, Filename: args.Name, Offset: args.Offset, MaxBytes: maxBytes})
 	if err != nil {
 		return nil, ReadAttachmentResult{}, err
 	}
@@ -1055,7 +1077,11 @@ func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, args InfoAr
 		return nil, InfoResult{}, err
 	}
 	defer ss.mu.Unlock()
-	info, err := s.app.Info(ctx, s.requestIdentity(req), ss.root.Project(), sdd.InfoRequest{})
+	project, _, _, err := s.readScope(ctx, req, ss, args.Project)
+	if err != nil {
+		return nil, InfoResult{}, err
+	}
+	info, err := s.app.Info(ctx, s.requestIdentity(req), project, sdd.InfoRequest{})
 	if err != nil {
 		return nil, InfoResult{}, err
 	}
@@ -1116,7 +1142,7 @@ func composeFraming(ss *shellSession, blocks []string) string {
 // later serve that does deliver.
 func (s *Server) serveResultBody(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res := ServeResult{
-		Session: string(serve.Session), Project: string(ss.root.Project()),
+		Session: string(serve.Session), Project: string(serve.Project),
 		Branch: serve.Branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
 		Step: serve.Step, Goal: serve.Goal, Instructions: composeInstructions(ss, serve), Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: capValues(serve.Produced), Execution: serve.Execution,

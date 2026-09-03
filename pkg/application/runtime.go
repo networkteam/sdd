@@ -75,7 +75,7 @@ func (r *ProjectRuntime) Project() ProjectRef {
 func (r *ProjectRuntime) defaultMutationTarget() (MutationTarget, error) {
 	target := MutationTarget{Project: r.options.Project.ID, Branch: strings.TrimSpace(r.options.DefaultBranch)}
 	if err := target.Validate(r.options.Project.ID); err != nil {
-		return MutationTarget{}, fmt.Errorf("sdd: no concrete default mutation branch is configured: %w", err)
+		return MutationTarget{}, fmt.Errorf("sdd: project %s has no concrete default mutation branch configured: %w", r.options.Project.ID, err)
 	}
 	return target, nil
 }
@@ -85,7 +85,7 @@ func (r *ProjectRuntime) acquire(ctx context.Context, target MutationTarget) (*A
 		return nil, markTargetAcquisitionError(target, err)
 	}
 	if r.options.Targets == nil {
-		return nil, markTargetAcquisitionError(target, &ApplicationError{Code: ErrorWriteDenied, Message: "project has no mutation target acquirer"})
+		return nil, markTargetAcquisitionError(target, &ApplicationError{Code: ErrorWriteDenied, Message: fmt.Sprintf("project %s has no mutation target acquirer for branch %q", target.Project, target.Branch)})
 	}
 	acquired, err := r.options.Targets.Acquire(ctx, target)
 	if err != nil {

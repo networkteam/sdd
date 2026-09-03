@@ -50,19 +50,26 @@ func (multiAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAcce
 	return sdd.OwnerOnly(ctx, request)
 }
 
-func (multiAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+func (a multiAccess) ResolveDependency(_ context.Context, _ sdd.Principal, _ sdd.ProjectID, dependency string) (*sdd.ProjectRuntime, error) {
+	if runtime := a.runtimes[sdd.ProjectID(dependency)]; runtime != nil {
+		return runtime, nil
+	}
 	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
 
-func newProjectRuntime(t *testing.T, id sdd.ProjectID) *sdd.ProjectRuntime {
+func newProjectRuntime(t *testing.T, id sdd.ProjectID, dependencies ...sdd.ProjectID) *sdd.ProjectRuntime {
 	t.Helper()
 	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: id, GraphDir: writeFixtureGraph(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
+	var declared []string
+	for _, dependency := range dependencies {
+		declared = append(declared, string(dependency))
+	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: id, DisplayName: "Project " + string(id)}, DefaultBranch: "main",
-		Graph: graph,
+		Dependencies: declared, Graph: graph,
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Text: `{"findings":[]}`, Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 		}),
@@ -90,8 +97,18 @@ func newMultiAccess(t *testing.T, ids ...sdd.ProjectID) multiAccess {
 	return access
 }
 
-// newMultiProjectServer builds a wrapper over the given projects with no
-// pinned Options.Project, the shape a hosted composition takes (d-tac-1z6).
+// newDependentAccess composes home declaring dependency — the shape a move
+// into a dependency needs (d-cpt-yjc).
+func newDependentAccess(t *testing.T, home, dependency sdd.ProjectID) multiAccess {
+	t.Helper()
+	access := newMultiAccess(t, dependency)
+	access.order = []sdd.ProjectID{home, dependency}
+	access.runtimes[home] = newProjectRuntime(t, home, dependency)
+	return access
+}
+
+// newMultiProjectServer builds a wrapper over the given projects, the shape a
+// hosted composition takes (d-tac-1z6).
 func newMultiProjectServer(t *testing.T, ids ...sdd.ProjectID) *mcpserver.Server {
 	t.Helper()
 	return newServerOver(t, newMultiAccess(t, ids...))
@@ -204,9 +221,58 @@ func TestHandleCarriesProjectAcrossConnections(t *testing.T) {
 	}
 }
 
-// TestSingleProjectCompositionInfersProject: with one accessible project and
-// no pinned Options.Project, start_session infers it — the local sdd serve
-// shape stays a one-call door.
+// TestMovesAndReadsInDependencyProject: a session homed in alpha reads and
+// starts moves in beta, which alpha declares, each serve naming the project
+// the instance works in — and is refused a project alpha does not declare
+// (d-cpt-yjc).
+func TestMovesAndReadsInDependencyProject(t *testing.T) {
+	srv := newServerOver(t, newDependentAccess(t, "alpha", "beta"))
+	cs := connect(t, srv)
+	var door mcpserver.ServeResult
+	call(t, cs, "start_session", map[string]any{"project": "alpha"}, &door)
+	if door.Project != "alpha" {
+		t.Fatalf("session should open at home, got %+v", door.Project)
+	}
+
+	var info mcpserver.InfoResult
+	call(t, cs, "info", map[string]any{"session": door.Session, "project": "beta"}, &info)
+	if info.Project != "beta" {
+		t.Fatalf("info in the dependency should describe beta, got %+v", info)
+	}
+	var shown mcpserver.ShowResult
+	call(t, cs, "show", map[string]any{"session": door.Session, "project": "beta", "ids": []string{fixtureGapID}}, &shown)
+	if !strings.Contains(shown.Entries, fixtureGapID) {
+		t.Fatalf("show in the dependency should render its entry, got %q", shown.Entries)
+	}
+	msg := callExpectError(t, cs, "show", map[string]any{"session": door.Session, "project": "gamma", "ids": []string{fixtureGapID}})
+	if !strings.Contains(msg, "dependency closure") {
+		t.Fatalf("a project outside the declared closure must be refused, got %q", msg)
+	}
+
+	var move mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture", "project": "beta"}, &move)
+	if move.Status != "running" || move.Project != "beta" {
+		t.Fatalf("a move started in beta should serve as beta's, got status %q project %q", move.Status, move.Project)
+	}
+	var homeMove mcpserver.ServeResult
+	call(t, cs, "start_procedure", map[string]any{"session": door.Session, "canonical": "capture"}, &homeMove)
+	if homeMove.Project != "alpha" {
+		t.Fatalf("a plain move should derive the home project, got %q", homeMove.Project)
+	}
+
+	var resumed mcpserver.ResumeSessionResult
+	call(t, connect(t, srv), "resume_session", map[string]any{"session": door.Session}, &resumed)
+	projects := map[string]string{}
+	for _, open := range resumed.Open {
+		projects[open.Instance] = open.Project
+	}
+	if projects[move.Instance] != "beta" || projects[homeMove.Instance] != "alpha" {
+		t.Fatalf("resume should project each instance's target, got %v", projects)
+	}
+}
+
+// TestSingleProjectCompositionInfersProject: with one accessible project,
+// start_session infers it — the local sdd serve shape stays a one-call door.
 func TestSingleProjectCompositionInfersProject(t *testing.T) {
 	srv := newMultiProjectServer(t, "solo")
 	cs := connect(t, srv)

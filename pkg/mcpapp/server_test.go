@@ -861,7 +861,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "14fba843040eb08dbdcb42f00228e9604e40fbca60cc797c10a89d8481549144"
+	const want = "62724c76e938ff3fca52aa189b1ee63f5aeef0d63c40849fd6324acbc05ed5f8"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}

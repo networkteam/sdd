@@ -184,11 +184,18 @@ func localBearerAuth(token string, next http.Handler) http.Handler {
 	})
 }
 
+// localRuntimeAccess serves one repository and the dependencies its config
+// declares. Each dependency has two runtimes: the horizon member composing the
+// home view (dependencies), and the full project a move may work in (projects)
+// — its own declared dependencies, its own index namespace, no write authority
+// until the ephemeral clone of d-cpt-n8z exists (d-cpt-yjc). ListProjects
+// names the home alone, so a session still opens there without choosing.
 type localRuntimeAccess struct {
 	project      sdd.ProjectID
 	participant  string
 	runtime      *sdd.ProjectRuntime
 	dependencies map[string]*sdd.ProjectRuntime
+	projects     map[sdd.ProjectID]*sdd.ProjectRuntime
 }
 
 func (a *localRuntimeAccess) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
@@ -209,10 +216,13 @@ func (a *localRuntimeAccess) ListProjects(context.Context, sdd.Principal) (sdd.P
 }
 
 func (a *localRuntimeAccess) ResolveProject(_ context.Context, _ sdd.Principal, project sdd.ProjectID, _ sdd.Access) (*sdd.ProjectRuntime, error) {
-	if project != a.project {
-		return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "project unavailable"}
+	if project == a.project {
+		return a.runtime, nil
 	}
-	return a.runtime, nil
+	if runtime := a.projects[project]; runtime != nil {
+		return runtime, nil
+	}
+	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "project unavailable"}
 }
 
 func (a *localRuntimeAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
@@ -302,7 +312,10 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	access := &localRuntimeAccess{project: project, participant: participant, runtime: runtime, dependencies: map[string]*sdd.ProjectRuntime{}}
+	access := &localRuntimeAccess{
+		project: project, participant: participant, runtime: runtime,
+		dependencies: map[string]*sdd.ProjectRuntime{}, projects: map[sdd.ProjectID]*sdd.ProjectRuntime{},
+	}
 	for _, dependency := range dependencies {
 		cacheDir, cacheErr := registry.CacheDir(dependency)
 		if cacheErr != nil {
@@ -318,15 +331,31 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		// not once per connected repo.
 		memberEmbedder := crossEmbedder.Embedder
 		memberIndex := localadapter.NewPersistentSearchIndexStore(sdd.ProjectID(dependency), cacheRoot, dependency)
-		member, runtimeErr := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		options := sdd.ProjectRuntimeOptions{
 			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: dependency}, Graph: memberGraph,
 			Embedder: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: runner,
 			ExcludeEmbeddedFromIndex: true,
-		})
+		}
+		member, runtimeErr := sdd.NewProjectRuntime(options)
 		if runtimeErr != nil {
 			return nil, "", sdd.RequestIdentity{}, runtimeErr
 		}
 		access.dependencies[dependency] = member
+		// The same cache as a project of its own: its config supplies the
+		// language and the dependencies its horizon is composed from.
+		dependencyCfg, cfgErr := resolveConfigAt(filepath.Join(cacheDir, model.SDDDirName))
+		if cfgErr != nil {
+			return nil, "", sdd.RequestIdentity{}, fmt.Errorf("reading config of dependency %s: %w", dependency, cfgErr)
+		}
+		if dependencyCfg != nil {
+			options.Language = dependencyCfg.Language
+			options.Dependencies = append([]string(nil), dependencyCfg.Dependencies...)
+		}
+		full, runtimeErr := sdd.NewProjectRuntime(options)
+		if runtimeErr != nil {
+			return nil, "", sdd.RequestIdentity{}, runtimeErr
+		}
+		access.projects[sdd.ProjectID(dependency)] = full
 	}
 	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: access, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {

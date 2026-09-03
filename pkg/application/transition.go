@@ -241,7 +241,10 @@ func validatePreparedTransition(prepared PreparedTransition, principal Principal
 	if prepared.Version != PreparedTransitionVersion {
 		return &ApplicationError{Code: ErrorMigrationRequired, Message: "unsupported prepared transition version", Version: prepared.Version}
 	}
-	if binding.Subject != principal.Subject || binding.Project != project || prepared.Staged.Subject != principal.Subject || prepared.Staged.Session != binding.SessionID {
+	// The binding's project is the session's home; the target project may be a
+	// dependency the instance works in (d-cpt-yjc), so only the principal and
+	// the staging provenance tie the transition to the session here.
+	if binding.Subject != principal.Subject || prepared.Staged.Subject != principal.Subject || prepared.Staged.Session != binding.SessionID {
 		return &ApplicationError{Code: ErrorSessionOwnership, Message: "prepared transition ownership mismatch"}
 	}
 	if err := prepared.Target.Validate(project); err != nil {

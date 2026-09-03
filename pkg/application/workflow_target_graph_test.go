@@ -229,10 +229,8 @@ func TestWorkflowEffectiveTargetPrecedenceIsSharedByReadsAndWrites(t *testing.T)
 			}
 
 			read, fromBinding := workflow.effectiveTarget(store)
-			wantRead := MutationTarget{}
-			if tt.wantRead != "" {
-				wantRead = MutationTarget{Project: "example", Branch: tt.wantRead}
-			}
+			// The project is always the instance's; only the branch varies.
+			wantRead := MutationTarget{Project: "example", Branch: tt.wantRead}
 			if read != wantRead {
 				t.Fatalf("read target = %+v, want %+v", read, wantRead)
 			}
@@ -246,10 +244,10 @@ func TestWorkflowEffectiveTargetPrecedenceIsSharedByReadsAndWrites(t *testing.T)
 			if writeFromBinding != fromBinding {
 				t.Fatalf("binding provenance differs: read=%v write=%v", fromBinding, writeFromBinding)
 			}
-			if resolvedDefault != (read == MutationTarget{}) {
+			if resolvedDefault != (read.Branch == "") {
 				t.Fatalf("resolvedDefault = %v for read target %+v", resolvedDefault, read)
 			}
-			if read != (MutationTarget{}) && read != write {
+			if read.Branch != "" && read != write {
 				t.Fatalf("read target %+v and write target %+v disagree", read, write)
 			}
 			graph, err := graphs.CurrentFor(store)
