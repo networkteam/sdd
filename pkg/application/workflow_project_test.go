@@ -12,9 +12,11 @@ import (
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
-// newClosureFixture composes three projects: A is the home and declares B; C
-// is readable but undeclared. Alice is a full member of A and B and reads C;
-// B has no write authority of its own, as a local dependency has today.
+// newClosureFixture composes three projects: A is the home and declares B
+// under the repo ID example.test/b, which differs from B's project ID as it
+// does in every composition but the local one; C is readable but undeclared.
+// Alice is a full member of A and B and reads C; B has no write authority of
+// its own, as a local dependency has today.
 func newClosureFixture(t *testing.T) (*sdd.Application, sdd.RequestIdentity) {
 	t.Helper()
 	root := t.TempDir()
@@ -44,7 +46,7 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 		dependencies []string
 		branch       string
 	}{
-		{id: "project-a", dir: filepath.Join(root, "project-a"), dependencies: []string{"project-b"}, branch: "main"},
+		{id: "project-a", dir: filepath.Join(root, "project-a"), dependencies: []string{"example.test/b"}, branch: "main"},
 		{id: "project-b", dir: graphB},
 		{id: "project-c", dir: filepath.Join(root, "project-c")},
 	} {
@@ -74,6 +76,7 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 		permissions: map[string]map[sdd.ProjectID]compositionPermission{
 			"alice": {"project-a": {read: true, write: true}, "project-b": {read: true, write: true}, "project-c": {read: true}},
 		},
+		dependencies: map[string]sdd.ProjectID{"example.test/b": "project-b"},
 	}
 	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: access, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
@@ -122,6 +125,11 @@ func TestInstanceTargetsProjectInDependencyClosure(t *testing.T) {
 	_, err = workflow.Start(t.Context(), alice, sdd.WorkflowStartRequest{Canonical: "capture", Project: "project-c"})
 	if applicationErrorCode(err) != sdd.ErrorProjectUnavailable || !strings.Contains(err.Error(), "dependency closure") {
 		t.Fatalf("start outside the closure = %v, want a closure refusal", err)
+	}
+	// The declared repo ID is not a project: the closure holds resolved projects.
+	_, err = workflow.Start(t.Context(), alice, sdd.WorkflowStartRequest{Canonical: "capture", Project: "example.test/b"})
+	if applicationErrorCode(err) != sdd.ErrorProjectUnavailable || !strings.Contains(err.Error(), "dependency closure") {
+		t.Fatalf("start on the declared string = %v, want a closure refusal", err)
 	}
 
 	if project, branch, fromBinding, err := workflow.ReadScope(t.Context(), alice, "project-b"); err != nil || project != "project-b" || branch != "" || fromBinding {

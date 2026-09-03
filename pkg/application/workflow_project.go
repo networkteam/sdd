@@ -165,7 +165,9 @@ func (a *Application) resolveTargetProject(ctx context.Context, identity Request
 // inDependencyClosure walks the declared dependencies transitively from home
 // through the configurations the composition can reach. A dependency the
 // composition cannot resolve is not part of the reachable closure, so nothing
-// behind it is a valid target.
+// behind it is a valid target. Membership is a property of the resolved
+// project, never of the declared string: a declaration names a repo ID, and
+// only the composition knows which project carries it.
 func (a *Application) inDependencyClosure(ctx context.Context, principal Principal, home *ProjectRuntime, target ProjectID) error {
 	seen := map[ProjectID]bool{home.options.Project.ID: true}
 	queue := []*ProjectRuntime{home}
@@ -173,7 +175,11 @@ func (a *Application) inDependencyClosure(ctx context.Context, principal Princip
 		current := queue[0]
 		queue = queue[1:]
 		for _, dependency := range current.options.Dependencies {
-			id := ProjectID(dependency)
+			runtime, err := a.access.ResolveDependency(ctx, principal, current.options.Project.ID, dependency)
+			if err != nil || runtime == nil {
+				continue
+			}
+			id := runtime.options.Project.ID
 			if id == target {
 				return nil
 			}
@@ -181,10 +187,6 @@ func (a *Application) inDependencyClosure(ctx context.Context, principal Princip
 				continue
 			}
 			seen[id] = true
-			runtime, err := a.access.ResolveDependency(ctx, principal, current.options.Project.ID, dependency)
-			if err != nil || runtime == nil {
-				continue
-			}
 			queue = append(queue, runtime)
 		}
 	}

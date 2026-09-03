@@ -23,6 +23,9 @@ type compositionAccess struct {
 	mu          sync.Mutex
 	runtimes    map[sdd.ProjectID]*sdd.ProjectRuntime
 	permissions map[string]map[sdd.ProjectID]compositionPermission
+	// dependencies maps a declared repo ID to the project carrying it; a
+	// declaration without a mapping resolves to the project of the same name.
+	dependencies map[string]sdd.ProjectID
 }
 
 func (a *compositionAccess) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
@@ -72,7 +75,11 @@ func (a *compositionAccess) AuthorizeSession(ctx context.Context, request sdd.Se
 }
 
 func (a *compositionAccess) ResolveDependency(ctx context.Context, principal sdd.Principal, _ sdd.ProjectID, dependency string) (*sdd.ProjectRuntime, error) {
-	return a.ResolveProject(ctx, principal, sdd.ProjectID(dependency), sdd.AccessRead)
+	project, mapped := a.dependencies[dependency]
+	if !mapped {
+		project = sdd.ProjectID(dependency)
+	}
+	return a.ResolveProject(ctx, principal, project, sdd.AccessRead)
 }
 
 func (a *compositionAccess) revoke(subject string, project sdd.ProjectID) {
