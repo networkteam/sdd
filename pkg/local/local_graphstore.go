@@ -417,53 +417,7 @@ func (s *FilesystemGraphStore) ReadAttachmentPage(_ context.Context, entryID, fi
 	if err := s.recoverPendingTransactionsLocked(); err != nil {
 		return app.AttachmentPage{}, err
 	}
-	if offset < 0 || maxBytes <= 0 {
-		return app.AttachmentPage{}, fmt.Errorf("sdd: invalid attachment page range")
-	}
-	attachmentDir, err := app.AttachmentDirRelPath(entryID)
-	if err != nil {
-		return app.AttachmentPage{}, err
-	}
-	if filename == "" {
-		entries, readErr := os.ReadDir(filepath.Join(s.dir, attachmentDir))
-		if readErr != nil {
-			return app.AttachmentPage{}, readErr
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				if filename != "" {
-					return app.AttachmentPage{}, fmt.Errorf("sdd: attachment name is required when entry %s has more than one attachment", entryID)
-				}
-				filename = entry.Name()
-			}
-		}
-		if filename == "" {
-			return app.AttachmentPage{}, fmt.Errorf("sdd: entry %s has no attachments", entryID)
-		}
-	}
-	if filepath.Base(filename) != filename || strings.ContainsAny(filename, `/\\`) {
-		return app.AttachmentPage{}, fmt.Errorf("sdd: invalid attachment filename %q", filename)
-	}
-	logicalPath := filepath.ToSlash(filepath.Join(attachmentDir, filename))
-	target, err := safeGraphPath(s.dir, logicalPath)
-	if err != nil {
-		return app.AttachmentPage{}, err
-	}
-	data, err := os.ReadFile(target)
-	if err != nil {
-		return app.AttachmentPage{}, err
-	}
-	if offset > int64(len(data)) {
-		offset = int64(len(data))
-	}
-	end := offset + int64(maxBytes)
-	if end > int64(len(data)) {
-		end = int64(len(data))
-	}
-	return app.AttachmentPage{
-		Filename: filename, Content: append([]byte(nil), data[offset:end]...), Offset: offset,
-		NextOffset: end, TotalSize: int64(len(data)), More: end < int64(len(data)), Digest: sha256Digest(data),
-	}, nil
+	return app.PageAttachment(os.DirFS(s.dir), ".", entryID, filename, offset, maxBytes)
 }
 
 func (s *FilesystemGraphStore) lock() (*flock.Flock, error) {
