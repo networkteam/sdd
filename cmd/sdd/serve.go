@@ -321,7 +321,17 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		if cacheErr != nil {
 			return nil, "", sdd.RequestIdentity{}, cacheErr
 		}
-		memberGraph, graphErr := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: sdd.ProjectID(dependency), GraphDir: filepath.Join(cacheDir, model.DefaultGraphDir)})
+		// The same cache as a project of its own: its committed config supplies
+		// the graph layout, the language, and the dependencies its horizon is
+		// composed from. A cache without one is a graph at the default layout.
+		dependencyCfg, cfgErr := sdd.ReadProjectConfigFS(os.DirFS(cacheDir))
+		if cfgErr != nil && !errors.Is(cfgErr, sdd.ErrNotAnSDDProject) {
+			return nil, "", sdd.RequestIdentity{}, fmt.Errorf("reading config of dependency %s: %w", dependency, cfgErr)
+		}
+		if cfgErr != nil {
+			dependencyCfg.GraphDir = model.DefaultGraphDir
+		}
+		memberGraph, graphErr := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: sdd.ProjectID(dependency), GraphDir: filepath.Join(cacheDir, filepath.FromSlash(dependencyCfg.GraphDir))})
 		if graphErr != nil {
 			return nil, "", sdd.RequestIdentity{}, graphErr
 		}
@@ -341,16 +351,8 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 			return nil, "", sdd.RequestIdentity{}, runtimeErr
 		}
 		access.dependencies[dependency] = member
-		// The same cache as a project of its own: its config supplies the
-		// language and the dependencies its horizon is composed from.
-		dependencyCfg, cfgErr := resolveConfigAt(filepath.Join(cacheDir, model.SDDDirName))
-		if cfgErr != nil {
-			return nil, "", sdd.RequestIdentity{}, fmt.Errorf("reading config of dependency %s: %w", dependency, cfgErr)
-		}
-		if dependencyCfg != nil {
-			options.Language = dependencyCfg.Language
-			options.Dependencies = append([]string(nil), dependencyCfg.Dependencies...)
-		}
+		options.Language = dependencyCfg.Language
+		options.Dependencies = dependencyCfg.Dependencies
 		full, runtimeErr := sdd.NewProjectRuntime(options)
 		if runtimeErr != nil {
 			return nil, "", sdd.RequestIdentity{}, runtimeErr
