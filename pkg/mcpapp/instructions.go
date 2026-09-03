@@ -36,7 +36,11 @@ it is the whole authorization to continue that dialogue. Every other tool
 carries it as a required argument — the work tools (start_procedure, next,
 park, stage_attachment, bind_branch, abandon) and the reads (search, view,
 show, read_attachment, info, registry) alike; a read runs in the session's
-project and branch. Nothing is derived from the connection: a reconnect
+home project and branch unless it names another project. A project the
+home declares as a dependency, directly or through its dependencies, is
+one a move or a read may work in: pass it as project on start_procedure or
+on the read, and every serve names the project its instance works in.
+Nothing is derived from the connection: a reconnect
 changes nothing, and closing a connection ends nothing. Retain the handle
 across context compaction. Reads are free in the sense that matters: no move
 has to be running and no procedure state gates them.

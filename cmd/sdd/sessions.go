@@ -38,7 +38,7 @@ func sessionsCmd() *cli.Command {
 func sessionsAbandonCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "abandon",
-		Usage:     "Tear down a session by handle: its open moves are discarded, held WIP markers are left standing",
+		Usage:     "Tear down a session by its ID: its open moves are discarded, held WIP markers are left standing",
 		ArgsUsage: "<session-id>",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "reason", Usage: "Reason recorded with the abandon"},

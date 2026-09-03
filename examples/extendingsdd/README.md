@@ -5,11 +5,11 @@ This nested module compiles as `example.com/extendingsdd`, so it proves that an 
 The composition in `main.go` owns:
 
 - authentication middleware and token validation;
-- principal, project, access, and dependency resolution;
-- graph, session, staged-blob, LLM, embedding/index, and finalizer adapters;
+- principal, project, access, and dependency resolution, and the session-continuation policy (`AuthorizeSession`; SDD ships `application.OwnerOnly`);
+- graph, LLM, embedding/index, and finalizer adapters per project, and one session store and one staged-blob store for the whole composition;
 - the HTTP listener and deployment policy.
 
-SDD owns graph semantics, workflow procedures, read rendering, pre-flight and summary behavior, durable transition recovery, and write gates. The composition imports the canonical `application` contracts and optional `local` adapters, constructs an `application.ProjectRuntime`, resolves it through `application.AccessResolver`, creates `application.Application`, and mounts `mcpapp.Server.Handler()` behind the MCP SDK's bearer middleware.
+SDD owns graph semantics, workflow procedures, read rendering, pre-flight and summary behavior, durable transition recovery, and write gates. The composition imports the canonical `application` contracts and optional `local` adapters, constructs an `application.ProjectRuntime` per project, resolves them through `application.AccessResolver`, creates `application.Application` with the composition-wide session and staged-blob stores, and mounts `mcpapp.Server.Handler()` behind the MCP SDK's bearer middleware. A session handle is the session ID alone; the application reads a session's home project from its own record, so the server pins no project and serves every project the principal can reach.
 
 For local development the module uses `replace github.com/networkteam/sdd => ../..`. A release consumer removes that replacement and pins a published SDD version.
 
