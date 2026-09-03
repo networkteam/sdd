@@ -41,7 +41,6 @@ func newBranchBindingApplicationWithStore(t *testing.T, validator sdd.BranchVali
 		Targets: sdd.TargetAcquirerFunc(func(_ context.Context, target sdd.MutationTarget) (*sdd.AcquiredTarget, error) {
 			return &sdd.AcquiredTarget{Target: target, Graph: graph, Release: func() error { return nil }}, nil
 		}),
-		Sessions: sessionStore, StagedBlobs: blobs,
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 		}),
@@ -49,7 +48,7 @@ func newBranchBindingApplicationWithStore(t *testing.T, validator sdd.BranchVali
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessionStore, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +251,7 @@ func TestWorkflowSessionBindBranchVerifiesSessionBeforeValidation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{
+	if _, err := application.AbandonWorkflowSession(t.Context(), identity, sdd.WorkflowResumeRequest{
 		SessionID: workflow.ID(), ClientName: "mcp-b",
 	}, "torn down"); err != nil {
 		t.Fatal(err)
@@ -279,7 +278,7 @@ func TestWorkflowBranchProjectsFromStoreOnResumeAndList(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resumed, result, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{
+	resumed, result, err := application.ResumeWorkflow(t.Context(), identity, sdd.WorkflowResumeRequest{
 		SessionID: workflow.ID(), ClientName: "mcp-a",
 	})
 	if err != nil {

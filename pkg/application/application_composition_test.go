@@ -67,6 +67,10 @@ func (a *compositionAccess) ResolveProject(_ context.Context, principal sdd.Prin
 	return a.runtimes[project], nil
 }
 
+func (a *compositionAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
+
 func (a *compositionAccess) ResolveDependency(ctx context.Context, principal sdd.Principal, _ sdd.ProjectID, dependency string) (*sdd.ProjectRuntime, error) {
 	return a.ResolveProject(ctx, principal, sdd.ProjectID(dependency), sdd.AccessRead)
 }
@@ -117,14 +121,14 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 	})
 	runtimeA, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "project-a", DisplayName: "Project A"}, Dependencies: []string{"project-b"},
-		Graph: storeA, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
+		Graph: storeA, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtimeB, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "project-b", DisplayName: "Project B"},
-		Graph:   storeB, Sessions: sessions, StagedBlobs: blobs, LLM: llm,
+		Graph:   storeB, LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +142,7 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 			"carol":  {"project-a": {read: true, write: true}},
 		},
 	}
-	application, err := sdd.NewApplication(access)
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: access, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,12 +186,14 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := application.ResumeWorkflow(t.Context(), alice, "project-b", sdd.WorkflowResumeRequest{
-		SessionID: aliceWorkflow.ID(), ClientName: "alice-other-project",
-	}); applicationErrorCode(err) != sdd.ErrorSessionOwnership {
-		t.Fatalf("project binding changed = %v", err)
+	// The handle alone names the session; its home project comes from the
+	// session's own record (d-cpt-yjc).
+	if resumed, _, err := application.ResumeWorkflow(t.Context(), alice, sdd.WorkflowResumeRequest{
+		SessionID: aliceWorkflow.ID(), ClientName: "alice-again",
+	}); err != nil || resumed.Project() != "project-a" {
+		t.Fatalf("resume by bare handle = %v, %v", resumed, err)
 	}
-	if _, _, err := application.ResumeWorkflow(t.Context(), carol, "project-a", sdd.WorkflowResumeRequest{
+	if _, _, err := application.ResumeWorkflow(t.Context(), carol, sdd.WorkflowResumeRequest{
 		SessionID: aliceWorkflow.ID(), ClientName: "carol-mcp",
 	}); applicationErrorCode(err) != sdd.ErrorSessionOwnership {
 		t.Fatalf("principal binding changed = %v", err)

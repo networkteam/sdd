@@ -81,6 +81,10 @@ func (r *multiAccessResolver) ListProjects(context.Context, sdd.Principal) (sdd.
 func (r *multiAccessResolver) ResolveProject(context.Context, sdd.Principal, sdd.ProjectID, sdd.Access) (*sdd.ProjectRuntime, error) {
 	return r.base, nil
 }
+func (r *multiAccessResolver) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
+
 func (r *multiAccessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
 	if r.deny {
 		return nil, &sdd.ApplicationError{Code: sdd.ErrorReadDenied, Message: "secret policy detail"}
@@ -121,19 +125,19 @@ func TestApplicationLoadsDependencyPartiallyWithUnreadableEntry(t *testing.T) {
 	})
 	dependency, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example.org/dep"}, Graph: staticGraphStore{snapshot: foreignSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+		LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []string{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+		LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&multiAccessResolver{base: base, dependency: dependency})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &multiAccessResolver{base: base, dependency: dependency}, Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,20 +167,20 @@ func TestApplicationResolvesAuthorizedDependenciesWithoutLeakingDenials(t *testi
 	})
 	dependency, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example.org/dep"}, Graph: staticGraphStore{snapshot: foreignSnapshot, attachment: "foreign attachment"},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+		LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []string{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llm,
+		LLM: llm,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	resolver := &multiAccessResolver{base: base, dependency: dependency}
-	application, err := sdd.NewApplication(resolver)
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: resolver, Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}})
 	if err != nil {
 		t.Fatal(err)
 	}

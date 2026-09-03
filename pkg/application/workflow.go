@@ -199,13 +199,13 @@ func (a *Application) OpenWorkflow(ctx context.Context, identity RequestIdentity
 		return nil, nil, err
 	}
 	id := newWorkflowSessionID(time.Now())
-	now := runtime.options.Now().UTC().Round(0)
+	now := a.now().UTC().Round(0)
 	metadata := SessionMetadata{
 		ID: id, Subject: principal.Subject,
 		Project: runtime.options.Project.ID, Participant: info.Participant, UpdatedAt: now,
 		Attachment: newAttachment(principal.Subject, request.ClientName, request.ClientVersion, now),
 	}
-	created, err := runtime.options.Sessions.Create(ctx, metadata)
+	created, err := a.sessions.Create(ctx, metadata)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -236,38 +236,26 @@ func (a *Application) OpenWorkflow(ctx context.Context, identity RequestIdentity
 	return w, w.publicServe(serve), nil
 }
 
-// LoadWorkflow loads an existing session by ID within the principal's scope:
-// the session must belong to the request's subject and project and must not
-// have ended. Possession of the ID is the authorization — no consent, no
-// takeover (d-cpt-aen). Loading stamps which client attached and when, the
-// record staleness is derived from.
-func (a *Application) LoadWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, request WorkflowResumeRequest) (*WorkflowSession, error) {
+// LoadWorkflow loads an existing session by ID: the session's own record
+// names its home project, the composition's continuation policy and current
+// membership in that project gate the load, and an ended session is refused.
+// Possession of the ID is the authorization — no consent, no takeover
+// (d-cpt-aen). Loading stamps which client attached and when, the record
+// staleness is derived from.
+func (a *Application) LoadWorkflow(ctx context.Context, identity RequestIdentity, request WorkflowResumeRequest) (*WorkflowSession, error) {
 	if request.SessionID == "" {
 		return nil, fmt.Errorf("sdd: session ID is required")
 	}
-	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
+	principal, runtime, stored, err := a.resolveSession(ctx, identity, request.SessionID, AccessRead)
 	if err != nil {
 		return nil, err
-	}
-	stored, err := runtime.options.Sessions.Load(ctx, request.SessionID)
-	if err != nil {
-		if errors.Is(err, ErrSessionNotFound) {
-			return nil, fmt.Errorf("unknown session %q", request.SessionID)
-		}
-		return nil, err
-	}
-	if err := validateStoredSession(stored); err != nil {
-		return nil, err
-	}
-	if stored.Metadata.Subject != principal.Subject || stored.Metadata.Project != runtime.options.Project.ID {
-		return nil, &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
 	}
 	// An ended dialogue is kept to be read, never carried on: loading would
 	// replay it and auto-start a fresh shell, the revival d-tac-k4q refuses.
 	if end := stored.Metadata.Ended; end != nil {
 		return nil, endedSessionError(stored.Metadata, *end)
 	}
-	stored, err = a.stampAttachment(ctx, runtime, principal, request, stored)
+	stored, err = a.stampAttachment(ctx, principal, request, stored)
 	if err != nil {
 		return nil, err
 	}
@@ -295,8 +283,8 @@ func (a *Application) LoadWorkflow(ctx context.Context, identity RequestIdentity
 
 // ResumeWorkflow loads a session and serves its current position: every
 // running instance at its step with the schema to continue it.
-func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdentity, project ProjectID, request WorkflowResumeRequest) (*WorkflowSession, WorkflowResumeResult, error) {
-	w, err := a.LoadWorkflow(ctx, identity, project, request)
+func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdentity, request WorkflowResumeRequest) (*WorkflowSession, WorkflowResumeResult, error) {
+	w, err := a.LoadWorkflow(ctx, identity, request)
 	if err != nil {
 		return nil, WorkflowResumeResult{}, err
 	}
@@ -307,13 +295,13 @@ func (a *Application) ResumeWorkflow(ctx context.Context, identity RequestIdenti
 // stampAttachment records the loading client as the session's last attachment.
 // A lost CAS race against a concurrent writer reloads and retries once; the
 // stamp is a record, so a second loss surfaces as the conflict it is.
-func (a *Application) stampAttachment(ctx context.Context, runtime *ProjectRuntime, principal Principal, request WorkflowResumeRequest, stored StoredSession) (StoredSession, error) {
+func (a *Application) stampAttachment(ctx context.Context, principal Principal, request WorkflowResumeRequest, stored StoredSession) (StoredSession, error) {
 	for attempt := 0; ; attempt++ {
-		now := runtime.options.Now().UTC().Round(0)
+		now := a.now().UTC().Round(0)
 		metadata := stored.Metadata
 		metadata.Attachment = newAttachment(principal.Subject, request.ClientName, request.ClientVersion, now)
 		metadata.UpdatedAt = now
-		version, err := runtime.options.Sessions.Append(ctx, request.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
+		version, err := a.sessions.Append(ctx, request.SessionID, stored.Version, SessionAppend{Metadata: &metadata})
 		if err == nil {
 			stored.Metadata = metadata
 			stored.Version = version
@@ -323,7 +311,7 @@ func (a *Application) stampAttachment(ctx context.Context, runtime *ProjectRunti
 		if attempt > 0 || !errors.As(err, &appErr) || appErr.Code != ErrorSessionConflict {
 			return StoredSession{}, err
 		}
-		if stored, err = runtime.options.Sessions.Load(ctx, request.SessionID); err != nil {
+		if stored, err = a.sessions.Load(ctx, request.SessionID); err != nil {
 			return StoredSession{}, err
 		}
 		if err := validateStoredSession(stored); err != nil {
@@ -718,11 +706,7 @@ func (w *WorkflowSession) BindBranch(ctx context.Context, identity RequestIdenti
 }
 
 func (w *WorkflowSession) bindBranchOnce(branch string, clear bool) error {
-	principal, runtime, err := w.app.resolve(w.ctx, w.identity, w.project, AccessRead)
-	if err != nil {
-		return err
-	}
-	stored, err := runtime.options.Sessions.Load(w.ctx, w.ID())
+	principal, runtime, stored, err := w.app.resolveSession(w.ctx, w.identity, w.ID(), AccessRead)
 	if err != nil {
 		return err
 	}
@@ -749,7 +733,7 @@ func (w *WorkflowSession) bindBranchOnce(branch string, clear bool) error {
 	} else {
 		metadata.Branch = branch
 	}
-	now := runtime.options.Now().UTC().Round(0)
+	now := w.app.now().UTC().Round(0)
 	metadata.UpdatedAt = now
 	if metadata.Attachment != nil {
 		attachment := *metadata.Attachment
@@ -767,7 +751,7 @@ func (w *WorkflowSession) bindBranchOnce(branch string, clear bool) error {
 	if err != nil {
 		return err
 	}
-	next, err := runtime.options.Sessions.Append(w.ctx, w.ID(), stored.Version, SessionAppend{
+	next, err := w.app.sessions.Append(w.ctx, w.ID(), stored.Version, SessionAppend{
 		Metadata: &metadata,
 		Events:   []StoredEvent{{CodecVersion: SessionCodecVersion, Code: eventCode, Payload: payload}},
 	})
@@ -916,11 +900,11 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 	if err != nil {
 		return nil, err
 	}
-	stored, err := runtime.options.Sessions.List(ctx, SessionFilter{Subject: principal.Subject, Project: runtime.options.Project.ID})
+	stored, err := a.sessions.List(ctx, SessionFilter{Subject: principal.Subject, Project: runtime.options.Project.ID})
 	if err != nil {
 		return nil, err
 	}
-	now := runtime.options.Now().UTC()
+	now := a.now().UTC()
 	result := make([]WorkflowSessionSummary, 0, len(stored))
 	log := slogutils.FromContext(ctx)
 	for _, item := range stored {
@@ -973,23 +957,16 @@ func (a *Application) ListWorkflowSessions(ctx context.Context, identity Request
 // append, so the session stays as it was — honest state, no phantom teardown.
 // Ending a session is a participant act, and holding the handle is what
 // authorizes it (d-cpt-aen).
-func (a *Application) AbandonWorkflowSession(ctx context.Context, identity RequestIdentity, project ProjectID, request WorkflowResumeRequest, reason string) (WorkflowAbandonResult, error) {
-	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
+func (a *Application) AbandonWorkflowSession(ctx context.Context, identity RequestIdentity, request WorkflowResumeRequest, reason string) (WorkflowAbandonResult, error) {
+	if request.SessionID == "" {
+		return WorkflowAbandonResult{}, fmt.Errorf("sdd: session ID is required")
+	}
+	_, runtime, stored, err := a.resolveSession(ctx, identity, request.SessionID, AccessRead)
 	if err != nil {
 		return WorkflowAbandonResult{}, err
 	}
-	stored, err := runtime.options.Sessions.Load(ctx, request.SessionID)
-	if err != nil {
-		if errors.Is(err, ErrSessionNotFound) {
-			return WorkflowAbandonResult{}, fmt.Errorf("unknown session %q", request.SessionID)
-		}
-		return WorkflowAbandonResult{}, err
-	}
-	if err := validateStoredSession(stored); err != nil {
-		return WorkflowAbandonResult{}, err
-	}
-	if stored.Metadata.Subject != principal.Subject || stored.Metadata.Project != runtime.options.Project.ID {
-		return WorkflowAbandonResult{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "session identity and project are immutable"}
+	if end := stored.Metadata.Ended; end != nil {
+		return WorkflowAbandonResult{}, endedSessionError(stored.Metadata, *end)
 	}
 	w, err := a.newWorkflow(ctx, identity, runtime.options.Project.ID, sessionBindingFrom(stored), stored.Metadata.Branch)
 	if err != nil {
@@ -1020,7 +997,7 @@ func (a *Application) AbandonWorkflowSession(ctx context.Context, identity Reque
 			return WorkflowAbandonResult{}, err
 		}
 	}
-	now := runtime.options.Now().UTC().Round(0)
+	now := a.now().UTC().Round(0)
 	metadata := stored.Metadata
 	metadata.UpdatedAt = now
 	metadata.Ended = &SessionEnd{Act: SessionAbandoned, EndedAt: now, Reason: strings.TrimSpace(reason)}
@@ -1032,7 +1009,7 @@ func (a *Application) AbandonWorkflowSession(ctx context.Context, identity Reque
 		}
 		appendData.Events = append(appendData.Events, StoredEvent{CodecVersion: SessionCodecVersion, Code: WorkflowEventCode, Payload: payload})
 	}
-	if _, err := runtime.options.Sessions.Append(ctx, request.SessionID, stored.Version, appendData); err != nil {
+	if _, err := a.sessions.Append(ctx, request.SessionID, stored.Version, appendData); err != nil {
 		return WorkflowAbandonResult{}, err
 	}
 	return result, nil
@@ -1241,11 +1218,7 @@ func (w *WorkflowSession) appendStoredEvent(code string, payload json.RawMessage
 // the store's so a retried append passes the version CAS; an ended session
 // surfaces typed instead of being written on.
 func (w *WorkflowSession) resyncBindingVersion() error {
-	_, runtime, err := w.app.resolve(w.ctx, w.identity, w.project, AccessRead)
-	if err != nil {
-		return err
-	}
-	stored, err := runtime.options.Sessions.Load(w.ctx, w.ID())
+	_, _, stored, err := w.app.resolveSession(w.ctx, w.identity, w.ID(), AccessRead)
 	if err != nil {
 		return err
 	}
@@ -1258,11 +1231,7 @@ func (w *WorkflowSession) resyncBindingVersion() error {
 }
 
 func (w *WorkflowSession) appendStoredEventOnce(code string, payload json.RawMessage) error {
-	principal, runtime, err := w.app.resolve(w.ctx, w.identity, w.project, AccessRead)
-	if err != nil {
-		return err
-	}
-	stored, err := runtime.options.Sessions.Load(w.ctx, w.ID())
+	principal, _, stored, err := w.app.resolveSession(w.ctx, w.identity, w.ID(), AccessRead)
 	if err != nil {
 		return err
 	}
@@ -1270,7 +1239,7 @@ func (w *WorkflowSession) appendStoredEventOnce(code string, payload json.RawMes
 		return err
 	}
 	metadata := stored.Metadata
-	now := runtime.options.Now().UTC().Round(0)
+	now := w.app.now().UTC().Round(0)
 	metadata.UpdatedAt = now
 	if metadata.Attachment != nil {
 		attachment := *metadata.Attachment
@@ -1298,7 +1267,7 @@ func (w *WorkflowSession) appendStoredEventOnce(code string, payload json.RawMes
 	if metadata.Subject != principal.Subject {
 		return &ApplicationError{Code: ErrorSessionOwnership, Message: "session subject changed"}
 	}
-	next, err := runtime.options.Sessions.Append(w.ctx, w.ID(), stored.Version, SessionAppend{
+	next, err := w.app.sessions.Append(w.ctx, w.ID(), stored.Version, SessionAppend{
 		Metadata: &metadata,
 		Events:   []StoredEvent{{CodecVersion: SessionCodecVersion, Code: code, Payload: payload}},
 	})

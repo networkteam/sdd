@@ -228,7 +228,6 @@ func TestInterleavedCapturesBothLandWithoutRecovery(t *testing.T) {
 	release := make(chan struct{})
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph,
-		Sessions: sessions, StagedBlobs: blobs,
 		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
 			identity := pkgllm.Identity{Provider: "test", Model: "test"}
 			if request.Purpose == pkgllm.PurposePreflight {
@@ -246,7 +245,7 @@ func TestInterleavedCapturesBothLandWithoutRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}

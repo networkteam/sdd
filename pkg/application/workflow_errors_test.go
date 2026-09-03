@@ -63,6 +63,10 @@ func (r *failAtPrincipalResolver) ResolveProject(context.Context, sdd.Principal,
 	return r.runtime, nil
 }
 
+func (*failAtPrincipalResolver) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
+
 func (*failAtPrincipalResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
 	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
@@ -142,7 +146,7 @@ func newShellFailureApplication(t *testing.T) (*sdd.Application, *failAtPrincipa
 		t.Fatal(err)
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		Project: sdd.ProjectRef{ID: "example"}, Graph: graph,
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 		}),
@@ -151,7 +155,7 @@ func newShellFailureApplication(t *testing.T) (*sdd.Application, *failAtPrincipa
 		t.Fatal(err)
 	}
 	resolver := &failAtPrincipalResolver{runtime: runtime}
-	application, err := sdd.NewApplication(resolver)
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: resolver, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}

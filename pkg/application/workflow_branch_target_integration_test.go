@@ -97,8 +97,6 @@ Branch-targeted workflow reads need to follow the written artifact.
 			}
 			return nil
 		}),
-		Sessions:    sessions,
-		StagedBlobs: blobs,
 		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
 			identity := pkgllm.Identity{Provider: "test", Model: "test"}
 			switch request.Purpose {
@@ -114,7 +112,7 @@ Branch-targeted workflow reads need to follow the written artifact.
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +296,6 @@ This reference exists only on the bound work branch.
 			}
 			return nil
 		}),
-		Sessions: sessions, StagedBlobs: blobs,
 		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
 			identity := pkgllm.Identity{Provider: "test", Model: "test"}
 			switch request.Purpose {
@@ -320,7 +317,7 @@ This reference exists only on the bound work branch.
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}

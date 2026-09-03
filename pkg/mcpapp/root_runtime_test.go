@@ -31,6 +31,10 @@ func (r rootAccess) ResolveProject(context.Context, sdd.Principal, sdd.ProjectID
 	return r.runtime, nil
 }
 
+func (rootAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
+
 func (rootAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
 	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
@@ -51,7 +55,7 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "root-test", DisplayName: "Root test"}, DefaultBranch: "main",
-		Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		Graph: graph,
 		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
 			identity := pkgllm.Identity{Provider: "test", Model: "test"}
 			if request.Purpose == pkgllm.PurposePreflight {
@@ -63,13 +67,13 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(rootAccess{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: rootAccess{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
 	identity := sdd.RequestIdentity{Subject: "tester"}
 	server, err := mcpserver.New(mcpserver.Options{
-		Application: application, Project: "root-test", LocalIdentity: identity, LocalClient: true, Version: "test",
+		Application: application, LocalIdentity: identity, LocalClient: true, Version: "test",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -332,7 +332,7 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(testRuntimeGeneration.Add(1)) * time.Hour)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, DefaultBranch: "main", Language: language,
-		Graph: graph, Targets: targets, Sessions: sessions, StagedBlobs: blobs, Now: func() time.Time { return now },
+		Graph: graph, Targets: targets,
 		Branches: sdd.BranchValidatorFunc(func(_ context.Context, target sdd.MutationTarget) error {
 			if target.Project != "test" {
 				return fmt.Errorf("unexpected branch project %q", target.Project)
@@ -358,12 +358,12 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(rootAccess{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: rootAccess{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs, Clock: sdd.ClockFunc(func() time.Time { return now })})
 	if err != nil {
 		t.Fatal(err)
 	}
 	opts := mcpserver.Options{
-		Application: application, Project: "test", LocalIdentity: sdd.RequestIdentity{Subject: "tester"}, Version: "test",
+		Application: application, LocalIdentity: sdd.RequestIdentity{Subject: "tester"}, Version: "test",
 		LocalAttachmentPath: func(entryID, filename string) (string, error) {
 			dir, pathErr := model.AttachDirRelPath(entryID)
 			if pathErr != nil {
@@ -861,7 +861,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "d21bd9a4921bd60901924d77c5b8ba64d648f86b846933eda786f34f51680c78"
+	const want = "14fba843040eb08dbdcb42f00228e9604e40fbca60cc797c10a89d8481549144"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
@@ -1952,7 +1952,7 @@ func TestAbandonLeavesLogStanding(t *testing.T) {
 	if abandoned.Base.OpenThreads != "" {
 		t.Fatalf("the abandoned move must not list as an open thread, got %q", abandoned.Base.OpenThreads)
 	}
-	if _, err := os.Stat(filepath.Join(env.sessionsDir, bareSessionID(serve.Session)+".jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(env.sessionsDir, serve.Session+".jsonl")); err != nil {
 		t.Fatalf("session log must stay on disk: %v", err)
 	}
 }
@@ -2083,7 +2083,7 @@ func TestAbandonSessionByHandle_Parked(t *testing.T) {
 	if msg := callExpectError(t, cs2, "resume_session", map[string]any{"session": sessionID}); !strings.Contains(msg, "torn down") {
 		t.Fatalf("a torn-down session must not resume, got %q", msg)
 	}
-	if _, err := os.Stat(filepath.Join(env.sessionsDir, bareSessionID(sessionID)+".jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(env.sessionsDir, sessionID+".jsonl")); err != nil {
 		t.Fatalf("teardown closes the log, never deletes it: %v", err)
 	}
 }
@@ -2198,7 +2198,7 @@ func TestNoHandleRejectionNamesDoorsOnly(t *testing.T) {
 
 	requireNoListing := func(t *testing.T, tool, msg string) {
 		t.Helper()
-		if strings.Contains(msg, bareSessionID(session)) || strings.Contains(msg, "the open one") {
+		if strings.Contains(msg, session) || strings.Contains(msg, "the open one") {
 			t.Fatalf("%s without a handle must list no session, got %q", tool, msg)
 		}
 	}
@@ -2927,7 +2927,7 @@ func TestFreeReads(t *testing.T) {
 
 	// The bare session ID names the attached session too — a handle carried
 	// from before the project prefix existed keeps working.
-	call(t, cs, "show", map[string]any{"session": bareSessionID(session), "ids": []string{fixtureGapID}}, &show)
+	call(t, cs, "show", map[string]any{"session": session, "ids": []string{fixtureGapID}}, &show)
 	if !strings.Contains(show.Entries, fixtureGapID) {
 		t.Fatalf("show with the bare session ID should render the entry, got %q", show.Entries)
 	}
@@ -3239,7 +3239,7 @@ func TestShellConcludeLeavesOpenThreadsBehind(t *testing.T) {
 	}
 
 	// The terminal record is durable, so collection can reclaim it after retention.
-	stored, err := env.sessions.Load(t.Context(), sdd.SessionID(bareSessionID(session)))
+	stored, err := env.sessions.Load(t.Context(), sdd.SessionID(session))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3253,7 +3253,7 @@ func TestShellConcludeLeavesOpenThreadsBehind(t *testing.T) {
 		t.Fatalf("a concluded session must not resume, and the refusal names the way on, got %q", msg)
 	}
 	msg := callExpectError(t, cs, "start_procedure", map[string]any{"canonical": "capture"})
-	if strings.Contains(msg, bareSessionID(session)) {
+	if strings.Contains(msg, session) {
 		t.Fatalf("the no-handle rejection must not offer a concluded session, got %q", msg)
 	}
 
@@ -3340,7 +3340,7 @@ func TestDoorAfterConcludeOpensFresh(t *testing.T) {
 func TestConnectionEventsEndNothing(t *testing.T) {
 	end := func(t *testing.T, env testEnv, session string) *sdd.SessionEnd {
 		t.Helper()
-		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(bareSessionID(session)))
+		stored, err := env.sessions.Load(t.Context(), sdd.SessionID(session))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3409,15 +3409,6 @@ func TestConnectionEventsEndNothing(t *testing.T) {
 	})
 }
 
-// bareSessionID strips the project prefix off a served handle
-// (project:session-id), yielding the store's own session ID.
-func bareSessionID(handle string) string {
-	if at := strings.LastIndex(handle, ":s_"); at >= 0 {
-		return handle[at+1:]
-	}
-	return handle
-}
-
 // readSessionLog reads a session's JSONL event log from the sessions dir.
 func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	t.Helper()
@@ -3425,7 +3416,7 @@ func readSessionLog(t *testing.T, dir, session string) ([]engine.Event, error) {
 	if err != nil {
 		return nil, err
 	}
-	stored, err := store.Load(t.Context(), sdd.SessionID(bareSessionID(session)))
+	stored, err := store.Load(t.Context(), sdd.SessionID(session))
 	if err != nil {
 		return nil, err
 	}

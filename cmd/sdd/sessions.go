@@ -28,7 +28,7 @@ func sessionsCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			renderSessions(project, sessions)
+			renderSessions(sessions)
 			return nil
 		},
 		Commands: []*cli.Command{sessionsAbandonCmd()},
@@ -39,20 +39,20 @@ func sessionsAbandonCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "abandon",
 		Usage:     "Tear down a session by handle: its open moves are discarded, held WIP markers are left standing",
-		ArgsUsage: "<session-handle>",
+		ArgsUsage: "<session-id>",
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: "reason", Usage: "Reason recorded with the abandon"},
 		},
 		Action: withWriteGate(func(ctx context.Context, cmd *cli.Command) error {
 			if cmd.Args().Len() != 1 {
-				return fmt.Errorf("pass exactly one session handle (see `sdd sessions`)")
+				return fmt.Errorf("pass exactly one session ID (see `sdd sessions`)")
 			}
-			application, project, identity, err := buildLocalStoreApplication(ctx, cmd)
+			application, _, identity, err := buildLocalStoreApplication(ctx, cmd)
 			if err != nil {
 				return err
 			}
-			result, err := application.AbandonWorkflowSession(ctx, identity, project, sdd.WorkflowResumeRequest{
-				SessionID: sessionIDFromHandle(cmd.Args().First()), ClientName: "sdd sessions abandon",
+			result, err := application.AbandonWorkflowSession(ctx, identity, sdd.WorkflowResumeRequest{
+				SessionID: sdd.SessionID(strings.TrimSpace(cmd.Args().First())), ClientName: "sdd sessions abandon",
 			}, cmd.String("reason"))
 			if err != nil {
 				return err
@@ -73,17 +73,7 @@ func sessionsAbandonCmd() *cli.Command {
 	}
 }
 
-// sessionIDFromHandle accepts the served handle (project:session-id) or a bare
-// session ID; the CLI serves one project, so the prefix only needs stripping.
-func sessionIDFromHandle(handle string) sdd.SessionID {
-	handle = strings.TrimSpace(handle)
-	if at := strings.LastIndex(handle, ":s_"); at >= 0 {
-		return sdd.SessionID(handle[at+1:])
-	}
-	return sdd.SessionID(handle)
-}
-
-func renderSessions(project sdd.ProjectID, sessions []sdd.WorkflowSessionSummary) {
+func renderSessions(sessions []sdd.WorkflowSessionSummary) {
 	shown := 0
 	for _, session := range sessions {
 		if len(session.Open) == 0 {
@@ -94,7 +84,7 @@ func renderSessions(project sdd.ProjectID, sessions []sdd.WorkflowSessionSummary
 		if session.Active {
 			activity = "active"
 		}
-		line := fmt.Sprintf("%s:%s · %s · last %s", project, session.Session, activity, session.LastActivity.Local().Format(time.RFC3339))
+		line := fmt.Sprintf("%s · %s · last %s", session.Session, activity, session.LastActivity.Local().Format(time.RFC3339))
 		if session.Attachment != nil && session.Attachment.ClientName != "" {
 			line += " · " + session.Attachment.ClientName
 		}

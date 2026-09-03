@@ -96,7 +96,7 @@ func newStampWorkflowApp(t *testing.T, graphDir, sessionsDir string, now func() 
 		store = w(store)
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Sessions: store, StagedBlobs: blobs, Now: now,
+		Project: sdd.ProjectRef{ID: "example"}, Graph: graph,
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 		}),
@@ -104,7 +104,7 @@ func newStampWorkflowApp(t *testing.T, graphDir, sessionsDir string, now func() 
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: store, StagedBlobs: blobs, Clock: sdd.ClockFunc(now)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestSecondClientLoadsAndBothMayWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, result, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: first.ID(), ClientName: "mcp-b"})
+	second, result, err := application.ResumeWorkflow(t.Context(), identity, sdd.WorkflowResumeRequest{SessionID: first.ID(), ClientName: "mcp-b"})
 	if err != nil {
 		t.Fatalf("a second client presenting the handle should load the session, got %v", err)
 	}
@@ -314,7 +314,7 @@ func TestLoadStampRetriesPastRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	failOnce.armed.Store(true)
-	_, result, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"})
+	_, result, err := application.ResumeWorkflow(t.Context(), identity, sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"})
 	if err != nil {
 		t.Fatalf("load should retry past a version race, got %v", err)
 	}
@@ -348,7 +348,7 @@ func TestAbandonMidTeardownLeavesSessionIntact(t *testing.T) {
 		t.Fatal(err)
 	}
 	conflict.fail.Store(true)
-	if _, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"}, "boom"); err == nil {
+	if _, err := application.AbandonWorkflowSession(t.Context(), identity, sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"}, "boom"); err == nil {
 		t.Fatal("expected the teardown's final append to fail")
 	}
 	conflict.fail.Store(false)
@@ -382,7 +382,7 @@ func TestAbandonByHandleNamesActorTimeReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The stamp is fresh: an "actively driven" session is no bar to teardown.
-	result, err := application.AbandonWorkflowSession(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"}, "stale branch")
+	result, err := application.AbandonWorkflowSession(t.Context(), identity, sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"}, "stale branch")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestAbandonByHandleNamesActorTimeReason(t *testing.T) {
 		t.Fatalf("teardown result = %+v, want the one open move discarded", result)
 	}
 
-	_, _, loadErr := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-c"})
+	_, _, loadErr := application.ResumeWorkflow(t.Context(), identity, sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-c"})
 	var loadAppErr *sdd.ApplicationError
 	if !errors.As(loadErr, &loadAppErr) || loadAppErr.Code != sdd.ErrorSessionEnded {
 		t.Fatalf("loading a torn-down handle = %v, want typed ErrorSessionEnded", loadErr)

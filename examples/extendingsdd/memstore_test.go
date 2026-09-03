@@ -63,17 +63,14 @@ func newCollectFixture(t *testing.T) collectFixture {
 	sessions := newMemorySessionStore()
 	blobs := newMemoryStagedBlobStore(func() time.Time { return now })
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project:     sdd.ProjectRef{ID: "example", DisplayName: "Example"},
-		Graph:       graphStore{},
-		Sessions:    sessions,
-		StagedBlobs: blobs,
-		Now:         func() time.Time { return now },
-		LLM:         llmRunner{},
+		Project: sdd.ProjectRef{ID: "example", DisplayName: "Example"},
+		Graph:   graphStore{},
+		LLM:     llmRunner{},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, err := sdd.NewApplication(accessResolver{runtime: runtime})
+	app, err := sdd.NewApplication(sdd.ApplicationOptions{Access: accessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs, Clock: sdd.ClockFunc(func() time.Time { return now })})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +117,7 @@ func (f collectFixture) stage(t *testing.T, id sdd.SessionID) {
 
 func (f collectFixture) collect(t *testing.T, retention time.Duration) sdd.CollectSessionsResult {
 	t.Helper()
-	result, err := f.app.CollectSessions(t.Context(), f.identity, f.project, sdd.CollectSessionsCmd{
+	result, err := f.app.CollectSessions(t.Context(), sdd.CollectSessionsCmd{
 		Retention: retention,
 	})
 	if err != nil {

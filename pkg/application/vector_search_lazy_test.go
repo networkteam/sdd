@@ -55,7 +55,7 @@ func TestVectorSearchWithLazyDimensionEmbedder(t *testing.T) {
 	}}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example", DisplayName: "Example"},
-		Graph:   graph, Sessions: sessions, StagedBlobs: blobs, Embedder: embeddings,
+		Graph:   graph, Embedder: embeddings,
 		SearchIndex: localadapter.NewMemorySearchIndexStore(),
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
@@ -65,7 +65,7 @@ func TestVectorSearchWithLazyDimensionEmbedder(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolver := &runtimeAccessResolver{runtime: runtime}
-	application, err := sdd.NewApplication(resolver)
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: resolver, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}

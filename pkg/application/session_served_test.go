@@ -35,7 +35,7 @@ func TestServedLedgerSurvivesReplayAndReorientClearsIt(t *testing.T) {
 	}
 	assertServed(t, w, true)
 
-	replayed, err := application.LoadWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"})
+	replayed, err := application.LoadWorkflow(t.Context(), identity, sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-b"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestServedLedgerSurvivesReplayAndReorientClearsIt(t *testing.T) {
 	}
 	assertServed(t, replayed, false)
 
-	again, _, err := application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-c"})
+	again, _, err := application.ResumeWorkflow(t.Context(), identity, sdd.WorkflowResumeRequest{SessionID: w.ID(), ClientName: "mcp-c"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -52,7 +52,7 @@ func recoverCmd() *cli.Command {
 				return err
 			}
 			if recoveryNeedsReconciliation(item, cmd.String("verb")) {
-				refreshed, err := application.ReconcileMutation(ctx, identity, project, sdd.RecoveryReconcileRequest{
+				refreshed, err := application.ReconcileMutation(ctx, identity, sdd.RecoveryReconcileRequest{
 					Session: item.Session, MutationID: item.MutationID,
 				})
 				if err != nil {
@@ -97,7 +97,7 @@ func recoverCmd() *cli.Command {
 					return fmt.Errorf("recovery cancelled")
 				}
 			}
-			result, err := application.RecoverMutation(ctx, identity, project, sdd.RecoveryRequest{
+			result, err := application.RecoverMutation(ctx, identity, sdd.RecoveryRequest{
 				Session: item.Session, MutationID: item.MutationID, Verb: verb, Reason: reason, Target: target,
 			})
 			if err != nil {
@@ -155,7 +155,7 @@ func buildLocalStoreApplication(ctx context.Context, cmd *cli.Command) (*sdd.App
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: project, DisplayName: filepath.Base(filepath.Dir(sddDir))}, DefaultBranch: cfg.DefaultBranch,
-		Graph: graph, Targets: targets, Sessions: sessions, StagedBlobs: blobs,
+		Graph: graph, Targets: targets,
 		Recovery: sdd.RecoveryAuthorizerFunc(func(_ context.Context, request sdd.RecoveryAccessRequest) error {
 			if request.Actor.Subject != request.OriginalSubject {
 				return &sdd.ApplicationError{Code: sdd.ErrorWriteDenied, Message: "cross-principal recovery is not authorized by the local runtime"}
@@ -170,7 +170,7 @@ func buildLocalStoreApplication(ctx context.Context, cmd *cli.Command) (*sdd.App
 		return nil, "", sdd.RequestIdentity{}, err
 	}
 	access := &localRuntimeAccess{project: project, participant: cfg.Participant, runtime: runtime, dependencies: map[string]*sdd.ProjectRuntime{}}
-	application, err := sdd.NewApplication(access)
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: access, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}

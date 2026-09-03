@@ -49,8 +49,6 @@ func newCollectFixture(t *testing.T) collectFixture {
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "local"}, Graph: graph,
-		Sessions: sessions, StagedBlobs: blobs,
-		Now: func() time.Time { return now },
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 		}),
@@ -58,7 +56,7 @@ func newCollectFixture(t *testing.T) collectFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	app, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs, Clock: sdd.ClockFunc(func() time.Time { return now })})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +103,7 @@ func (f collectFixture) stage(t *testing.T, id sdd.SessionID) {
 
 func (f collectFixture) collect(t *testing.T, retention time.Duration) sdd.CollectSessionsResult {
 	t.Helper()
-	result, err := f.app.CollectSessions(t.Context(), f.identity, f.project, sdd.CollectSessionsCmd{
+	result, err := f.app.CollectSessions(t.Context(), sdd.CollectSessionsCmd{
 		Retention: retention,
 	})
 	if err != nil {

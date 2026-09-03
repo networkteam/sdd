@@ -70,7 +70,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			application, project, identity, err := buildLocalApplication(ctx, cmd, dir, sddDir, cfg, reg, runner)
+			application, _, identity, err := buildLocalApplication(ctx, cmd, dir, sddDir, cfg, reg, runner)
 			if err != nil {
 				return err
 			}
@@ -78,12 +78,11 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			collectSessions(ctx, application, project, identity, retention)
+			collectSessions(ctx, application, retention)
 
 			transport := cmd.String("transport")
 			srv, err := mcpserver.New(mcpserver.Options{
 				Application:   application,
-				Project:       project,
 				LocalIdentity: identity,
 				LocalClient:   transport == "stdio",
 				LocalAttachmentPath: func(entryID, filename string) (string, error) {
@@ -216,6 +215,10 @@ func (a *localRuntimeAccess) ResolveProject(_ context.Context, _ sdd.Principal, 
 	return a.runtime, nil
 }
 
+func (a *localRuntimeAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
+
 func (a *localRuntimeAccess) ResolveDependency(_ context.Context, _ sdd.Principal, _ sdd.ProjectID, dependency string) (*sdd.ProjectRuntime, error) {
 	runtime := a.dependencies[dependency]
 	if runtime == nil {
@@ -293,7 +296,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 			}
 			return nil
 		}),
-		Sessions: sessions, StagedBlobs: blobs, Embedder: embeddings, SearchIndex: optionalSearchIndex(embeddings, baseIndex),
+		Embedder: embeddings, SearchIndex: optionalSearchIndex(embeddings, baseIndex),
 		LLM: runner,
 	})
 	if err != nil {
@@ -317,7 +320,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		memberIndex := localadapter.NewPersistentSearchIndexStore(sdd.ProjectID(dependency), cacheRoot, dependency)
 		member, runtimeErr := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: dependency}, Graph: memberGraph,
-			Sessions: sessions, StagedBlobs: blobs, Embedder: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: runner,
+			Embedder: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: runner,
 			ExcludeEmbeddedFromIndex: true,
 		})
 		if runtimeErr != nil {
@@ -325,7 +328,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		}
 		access.dependencies[dependency] = member
 	}
-	application, err := sdd.NewApplication(access)
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: access, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
@@ -345,16 +348,8 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 // schedule can act on one. This adapter cannot: over stdio a server that exits
 // leaves the agent with a dead pipe and no way to act, which is worse than the
 // unreclaimed disk it would be reporting. So startup logs and serves.
-func collectSessions(
-	ctx context.Context,
-	application *sdd.Application,
-	project sdd.ProjectID,
-	identity sdd.RequestIdentity,
-	retention time.Duration,
-) {
-	result, err := application.CollectSessions(ctx, identity, project, sdd.CollectSessionsCmd{
-		Retention: retention,
-	})
+func collectSessions(ctx context.Context, application *sdd.Application, retention time.Duration) {
+	result, err := application.CollectSessions(ctx, sdd.CollectSessionsCmd{Retention: retention})
 	if err != nil {
 		slogutils.FromContext(ctx).Warn("session collection did not complete", "err", err)
 		return

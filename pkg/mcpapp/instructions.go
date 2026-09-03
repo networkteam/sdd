@@ -29,7 +29,7 @@ when several exist and none was passed the response lists them (status
 project-required) instead of opening a session — choose with the user, then
 call again with project.
 
-The session handle (project:session-id) is the dialogue's identity and its
+The session handle (the session ID) is the dialogue's identity and its
 capability: it reaches you only by issuance (start_session minted it for you,
 or a dispatch carried it) or because the user handed it over, and presenting
 it is the whole authorization to continue that dialogue. Every other tool

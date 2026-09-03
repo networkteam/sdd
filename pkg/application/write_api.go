@@ -121,27 +121,27 @@ func (a *Application) CurrentSnapshot(ctx context.Context, identity RequestIdent
 // session-scoped scratch. Canonical write access is checked later at the
 // mutation gate, so read-only principals can still conduct dialogue.
 func (a *Application) StageBlob(ctx context.Context, identity RequestIdentity, project ProjectID, ref SessionRef, filename string, content []byte) (StagedBlob, error) {
-	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
+	principal, _, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return StagedBlob{}, err
 	}
 	if ref.Subject != principal.Subject {
 		return StagedBlob{}, &ApplicationError{Code: ErrorSessionOwnership, Message: "staged blobs belong to another principal"}
 	}
-	return runtime.options.StagedBlobs.Stage(ctx, ref, filename, bytes.NewReader(content))
+	return a.blobs.Stage(ctx, ref, filename, bytes.NewReader(content))
 }
 
 // OpenStagedBlob resolves read access and session ownership, then streams a
 // staged blob's bytes — the read-side counterpart of StageBlob.
 func (a *Application) OpenStagedBlob(ctx context.Context, identity RequestIdentity, project ProjectID, ref SessionRef, blobID string) (io.ReadCloser, error) {
-	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
+	principal, _, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return nil, err
 	}
 	if ref.Subject != principal.Subject {
 		return nil, &ApplicationError{Code: ErrorSessionOwnership, Message: "staged blobs belong to another principal"}
 	}
-	return runtime.options.StagedBlobs.Open(ctx, ref, blobID)
+	return a.blobs.Open(ctx, ref, blobID)
 }
 
 // CreateEntry runs SDD-owned validation and pre-flight, prepares canonical
@@ -173,8 +173,8 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	if err != nil {
 		return CreateEntryResult{}, err
 	}
-	id := model.GenerateIDAt(entryType, layer, suffix, runtime.options.Now())
-	entry, assemblyFindings := entryFromDraft(draft, id, runtime.options.Now())
+	id := model.GenerateIDAt(entryType, layer, suffix, a.now())
+	entry, assemblyFindings := entryFromDraft(draft, id, a.now())
 	if len(assemblyFindings) > 0 {
 		warnings := make([]types.Warning, 0, len(assemblyFindings))
 		for _, f := range assemblyFindings {
@@ -198,7 +198,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	owner := SessionRef{Subject: principal.Subject, Session: binding.SessionID}
 	var materializations []AttachmentMaterialization
 	for _, handle := range draft.AttachmentHandles {
-		blob, err := runtime.options.StagedBlobs.Stat(ctx, owner, handle)
+		blob, err := a.blobs.Stat(ctx, owner, handle)
 		if err != nil {
 			return CreateEntryResult{}, fmt.Errorf("attachment %q is not staged in this session: %w", handle, err)
 		}
@@ -352,7 +352,7 @@ func (a *Application) StartWIP(ctx context.Context, identity RequestIdentity, pr
 	}
 	marker := &model.WIPMarker{
 		ID: model.GenerateWIPMarkerID(participant), Entry: entryID, Participant: participant,
-		Exclusive: true, Content: description, Time: runtime.options.Now(),
+		Exclusive: true, Content: description, Time: a.now(),
 	}
 	target, err = resolveMutationTarget(runtime, target)
 	if err != nil {

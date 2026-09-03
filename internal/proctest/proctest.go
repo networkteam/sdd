@@ -209,6 +209,10 @@ func (r *accessResolver) ResolveProject(context.Context, sdd.Principal, sdd.Proj
 	return r.runtime, nil
 }
 
+func (*accessResolver) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
+
 func (*accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
 	return nil, nil
 }
@@ -243,8 +247,7 @@ func NewWorld(t *testing.T, opts ...Option) *World {
 	script := &LLMScript{Summary: "A generated summary."}
 	options := sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "proctest"}, DefaultBranch: "main",
-		Graph: graph, Sessions: sessions, StagedBlobs: blobs,
-		LLM: script,
+		Graph: graph, LLM: script,
 	}
 	if len(cfg.branchDirs) > 0 {
 		targets := branchTargets{fallback: graph, graphs: map[string]sdd.GraphStore{"main": graph}}
@@ -262,7 +265,9 @@ func NewWorld(t *testing.T, opts ...Option) *World {
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&accessResolver{runtime: runtime, participant: cfg.participant})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{
+		Access: &accessResolver{runtime: runtime, participant: cfg.participant}, Sessions: sessions, StagedBlobs: blobs,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +296,7 @@ func (w *World) Open(t *testing.T, connID string) *Session {
 // restarted client would.
 func (w *World) Resume(t *testing.T, sessionID sdd.SessionID, connID string) (*Session, sdd.WorkflowResumeResult) {
 	t.Helper()
-	workflow, result, err := w.App.ResumeWorkflow(t.Context(), w.Identity, "proctest", sdd.WorkflowResumeRequest{
+	workflow, result, err := w.App.ResumeWorkflow(t.Context(), w.Identity, sdd.WorkflowResumeRequest{
 		SessionID: sessionID, ClientName: connID,
 	})
 	if err != nil {

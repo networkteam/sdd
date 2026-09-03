@@ -63,6 +63,10 @@ func (accessResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectL
 func (r accessResolver) ResolveProject(context.Context, sdd.Principal, sdd.ProjectID, sdd.Access) (*sdd.ProjectRuntime, error) {
 	return r.runtime, nil
 }
+func (r accessResolver) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
+
 func (r accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
 	return r.runtime, nil
 }
@@ -87,8 +91,6 @@ func TestExternalCompositionCompilesAgainstPublicPorts(t *testing.T) {
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project:     sdd.ProjectRef{ID: "example", DisplayName: "Example"},
 		Graph:       graphStore{},
-		Sessions:    newMemorySessionStore(),
-		StagedBlobs: newMemoryStagedBlobStore(nil),
 		Embedder:    embedder{},
 		SearchIndex: indexStore{},
 		LLM:         llmRunner{},
@@ -99,11 +101,11 @@ func TestExternalCompositionCompilesAgainstPublicPorts(t *testing.T) {
 	if runtime.Project().ID != "example" {
 		t.Fatalf("project = %+v", runtime.Project())
 	}
-	application, err := sdd.NewApplication(accessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: accessResolver{runtime: runtime}, Sessions: newMemorySessionStore(), StagedBlobs: newMemoryStagedBlobStore(nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := mcpapp.New(mcpapp.Options{Application: application, Project: "example", Version: "test"})
+	server, err := mcpapp.New(mcpapp.Options{Application: application, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}

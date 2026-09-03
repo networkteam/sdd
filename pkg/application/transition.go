@@ -79,7 +79,7 @@ func (a *Application) ApplyPrepared(ctx context.Context, identity RequestIdentit
 	if err := validatePreparedTransition(prepared, principal, binding, runtime.options.Project.ID); err != nil {
 		return TransitionResult{}, err
 	}
-	stored, err := runtime.options.Sessions.Load(ctx, binding.SessionID)
+	stored, err := a.sessions.Load(ctx, binding.SessionID)
 	if err != nil {
 		return TransitionResult{}, err
 	}
@@ -90,12 +90,12 @@ func (a *Application) ApplyPrepared(ctx context.Context, identity RequestIdentit
 	if err != nil {
 		return TransitionResult{}, err
 	}
-	if err := runtime.options.StagedBlobs.Retain(ctx, prepared.Staged, prepared.Batch.ID, prepared.BlobIDs); err != nil {
+	if err := a.blobs.Retain(ctx, prepared.Staged, prepared.Batch.ID, prepared.BlobIDs); err != nil {
 		return TransitionResult{}, err
 	}
-	version, err := runtime.options.Sessions.Append(ctx, binding.SessionID, stored.Version, SessionAppend{Events: []StoredEvent{intent}})
+	version, err := a.sessions.Append(ctx, binding.SessionID, stored.Version, SessionAppend{Events: []StoredEvent{intent}})
 	if err != nil {
-		if releaseErr := runtime.options.StagedBlobs.Release(ctx, prepared.Staged, prepared.Batch.ID); releaseErr != nil {
+		if releaseErr := a.blobs.Release(ctx, prepared.Staged, prepared.Batch.ID); releaseErr != nil {
 			return TransitionResult{}, errors.Join(err, fmt.Errorf("releasing staged blob retention after intent append failed: %w", releaseErr))
 		}
 		return TransitionResult{}, err
@@ -125,7 +125,7 @@ func (a *Application) applyOnAcquired(ctx context.Context, runtime *ProjectRunti
 		if revalidateErr := revalidatePreparedTransition(ctx, snapshot, prepared); revalidateErr != nil {
 			return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationNotApplied, Revision: snapshot.Revision()}}, revalidateErr
 		}
-		apply, applyErr = acquired.Graph.Apply(ctx, snapshot.Revision(), prepared.Batch, ownedBlobReader{store: runtime.options.StagedBlobs, ref: prepared.Staged})
+		apply, applyErr = acquired.Graph.Apply(ctx, snapshot.Revision(), prepared.Batch, ownedBlobReader{store: a.blobs, ref: prepared.Staged})
 		if !isGraphConflict(applyErr) || attempt >= maxApplyAttempts {
 			break
 		}
@@ -139,14 +139,14 @@ func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRunt
 	}
 	result := TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: apply}
 	if isGraphConflict(applyErr) {
-		return a.discardContendedTransition(ctx, runtime, result, prepared, actor)
+		return a.discardContendedTransition(ctx, result, prepared, actor)
 	}
 	if apply.State != MutationUnknown {
 		outcome, err := storedEvent(eventMutationOutcome, mutationOutcomeEvent{MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Apply: apply})
 		if err != nil {
 			return result, err
 		}
-		next, err := runtime.options.Sessions.Append(ctx, binding.SessionID, result.Binding.Version, SessionAppend{Events: []StoredEvent{outcome}})
+		next, err := a.sessions.Append(ctx, binding.SessionID, result.Binding.Version, SessionAppend{Events: []StoredEvent{outcome}})
 		if err != nil {
 			return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "canonical mutation outcome was not persisted", ApplyState: apply.State, Revision: apply.Revision, Cause: err}
 		}
@@ -167,7 +167,7 @@ func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRunt
 			if err != nil {
 				return result, err
 			}
-			next, err := runtime.options.Sessions.Append(ctx, binding.SessionID, result.Binding.Version, SessionAppend{Events: []StoredEvent{event}})
+			next, err := a.sessions.Append(ctx, binding.SessionID, result.Binding.Version, SessionAppend{Events: []StoredEvent{event}})
 			if err != nil {
 				return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "finalizer outcome was not persisted", Cause: err}
 			}
@@ -179,10 +179,10 @@ func (a *Application) finishTransition(ctx context.Context, runtime *ProjectRunt
 		}
 	}
 	if apply.State == MutationApplied {
-		if err := runtime.options.StagedBlobs.Release(ctx, prepared.Staged, prepared.Batch.ID); err != nil {
+		if err := a.blobs.Release(ctx, prepared.Staged, prepared.Batch.ID); err != nil {
 			return result, &ApplicationError{Code: ErrorRecoveryRequired, Message: "staged blob retention could not be released", ApplyState: apply.State, Revision: apply.Revision, Cause: err}
 		}
-		next, err := appendRecoveryTerminal(ctx, runtime.options.Sessions, result.Binding, recoveryTerminalEvent{
+		next, err := appendRecoveryTerminal(ctx, a.sessions, result.Binding, recoveryTerminalEvent{
 			MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
 			OriginalSubject: prepared.Staged.Subject, OriginalSession: prepared.Staged.Session,
 			Actor: actor, Verb: terminalVerb,
@@ -219,8 +219,8 @@ func isGraphConflict(err error) bool {
 // CAS before any file write, so the intent carries no partial graph state:
 // tear it down as a discard so it never surfaces as a pending recovery, and
 // return the typed conflict inviting a plain re-try.
-func (a *Application) discardContendedTransition(ctx context.Context, runtime *ProjectRuntime, result TransitionResult, prepared PreparedTransition, actor string) (TransitionResult, error) {
-	next, err := releaseAndRecordTerminal(ctx, runtime, result.Binding, prepared, recoveryTerminalEvent{
+func (a *Application) discardContendedTransition(ctx context.Context, result TransitionResult, prepared PreparedTransition, actor string) (TransitionResult, error) {
+	next, err := a.releaseAndRecordTerminal(ctx, result.Binding, prepared, recoveryTerminalEvent{
 		MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
 		OriginalSubject: prepared.Staged.Subject, OriginalSession: prepared.Staged.Session,
 		Actor: actor, Verb: RecoveryDiscard, Cause: recoveryCauseGraphContention,

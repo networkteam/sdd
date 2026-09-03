@@ -110,7 +110,7 @@ type ChooserResult struct {
 // ServeResult is the loop's uniform response shape: where the instance
 // stands, what advances it, and the material to work with.
 type ServeResult struct {
-	Session        string            `json:"session,omitempty" jsonschema:"session handle (project:session-id); sessions survive restarts and resume via resume_session. Pass it to every other tool"`
+	Session        string            `json:"session,omitempty" jsonschema:"session handle (the session ID); sessions survive restarts and resume via resume_session. Pass it to every other tool"`
 	Project        string            `json:"project,omitempty" jsonschema:"the project this session is bound to"`
 	Projects       []ProjectResult   `json:"projects,omitempty" jsonschema:"start_session only: the principal's accessible projects, served with status project-required when several exist and none was passed — no session opened yet"`
 	Branch         string            `json:"branch,omitempty" jsonschema:"the session's declared branch binding"`
@@ -153,11 +153,11 @@ type BaseServe struct {
 // --- sessions & staging ----------------------------------------------------
 
 type ResumeSessionArgs struct {
-	Session string `json:"session" jsonschema:"the session handle (project:session-id) whose current position to re-serve: its framing plus every running move at its current step with the schema to continue it. Presenting the handle is the whole authorization; it also declares that you need re-serving, so the served-once memory resets and the complete position serves in full"`
+	Session string `json:"session" jsonschema:"the session handle (the session ID) whose current position to re-serve: its framing plus every running move at its current step with the schema to continue it. Presenting the handle is the whole authorization; it also declares that you need re-serving, so the served-once memory resets and the complete position serves in full"`
 }
 
 type ResumeSessionResult struct {
-	Session      string        `json:"session" jsonschema:"session handle (project:session-id)"`
+	Session      string        `json:"session" jsonschema:"session handle (the session ID)"`
 	Project      string        `json:"project,omitempty" jsonschema:"the project this session is bound to"`
 	Participant  string        `json:"participant,omitempty"`
 	Label        string        `json:"label,omitempty" jsonschema:"the session's subject label, when one was recorded"`
@@ -406,22 +406,19 @@ func (s *Server) registerTools() {
 // dialogue's identity and its capability (d-cpt-aen); a missing one names the
 // doors. The session comes back locked; the caller unlocks it.
 func (s *Server) attachedSession(ctx context.Context, req *mcp.CallToolRequest, session string) (*shellSession, error) {
-	if strings.TrimSpace(session) == "" {
+	id := sdd.SessionID(strings.TrimSpace(session))
+	if id == "" {
 		return nil, noHandleError()
 	}
-	project, id := splitHandle(session)
 	ss := s.sessions.get(id)
 	if ss == nil {
-		workflow, err := s.app.LoadWorkflow(ctx, s.requestIdentity(req), s.projectFor(project), sdd.WorkflowResumeRequest{
+		workflow, err := s.app.LoadWorkflow(ctx, s.requestIdentity(req), sdd.WorkflowResumeRequest{
 			SessionID: id, ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
 		})
 		if err != nil {
 			return nil, err
 		}
 		ss = s.sessions.put(&shellSession{root: workflow})
-	}
-	if project != "" && project != ss.root.Project() {
-		return nil, toolError("session %s belongs to project %s, not %s", id, ss.root.Project(), project)
 	}
 	ss.mu.Lock()
 	if ss.root.Finished() {
@@ -430,16 +427,6 @@ func (s *Server) attachedSession(ctx context.Context, req *mcp.CallToolRequest, 
 		return nil, toolError("session %s has ended — %s", session, sdd.NewSessionNote)
 	}
 	return ss, nil
-}
-
-// projectFor resolves the project a door call addresses: the handle's own
-// prefix, else the pinned Options.Project, else empty — which the application
-// resolves to the sole accessible project or rejects as ambiguous.
-func (s *Server) projectFor(handleProject sdd.ProjectID) sdd.ProjectID {
-	if handleProject != "" {
-		return handleProject
-	}
-	return s.project
 }
 
 func mcpClientName(session *mcp.ServerSession) string {
@@ -471,11 +458,10 @@ func noHandleError() error {
 // handle, every call. Nothing is derived from the connection.
 func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, args StartSessionArgs) (*mcp.CallToolResult, ServeResult, error) {
 	identity := s.requestIdentity(req)
-	// The door is the one tool that takes a project. Explicit wins; else the
-	// pinned project; else empty, and the application infers a sole accessible
-	// project or reports the ambiguity, which becomes the project listing
-	// (d-tac-1z6).
-	project := s.projectFor(sdd.ProjectID(strings.TrimSpace(args.Project)))
+	// The door is the one tool that takes a project. Left empty, the
+	// application infers a sole accessible project or reports the ambiguity,
+	// which becomes the project listing (d-tac-1z6).
+	project := sdd.ProjectID(strings.TrimSpace(args.Project))
 	workflow, serve, err := s.app.OpenWorkflow(ctx, identity, project, sdd.WorkflowOpenRequest{
 		ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
 		Shell: args.Shell, Label: args.Label,
@@ -634,20 +620,22 @@ func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkAr
 // (d-cpt-aen); a session this server holds replayed leaves the cache with it.
 func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
 	identity := s.requestIdentity(req)
-	handleProject, id := splitHandle(args.Session)
-	project := s.projectFor(handleProject)
+	id := sdd.SessionID(strings.TrimSpace(args.Session))
+	if id == "" {
+		return nil, AbandonResult{}, noHandleError()
+	}
 	if cached := s.sessions.get(id); cached != nil {
 		cached.mu.Lock()
 		defer cached.mu.Unlock()
 		s.sessions.evict(id)
 	}
-	result, err := s.app.AbandonWorkflowSession(ctx, identity, project, sdd.WorkflowResumeRequest{
+	result, err := s.app.AbandonWorkflowSession(ctx, identity, sdd.WorkflowResumeRequest{
 		SessionID: id, ClientName: mcpClientName(req.Session), ClientVersion: mcpClientVersion(req.Session),
 	}, args.Reason)
 	if err != nil {
 		return nil, AbandonResult{}, err
 	}
-	out := AbandonResult{Abandoned: true, Session: composeHandle(project, result.Session), Label: result.Label, HeldMarkers: boundList(result.HeldMarkers, "held markers")}
+	out := AbandonResult{Abandoned: true, Session: string(result.Session), Label: result.Label, HeldMarkers: boundList(result.HeldMarkers, "held markers")}
 	for _, instance := range result.Discarded {
 		out.DiscardedThreads = append(out.DiscardedThreads, instance.Procedure+" at "+instance.Step)
 	}
@@ -1128,7 +1116,7 @@ func composeFraming(ss *shellSession, blocks []string) string {
 // later serve that does deliver.
 func (s *Server) serveResultBody(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res := ServeResult{
-		Session: composeHandle(ss.root.Project(), serve.Session), Project: string(ss.root.Project()),
+		Session: string(serve.Session), Project: string(ss.root.Project()),
 		Branch: serve.Branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
 		Step: serve.Step, Goal: serve.Goal, Instructions: composeInstructions(ss, serve), Missing: serve.Missing,
 		ReportSchema: serve.ReportSchema, Produced: capValues(serve.Produced), Execution: serve.Execution,
@@ -1244,7 +1232,7 @@ func rootBaseServe(result ServeResult) *BaseServe {
 
 func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, source sdd.WorkflowResumeResult) (ResumeSessionResult, error) {
 	result := ResumeSessionResult{
-		Session: composeHandle(ss.root.Project(), source.Session), Project: string(ss.root.Project()),
+		Session: string(source.Session), Project: string(ss.root.Project()),
 		Participant: source.Participant, Label: source.Label, Branch: source.Branch,
 		Instructions: resumeInstructions,
 	}

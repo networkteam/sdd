@@ -14,12 +14,11 @@ import (
 
 // Options configures a workflow MCP server.
 type Options struct {
-	// Application is the protocol-neutral SDD runtime. Project optionally pins
-	// the one project this server serves; left empty, start_session selects
-	// the project inside the dialogue and a sole accessible project is
-	// inferred (d-tac-1z6).
+	// Application is the protocol-neutral SDD runtime. The server pins no
+	// project: start_session selects one inside the dialogue, a sole
+	// accessible project is inferred, and every other tool reaches its
+	// project through the session it names (d-tac-1z6, d-cpt-yjc).
 	Application *sdd.Application
-	Project     sdd.ProjectID
 	// LocalIdentity supplies the identity for a trusted composition whose
 	// transport authenticates every request but cannot populate MCP TokenInfo
 	// (the local stdio and static-bearer wrappers use this seam).
@@ -40,7 +39,6 @@ type Options struct {
 type Server struct {
 	mcp                 *mcp.Server
 	app                 *sdd.Application
-	project             sdd.ProjectID
 	localIdentity       sdd.RequestIdentity
 	local               bool
 	localAttachmentPath func(string, string) (string, error)
@@ -65,7 +63,6 @@ func New(opts Options) (*Server, error) {
 	}
 	s := &Server{
 		app:                 opts.Application,
-		project:             opts.Project,
 		localIdentity:       opts.LocalIdentity,
 		local:               opts.LocalClient,
 		localAttachmentPath: opts.LocalAttachmentPath,

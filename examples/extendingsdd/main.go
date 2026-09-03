@@ -51,6 +51,12 @@ func (r externalAccess) ResolveDependency(context.Context, sdd.Principal, sdd.Pr
 	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
 
+// AuthorizeSession is where a composition decides who may continue a
+// dialogue; this example keeps SDD's owner-only default.
+func (r externalAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
+
 func main() {
 	root := env("SDD_EXAMPLE_DATA", ".example-sdd")
 	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: filepath.Join(root, "graph")})
@@ -60,7 +66,7 @@ func main() {
 	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(filepath.Join(root, "staged-blobs"))
 	check(err)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example", DisplayName: "External example"}, Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		Project: sdd.ProjectRef{ID: "example", DisplayName: "External example"}, Graph: graph,
 		LLM: llm.RunnerFunc(func(context.Context, llm.Request) (llm.Result, error) {
 			return llm.Result{}, &llm.Error{
 				Identity: llm.Identity{Provider: "example", Model: "stub"},
@@ -69,10 +75,14 @@ func main() {
 		}),
 	})
 	check(err)
-	application, err := sdd.NewApplication(externalAccess{runtime: runtime})
+	// Sessions and staged blobs belong to the composition, not to a project:
+	// one store serves every project the principal can reach (d-cpt-yjc).
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{
+		Access: externalAccess{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs,
+	})
 	check(err)
-	// No pinned project: the wrapper serves every project the principal can
-	// reach, and with one accessible project start_session infers it.
+	// The wrapper serves every project the principal can reach, and with one
+	// accessible project start_session infers it.
 	server, err := mcpapp.New(mcpapp.Options{Application: application, Version: "example"})
 	check(err)
 

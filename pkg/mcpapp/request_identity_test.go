@@ -191,6 +191,10 @@ func (a *observingAccess) ResolveProject(_ context.Context, principal sdd.Princi
 	return nil, &sdd.ApplicationError{Code: code, Message: "scope denied"}
 }
 
+func (a *observingAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
+
 func (a *observingAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
 	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
@@ -227,7 +231,7 @@ The HTTP identity test anchors its real mutation here.
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "identity-test", DisplayName: "Identity test"}, DefaultBranch: "main",
-		Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		Graph: graph,
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Text: `{"findings":[]}`, Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 		}),
@@ -236,11 +240,11 @@ The HTTP identity test anchors its real mutation here.
 		t.Fatal(err)
 	}
 	access := &observingAccess{runtime: runtime}
-	application, err := sdd.NewApplication(access)
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: access, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(Options{Application: application, Project: "identity-test", Version: "test"})
+	server, err := New(Options{Application: application, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}

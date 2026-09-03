@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/networkteam/sdd/internal/bundledskills"
 	"github.com/networkteam/sdd/internal/engine"
@@ -19,18 +20,59 @@ import (
 	"github.com/networkteam/sdd/pkg/application/types"
 )
 
-// Application resolves current access and dispatches protocol-neutral SDD
-// operations. Every method resolves identity and project afresh.
-type Application struct {
-	access AccessResolver
+// Clock is the application's time source, replaceable for tests.
+type Clock interface{ Now() time.Time }
+
+// ClockFunc adapts a function to Clock.
+type ClockFunc func() time.Time
+
+func (f ClockFunc) Now() time.Time { return f() }
+
+// ApplicationOptions composes the application. Sessions and staged blobs are
+// scaffolding of the composition as a whole, keyed by session ID and
+// namespaced by subject, not of any project (d-cpt-yjc); a nil Clock is the
+// system clock.
+type ApplicationOptions struct {
+	Access      AccessResolver
+	Sessions    SessionStore
+	StagedBlobs StagedBlobStore
+	Clock       Clock
 }
 
-func NewApplication(access AccessResolver) (*Application, error) {
-	if access == nil {
+// Application resolves current access and dispatches protocol-neutral SDD
+// operations. Every method resolves identity and project afresh; a
+// session-addressed method resolves the session's home project from the
+// session's own record.
+type Application struct {
+	access   AccessResolver
+	sessions SessionStore
+	blobs    StagedBlobStore
+	clock    Clock
+}
+
+func NewApplication(options ApplicationOptions) (*Application, error) {
+	if options.Access == nil {
 		return nil, fmt.Errorf("sdd: AccessResolver is required")
 	}
-	return &Application{access: access}, nil
+	if options.Sessions == nil {
+		return nil, fmt.Errorf("sdd: SessionStore is required")
+	}
+	if options.StagedBlobs == nil {
+		return nil, fmt.Errorf("sdd: StagedBlobStore is required")
+	}
+	clock := options.Clock
+	if clock == nil {
+		clock = ClockFunc(time.Now)
+	}
+	return &Application{
+		access:   options.Access,
+		sessions: legacyEndStore{options.Sessions},
+		blobs:    options.StagedBlobs,
+		clock:    clock,
+	}, nil
 }
+
+func (a *Application) now() time.Time { return a.clock.Now() }
 
 func (a *Application) Info(ctx context.Context, identity RequestIdentity, project ProjectID, _ InfoRequest) (InfoResult, error) {
 	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
@@ -41,7 +83,7 @@ func (a *Application) Info(ctx context.Context, identity RequestIdentity, projec
 	if runtime.options.Embedder != nil && runtime.options.SearchIndex != nil {
 		search = "vector,text"
 	}
-	recoveries, err := listRecoveriesRuntime(ctx, runtime, false)
+	recoveries, err := a.listRecoveries(ctx, runtime, false)
 	if err != nil {
 		return InfoResult{}, err
 	}
@@ -182,7 +224,7 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 		presenters.RenderView(&rendered, memberResult)
 	}
 	if !request.OmitRecovery {
-		recoveries, err := listRecoveriesRuntime(ctx, runtime, false)
+		recoveries, err := a.listRecoveries(ctx, runtime, false)
 		if err != nil {
 			return ViewResult{}, err
 		}
@@ -461,14 +503,60 @@ func (a *Application) resolve(ctx context.Context, identity RequestIdentity, pro
 			return Principal{}, nil, &ApplicationError{Code: ErrorProjectRequired, Message: "no accessible project could be inferred"}
 		}
 	}
-	runtime, err := a.access.ResolveProject(ctx, principal, project, required)
+	runtime, err := a.resolveProject(ctx, principal, project, required)
 	if err != nil {
 		return Principal{}, nil, err
 	}
-	if runtime == nil || runtime.options.Project.ID != project {
-		return Principal{}, nil, &ApplicationError{Code: ErrorProjectUnavailable, Message: "project resolver returned no matching runtime"}
-	}
 	return principal, runtime, nil
+}
+
+func (a *Application) resolveProject(ctx context.Context, principal Principal, project ProjectID, required Access) (*ProjectRuntime, error) {
+	runtime, err := a.access.ResolveProject(ctx, principal, project, required)
+	if err != nil {
+		return nil, err
+	}
+	if runtime == nil || runtime.options.Project.ID != project {
+		return nil, &ApplicationError{Code: ErrorProjectUnavailable, Message: "project resolver returned no matching runtime"}
+	}
+	return runtime, nil
+}
+
+// resolveSession is the one door every session-addressed operation passes
+// (d-cpt-yjc): a keyed load with no policy, the composition's continuation
+// policy, then current membership in the session's home project with the
+// access the operation needs. The store is read before membership is asked;
+// the ID carries 128 random bits and the caller learns nothing until both
+// checks pass. Whether an ended session may still be acted on is the
+// caller's question — recovery reads a concluded log, a move never does.
+func (a *Application) resolveSession(ctx context.Context, identity RequestIdentity, id SessionID, required Access) (Principal, *ProjectRuntime, StoredSession, error) {
+	if id == "" {
+		return Principal{}, nil, StoredSession{}, &ApplicationError{Code: ErrorInvalidArgument, Message: "session ID is required"}
+	}
+	principal, err := a.resolvePrincipal(ctx, identity)
+	if err != nil {
+		return Principal{}, nil, StoredSession{}, err
+	}
+	stored, err := a.sessions.Load(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return Principal{}, nil, StoredSession{}, fmt.Errorf("unknown session %q", id)
+		}
+		return Principal{}, nil, StoredSession{}, err
+	}
+	if err := a.access.AuthorizeSession(ctx, SessionAccessRequest{
+		Actor: principal, Owner: Principal{Subject: stored.Metadata.Subject},
+		Session: id, Project: stored.Metadata.Project,
+	}); err != nil {
+		return Principal{}, nil, StoredSession{}, err
+	}
+	runtime, err := a.resolveProject(ctx, principal, stored.Metadata.Project, required)
+	if err != nil {
+		return Principal{}, nil, StoredSession{}, err
+	}
+	if err := validateStoredSession(stored); err != nil {
+		return Principal{}, nil, StoredSession{}, err
+	}
+	return principal, runtime, stored, nil
 }
 
 func (r *ProjectRuntime) searchSnapshot(ctx context.Context, snapshot *Snapshot, attachments GraphStore, request query.SearchQuery) (*query.SearchResult, error) {

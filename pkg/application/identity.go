@@ -65,11 +65,32 @@ type ProjectList struct {
 	Projects []ProjectSummary
 }
 
-// AccessResolver is the single identity, project-access, and dependency
-// authorization boundary. Implementations must resolve current authorization
-// from ctx on every call; previously returned principals and runtimes are not
-// proof of current access. Every call arrives inside a request: the
-// application never calls the resolver from a connection lifecycle.
+// SessionAccessRequest carries what a continuation policy needs to answer
+// whether Actor may continue the session Owner opened. The application has
+// just loaded the session; the composition is not asked to load it again. It
+// names no verb: continuing a dialogue is one act (d-cpt-yjc).
+type SessionAccessRequest struct {
+	Actor   Principal
+	Owner   Principal
+	Session SessionID
+	Project ProjectID
+}
+
+// OwnerOnly is the shipped continuation policy: only the principal who opened
+// a session may continue it. Compositions that share sessions replace it.
+func OwnerOnly(_ context.Context, request SessionAccessRequest) error {
+	if request.Actor.Subject == "" || request.Actor.Subject != request.Owner.Subject {
+		return &ApplicationError{Code: ErrorSessionOwnership, Message: "session belongs to another principal"}
+	}
+	return nil
+}
+
+// AccessResolver is the single identity, project-access, session-continuation,
+// and dependency authorization boundary. Implementations must resolve current
+// authorization from ctx on every call; previously returned principals and
+// runtimes are not proof of current access. Every call arrives inside a
+// request: the application never calls the resolver from a connection
+// lifecycle.
 type AccessResolver interface {
 	ResolvePrincipal(context.Context, RequestIdentity) (Principal, error)
 	// ResolveParticipant names the graph participant the principal appears as
@@ -80,4 +101,8 @@ type AccessResolver interface {
 	ListProjects(context.Context, Principal) (ProjectList, error)
 	ResolveProject(context.Context, Principal, ProjectID, Access) (*ProjectRuntime, error)
 	ResolveDependency(context.Context, Principal, ProjectID, string) (*ProjectRuntime, error)
+	// AuthorizeSession answers whether the actor may continue the session.
+	// Membership in the session's home project is asked separately, so a
+	// shared session never admits anyone into a project they cannot read.
+	AuthorizeSession(context.Context, SessionAccessRequest) error
 }

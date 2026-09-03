@@ -66,10 +66,8 @@ func newRecoveryFixtureApplication(t *testing.T, sessionsDir string) *sdd.Applic
 		t.Fatal(err)
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project:     sdd.ProjectRef{ID: recoveryFixtureProject, DisplayName: "SDD"},
-		Graph:       graph,
-		Sessions:    sessions,
-		StagedBlobs: blobs,
+		Project: sdd.ProjectRef{ID: recoveryFixtureProject, DisplayName: "SDD"},
+		Graph:   graph,
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 		}),
@@ -77,7 +75,7 @@ func newRecoveryFixtureApplication(t *testing.T, sessionsDir string) *sdd.Applic
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}

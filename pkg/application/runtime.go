@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/networkteam/sdd/pkg/llm"
 	"github.com/networkteam/sdd/pkg/llm/embed"
@@ -26,8 +25,6 @@ type ProjectRuntimeOptions struct {
 	Targets       TargetAcquirer
 	Branches      BranchValidator
 	Recovery      RecoveryAuthorizer
-	Sessions      SessionStore
-	StagedBlobs   StagedBlobStore
 	// Embedder and LLM are the two model dependencies, each a pkg/llm port
 	// injected as an instance that arrives already composed — observed,
 	// bounded, and rate-limited by the host's decorators. Routing, deadlines,
@@ -38,7 +35,6 @@ type ProjectRuntimeOptions struct {
 	SearchIndex SearchIndexStore
 	LLM         llm.Runner
 	Finalizers  []MutationFinalizer
-	Now         func() time.Time
 	// ExcludeEmbeddedFromIndex mirrors the CLI's excludeEmbedded semantics for
 	// the vector index: connected-repo runtimes set it so binary-shipped base
 	// entries embed once per machine (in the base store) rather than once per
@@ -54,21 +50,11 @@ func NewProjectRuntime(options ProjectRuntimeOptions) (*ProjectRuntime, error) {
 	if options.Graph == nil {
 		return nil, fmt.Errorf("sdd: GraphStore is required")
 	}
-	if options.Sessions == nil {
-		return nil, fmt.Errorf("sdd: SessionStore is required")
-	}
-	options.Sessions = legacyEndStore{options.Sessions}
-	if options.StagedBlobs == nil {
-		return nil, fmt.Errorf("sdd: StagedBlobStore is required")
-	}
 	if (options.Embedder == nil) != (options.SearchIndex == nil) {
 		return nil, fmt.Errorf("sdd: Embedder and SearchIndexStore must be configured together")
 	}
 	if options.LLM == nil {
 		return nil, fmt.Errorf("sdd: LLM runner is required")
-	}
-	if options.Now == nil {
-		options.Now = time.Now
 	}
 	if options.Targets == nil && options.DefaultBranch != "" {
 		options.Targets = FixedTargetAcquirer{

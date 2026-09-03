@@ -233,15 +233,15 @@ func TestPreparedTransitionRecoversUnknownApplyAndFinalizer(t *testing.T) {
 	if blobs.released != 0 {
 		t.Fatal("unknown outcome released staged-blob retention")
 	}
-	if _, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: unknown.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard}); errorCode(err) != sdd.ErrorRecoveryRequired {
+	if _, err := application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{Session: unknown.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard}); errorCode(err) != sdd.ErrorRecoveryRequired {
 		t.Fatalf("discard after reconciled applied error = %v", err)
 	}
-	recoveredResult, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: unknown.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryFinalizeRetry})
+	recoveredResult, err := application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{Session: unknown.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryFinalizeRetry})
 	recovered := recoveredResult.Transition
 	if errorCode(err) != sdd.ErrorRecoveryRequired || recovered.Apply.State != sdd.MutationApplied || finalizer.calls != 1 {
 		t.Fatalf("first recovery = %+v, %v; finalizer calls=%d", recovered, err, finalizer.calls)
 	}
-	recoveredResult, err = application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: recovered.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryFinalizeRetry})
+	recoveredResult, err = application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{Session: recovered.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryFinalizeRetry})
 	recovered = recoveredResult.Transition
 	if err != nil || recovered.Apply.State != sdd.MutationApplied || finalizer.calls != 2 || blobs.released != 1 {
 		t.Fatalf("second recovery = %+v, %v; finalizer calls=%d released=%d", recovered, err, finalizer.calls, blobs.released)
@@ -303,7 +303,7 @@ func TestReconcileMutationRefreshesIntentOnlyProjectionBeforeVerbSelection(t *te
 		t.Fatalf("intent-only ApplyPrepared = %+v, %v", result, err)
 	}
 
-	refreshed, err := application.ReconcileMutation(t.Context(), identity, "example", sdd.RecoveryReconcileRequest{
+	refreshed, err := application.ReconcileMutation(t.Context(), identity, sdd.RecoveryReconcileRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID,
 	})
 	if err != nil || refreshed.Item.State != sdd.RecoveryPending || refreshed.Item.Reason != sdd.RecoveryReasonNotApplied || refreshed.Transition.Apply.State != sdd.MutationNotApplied {
@@ -322,7 +322,7 @@ func TestReconcileMutationRefreshesIntentOnlyProjectionBeforeVerbSelection(t *te
 	if !found {
 		t.Fatal("reconcile-only recovery attempt was not recorded")
 	}
-	applied, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
+	applied, err := application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryApply,
 	})
 	if err != nil || applied.Transition.Apply.State != sdd.MutationApplied || blobs.released != 1 {
@@ -388,7 +388,6 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 	llmCalls := 0
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Targets: targets,
-		Sessions: sessions, StagedBlobs: blobs,
 		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
 			identity := pkgllm.Identity{Provider: "test", Model: "test"}
 			if targets.isActive() {
@@ -404,7 +403,7 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +533,7 @@ func TestLegacyIntentRequiresAuthorizedAuditedTargetBinding(t *testing.T) {
 	if err != nil || len(list.Items) != 1 || !list.Items[0].LegacyUnroutable || list.Items[0].Target.Branch != "" {
 		t.Fatalf("legacy projection = %+v, %v", list, err)
 	}
-	boundTarget, err := application.RecoverMutation(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, "example", sdd.RecoveryRequest{
+	boundTarget, err := application.RecoverMutation(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, sdd.RecoveryRequest{
 		Session: metadata.ID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryBindTarget,
 		Target: sdd.MutationTarget{Project: "example", Branch: "main"}, Reason: "operator selected the historical branch",
 	})
@@ -554,7 +553,7 @@ func TestLegacyIntentRequiresAuthorizedAuditedTargetBinding(t *testing.T) {
 	if !sessionHasEvent(stored.Events, "legacy_target_bound", `"actor":"christopher"`) || !sessionHasEvent(stored.Events, "legacy_target_bound", `"reason":"operator selected the historical branch"`) {
 		t.Fatalf("legacy binding audit = %+v", stored.Events)
 	}
-	refreshed, err := application.ReconcileMutation(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, "example", sdd.RecoveryReconcileRequest{Session: metadata.ID, MutationID: prepared.Batch.ID})
+	refreshed, err := application.ReconcileMutation(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, sdd.RecoveryReconcileRequest{Session: metadata.ID, MutationID: prepared.Batch.ID})
 	if err != nil || refreshed.Item.State != sdd.RecoveryPending || refreshed.Item.Reason != sdd.RecoveryReasonNotApplied {
 		t.Fatalf("bound legacy reconciliation = %+v, %v", refreshed, err)
 	}
@@ -583,7 +582,7 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 			t.Fatalf("diverged apply = %+v, %v", result, err)
 		}
 		targets.setReleaseError(errors.New("injected target release failure"))
-		discarded, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard})
+		discarded, err := application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard})
 		if discarded.Item.State != sdd.RecoveryAbandoned || discarded.Item.Reason != sdd.RecoveryReasonDiscarded || err == nil || !strings.Contains(err.Error(), "injected target release failure") {
 			t.Fatalf("discard = %+v, %v", discarded, err)
 		}
@@ -605,7 +604,7 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 			t.Fatalf("unknown apply = %+v, %v", result, err)
 		}
 		targets.setReleaseError(errors.New("injected target release failure"))
-		abandoned, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryAbandonUnknown})
+		abandoned, err := application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryAbandonUnknown})
 		if abandoned.Item.State != sdd.RecoveryAbandoned || abandoned.Item.Reason != sdd.RecoveryReasonAbandonedUnknown || err == nil || !strings.Contains(err.Error(), "injected target release failure") {
 			t.Fatalf("abandon = %+v, %v", abandoned, err)
 		}
@@ -628,7 +627,7 @@ func TestRecoveryNonApplyPathsSurfaceTargetReleaseErrors(t *testing.T) {
 			t.Fatalf("unknown apply = %+v, %v", result, err)
 		}
 		targets.setReleaseError(errors.New("injected target release failure"))
-		_, err = application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryFinalizeRetry})
+		_, err = application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryFinalizeRetry})
 		if err == nil || !strings.Contains(err.Error(), "injected target release failure") {
 			t.Fatalf("finalize retry error = %v", err)
 		}
@@ -671,17 +670,17 @@ func TestReadSurfacesNeverReplayPendingMutation(t *testing.T) {
 	if reconciles != 0 || blobs.released != 0 {
 		t.Fatalf("read surfaces reconciled %d times; released=%d", reconciles, blobs.released)
 	}
-	if _, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
+	if _, err := application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryApply,
 	}); errorCode(err) != sdd.ErrorRecoveryRequired {
 		t.Fatalf("apply after unknown reconciliation error = %v", err)
 	}
-	if _, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
+	if _, err := application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard,
 	}); errorCode(err) != sdd.ErrorRecoveryRequired {
 		t.Fatalf("discard after unknown reconciliation error = %v", err)
 	}
-	abandoned, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
+	abandoned, err := application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryAbandonUnknown, Reason: "operator accepts unknown history",
 	})
 	if err != nil || abandoned.Item.State != sdd.RecoveryAbandoned || abandoned.Item.Reason != sdd.RecoveryReasonAbandonedUnknown || blobs.released != 1 {
@@ -707,7 +706,7 @@ func TestRecoveryAuthorizationReceivesActorOwnerTargetAndDistinctVerb(t *testing
 	if errorCode(err) != sdd.ErrorRecoveryRequired {
 		t.Fatalf("diverged apply = %+v, %v", result, err)
 	}
-	if _, err := application.RecoverMutation(t.Context(), identity, "example", sdd.RecoveryRequest{
+	if _, err := application.RecoverMutation(t.Context(), identity, sdd.RecoveryRequest{
 		Session: result.Binding.SessionID, MutationID: prepared.Batch.ID, Verb: sdd.RecoveryDiscard, Reason: "operator chose discard",
 	}); err != nil {
 		t.Fatal(err)
@@ -736,7 +735,7 @@ func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *te
 	}
 	blobs := &trackingBlobStore{StagedBlobStore: baseBlobs, releaseErr: errors.New("injected release failure")}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs,
+		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph,
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 		}),
@@ -744,7 +743,7 @@ func TestPreparedTransitionSurfacesIntentAppendAndRetentionReleaseFailures(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -771,7 +770,7 @@ func TestSessionReplayFailsClosedForUnsupportedCodec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = application.ResumeWorkflow(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, "example", sdd.WorkflowResumeRequest{SessionID: "future", ClientName: "mcp"})
+	_, _, err = application.ResumeWorkflow(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, sdd.WorkflowResumeRequest{SessionID: "future", ClientName: "mcp"})
 	var migration *sdd.ApplicationError
 	if !errors.As(err, &migration) || migration.Code != sdd.ErrorMigrationRequired || migration.Version != 99 {
 		t.Fatalf("unsupported codec error = %#v", err)
@@ -808,7 +807,7 @@ func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.Gra
 		authorizer = authorizers[0]
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Sessions: sessions, StagedBlobs: blobs, Now: now, Finalizers: finalizers,
+		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Finalizers: finalizers,
 		Recovery: authorizer,
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
@@ -818,7 +817,7 @@ func newDurableApplication(t *testing.T, now func() time.Time, wrap func(sdd.Gra
 		t.Fatal(err)
 	}
 	resolver := &runtimeAccessResolver{runtime: runtime}
-	application, err := sdd.NewApplication(resolver)
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: resolver, Sessions: sessions, StagedBlobs: blobs, Clock: sdd.ClockFunc(now)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -842,7 +841,6 @@ func newDurableApplicationWithHomeAndTargets(t *testing.T, home sdd.GraphStore, 
 	blobs := &trackingBlobStore{StagedBlobStore: baseBlobs}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: home, Targets: targets,
-		Sessions: sessions, StagedBlobs: blobs,
 		Recovery: sdd.RecoveryAuthorizerFunc(func(context.Context, sdd.RecoveryAccessRequest) error { return nil }),
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
@@ -851,7 +849,7 @@ func newDurableApplicationWithHomeAndTargets(t *testing.T, home sdd.GraphStore, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}

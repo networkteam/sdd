@@ -154,11 +154,11 @@ func (a *Application) ListRecoveries(ctx context.Context, identity RequestIdenti
 	if err != nil {
 		return RecoveryList{}, err
 	}
-	return listRecoveriesRuntime(ctx, runtime, includeClosed)
+	return a.listRecoveries(ctx, runtime, includeClosed)
 }
 
-func listRecoveriesRuntime(ctx context.Context, runtime *ProjectRuntime, includeClosed bool) (RecoveryList, error) {
-	sessions, err := runtime.options.Sessions.List(ctx, SessionFilter{Project: runtime.options.Project.ID})
+func (a *Application) listRecoveries(ctx context.Context, runtime *ProjectRuntime, includeClosed bool) (RecoveryList, error) {
+	sessions, err := a.sessions.List(ctx, SessionFilter{Project: runtime.options.Project.ID})
 	if err != nil {
 		return RecoveryList{}, err
 	}
@@ -213,15 +213,11 @@ func renderRecoveryNotices(items []RecoveryItem) string {
 // choosing a terminal or graph-affecting verb. It exists for interactive
 // clients that must present actions from current target evidence instead of
 // guessing from a durable projection that may predate reconciliation.
-func (a *Application) ReconcileMutation(ctx context.Context, identity RequestIdentity, project ProjectID, request RecoveryReconcileRequest) (result RecoveryResult, err error) {
-	principal, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
-	if err != nil {
-		return RecoveryResult{}, err
-	}
+func (a *Application) ReconcileMutation(ctx context.Context, identity RequestIdentity, request RecoveryReconcileRequest) (result RecoveryResult, err error) {
 	if request.Session == "" || strings.TrimSpace(request.MutationID) == "" {
 		return RecoveryResult{}, fmt.Errorf("sdd: recovery session and mutation ID are required")
 	}
-	stored, err := runtime.options.Sessions.Load(ctx, request.Session)
+	principal, runtime, stored, err := a.resolveSession(ctx, identity, request.Session, AccessWrite)
 	if err != nil {
 		return RecoveryResult{}, err
 	}
@@ -260,7 +256,7 @@ func (a *Application) ReconcileMutation(ctx context.Context, identity RequestIde
 			OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID, Actor: principal.Subject,
 			Verb: RecoveryReconcile, Evidence: "target acquisition failed: " + acquireErr.Error(), Reconciled: ApplyResult{State: MutationUnknown},
 		}
-		binding, appendErr := appendRecoveryAttempt(ctx, runtime.options.Sessions, binding, attempt)
+		binding, appendErr := appendRecoveryAttempt(ctx, a.sessions, binding, attempt)
 		if appendErr != nil {
 			return RecoveryResult{}, errors.Join(acquireErr, appendErr)
 		}
@@ -286,7 +282,7 @@ func (a *Application) ReconcileMutation(ctx context.Context, identity RequestIde
 		OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID, Actor: principal.Subject,
 		Verb: RecoveryReconcile, Evidence: evidence, Reconciled: reconciled,
 	}
-	binding, err = appendRecoveryAttempt(ctx, runtime.options.Sessions, binding, attempt)
+	binding, err = appendRecoveryAttempt(ctx, a.sessions, binding, attempt)
 	if err != nil {
 		return RecoveryResult{}, err
 	}
@@ -304,15 +300,11 @@ func (a *Application) ReconcileMutation(ctx context.Context, identity RequestIde
 // RecoverMutation performs exactly one explicitly authorized verb. It always
 // reconciles a freshly acquired concrete target before any graph-affecting or
 // terminal action and never runs from startup, resume, or read surfaces.
-func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdentity, project ProjectID, request RecoveryRequest) (result RecoveryResult, err error) {
-	principal, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
-	if err != nil {
-		return RecoveryResult{}, err
-	}
+func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdentity, request RecoveryRequest) (result RecoveryResult, err error) {
 	if request.Session == "" || strings.TrimSpace(request.MutationID) == "" {
 		return RecoveryResult{}, fmt.Errorf("sdd: recovery session and mutation ID are required")
 	}
-	stored, err := runtime.options.Sessions.Load(ctx, request.Session)
+	principal, runtime, stored, err := a.resolveSession(ctx, identity, request.Session, AccessWrite)
 	if err != nil {
 		return RecoveryResult{}, err
 	}
@@ -353,7 +345,7 @@ func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdent
 	binding := SessionBinding{SessionID: stored.Metadata.ID, Subject: stored.Metadata.Subject, Project: stored.Metadata.Project, Version: stored.Version}
 	acquired, acquireErr := runtime.acquire(ctx, prepared.Target)
 	if acquireErr != nil {
-		binding, appendErr := appendRecoveryAttempt(ctx, runtime.options.Sessions, binding, recoveryAttemptEvent{
+		binding, appendErr := appendRecoveryAttempt(ctx, a.sessions, binding, recoveryAttemptEvent{
 			MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
 			OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID, Actor: principal.Subject,
 			Verb: request.Verb, Reason: request.Reason, Evidence: "target acquisition failed: " + acquireErr.Error(), Reconciled: ApplyResult{State: MutationUnknown},
@@ -380,7 +372,7 @@ func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdent
 		evidence = "reconciliation failed: " + reconcileErr.Error()
 		reconciled.State = MutationUnknown
 	}
-	binding, err = appendRecoveryAttempt(ctx, runtime.options.Sessions, binding, recoveryAttemptEvent{
+	binding, err = appendRecoveryAttempt(ctx, a.sessions, binding, recoveryAttemptEvent{
 		MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
 		OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID, Actor: principal.Subject,
 		Verb: request.Verb, Reason: request.Reason, Evidence: evidence, Reconciled: reconciled,
@@ -418,7 +410,7 @@ func (a *Application) RecoverMutation(ctx context.Context, identity RequestIdent
 }
 
 func (a *Application) terminalRecovery(ctx context.Context, runtime *ProjectRuntime, stored StoredSession, prepared PreparedTransition, binding SessionBinding, actor string, request RecoveryRequest, reason RecoveryReason) (RecoveryResult, error) {
-	next, err := releaseAndRecordTerminal(ctx, runtime, binding, prepared, recoveryTerminalEvent{
+	next, err := a.releaseAndRecordTerminal(ctx, binding, prepared, recoveryTerminalEvent{
 		MutationID: prepared.Batch.ID, Digest: prepared.Batch.Digest, Target: prepared.Target,
 		OriginalSubject: stored.Metadata.Subject, OriginalSession: stored.Metadata.ID,
 		Actor: actor, Verb: request.Verb, Reason: request.Reason,
@@ -460,7 +452,7 @@ func (a *Application) bindLegacyTarget(ctx context.Context, runtime *ProjectRunt
 	if err != nil {
 		return RecoveryResult{}, err
 	}
-	version, err := runtime.options.Sessions.Append(ctx, stored.Metadata.ID, stored.Version, SessionAppend{Events: []StoredEvent{event}})
+	version, err := a.sessions.Append(ctx, stored.Metadata.ID, stored.Version, SessionAppend{Events: []StoredEvent{event}})
 	if err != nil {
 		return RecoveryResult{}, err
 	}
@@ -518,11 +510,11 @@ func appendRecoveryTerminal(ctx context.Context, sessions SessionStore, binding 
 // release its retained blobs, then append the terminal record and return the
 // advanced binding version. Used by operator recovery decisions and the
 // engine's own contention discard alike.
-func releaseAndRecordTerminal(ctx context.Context, runtime *ProjectRuntime, binding SessionBinding, prepared PreparedTransition, event recoveryTerminalEvent) (uint64, error) {
-	if err := runtime.options.StagedBlobs.Release(ctx, prepared.Staged, prepared.Batch.ID); err != nil {
+func (a *Application) releaseAndRecordTerminal(ctx context.Context, binding SessionBinding, prepared PreparedTransition, event recoveryTerminalEvent) (uint64, error) {
+	if err := a.blobs.Release(ctx, prepared.Staged, prepared.Batch.ID); err != nil {
 		return binding.Version, &ApplicationError{Code: ErrorRecoveryRequired, Message: "recovery could not release retained blobs", Cause: err}
 	}
-	return appendRecoveryTerminal(ctx, runtime.options.Sessions, binding, event)
+	return appendRecoveryTerminal(ctx, a.sessions, binding, event)
 }
 
 func recoveryStateError(verb RecoveryVerb, state ApplyState, cause error) error {

@@ -259,6 +259,9 @@ func (accessResolver) ResolveProject(context.Context, sdd.Principal, sdd.Project
 func (accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
 	return nil, nil
 }
+func (accessResolver) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {
+	return sdd.OwnerOnly(ctx, request)
+}
 
 func TestAccessResolverConformance(t *testing.T) {
 	sddtest.RunAccessResolverTests(t, func(*testing.T) sddtest.AccessResolverFixture {

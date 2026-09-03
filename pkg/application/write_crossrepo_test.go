@@ -35,7 +35,7 @@ func TestCreateEntry_DeclaredCrossRepoRefPassesPreflight(t *testing.T) {
 	})
 	dependency, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example.org/dep"}, Graph: staticGraphStore{snapshot: foreignSnapshot},
-		Sessions: noSessionStore{}, StagedBlobs: noBlobStore{}, LLM: llmRunner,
+		LLM: llmRunner,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -54,12 +54,12 @@ func TestCreateEntry_DeclaredCrossRepoRefPassesPreflight(t *testing.T) {
 	}
 	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Dependencies: []string{"example.org/dep"},
-		Graph: graph, Sessions: sessions, StagedBlobs: blobs, LLM: llmRunner,
+		Graph: graph, LLM: llmRunner,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&multiAccessResolver{base: base, dependency: dependency})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &multiAccessResolver{base: base, dependency: dependency}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}

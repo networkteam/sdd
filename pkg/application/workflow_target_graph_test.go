@@ -61,6 +61,10 @@ func (a workflowTargetAccess) ListProjects(context.Context, Principal) (ProjectL
 func (a workflowTargetAccess) ResolveProject(context.Context, Principal, ProjectID, Access) (*ProjectRuntime, error) {
 	return a.runtime, nil
 }
+func (a workflowTargetAccess) AuthorizeSession(ctx context.Context, request SessionAccessRequest) error {
+	return OwnerOnly(ctx, request)
+}
+
 func (a workflowTargetAccess) ResolveDependency(context.Context, Principal, ProjectID, string) (*ProjectRuntime, error) {
 	return nil, nil
 }

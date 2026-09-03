@@ -8,9 +8,9 @@ import (
 	"github.com/networkteam/slogutils"
 )
 
-// CollectSessionsCmd asks for one reclamation pass over a project's session
-// store. Retention is how long an ended session is kept; zero means remove as
-// soon as it has ended.
+// CollectSessionsCmd asks for one reclamation pass over the composition's
+// session store. Retention is how long an ended session is kept; zero means
+// remove as soon as it has ended.
 type CollectSessionsCmd struct {
 	Retention time.Duration
 }
@@ -26,7 +26,9 @@ type CollectSessionsResult struct {
 }
 
 // CollectSessions removes the sessions that are safe to remove and drains the
-// pending declarations that can never converge.
+// pending declarations that can never converge. It is an operator act on the
+// composition's stores, without identity or project (d-cpt-yjc); who may
+// trigger it is the composition's to gate.
 //
 // The pass is lock-free and optimistic. An ended session is never written to
 // again, so two processes starting at once derive the same target set and both
@@ -38,41 +40,24 @@ type CollectSessionsResult struct {
 // not ended, one inside its retention window, one an in-flight declaration
 // still claims, or one this binary cannot read — an unreadable log may belong
 // to a newer version, so it is left alone rather than treated as garbage.
-func (a *Application) CollectSessions(
-	ctx context.Context,
-	identity RequestIdentity,
-	project ProjectID,
-	cmd CollectSessionsCmd,
-) (CollectSessionsResult, error) {
-	_, runtime, err := a.resolve(ctx, identity, project, AccessWrite)
-	if err != nil {
-		return CollectSessionsResult{}, err
-	}
-	return collectRuntime(ctx, runtime, cmd)
-}
-
-func collectRuntime(
-	ctx context.Context,
-	runtime *ProjectRuntime,
-	cmd CollectSessionsCmd,
-) (CollectSessionsResult, error) {
-	sessions := runtime.options.Sessions
-	blobs := runtime.options.StagedBlobs
+func (a *Application) CollectSessions(ctx context.Context, cmd CollectSessionsCmd) (CollectSessionsResult, error) {
+	sessions := a.sessions
+	blobs := a.blobs
 
 	// List already skips a log this binary cannot read, which is why an
 	// unreadable session is never a collection candidate.
-	stored, err := sessions.List(ctx, SessionFilter{Project: runtime.options.Project.ID})
+	stored, err := sessions.List(ctx, SessionFilter{})
 	if err != nil {
 		return CollectSessionsResult{}, err
 	}
 
 	log := slogutils.FromContext(ctx)
-	now := runtime.options.Now().UTC()
+	now := a.now().UTC()
 	result := CollectSessionsResult{}
 
 	for _, session := range stored {
 		id := session.Metadata.ID
-		drained, claimed, err := drainDeclarations(ctx, runtime, session)
+		drained, claimed, err := a.drainDeclarations(ctx, session)
 		result.DrainedIntents += drained
 		if err != nil {
 			// One unreadable payload stops that session, not the run.
@@ -136,16 +121,15 @@ func collectOrphanStaging(
 // Such an intent names no routable target and no recovery verb can supply one,
 // so no future run will ever complete it: recording the terminal discard is the
 // only end state it can reach, and until it has one it keeps its session alive.
-func discardUnroutable(
+func (a *Application) discardUnroutable(
 	ctx context.Context,
-	runtime *ProjectRuntime,
 	session StoredSession,
 	replay mutationRecoveryReplay,
 	mutationID string,
 	version uint64,
 ) (uint64, error) {
 	prepared := replay.prepared
-	if err := runtime.options.StagedBlobs.Release(ctx, prepared.Staged, mutationID); err != nil {
+	if err := a.blobs.Release(ctx, prepared.Staged, mutationID); err != nil {
 		return version, err
 	}
 	binding := SessionBinding{
@@ -153,7 +137,7 @@ func discardUnroutable(
 		Subject:   session.Metadata.Subject,
 		Version:   version,
 	}
-	return appendRecoveryTerminal(ctx, runtime.options.Sessions, binding, recoveryTerminalEvent{
+	return appendRecoveryTerminal(ctx, a.sessions, binding, recoveryTerminalEvent{
 		MutationID: mutationID, Digest: prepared.Batch.Digest, Target: prepared.Target,
 		OriginalSubject: session.Metadata.Subject, OriginalSession: session.Metadata.ID,
 		Actor: session.Metadata.Subject, Verb: RecoveryDiscard,
@@ -166,9 +150,8 @@ func discardUnroutable(
 // that can still converge keeps its session alive; one from before the
 // convergence rule that can never be routed is discarded, since nothing will
 // ever complete it.
-func drainDeclarations(
+func (a *Application) drainDeclarations(
 	ctx context.Context,
-	runtime *ProjectRuntime,
 	session StoredSession,
 ) (drained int, claimed bool, err error) {
 	ids, err := mutationIDs(session.Events)
@@ -190,7 +173,7 @@ func drainDeclarations(
 			claimed = true
 			continue
 		}
-		next, discardErr := discardUnroutable(ctx, runtime, session, replay, id, version)
+		next, discardErr := a.discardUnroutable(ctx, session, replay, id, version)
 		if discardErr != nil {
 			return drained, true, discardErr
 		}

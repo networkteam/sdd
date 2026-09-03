@@ -193,7 +193,7 @@ func TestConcludedSessionRefusesRevival(t *testing.T) {
 	refusals := map[string]error{}
 	_, refusals["start_procedure"] = w.Start(t.Context(), identity, sdd.WorkflowStartRequest{Canonical: "waiting-test"})
 	_, refusals["next"] = w.Advance(t.Context(), identity, sdd.WorkflowAdvanceRequest{Instance: shell.Instance, Report: map[string]any{"body": "one"}})
-	_, _, refusals["resume_session"] = application.ResumeWorkflow(t.Context(), identity, "example", sdd.WorkflowResumeRequest{
+	_, _, refusals["resume_session"] = application.ResumeWorkflow(t.Context(), identity, sdd.WorkflowResumeRequest{
 		SessionID: w.ID(), ClientName: "mcp-2",
 	})
 	for name, err := range refusals {

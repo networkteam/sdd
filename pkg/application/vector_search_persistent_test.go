@@ -135,8 +135,6 @@ func newCounterApp(t *testing.T, graphDir, cacheRoot string, embeddings embed.Em
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project:     sdd.ProjectRef{ID: counterProject, DisplayName: "Counter"},
 		Graph:       graph,
-		Sessions:    sessions,
-		StagedBlobs: blobs,
 		Embedder:    embeddings,
 		SearchIndex: localadapter.NewPersistentSearchIndexStore(counterProject, cacheRoot, "counter/repo"),
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
@@ -146,7 +144,7 @@ func newCounterApp(t *testing.T, graphDir, cacheRoot string, embeddings embed.Em
 	if err != nil {
 		t.Fatal(err)
 	}
-	application, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +382,7 @@ func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAc
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: counterProject, DisplayName: "Counter"}, DefaultBranch: "main",
-		Graph: base, Targets: targets, Sessions: sessions, StagedBlobs: blobs,
+		Graph: base, Targets: targets,
 		Embedder:    embeddings,
 		SearchIndex: localadapter.NewPersistentSearchIndexStore(counterProject, cacheRoot, "counter/branch"),
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
@@ -394,7 +392,7 @@ func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAc
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, err := sdd.NewApplication(&runtimeAccessResolver{runtime: runtime})
+	app, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
