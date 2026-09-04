@@ -398,6 +398,12 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 		}
 	}
 
+	// Sweep out what the bundle stopped shipping, after the install pass so
+	// this run's own writes are on disk and stamped (s-tac-zaz).
+	if err := h.pruneSkillOrphans(ctx, effectiveAgents, effectiveScope, cmd, &touched); err != nil {
+		return err
+	}
+
 	// Transition messaging (d-tac-o2v): reach users who upgrade without
 	// invoking the skill.
 	log.Info("the /sdd skill family is deprecated — work in /sdd-engine; v0.18.0 will remove the legacy skills and rename /sdd-engine to /sdd")
@@ -646,6 +652,55 @@ func (h *Handler) pruneAgentSkills(ctx context.Context, dropped []model.AgentTar
 		*touched = append(*touched, removed...)
 		if cmd.OnAgentSkillsPruned != nil && (len(removed) > 0 || len(keptModified) > 0) {
 			cmd.OnAgentSkillsPruned(command.AgentPruneResult{
+				Target:       target,
+				InstallDir:   status.InstallDir,
+				Removed:      removed,
+				KeptModified: keptModified,
+			})
+		}
+	}
+	return nil
+}
+
+// pruneSkillOrphans removes installed files whose bundle source is gone, for
+// agents that are still rendered — the upgrade path pruneAgentSkills does not
+// cover, since nothing was dropped from supported_agents. Ownership and safety
+// follow the same rule: only unmodified sdd-written files go, user-modified
+// copies are preserved and named, and --force removes those too. Files sdd
+// never wrote carry no stamp and never reach here.
+func (h *Handler) pruneSkillOrphans(ctx context.Context, targets []model.AgentTarget, scope model.Scope, cmd *command.InitCmd, touched *[]string) error {
+	for _, target := range targets {
+		status, err := h.reader.SkillStatus(ctx, query.SkillStatusQuery{
+			Target:   target,
+			Scope:    scope,
+			RepoRoot: cmd.RepoRoot,
+			UserHome: cmd.UserHome,
+		})
+		if err != nil {
+			return fmt.Errorf("classifying %s skills for orphan prune: %w", target, err)
+		}
+
+		var removed, keptModified []string
+		skillDirs := map[string]bool{}
+		for _, o := range status.Orphans {
+			if o.Class == model.SkillOrphanModified && !cmd.Force {
+				keptModified = append(keptModified, o.AbsPath)
+				continue
+			}
+			if err := os.Remove(o.AbsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("removing orphaned skill file %s: %w", o.AbsPath, err)
+			}
+			removed = append(removed, o.AbsPath)
+			skillDirs[filepath.Join(status.InstallDir, o.Skill)] = true
+		}
+
+		for dir := range skillDirs {
+			pruneEmptyDirs(dir)
+		}
+
+		*touched = append(*touched, removed...)
+		if cmd.OnSkillOrphansPruned != nil && (len(removed) > 0 || len(keptModified) > 0) {
+			cmd.OnSkillOrphansPruned(command.AgentPruneResult{
 				Target:       target,
 				InstallDir:   status.InstallDir,
 				Removed:      removed,

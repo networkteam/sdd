@@ -482,3 +482,36 @@ func ParseSkillFile(absPath string, content []byte) *SkillFile {
 	sf.StoredVersion, sf.StoredHash = readStamps(fm)
 	return sf
 }
+
+// SkillOrphanClass classifies an installed file the embedded bundle no longer
+// carries — the state left behind when a bundle source is removed by a
+// rename, a split, or a retirement.
+type SkillOrphanClass string
+
+const (
+	// SkillOrphanForeign means the file carries no sdd install stamp, so sdd
+	// never wrote it: a skill of the user's own sharing the install
+	// directory. Never removed, never reported.
+	SkillOrphanForeign SkillOrphanClass = "foreign"
+
+	// SkillOrphanUnmodified means sdd wrote the file and its content still
+	// matches the stamp from that install — safe to remove.
+	SkillOrphanUnmodified SkillOrphanClass = "unmodified"
+
+	// SkillOrphanModified means sdd wrote the file and it has been edited
+	// since — preserved, and named so the user can resolve it.
+	SkillOrphanModified SkillOrphanClass = "modified"
+)
+
+// ClassifySkillOrphan decides what may be done with an installed file that has
+// no bundle counterpart. The stamp is the ownership marker: without one, the
+// file is not sdd's to touch.
+func ClassifySkillOrphan(installed *SkillFile) SkillOrphanClass {
+	if installed == nil || installed.StoredHash == "" {
+		return SkillOrphanForeign
+	}
+	if ComputeSkillHash(installed.Content) == installed.StoredHash {
+		return SkillOrphanUnmodified
+	}
+	return SkillOrphanModified
+}
