@@ -183,6 +183,12 @@ type AgentPruneResult struct {
 	KeptModified []string
 }
 
+// TouchedAnything reports whether the pass found something worth telling the
+// user about — a prune that matched nothing stays silent.
+func (r AgentPruneResult) TouchedAnything() bool {
+	return len(r.Removed) > 0 || len(r.KeptModified) > 0
+}
+
 // Validate checks required fields.
 func (c *InitCmd) Validate() error {
 	if c.RepoRoot == "" {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -514,4 +515,16 @@ func ClassifySkillOrphan(installed *SkillFile) SkillOrphanClass {
 		return SkillOrphanUnmodified
 	}
 	return SkillOrphanModified
+}
+
+// SkillStampIsAhead reports whether an installed file's version stamp names a
+// release later than the running binary — the downgrade case, where an older
+// sdd would otherwise prune files a newer one installed simply because its own
+// bundle does not carry them. Dev builds on either side never trigger it, in
+// keeping with how they bypass the other version gates.
+func SkillStampIsAhead(stampVersion, binaryVersion string) bool {
+	if IsDevVersion(stampVersion) || IsDevVersion(binaryVersion) {
+		return false
+	}
+	return semver.Compare(normalizeSemver(stampVersion), normalizeSemver(binaryVersion)) > 0
 }

@@ -621,45 +621,68 @@ func (h *Handler) pruneAgentSkills(ctx context.Context, dropped []model.AgentTar
 			return fmt.Errorf("classifying %s skills for prune: %w", target, err)
 		}
 
-		var removed, keptModified []string
-		skillDirs := map[string]bool{}
+		var files []prunable
 		for _, e := range status.Entries {
 			if e.Status == model.SkillStatusMissing {
 				continue
 			}
-			if e.Status == model.SkillStatusModified && !cmd.Force {
-				keptModified = append(keptModified, e.AbsPath)
-				continue
-			}
-			// Current, Pristine, or (Modified under --force): sdd-owned.
-			if err := os.Remove(e.AbsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("removing %s: %w", e.AbsPath, err)
-			}
-			removed = append(removed, e.AbsPath)
-			skillDirs[filepath.Join(status.InstallDir, e.Skill)] = true
+			files = append(files, prunable{
+				absPath:  e.AbsPath,
+				skill:    e.Skill,
+				modified: e.Status == model.SkillStatusModified,
+			})
 		}
 
-		// Remove emptied skill subdirs (and their empty descendants), then the
-		// parent skills dir if nothing remains. A dir still holding a user's
-		// non-sdd skill is left in place.
-		for dir := range skillDirs {
-			pruneEmptyDirs(dir)
+		result, err := removePrunable(files, target, status.InstallDir, cmd.Force, touched)
+		if err != nil {
+			return err
 		}
+		// A dropped agent leaves the whole tree behind, so the parent skills
+		// dir goes too when nothing remains in it. A dir still holding a
+		// user's non-sdd skill is left in place.
 		if entries, err := os.ReadDir(status.InstallDir); err == nil && len(entries) == 0 {
 			_ = os.Remove(status.InstallDir)
 		}
 
-		*touched = append(*touched, removed...)
-		if cmd.OnAgentSkillsPruned != nil && (len(removed) > 0 || len(keptModified) > 0) {
-			cmd.OnAgentSkillsPruned(command.AgentPruneResult{
-				Target:       target,
-				InstallDir:   status.InstallDir,
-				Removed:      removed,
-				KeptModified: keptModified,
-			})
+		if cmd.OnAgentSkillsPruned != nil && result.TouchedAnything() {
+			cmd.OnAgentSkillsPruned(result)
 		}
 	}
 	return nil
+}
+
+// prunable is one installed file a prune pass may remove, paired with whether
+// the user has edited it since sdd wrote it.
+type prunable struct {
+	absPath  string
+	skill    string
+	modified bool
+}
+
+// removePrunable is the one rule both prune passes apply — a dropped agent's
+// whole render, and the orphans a still-rendered agent's bundle no longer
+// carries: unmodified files go, edited ones are preserved and named, --force
+// takes those too, and directories a removal emptied are cleaned up. Removed
+// paths join touched so the commit records the deletions.
+func removePrunable(files []prunable, target model.AgentTarget, installDir string, force bool, touched *[]string) (command.AgentPruneResult, error) {
+	result := command.AgentPruneResult{Target: target, InstallDir: installDir}
+	skillDirs := map[string]bool{}
+	for _, f := range files {
+		if f.modified && !force {
+			result.KeptModified = append(result.KeptModified, f.absPath)
+			continue
+		}
+		if err := os.Remove(f.absPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return result, fmt.Errorf("removing %s: %w", f.absPath, err)
+		}
+		result.Removed = append(result.Removed, f.absPath)
+		skillDirs[filepath.Join(installDir, f.skill)] = true
+	}
+	for dir := range skillDirs {
+		pruneEmptyDirs(dir)
+	}
+	*touched = append(*touched, result.Removed...)
+	return result, nil
 }
 
 // pruneSkillOrphans removes installed files whose bundle source is gone, for
@@ -680,32 +703,27 @@ func (h *Handler) pruneSkillOrphans(ctx context.Context, targets []model.AgentTa
 			return fmt.Errorf("classifying %s skills for orphan prune: %w", target, err)
 		}
 
-		var removed, keptModified []string
-		skillDirs := map[string]bool{}
+		var files []prunable
 		for _, o := range status.Orphans {
-			if o.Class == model.SkillOrphanModified && !cmd.Force {
-				keptModified = append(keptModified, o.AbsPath)
+			// A file stamped by a later sdd is not an orphan, it is the
+			// future: an older binary running here must not delete what a
+			// newer one installed just because its own bundle lacks it.
+			if model.SkillStampIsAhead(o.Installed.StoredVersion, cmd.BinaryVersion) {
 				continue
 			}
-			if err := os.Remove(o.AbsPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return fmt.Errorf("removing orphaned skill file %s: %w", o.AbsPath, err)
-			}
-			removed = append(removed, o.AbsPath)
-			skillDirs[filepath.Join(status.InstallDir, o.Skill)] = true
-		}
-
-		for dir := range skillDirs {
-			pruneEmptyDirs(dir)
-		}
-
-		*touched = append(*touched, removed...)
-		if cmd.OnSkillOrphansPruned != nil && (len(removed) > 0 || len(keptModified) > 0) {
-			cmd.OnSkillOrphansPruned(command.AgentPruneResult{
-				Target:       target,
-				InstallDir:   status.InstallDir,
-				Removed:      removed,
-				KeptModified: keptModified,
+			files = append(files, prunable{
+				absPath:  o.AbsPath,
+				skill:    o.Skill,
+				modified: o.Class == model.SkillOrphanModified,
 			})
+		}
+
+		result, err := removePrunable(files, target, status.InstallDir, cmd.Force, touched)
+		if err != nil {
+			return err
+		}
+		if cmd.OnSkillOrphansPruned != nil && result.TouchedAnything() {
+			cmd.OnSkillOrphansPruned(result)
 		}
 	}
 	return nil
