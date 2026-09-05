@@ -144,6 +144,8 @@ Skills are **source-of-truth as agent-neutral templates in `internal/bundledskil
 
 All dialogue with the user and every graph entry follows the `unslop` skill — load it before writing either. It carries the goal (the tersest text that carries the meaning exactly), how the dialogue and graph-entry registers differ, and the pattern catalog (Christopher, 2026-08-24).
 
+Keep detailed Go API behavior and usage beside the code in package or symbol documentation. Use Go doc examples when they clarify usage. READMEs give an overview and point to those docs; do not duplicate API details there. Add only the documentation the change needs.
+
 ## Memory
 
 **Do not keep a parallel memory store for this project.** This repo dogfoods SDD — we use SDD to develop SDD. A separate agent memory (auto-memory, a side notes file, a scratch store) creates a parallel record that shortcuts what the graph and skill dialogue are supposed to handle, and it contaminates the evaluation of whether SDD itself is guiding the work well. If memory quietly carries the context that SDD should be surfacing through signals, decisions, and skill guidance, we lose the signal about where the framework is falling short.
