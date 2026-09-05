@@ -43,10 +43,26 @@ func RenderInitSkills(w io.Writer, installDir string, result command.SkillInstal
 // supported_agents, and lists any user-modified files left untouched.
 func RenderInitPrune(w io.Writer, result command.AgentPruneResult) {
 	fmt.Fprintf(w, "pruned %s: %d file(s) removed from %s\n", result.Target, len(result.Removed), result.InstallDir)
-	if len(result.KeptModified) > 0 {
-		fmt.Fprintf(w, "  preserved: %d modified file(s) left untouched (pass --force to remove)\n", len(result.KeptModified))
-		for _, p := range result.KeptModified {
-			fmt.Fprintf(w, "    - %s\n", p)
-		}
+	renderPreserved(w, result.KeptModified)
+}
+
+// RenderInitOrphans summarises the files removed from a still-rendered agent's
+// install directory because the bundle no longer carries them, and names every
+// user-modified copy left in place.
+func RenderInitOrphans(w io.Writer, result command.AgentPruneResult) {
+	fmt.Fprintf(w, "removed %d orphaned %s file(s) from %s (no longer part of sdd)\n", len(result.Removed), result.Target, result.InstallDir)
+	for _, p := range result.Removed {
+		fmt.Fprintf(w, "    - %s\n", p)
+	}
+	renderPreserved(w, result.KeptModified)
+}
+
+func renderPreserved(w io.Writer, keptModified []string) {
+	if len(keptModified) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "  preserved: %d modified file(s) left untouched (pass --force to remove)\n", len(keptModified))
+	for _, p := range keptModified {
+		fmt.Fprintf(w, "    - %s\n", p)
 	}
 }

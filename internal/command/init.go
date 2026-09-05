@@ -159,6 +159,12 @@ type InitCmd struct {
 	// files removed and any user-modified files preserved.
 	OnAgentSkillsPruned func(result AgentPruneResult)
 
+	// OnSkillOrphansPruned fires once per rendered agent whose install
+	// directory held files the bundle no longer carries, reporting what was
+	// removed and which user-modified copies were preserved. Does not fire
+	// when the sweep found nothing.
+	OnSkillOrphansPruned func(result AgentPruneResult)
+
 	// OnMCPRegistered fires for each project-scope config file written to
 	// register the SDD MCP server for an agent (a fresh file or an
 	// add-if-missing merge). Does not fire when an existing sdd entry is
@@ -166,14 +172,21 @@ type InitCmd struct {
 	OnMCPRegistered func(target model.AgentTarget, path string)
 }
 
-// AgentPruneResult reports the outcome of pruning a dropped agent's rendered
-// skills: which files were removed and which user-modified files were kept
-// (removable only under --force).
+// AgentPruneResult reports the outcome of a prune pass over one agent's
+// install directory — a dropped agent's whole render, or the orphans a
+// still-rendered agent's bundle no longer carries: which files were removed
+// and which user-modified files were kept (removable only under --force).
 type AgentPruneResult struct {
 	Target       model.AgentTarget
 	InstallDir   string
 	Removed      []string
 	KeptModified []string
+}
+
+// TouchedAnything reports whether the pass found something worth telling the
+// user about — a prune that matched nothing stays silent.
+func (r AgentPruneResult) TouchedAnything() bool {
+	return len(r.Removed) > 0 || len(r.KeptModified) > 0
 }
 
 // Validate checks required fields.
