@@ -32,15 +32,12 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, a
 		return nil, err
 	}
 
-	// The current state hash of every entry that belongs in the store, computed
-	// once: reconcile compares it against stored versions for presence, and the
-	// read-time filter compares it against each hit's version.
-	hashes, err := r.currentEntryHashes(ctx, snapshot, attachments)
-	if err != nil {
-		return nil, err
-	}
-
+	var hashes map[string]string
 	if request.SyncMode != query.SearchSyncNone {
+		hashes, err = r.currentEntryHashes(ctx, snapshot.graph.Entries, attachments)
+		if err != nil {
+			return nil, err
+		}
 		if err := r.reconcileSearchSnapshot(ctx, snapshot, attachments, namespace, hashes, ReconcileSearchIndexCmd{}); err != nil {
 			return nil, err
 		}
@@ -66,6 +63,20 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, a
 		return nil, err
 	}
 
+	if request.SyncMode == query.SearchSyncNone {
+		candidates := candidateSet(snapshot.graph, request, r.options.ExcludeEmbeddedFromIndex)
+		var entries []*model.Entry
+		for _, hit := range hits {
+			if entry, ok := candidates[hit.EntryID]; ok && hit.EntryHash != "" {
+				entries = append(entries, entry)
+				delete(candidates, hit.EntryID)
+			}
+		}
+		hashes, err = r.currentEntryHashes(ctx, entries, attachments)
+		if err != nil {
+			return nil, err
+		}
+	}
 	vector := r.vectorResult(snapshot.graph, request, hits, hashes)
 	if len(request.Terms) == 0 {
 		return vector, nil
@@ -77,15 +88,12 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, a
 	return hybridResult(text, vector, limit), nil
 }
 
-// currentEntryHashes computes the state hash of every graph entry that belongs
-// in the store, once per search. Attachment bytes are part of the hash, paged
-// through the GraphStore exactly as chunking derives them. Reconcile compares
-// these against stored versions for presence; the read-time filter compares
-// them against each hit's version.
-func (r *ProjectRuntime) currentEntryHashes(ctx context.Context, snapshot *Snapshot, store GraphStore) (map[string]string, error) {
+// Reconciliation needs the full graph; no-sync search verifies only candidate
+// versions so unrelated attachments do not contribute to search I/O.
+func (r *ProjectRuntime) currentEntryHashes(ctx context.Context, entries []*model.Entry, store GraphStore) (map[string]string, error) {
 	attachments := graphStoreAttachmentReader{store: store}
-	hashes := make(map[string]string, len(snapshot.graph.Entries))
-	for _, entry := range snapshot.graph.Entries {
+	hashes := make(map[string]string, len(entries))
+	for _, entry := range entries {
 		if !chunking.IncludeEntry(entry, r.options.ExcludeEmbeddedFromIndex) {
 			continue
 		}

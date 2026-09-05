@@ -29,7 +29,7 @@ func (r *ProjectRuntime) ReconcileSearchIndex(ctx context.Context, cmd Reconcile
 	if err != nil {
 		return err
 	}
-	hashes, err := r.currentEntryHashes(ctx, snapshot, r.options.Graph)
+	hashes, err := r.currentEntryHashes(ctx, snapshot.graph.Entries, r.options.Graph)
 	if err != nil {
 		return err
 	}

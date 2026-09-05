@@ -6,6 +6,8 @@
 // and SearchSyncAll also reconciles searched dependencies. Text-only searches
 // require a mode but do not need index maintenance. Existing synchronous callers
 // should pass SearchSyncAll.
+// No-sync search verifies only eligible returned candidates against the selected
+// snapshot, reading their attachments as needed; stale versions are omitted.
 //
 // Hosts can call ProjectRuntime.ReconcileSearchIndex independently to warm its
 // current graph index, with optional callbacks after persistence. The host owns
