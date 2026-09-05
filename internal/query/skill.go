@@ -19,6 +19,20 @@ type SkillStatusResult struct {
 
 	// Entries is one row per embedded skill file.
 	Entries []SkillStatusEntry
+
+	// Orphans is one row per installed file the bundle no longer carries,
+	// excluding files sdd never wrote. Empty on a bundle that lost nothing.
+	Orphans []SkillOrphanEntry
+}
+
+// SkillOrphanEntry carries an installed file with no embedded counterpart,
+// classified by whether sdd may remove it.
+type SkillOrphanEntry struct {
+	Skill     string
+	RelPath   string
+	AbsPath   string
+	Class     model.SkillOrphanClass
+	Installed *model.SkillFile
 }
 
 // SkillStatusEntry carries the inputs a handler needs to decide whether (and

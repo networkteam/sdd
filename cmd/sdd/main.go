@@ -1617,6 +1617,9 @@ func initCmd() *cli.Command {
 				OnAgentSkillsPruned: func(result command.AgentPruneResult) {
 					presenters.RenderInitPrune(os.Stdout, result)
 				},
+				OnSkillOrphansPruned: func(result command.AgentPruneResult) {
+					presenters.RenderInitOrphans(os.Stdout, result)
+				},
 				OnIndexMigrated: func(legacyDir, storeDir string, moved bool) {
 					if moved {
 						fmt.Printf("  index migrated: %s → %s\n", legacyDir, storeDir)
