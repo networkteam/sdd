@@ -244,7 +244,7 @@ The HTTP identity test anchors its real mutation here.
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(Options{Application: application, Version: "test"})
+	server, err := New(Options{SearchSyncMode: sdd.SearchSyncAll, Application: application, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}

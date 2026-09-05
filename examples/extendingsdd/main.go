@@ -83,7 +83,7 @@ func main() {
 	check(err)
 	// The wrapper serves every project the principal can reach, and with one
 	// accessible project start_session infers it.
-	server, err := mcpapp.New(mcpapp.Options{Application: application, Version: "example"})
+	server, err := mcpapp.New(mcpapp.Options{SearchSyncMode: sdd.SearchSyncAll, Application: application, Version: "example"})
 	check(err)
 
 	token := env("SDD_EXAMPLE_TOKEN", "development-token")

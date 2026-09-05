@@ -362,7 +362,7 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := mcpserver.Options{
+	opts := mcpserver.Options{SearchSyncMode: sdd.SearchSyncAll,
 		Application: application, LocalIdentity: sdd.RequestIdentity{Subject: "tester"}, Version: "test",
 		LocalAttachmentPath: func(entryID, filename string) (string, error) {
 			dir, pathErr := model.AttachDirRelPath(entryID)

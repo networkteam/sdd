@@ -81,7 +81,7 @@ func serveCmd() *cli.Command {
 			collectSessions(ctx, application, retention)
 
 			transport := cmd.String("transport")
-			srv, err := mcpserver.New(mcpserver.Options{
+			srv, err := mcpserver.New(mcpserver.Options{SearchSyncMode: sdd.SearchSyncAll,
 				Application:   application,
 				LocalIdentity: identity,
 				LocalClient:   transport == "stdio",

@@ -71,6 +71,8 @@ type ShowResult struct {
 }
 
 type SearchRequest struct {
+	// SyncMode is required, including for text-only requests.
+	SyncMode          SearchSyncMode
 	Terms             []string
 	Phrase            string
 	Branch            string

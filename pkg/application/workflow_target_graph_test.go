@@ -364,7 +364,7 @@ func TestWorkflowSessionBindingDriftProvenanceOnlyForBindingTargets(t *testing.T
 			return err
 		}(),
 		"search": func() error {
-			_, err := workflow.app.Search(t.Context(), workflow.identity, "example", SearchRequest{Terms: []string{"routing"}, Branch: "drifted"})
+			_, err := workflow.app.Search(t.Context(), workflow.identity, "example", SearchRequest{SyncMode: SearchSyncAll, Terms: []string{"routing"}, Branch: "drifted"})
 			return err
 		}(),
 	} {

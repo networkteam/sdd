@@ -807,7 +807,8 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 		return nil, SearchResult{}, err
 	}
 	result, err := s.app.Search(ctx, s.requestIdentity(req), project, sdd.SearchRequest{
-		Terms: args.Terms, Phrase: args.Query, Type: args.Type, Layer: args.Layer, Kind: args.Kind,
+		SyncMode: s.searchSyncMode,
+		Terms:    args.Terms, Phrase: args.Query, Type: args.Type, Layer: args.Layer, Kind: args.Kind,
 		IncludeSuperseded: args.IncludeSuperseded, Limit: limit, MaxCitations: maxCitations,
 		Branch: branch, BranchFromSession: branchFromSession, Repos: args.Repos, AllRepos: args.AllRepos,
 	})

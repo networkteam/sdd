@@ -71,7 +71,7 @@ func TestVectorSearchWithLazyDimensionEmbedder(t *testing.T) {
 	}
 	identity := sdd.RequestIdentity{Subject: "christopher", Scopes: []string{"project:read"}}
 
-	vector, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{Phrase: "application runtime", Limit: 5, MaxCitations: 1})
+	vector, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "application runtime", Limit: 5, MaxCitations: 1})
 	if err != nil {
 		t.Fatalf("vector Search with lazy-dimension embedder: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestVectorSearchWithLazyDimensionEmbedder(t *testing.T) {
 
 	// A second search must land in the same namespace — the first call
 	// discovering the dimensionality must not fork the index identity.
-	again, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{Phrase: "application runtime", Limit: 5, MaxCitations: 1})
+	again, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "application runtime", Limit: 5, MaxCitations: 1})
 	if err != nil || !strings.Contains(again.Results, "s-tac-api") {
 		t.Fatalf("repeated vector Search = %q, %v", again.Results, err)
 	}

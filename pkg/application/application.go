@@ -297,6 +297,9 @@ func (a *Application) Show(ctx context.Context, identity RequestIdentity, projec
 }
 
 func (a *Application) Search(ctx context.Context, identity RequestIdentity, project ProjectID, request SearchRequest) (result SearchResult, err error) {
+	if !request.SyncMode.Valid() {
+		return SearchResult{}, &ApplicationError{Code: ErrorInvalidArgument, Message: "sdd: search synchronization mode is required: none, local, or all"}
+	}
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return SearchResult{}, err
@@ -312,7 +315,8 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 		return SearchResult{}, err
 	}
 	q := query.SearchQuery{
-		Terms: request.Terms, Phrase: request.Phrase, Filter: filter,
+		SyncMode: request.SyncMode,
+		Terms:    request.Terms, Phrase: request.Phrase, Filter: filter,
 		IncludeSuperseded: request.IncludeSuperseded, Limit: request.Limit, MaxCitationsPerEntry: request.MaxCitations,
 	}
 	searchResult, err := runtime.searchSnapshot(ctx, snapshot, selected.store, q)
@@ -332,7 +336,11 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 		if err != nil {
 			return SearchResult{}, dependencyUnavailable()
 		}
-		memberResult, err := dependency.searchSnapshot(ctx, member, dependency.options.Graph, q)
+		memberQuery := q
+		if request.SyncMode == SearchSyncLocal {
+			memberQuery.SyncMode = SearchSyncNone
+		}
+		memberResult, err := dependency.searchSnapshot(ctx, member, dependency.options.Graph, memberQuery)
 		if err != nil {
 			return SearchResult{}, err
 		}

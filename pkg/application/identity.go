@@ -1,6 +1,10 @@
 package application
 
-import "context"
+import (
+	"context"
+
+	"github.com/networkteam/sdd/pkg/application/types"
+)
 
 // RequestIdentity is current-request authentication material supplied by a
 // transport composition. SDD treats Subject as opaque and does not interpret
@@ -19,7 +23,7 @@ type Principal struct {
 }
 
 // ProjectID is a composition's stable project identity.
-type ProjectID string
+type ProjectID = types.ProjectID
 
 // ProjectRef is the only project identity exposed in project-scoped results.
 type ProjectRef struct {

@@ -72,7 +72,7 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := sdd.RequestIdentity{Subject: "tester"}
-	server, err := mcpserver.New(mcpserver.Options{
+	server, err := mcpserver.New(mcpserver.Options{SearchSyncMode: sdd.SearchSyncAll,
 		Application: application, LocalIdentity: identity, LocalClient: true, Version: "test",
 	})
 	if err != nil {

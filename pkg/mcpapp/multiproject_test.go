@@ -125,7 +125,7 @@ func newServerOver(t *testing.T, access multiAccess) *mcpserver.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := mcpserver.New(mcpserver.Options{Application: application, LocalIdentity: sdd.RequestIdentity{Subject: "tester"}, Version: "test"})
+	server, err := mcpserver.New(mcpserver.Options{SearchSyncMode: sdd.SearchSyncAll, Application: application, LocalIdentity: sdd.RequestIdentity{Subject: "tester"}, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}

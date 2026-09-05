@@ -9,10 +9,8 @@ import (
 
 	"github.com/networkteam/sdd/internal/chunking"
 	"github.com/networkteam/sdd/internal/finders"
-	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
-	"github.com/networkteam/sdd/internal/textsplitter"
 	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
@@ -22,21 +20,17 @@ import (
 // token (d-cpt-65i). Every search:
 //
 //  1. resolves the embedding fingerprint and repository namespace;
-//  2. reconciles the index so entries absent from it are derived and embedded
+//  2. optionally reconciles the index so missing entries are derived and embedded
 //     once (including Markdown attachments) — nothing is ever deleted here;
 //  3. embeds the query once and runs nearest-neighbor search;
 //  4. resolves each hit's entry against the current graph and applies filter,
 //     status, supersession, and embedded-entry rules at read time;
 //  5. renders citations from stored hit metadata; fuses with text for hybrid.
 func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, attachments GraphStore, request query.SearchQuery) (*query.SearchResult, error) {
-	if r.options.Embedder == nil || r.options.SearchIndex == nil {
-		return nil, errVectorUnavailable
+	namespace, err := r.indexNamespace()
+	if err != nil {
+		return nil, err
 	}
-	fingerprint := r.options.Embedder.Fingerprint()
-	if fingerprint == "" {
-		return nil, fmt.Errorf("sdd: embedder returned an empty fingerprint")
-	}
-	namespace := IndexNamespace{Project: r.options.Project.ID, Fingerprint: fingerprint, Metric: "cosine"}
 
 	// The current state hash of every entry that belongs in the store, computed
 	// once: reconcile compares it against stored versions for presence, and the
@@ -46,8 +40,10 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, a
 		return nil, err
 	}
 
-	if err := r.reconcileVectorIndex(ctx, snapshot, attachments, namespace, hashes); err != nil {
-		return nil, err
+	if request.SyncMode != query.SearchSyncNone {
+		if err := r.reconcileSearchSnapshot(ctx, snapshot, attachments, namespace, hashes, ReconcileSearchIndexCmd{}); err != nil {
+			return nil, err
+		}
 	}
 
 	embedded, err := r.options.Embedder.Embed(ctx, embed.Request{Purpose: embed.PurposeQuery, Texts: []string{request.Phrase}})
@@ -81,14 +77,6 @@ func (r *ProjectRuntime) vectorSearch(ctx context.Context, snapshot *Snapshot, a
 	return hybridResult(text, vector, limit), nil
 }
 
-// versionKey identifies one stored (entry, version) pair for the presence
-// check — a changed entry's new hash reads as absent even when a prior version
-// of the same entry ID is present.
-type versionKey struct {
-	entryID   string
-	entryHash string
-}
-
 // currentEntryHashes computes the state hash of every graph entry that belongs
 // in the store, once per search. Attachment bytes are part of the hash, paged
 // through the GraphStore exactly as chunking derives them. Reconcile compares
@@ -108,153 +96,6 @@ func (r *ProjectRuntime) currentEntryHashes(ctx context.Context, snapshot *Snaps
 		hashes[entry.ID] = hash
 	}
 	return hashes, nil
-}
-
-// reconcileVectorIndex ensures every graph entry version that belongs in the
-// store is embedded and persisted. It walks the FULL current graph independent
-// of request filters and status. A store advertising the entry-manifest
-// capability reconciles on (entry, version) presence: a missing pair embeds
-// that entry once and ADDS a version — never deleting another. A third-party
-// store without the capability falls back to chunk-identity comparison. Both
-// ignore graph revision and never issue deletes.
-func (r *ProjectRuntime) reconcileVectorIndex(ctx context.Context, snapshot *Snapshot, attachments GraphStore, namespace IndexNamespace, hashes map[string]string) error {
-	if manifestCap, ok := r.options.SearchIndex.(SearchIndexEntryManifest); ok {
-		indexed, err := manifestCap.IndexedEntries(ctx, namespace)
-		if err != nil {
-			return err
-		}
-		present := make(map[versionKey]bool, len(indexed))
-		for _, ref := range indexed {
-			present[versionKey{ref.EntryID, ref.EntryHash}] = true
-		}
-		var absent []*model.Entry
-		for _, entry := range snapshot.graph.Entries {
-			if !chunking.IncludeEntry(entry, r.options.ExcludeEmbeddedFromIndex) {
-				continue
-			}
-			if present[versionKey{entry.ID, hashes[entry.ID]}] {
-				continue
-			}
-			absent = append(absent, entry)
-		}
-		return r.embedEntries(ctx, snapshot, attachments, namespace, absent, hashes, nil)
-	}
-	return r.reconcileByChunkIdentity(ctx, snapshot, attachments, namespace, hashes)
-}
-
-// reconcileByChunkIdentity is the compatibility path for third-party stores
-// that implement SearchIndexStore but not SearchIndexEntryManifest. It derives
-// chunks for the full graph and embeds those whose chunk ID is absent from the
-// store — graph revision ignored, no deletes. Because chunk IDs are now
-// version-qualified, a changed entry produces new IDs and its new version is
-// embedded while old-version rows remain (monotonic).
-func (r *ProjectRuntime) reconcileByChunkIdentity(ctx context.Context, snapshot *Snapshot, attachments GraphStore, namespace IndexNamespace, hashes map[string]string) error {
-	manifest, err := r.options.SearchIndex.Manifest(ctx, namespace)
-	if err != nil {
-		return err
-	}
-	stored := make(map[string]StoredChunkRef, len(manifest))
-	for _, ref := range manifest {
-		stored[ref.ID] = ref
-	}
-	var entries []*model.Entry
-	for _, entry := range snapshot.graph.Entries {
-		if !chunking.IncludeEntry(entry, r.options.ExcludeEmbeddedFromIndex) {
-			continue
-		}
-		entries = append(entries, entry)
-	}
-	keep := func(chunk CanonicalChunk) bool {
-		ref, ok := stored[chunk.ID]
-		return ok && ref.ContentHash == chunk.ContentHash
-	}
-	return r.embedEntries(ctx, snapshot, attachments, namespace, entries, hashes, keep)
-}
-
-// embedEntries derives, embeds, and persists the chunks of the given entries
-// under their current version (version-qualified chunk IDs from the precomputed
-// hash). When skip is non-nil, chunks it returns true for are already stored
-// and are not re-embedded (the compatibility path uses this; the entry-manifest
-// path passes nil because it only ever hands over absent entries). Attachments
-// are read through the GraphStore so MCP and the CLI derive identical content.
-func (r *ProjectRuntime) embedEntries(ctx context.Context, snapshot *Snapshot, store GraphStore, namespace IndexNamespace, entries []*model.Entry, hashes map[string]string, skip func(CanonicalChunk) bool) error {
-	if len(entries) == 0 {
-		return nil
-	}
-	attachments := graphStoreAttachmentReader{store: store}
-	splitter := textsplitter.NewSplitter()
-
-	var pending []CanonicalChunk
-	for _, entry := range entries {
-		hash := hashes[entry.ID]
-		if hash == "" {
-			// Defensive: an entry not covered by the precomputed set. Hash it
-			// now so its version identity is still correct.
-			h, err := chunking.EntryStateHash(ctx, entry, attachments)
-			if err != nil {
-				return err
-			}
-			hash = h
-		}
-		chunks, err := chunking.DeriveChunks(ctx, entry, hash, splitter, attachments)
-		if err != nil {
-			return err
-		}
-		for _, c := range chunks {
-			chunk := canonicalChunk(entry.ID, hash, c)
-			if skip != nil && skip(chunk) {
-				continue
-			}
-			pending = append(pending, chunk)
-		}
-	}
-	if len(pending) == 0 {
-		return nil
-	}
-	texts := make([]string, len(pending))
-	for i, chunk := range pending {
-		texts[i] = chunk.Text
-	}
-	embedded, err := r.options.Embedder.Embed(ctx, embed.Request{Purpose: embed.PurposeDocument, Texts: texts})
-	if err != nil {
-		return err
-	}
-	if len(embedded.Vectors) != len(pending) {
-		return fmt.Errorf("sdd: embedder returned %d vectors for %d inputs", len(embedded.Vectors), len(pending))
-	}
-	dims := 0
-	upserts := make([]IndexedChunk, 0, len(pending))
-	for i, vector := range embedded.Vectors {
-		if len(vector) == 0 {
-			return fmt.Errorf("sdd: embedding vector %d is empty", i)
-		}
-		if dims == 0 {
-			dims = len(vector)
-		}
-		if len(vector) != dims {
-			return fmt.Errorf("sdd: embedding vector %d has %d dimensions, want %d", i, len(vector), dims)
-		}
-		upserts = append(upserts, IndexedChunk{Chunk: pending[i], Vector: vector})
-	}
-	return r.options.SearchIndex.Reconcile(ctx, namespace, snapshot.revision, upserts, nil)
-}
-
-// canonicalChunk builds the public CanonicalChunk carrying the citation and
-// identity metadata a store persists for a derived chunk.
-func canonicalChunk(entryID, entryHash string, c chunking.Chunk) CanonicalChunk {
-	return CanonicalChunk{
-		ID:                   c.ChunkID,
-		EntryID:              entryID,
-		ContentHash:          index.HashContent(c.Chunk.Text),
-		Text:                 c.Chunk.Text,
-		Body:                 c.Chunk.Body,
-		Breadcrumb:           c.Chunk.Breadcrumb,
-		Depth:                c.Chunk.Depth,
-		IsSummary:            c.Chunk.IsSummary,
-		IsAttachment:         c.Chunk.IsAttachment,
-		SourceAttachmentPath: c.Chunk.SourceAttachmentPath,
-		EntryHash:            entryHash,
-	}
 }
 
 // vectorResult rolls chunk hits up to per-entry results, resolving each hit's

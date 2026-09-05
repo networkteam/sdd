@@ -105,7 +105,7 @@ func TestExternalCompositionCompilesAgainstPublicPorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := mcpapp.New(mcpapp.Options{Application: application, Version: "test"})
+	server, err := mcpapp.New(mcpapp.Options{SearchSyncMode: sdd.SearchSyncAll, Application: application, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,6 +30,7 @@ const DefaultMaxCitationsPerEntry = 1
 // SearchFinder that runs it, not carried here. The finder derives the mode
 // from which fields are populated.
 type SearchQuery struct {
+	SyncMode SearchSyncMode
 	// Terms are the --term values: regex strings combined with AND. Each
 	// must match somewhere in the entry's searchable text. Empty disables
 	// text mode.

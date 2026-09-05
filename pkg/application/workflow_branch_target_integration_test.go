@@ -325,14 +325,14 @@ This reference exists only on the bound work branch.
 
 	// Unbound reads deliberately stay on runtime.Graph even when the default
 	// write target points at a different checkout.
-	currentRead, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{Terms: []string{"runtime-current-only"}})
+	currentRead, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Terms: []string{"runtime-current-only"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(currentRead.Results, anchorID) {
 		t.Fatalf("unbound read did not use runtime graph: %q", currentRead.Results)
 	}
-	defaultRead, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{Terms: []string{"default-target-only"}})
+	defaultRead, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Terms: []string{"default-target-only"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -153,7 +153,7 @@ func newCounterApp(t *testing.T, graphDir, cacheRoot string, embeddings embed.Em
 
 func counterSearch(t *testing.T, application *sdd.Application, phrase string) sdd.SearchResult {
 	t.Helper()
-	res, err := application.Search(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, counterProject, sdd.SearchRequest{Phrase: phrase, Limit: 5, MaxCitations: 3})
+	res, err := application.Search(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, counterProject, sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: phrase, Limit: 5, MaxCitations: 3})
 	if err != nil {
 		t.Fatalf("Search(%q): %v", phrase, err)
 	}
@@ -274,7 +274,7 @@ func TestVectorSearchNarrowerFilterNoDeletesNoReembed(t *testing.T) {
 	// A narrower request (decisions only, though the graph holds signals) must
 	// neither re-embed nor delete stored vectors.
 	if _, err := app.Search(t.Context(), sdd.RequestIdentity{Subject: "christopher"}, counterProject,
-		sdd.SearchRequest{Phrase: "alpha", Type: "d", Limit: 5, MaxCitations: 1}); err != nil {
+		sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "alpha", Type: "d", Limit: 5, MaxCitations: 1}); err != nil {
 		t.Fatalf("filtered Search: %v", err)
 	}
 	if emb.docEmbeds != 0 {
@@ -335,8 +335,8 @@ func TestBranchVectorAndHybridSearchUseSelectedAttachmentAuthorityAndRelease(t *
 	identity := sdd.RequestIdentity{Subject: "christopher"}
 
 	for name, request := range map[string]sdd.SearchRequest{
-		"vector": {Phrase: "beta", Branch: "work", Limit: 5, MaxCitations: 3},
-		"hybrid": {Terms: []string{"beta"}, Phrase: "beta", Branch: "work", Limit: 5, MaxCitations: 3},
+		"vector": {SyncMode: sdd.SearchSyncAll, Phrase: "beta", Branch: "work", Limit: 5, MaxCitations: 3},
+		"hybrid": {SyncMode: sdd.SearchSyncAll, Terms: []string{"beta"}, Phrase: "beta", Branch: "work", Limit: 5, MaxCitations: 3},
 	} {
 		result, err := app.Search(t.Context(), identity, counterProject, request)
 		if err != nil {
@@ -356,7 +356,7 @@ func TestBranchVectorAndHybridSearchUseSelectedAttachmentAuthorityAndRelease(t *
 	attachmentErr := errors.New("selected attachment read failed")
 	failingTargets := &branchVectorTargets{graph: failingAttachmentGraphStore{GraphStore: branch, err: attachmentErr}}
 	failing := newBranchCounterApp(t, base, failingTargets, t.TempDir(), &countingEmbeddings{})
-	_, err = failing.Search(t.Context(), identity, counterProject, sdd.SearchRequest{
+	_, err = failing.Search(t.Context(), identity, counterProject, sdd.SearchRequest{SyncMode: sdd.SearchSyncAll,
 		Phrase: "beta", Branch: "work", Limit: 5, MaxCitations: 3,
 	})
 	if !errors.Is(err, attachmentErr) {

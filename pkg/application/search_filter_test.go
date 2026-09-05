@@ -26,9 +26,9 @@ func TestSearchFilterNormalizesTypeLayerAndKindAbbreviations(t *testing.T) {
 		name string
 		req  sdd.SearchRequest
 	}{
-		{"type abbrev + kind", sdd.SearchRequest{Phrase: "alpha", Type: "s", Kind: "gap", Limit: 8, MaxCitations: 1}},
-		{"type full name", sdd.SearchRequest{Phrase: "alpha", Type: "signal", Limit: 8, MaxCitations: 1}},
-		{"layer abbrev", sdd.SearchRequest{Phrase: "alpha", Layer: "tac", Limit: 8, MaxCitations: 1}},
+		{"type abbrev + kind", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "alpha", Type: "s", Kind: "gap", Limit: 8, MaxCitations: 1}},
+		{"type full name", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "alpha", Type: "signal", Limit: 8, MaxCitations: 1}},
+		{"layer abbrev", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "alpha", Layer: "tac", Limit: 8, MaxCitations: 1}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,7 +48,7 @@ func TestSearchFilterTextModeFiltersByTypeAbbreviation(t *testing.T) {
 	app := newCounterApp(t, graphDir, cacheRoot, &countingEmbeddings{})
 
 	// Terms-mode (no phrase) runs through the same normalized GraphFilter.
-	res, err := searchFiltered(t, app, sdd.SearchRequest{Terms: []string{"alpha"}, Type: "s", Limit: 8})
+	res, err := searchFiltered(t, app, sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Terms: []string{"alpha"}, Type: "s", Limit: 8})
 	if err != nil {
 		t.Fatalf("text Search: %v", err)
 	}
@@ -68,9 +68,9 @@ func TestSearchFilterUnknownValuesFailLoud(t *testing.T) {
 		name string
 		req  sdd.SearchRequest
 	}{
-		{"unknown type", sdd.SearchRequest{Phrase: "alpha", Type: "x"}},
-		{"unknown kind", sdd.SearchRequest{Phrase: "alpha", Kind: "gaps"}},
-		{"unknown layer", sdd.SearchRequest{Phrase: "alpha", Layer: "zzz"}},
+		{"unknown type", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "alpha", Type: "x"}},
+		{"unknown kind", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "alpha", Kind: "gaps"}},
+		{"unknown layer", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "alpha", Layer: "zzz"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

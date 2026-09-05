@@ -146,11 +146,11 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 	if err != nil || !strings.Contains(wipView.Sections, "Protocol-neutral application work") {
 		t.Fatalf("WIP View = %q, %v", wipView.Sections, err)
 	}
-	text, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{Terms: []string{"protocol-neutral"}, Limit: 5, MaxCitations: 1})
+	text, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Terms: []string{"protocol-neutral"}, Limit: 5, MaxCitations: 1})
 	if err != nil || !strings.Contains(text.Results, "s-tac-api") {
 		t.Fatalf("text Search = %q, %v", text.Results, err)
 	}
-	vector, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{Phrase: "application runtime", Limit: 5, MaxCitations: 1})
+	vector, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "application runtime", Limit: 5, MaxCitations: 1})
 	if err != nil || !strings.Contains(vector.Results, "s-tac-api") {
 		t.Fatalf("vector Search = %q, %v", vector.Results, err)
 	}

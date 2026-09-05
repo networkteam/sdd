@@ -19,6 +19,8 @@ type Options struct {
 	// accessible project is inferred, and every other tool reaches its
 	// project through the session it names (d-tac-1z6, d-cpt-yjc).
 	Application *sdd.Application
+	// SearchSyncMode is chosen by the host for every MCP search.
+	SearchSyncMode sdd.SearchSyncMode
 	// LocalIdentity supplies the identity for a trusted composition whose
 	// transport authenticates every request but cannot populate MCP TokenInfo
 	// (the local stdio and static-bearer wrappers use this seam).
@@ -39,6 +41,7 @@ type Options struct {
 type Server struct {
 	mcp                 *mcp.Server
 	app                 *sdd.Application
+	searchSyncMode      sdd.SearchSyncMode
 	localIdentity       sdd.RequestIdentity
 	local               bool
 	localAttachmentPath func(string, string) (string, error)
@@ -58,11 +61,15 @@ var ErrServerClosing = errors.New("mcpapp: server is shutting down")
 
 // New constructs the server and registers the workflow tool surface.
 func New(opts Options) (*Server, error) {
+	if !opts.SearchSyncMode.Valid() {
+		return nil, errors.New("mcpapp: SearchSyncMode is required: none, local, or all")
+	}
 	if opts.Application == nil {
 		return nil, errors.New("mcpapp: Application is required")
 	}
 	s := &Server{
 		app:                 opts.Application,
+		searchSyncMode:      opts.SearchSyncMode,
 		localIdentity:       opts.LocalIdentity,
 		local:               opts.LocalClient,
 		localAttachmentPath: opts.LocalAttachmentPath,
