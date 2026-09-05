@@ -72,21 +72,33 @@ func (f *Finder) SkillStatus(ctx context.Context, q query.SkillStatusQuery) (*qu
 // findSkillOrphans walks the install directory for skill files the bundle no
 // longer carries. Files sdd never wrote carry no stamp and are dropped here,
 // so they never reach a caller that removes things.
+//
+// The directory holds other people's files, so a path this walk cannot read is
+// a path whose ownership cannot be established — and establishing ownership is
+// the only thing that leads to deletion. Such a path is passed over rather than
+// failing the run, which never deletes more and at worst leaves an orphan for a
+// later init. Files already known to be sdd's are read by the bundle-entry loop
+// above, where a read failure still stops everything.
 func findSkillOrphans(installDir string, fromBundle map[string]bool) ([]query.SkillOrphanEntry, error) {
 	var orphans []query.SkillOrphanEntry
 	err := filepath.WalkDir(installDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
+			if path == installDir {
+				// Nothing installed for this target yet, or the directory is
+				// closed to us: there are no orphans to find either way.
 				return fs.SkipAll
 			}
-			return err
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() || filepath.Ext(path) != ".md" || fromBundle[path] {
 			return nil
 		}
 		installed, err := readSkillFile(path)
 		if err != nil {
-			return fmt.Errorf("reading installed skill %s: %w", path, err)
+			return nil
 		}
 		class := model.ClassifySkillOrphan(installed)
 		if class == model.SkillOrphanForeign {

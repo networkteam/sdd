@@ -125,6 +125,45 @@ func TestInit_PreservesModifiedOrphan(t *testing.T) {
 	}
 }
 
+// TestInit_UnreadableForeignFileDoesNotAbort holds the blast radius of the
+// orphan sweep: the install directory holds other people's files, and one sdd
+// cannot even read must not take the whole init down with it.
+func TestInit_UnreadableForeignFileDoesNotAbort(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads through permission bits")
+	}
+	tmp := t.TempDir()
+	h := initExistingWithAgents(t, tmp, model.AgentClaude)
+
+	sealed := filepath.Join(tmp, ".claude/skills/theirs/SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(sealed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sealed, []byte("---\nname: theirs\n---\n\nUnreadable.\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sealed, 0o644) })
+
+	orphan := filepath.Join(tmp, ".claude/skills/sdd-retired/SKILL.md")
+	writeStampedOrphan(t, orphan, "A skill the bundle no longer ships.\n")
+
+	if err := h.Init(context.Background(), &command.InitCmd{
+		RepoRoot:      tmp,
+		BinaryVersion: "v0.2.0",
+		Scope:         model.ScopeProject,
+	}); err != nil {
+		t.Fatalf("an unreadable foreign file must not fail init: %v", err)
+	}
+
+	if _, err := os.Stat(sealed); err != nil {
+		t.Errorf("the unreadable file must be left alone: %v", err)
+	}
+	// The sweep still does its job around it.
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("a readable orphan should still be pruned, stat err = %v", err)
+	}
+}
+
 // TestInit_LeavesAheadStampedOrphan covers the downgrade case: an older binary
 // finds files a newer sdd installed missing from its own bundle, and must not
 // delete the future on the strength of that.
