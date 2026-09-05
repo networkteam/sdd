@@ -149,3 +149,9 @@ All dialogue with the user and every graph entry follows the `unslop` skill — 
 **Do not keep a parallel memory store for this project.** This repo dogfoods SDD — we use SDD to develop SDD. A separate agent memory (auto-memory, a side notes file, a scratch store) creates a parallel record that shortcuts what the graph and skill dialogue are supposed to handle, and it contaminates the evaluation of whether SDD itself is guiding the work well. If memory quietly carries the context that SDD should be surfacing through signals, decisions, and skill guidance, we lose the signal about where the framework is falling short.
 
 **No exceptions, and no separate store.** When you would reach for a memory note — a working preference, a recurring habit, a cross-session note — update `AGENTS.md`/`CLAUDE.md` instead (or capture it in the graph when it is SDD substance). This holds even for things that feel "general" or unrelated to SDD: if it surfaced while working here, it lands in these instruction files, not in a parallel memory store. Don't carve out a "this one's just a communication tic" exception — that loophole defeats the purpose. These instruction files and the graph are the only durable records.
+
+## External material
+
+This repo is public. Anything from another project — private, closed, or to be treated as such — is read-only input: session transcripts, handover files, feedback, graphs, code. Analyse it in the session, keep any working copy in the scratchpad, never inside the repo.
+
+Nothing durable here may identify it. Graph entries, docs, code, comments, commit messages: no project, company, person, or path names, no internal specifics. Capture the pattern, not the case — generalised, or under a pseudonym when you need a handle to refer back to it.
