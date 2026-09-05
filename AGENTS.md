@@ -129,8 +129,7 @@ Skills are **source-of-truth as agent-neutral templates in `internal/bundledskil
 - **Never edit the installed renders (`.claude/skills/`, `.agents/skills/`) directly.** Changes made there will be overwritten (or flagged as "modified") the next time `sdd init` runs.
 - Edit the templates in `internal/bundledskills/templates/<skill>/` → rebuild (`devbox run build`) → reinstall (`sdd init --scope project`). The installed copies pick up the new render and refresh with fresh `sdd-version` + `sdd-content-hash` stamps. Per-agent deviations are `{{ if eq .Agent "claude" }}…{{ else }}…{{ end }}` conditionals and the `inject` helper — never duplicated files. Literal `{{ }}` in skill prose (e.g. the attachments placeholder) must be escaped as `{{"{{...}}"}}`.
 - Codex skills must conform to the Agent Skills standard (stamps under `metadata:`, `compatibility:` set, no Claude-only frontmatter keys). After changing a SKILL.md template, run `devbox run validate-skills` to confirm the Codex render still validates.
-- Commits should include both locations when a skill changes: the template source under `internal/bundledskills/templates/` and the re-stamped output under the installed render dirs.
-- **`sdd init` auto-commits the installed refresh.** The regenerated renders are committed as `sdd: refresh installed skills and metadata`; commit the template-source changes separately. The two halves land in separate commits. See Git rules for auto-commit handling.
+- Skill changes include both template source and installed renders. Commit template-source changes before running `sdd init`, which auto-commits the installed renders.
 
 ## Git rules
 
