@@ -27,3 +27,16 @@ type SearchIndexStore interface {
 type SearchIndexEntryManifest interface {
 	IndexedEntries(context.Context, IndexNamespace) ([]StoredEntryRef, error)
 }
+
+type SearchEntryVersion = types.SearchEntryVersion
+type SearchEntryDescriptor = types.SearchEntryDescriptor
+
+// SearchIndexEntryStore publishes complete entry versions, including versions
+// with no chunks. Unpublished chunks must be invisible to both EntryPublished
+// and Nearest. Publication is atomic, durable on success, and idempotent under
+// concurrent calls. A returned error may have committed; callers recheck.
+// Implementations validate all identities and vectors before publication.
+type SearchIndexEntryStore interface {
+	EntryPublished(context.Context, SearchEntryVersion) (bool, error)
+	PublishEntry(context.Context, SearchEntryVersion, []IndexedChunk) error
+}

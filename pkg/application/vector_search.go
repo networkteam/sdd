@@ -183,7 +183,7 @@ func candidateSet(graph *model.Graph, request query.SearchQuery, excludeEmbedded
 // so the application derives the same attachment content the CLI reads from
 // disk. It is a pure read over the canonical graph authority.
 type graphStoreAttachmentReader struct {
-	store GraphStore
+	store AttachmentPageReader
 }
 
 // attachmentPageSize is the page size for assembling an attachment's full

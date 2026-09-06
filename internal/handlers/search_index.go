@@ -36,9 +36,39 @@ type SearchIndexHandler struct {
 type versionKey struct{ entryID, entryHash string }
 
 func (h *SearchIndexHandler) complete(ctx context.Context, entries []*model.Entry, hashes map[string]string, skip func(types.CanonicalChunk) bool) error {
-	if err := h.embedEntries(ctx, h.Namespace, entries, hashes, skip); err != nil {
-		return err
+	if store, ok := h.Store.(EntryPublisher); ok {
+		for _, entry := range entries {
+			hash := hashes[entry.ID]
+			if hash == "" {
+				var err error
+				hash, err = chunking.EntryStateHash(ctx, entry, h.Attachments)
+				if err != nil {
+					return err
+				}
+			}
+			handler := SearchEntryHandler{Store: store, Embedder: h.Embedder, Entry: entry, Attachments: h.Attachments}
+			cmd := command.IndexSearchEntryCmd{
+				Entry: types.SearchEntryDescriptor{Version: types.SearchEntryVersion{Namespace: h.Namespace, EntryID: entry.ID, EntryHash: hash}, SourceRevision: h.Revision},
+				OnPublished: func(id string, count int) {
+					h.entries++
+					h.chunks += count
+					if h.cmd.OnEntryIndexed != nil {
+						h.cmd.OnEntryIndexed(id, count)
+					}
+				},
+			}
+			if err := handler.Index(ctx, cmd); err != nil {
+				return err
+			}
+		}
+	} else {
+		for _, entry := range entries {
+			if err := h.embedEntries(ctx, h.Namespace, []*model.Entry{entry}, hashes, skip); err != nil {
+				return err
+			}
+		}
 	}
+
 	if h.cmd.OnComplete != nil {
 		h.cmd.OnComplete(h.Revision, h.entries, h.chunks)
 	}

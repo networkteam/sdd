@@ -8,18 +8,20 @@ import (
 	"sync"
 
 	app "github.com/networkteam/sdd/pkg/application"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // MemorySearchIndexStore is a process-local mechanical vector index. It is
 // useful for embedded compositions that want root-owned lazy reconciliation
 // without operating a separate persistent index service.
 type MemorySearchIndexStore struct {
-	mu     sync.RWMutex
-	chunks map[app.IndexNamespace]map[string]app.IndexedChunk
+	mu        sync.RWMutex
+	chunks    map[app.IndexNamespace]map[string]app.IndexedChunk
+	published map[app.SearchEntryVersion]bool
 }
 
 func NewMemorySearchIndexStore() *MemorySearchIndexStore {
-	return &MemorySearchIndexStore{chunks: map[app.IndexNamespace]map[string]app.IndexedChunk{}}
+	return &MemorySearchIndexStore{chunks: map[app.IndexNamespace]map[string]app.IndexedChunk{}, published: map[app.SearchEntryVersion]bool{}}
 }
 
 func (s *MemorySearchIndexStore) Manifest(_ context.Context, namespace app.IndexNamespace) ([]app.StoredChunkRef, error) {
@@ -41,16 +43,10 @@ func (s *MemorySearchIndexStore) Manifest(_ context.Context, namespace app.Index
 func (s *MemorySearchIndexStore) IndexedEntries(_ context.Context, namespace app.IndexNamespace) ([]app.StoredEntryRef, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	seen := map[app.StoredEntryRef]bool{}
 	var refs []app.StoredEntryRef
-	for _, item := range s.chunks[namespace] {
-		if item.Chunk.EntryID == "" {
-			continue
-		}
-		ref := app.StoredEntryRef{EntryID: item.Chunk.EntryID, EntryHash: item.Chunk.EntryHash}
-		if !seen[ref] {
-			seen[ref] = true
-			refs = append(refs, ref)
+	for version := range s.published {
+		if version.Namespace == namespace {
+			refs = append(refs, app.StoredEntryRef{EntryID: version.EntryID, EntryHash: version.EntryHash})
 		}
 	}
 	sort.Slice(refs, func(i, j int) bool {
@@ -62,37 +58,93 @@ func (s *MemorySearchIndexStore) IndexedEntries(_ context.Context, namespace app
 	return refs, nil
 }
 
-func (s *MemorySearchIndexStore) Reconcile(_ context.Context, namespace app.IndexNamespace, _ string, upserts []app.IndexedChunk, deletes []string) error {
+func (s *MemorySearchIndexStore) Reconcile(ctx context.Context, namespace app.IndexNamespace, _ string, upserts []app.IndexedChunk, deletes []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.validateDimensions(namespace, upserts); err != nil {
+		return err
+	}
 	if s.chunks[namespace] == nil {
 		s.chunks[namespace] = map[string]app.IndexedChunk{}
 	}
 	for _, id := range deletes {
+		if item, ok := s.chunks[namespace][id]; ok {
+			delete(s.published, app.SearchEntryVersion{Namespace: namespace, EntryID: item.Chunk.EntryID, EntryHash: item.Chunk.EntryHash})
+		}
 		delete(s.chunks[namespace], id)
 	}
-	// The namespace fingerprint pins the embedding model, so every vector in
-	// a namespace must share one dimensionality — the first stored vector
-	// sets it, a mismatch is a provider bug.
+	for _, item := range upserts {
+		s.chunks[namespace][item.Chunk.ID] = cloneIndexedChunk(item)
+		s.published[app.SearchEntryVersion{Namespace: namespace, EntryID: item.Chunk.EntryID, EntryHash: item.Chunk.EntryHash}] = true
+	}
+	return nil
+}
+
+func (s *MemorySearchIndexStore) validateDimensions(namespace app.IndexNamespace, rows []app.IndexedChunk) error {
 	dims := 0
 	for _, item := range s.chunks[namespace] {
 		dims = len(item.Vector)
 		break
 	}
-	for _, item := range upserts {
-		if len(item.Vector) == 0 {
-			return fmt.Errorf("sdd: vector for %s is empty", item.Chunk.ID)
+	for _, row := range rows {
+		if len(row.Vector) == 0 {
+			return fmt.Errorf("sdd: empty vector")
 		}
 		if dims == 0 {
-			dims = len(item.Vector)
+			dims = len(row.Vector)
 		}
-		if len(item.Vector) != dims {
-			return fmt.Errorf("sdd: vector for %s has %d dimensions, want %d", item.Chunk.ID, len(item.Vector), dims)
+		if len(row.Vector) != dims {
+			return fmt.Errorf("sdd: inconsistent vector dimensions")
 		}
-		copy := item
-		copy.Vector = append([]float32(nil), item.Vector...)
-		s.chunks[namespace][item.Chunk.ID] = copy
+		for _, v := range row.Vector {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				return fmt.Errorf("sdd: non-finite vector")
+			}
+		}
 	}
+	return nil
+}
+
+func cloneIndexedChunk(row app.IndexedChunk) app.IndexedChunk {
+	row.Vector = append([]float32(nil), row.Vector...)
+	row.Chunk.Breadcrumb = append([]string(nil), row.Chunk.Breadcrumb...)
+	return row
+}
+
+func (s *MemorySearchIndexStore) EntryPublished(ctx context.Context, version app.SearchEntryVersion) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.published[version], nil
+}
+
+func (s *MemorySearchIndexStore) PublishEntry(ctx context.Context, version app.SearchEntryVersion, rows []app.IndexedChunk) error {
+	if err := types.ValidateEntryPublication(version, rows); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.published[version] {
+		return nil
+	}
+	if err := s.validateDimensions(version.Namespace, rows); err != nil {
+		return err
+	}
+	if s.chunks[version.Namespace] == nil {
+		s.chunks[version.Namespace] = map[string]app.IndexedChunk{}
+	}
+	for _, row := range rows {
+		s.chunks[version.Namespace][row.Chunk.ID] = cloneIndexedChunk(row)
+	}
+	s.published[version] = true
 	return nil
 }
 
@@ -102,6 +154,9 @@ func (s *MemorySearchIndexStore) Nearest(_ context.Context, namespaces []app.Ind
 	var result []app.ScoredChunkHit
 	for _, namespace := range namespaces {
 		for _, item := range s.chunks[namespace] {
+			if !s.published[app.SearchEntryVersion{Namespace: namespace, EntryID: item.Chunk.EntryID, EntryHash: item.Chunk.EntryHash}] {
+				continue
+			}
 			if len(vector) != len(item.Vector) {
 				return nil, fmt.Errorf("sdd: query vector has %d dimensions, want %d", len(vector), len(item.Vector))
 			}

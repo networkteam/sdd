@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -187,6 +188,25 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 	if entryID == "" {
 		return errors.New("entryID is required")
 	}
+	dims := 0
+	if i.indexDir != "" {
+		manifest, err := LoadManifest(i.indexDir)
+		if err != nil {
+			return err
+		}
+		for _, state := range manifest.Entries {
+			ids := state.AllChunkIDs()
+			if len(ids) == 0 {
+				continue
+			}
+			doc, err := i.coll.GetByID(ctx, ids[0])
+			if err != nil {
+				return err
+			}
+			dims = len(doc.Embedding)
+			break
+		}
+	}
 	for j, r := range rows {
 		if r.EntryID != entryID {
 			return fmt.Errorf("row %d: entry id %q does not match %q", j, r.EntryID, entryID)
@@ -194,6 +214,18 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 		if len(r.Embedding) == 0 {
 			return fmt.Errorf("row %d (chunk %s): embedding is empty", j, r.ChunkID)
 		}
+		if dims == 0 {
+			dims = len(r.Embedding)
+		}
+		if len(r.Embedding) != dims {
+			return fmt.Errorf("inconsistent vector dimensions")
+		}
+		for _, v := range r.Embedding {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				return fmt.Errorf("non-finite vector")
+			}
+		}
+
 	}
 
 	if len(oldChunkIDs) > 0 {
@@ -216,7 +248,7 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 			Content:   r.Text,
 		})
 	}
-	if err := i.coll.AddDocuments(ctx, docs, 1); err != nil {
+	if err := i.addDocuments(ctx, docs); err != nil {
 		return fmt.Errorf("add chunks for %s: %w", entryID, err)
 	}
 	i.dirty = true
@@ -253,13 +285,34 @@ func (i *Index) Query(ctx context.Context, embedding []float32, nResults int) ([
 	if nResults <= 0 {
 		nResults = 0
 	}
-	results, err := i.coll.QueryEmbedding(ctx, embedding, nResults, nil, nil)
+	var manifest *Manifest
+	if i.indexDir != "" {
+		var err error
+		manifest, err = LoadManifest(i.indexDir)
+		if err != nil {
+			return nil, err
+		}
+	}
+	queryCount := nResults
+	if manifest != nil {
+		queryCount = count
+	}
+	results, err := i.coll.QueryEmbedding(ctx, embedding, queryCount, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("vector query: %w", err)
 	}
 	hits := make([]Hit, 0, len(results))
 	for _, r := range results {
+		if manifest != nil {
+			hash := manifest.VersionHashForChunk(r.Metadata[MetaEntryID], r.ID)
+			if hash == "" || (r.Metadata[MetaEntryHash] != "" && hash != r.Metadata[MetaEntryHash]) {
+				continue
+			}
+		}
 		hits = append(hits, hitFromResult(r))
+		if len(hits) == nResults {
+			break
+		}
 	}
 	return hits, nil
 }

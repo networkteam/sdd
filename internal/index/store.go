@@ -269,6 +269,13 @@ func storeGeneration(indexDir string) (uint64, error) {
 	if n, present, err := readGenerationMarker(indexDir); err != nil {
 		return 0, err
 	} else if present {
+		info, err := os.Stat(manifestPath(indexDir))
+		if err != nil && !os.IsNotExist(err) {
+			return 0, err
+		}
+		if err == nil {
+			return n ^ uint64(info.ModTime().UnixNano()) ^ (uint64(info.Size()) << 20), nil
+		}
 		return n, nil
 	}
 	info, err := os.Stat(manifestPath(indexDir))

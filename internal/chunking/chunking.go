@@ -131,3 +131,28 @@ type DiskAttachmentReader struct {
 func (r DiskAttachmentReader) ReadAttachment(_ context.Context, _ *model.Entry, relPath string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(r.GraphDir, relPath))
 }
+
+// CachedAttachments keeps hashing and derivation on the same bytes within one
+// entry operation. Its lifetime is bounded by that entry, not the whole graph.
+type CachedAttachments struct {
+	Reader  AttachmentReader
+	content map[string][]byte
+}
+
+func (r *CachedAttachments) ReadAttachment(ctx context.Context, entry *model.Entry, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if content, ok := r.content[path]; ok {
+		return content, nil
+	}
+	content, err := r.Reader.ReadAttachment(ctx, entry, path)
+	if err != nil {
+		return nil, err
+	}
+	if r.content == nil {
+		r.content = map[string][]byte{}
+	}
+	r.content[path] = content
+	return content, nil
+}
