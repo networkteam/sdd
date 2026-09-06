@@ -168,20 +168,29 @@ func TestStoreGeneration(t *testing.T) {
 		t.Errorf("legacy generation not stable across reads: %d vs %d", again, legacyGen)
 	}
 
-	// The explicit marker takes precedence and increments per write, so a store
-	// that has been written since upgrade no longer depends on mtime resolution.
 	if err := bumpGeneration(dir); err != nil {
 		t.Fatal(err)
 	}
-	if g, _ := storeGeneration(dir); g != 1 {
-		t.Errorf("generation after first bump = %d, want 1 (marker wins over identity fallback)", g)
+	first, err := storeGeneration(dir)
+	if err != nil || first == legacyGen {
+		t.Fatalf("generation did not change: %v", err)
 	}
 	if err := bumpGeneration(dir); err != nil {
 		t.Fatal(err)
 	}
-	if g, _ := storeGeneration(dir); g != 2 {
-		t.Errorf("generation after second bump = %d, want 2", g)
+	second, err := storeGeneration(dir)
+	if err != nil || second == first {
+		t.Fatalf("generation did not change: %v", err)
 	}
+	m.AddVersion("another", EntryVersion{Hash: "h2"})
+	if err := m.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	afterManifest, err := storeGeneration(dir)
+	if err != nil || afterManifest == second {
+		t.Fatalf("manifest publication without generation bump was missed: %v", err)
+	}
+
 }
 
 func TestMigrateDir_EmptyManifestIsNoop(t *testing.T) {

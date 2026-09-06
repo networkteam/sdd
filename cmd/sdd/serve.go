@@ -428,7 +428,7 @@ func newLocalMutationTargets(project sdd.ProjectID, serverCheckout string) (*loc
 				return nil, nil, nil, fmt.Errorf("mutation target checkout %q does not contain project %s", checkout, project)
 			}
 			targetGraphDir := meta.ResolveGraphDir(checkout, targetCfg)
-			targetGraph, graphErr := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: targetGraphDir})
+			targetGraph, graphErr := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: project, GraphDir: targetGraphDir, Branch: target.Branch})
 			if graphErr != nil {
 				return nil, nil, nil, graphErr
 			}

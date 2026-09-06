@@ -181,6 +181,11 @@ func TestIndex_PersistRoundTrip(t *testing.T) {
 	if err := idx.UpsertEntry(ctx, "entry-P", nil, rows); err != nil {
 		t.Fatal(err)
 	}
+	manifest := &Manifest{Version: 2, Entries: map[string]EntryState{}}
+	manifest.AddVersion("entry-P", EntryVersion{Hash: "published", ChunkIDs: []string{"entry-P#summary"}})
+	if err := manifest.Save(dir); err != nil {
+		t.Fatal(err)
+	}
 	// Verify chromem subdirectory exists at the expected place.
 	if _, err := os.Stat(filepath.Join(dir, "chromem")); err != nil {
 		t.Errorf("chromem dir not created: %v", err)

@@ -23,14 +23,18 @@ import (
 type FilesystemGraphStoreOptions struct {
 	Project  app.ProjectID
 	GraphDir string
+	// Branch is the authority assigned by the target acquirer, if branch-scoped.
+	Branch string
 }
 
 // FilesystemGraphStore is the local canonical graph authority. It owns its
 // revision cache and never requires callers to invalidate snapshots.
 type FilesystemGraphStore struct {
-	project app.ProjectID
-	dir     string
-	mu      sync.Mutex
+	project   app.ProjectID
+	branch    string
+	dir       string
+	mu        sync.Mutex
+	snapshots map[string]*retainedSnapshot
 
 	beforeApplyOperation    func(int) error
 	beforeRollbackOperation func(int) error
@@ -79,6 +83,7 @@ func NewFilesystemGraphStore(options FilesystemGraphStoreOptions) (*FilesystemGr
 	}
 	return &FilesystemGraphStore{
 		project: options.Project,
+		branch:  options.Branch,
 		dir:     options.GraphDir,
 	}, nil
 }

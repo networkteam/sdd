@@ -255,20 +255,18 @@ func readGenerationMarker(indexDir string) (value uint64, present bool, err erro
 	return n, true, nil
 }
 
-// storeGeneration returns a token that changes whenever the store is written.
-// It prefers the explicit marker (bumped by every mutating WriteStore); for a
-// legacy store that has not been written since the upgrade it falls back to the
-// manifest sidecar's identity (size+mtime), which the atomic manifest save
-// always changes. An empty store (no marker, no manifest) is generation 0.
-//
-// The fallback means an unchanged legacy store still caches — any write, which
-// rewrites the manifest, invalidates it — and the first local write then
-// creates the marker and takes over. A store with neither marker nor manifest
-// reloads until the first write, never wrongly reusing a stale snapshot.
+// storeGeneration includes publication changes that precede the marker update.
 func storeGeneration(indexDir string) (uint64, error) {
 	if n, present, err := readGenerationMarker(indexDir); err != nil {
 		return 0, err
 	} else if present {
+		info, err := os.Stat(manifestPath(indexDir))
+		if err != nil && !os.IsNotExist(err) {
+			return 0, err
+		}
+		if err == nil {
+			return n ^ uint64(info.ModTime().UnixNano()) ^ (uint64(info.Size()) << 20), nil
+		}
 		return n, nil
 	}
 	info, err := os.Stat(manifestPath(indexDir))
@@ -286,9 +284,10 @@ func storeGeneration(indexDir string) (uint64, error) {
 // A caller shares one per store directory and guards it with its own mutex —
 // SnapshotCache carries no locking of its own.
 type SnapshotCache struct {
-	index *Index
-	gen   uint64
-	valid bool
+	index            *Index
+	gen              uint64
+	valid            bool
+	manifestIdentity os.FileInfo
 }
 
 // ReadCached runs fn against a store snapshot under the shared lock, reusing
@@ -315,12 +314,20 @@ func ReadCached(ctx context.Context, indexDir string, cache *SnapshotCache, fn f
 	if err != nil {
 		return false, err
 	}
-	if !cache.valid || cache.index == nil || cache.gen != gen {
+	identity, statErr := os.Stat(manifestPath(indexDir))
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return false, statErr
+	}
+	sameManifest := identity == nil && cache.manifestIdentity == nil
+	if identity != nil && cache.manifestIdentity != nil {
+		sameManifest = os.SameFile(identity, cache.manifestIdentity) && identity.ModTime().Equal(cache.manifestIdentity.ModTime()) && identity.Size() == cache.manifestIdentity.Size()
+	}
+	if !cache.valid || cache.index == nil || cache.gen != gen || !sameManifest {
 		store, err := loadStore(indexDir)
 		if err != nil {
 			return false, err
 		}
-		cache.index, cache.gen, cache.valid = store, gen, true
+		cache.index, cache.gen, cache.valid, cache.manifestIdentity = store, gen, true, identity
 		reloaded = true
 	}
 	return reloaded, fn(cache.index)

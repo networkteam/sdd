@@ -37,6 +37,10 @@ type ApplicationOptions struct {
 	Sessions    SessionStore
 	StagedBlobs StagedBlobStore
 	Clock       Clock
+	// PrepareSearch runs once after authorized semantic-search snapshots are
+	// selected. nil preserves SyncMode preparation. Returning nil claims no
+	// coverage; SDD reads publication afterwards. Callback failures propagate.
+	PrepareSearch func(context.Context, SearchTarget) error
 }
 
 // Application resolves current access and dispatches protocol-neutral SDD
@@ -44,10 +48,11 @@ type ApplicationOptions struct {
 // session-addressed method resolves the session's home project from the
 // session's own record.
 type Application struct {
-	access   AccessResolver
-	sessions SessionStore
-	blobs    StagedBlobStore
-	clock    Clock
+	access        AccessResolver
+	sessions      SessionStore
+	blobs         StagedBlobStore
+	clock         Clock
+	prepareSearch func(context.Context, SearchTarget) error
 }
 
 func NewApplication(options ApplicationOptions) (*Application, error) {
@@ -65,10 +70,11 @@ func NewApplication(options ApplicationOptions) (*Application, error) {
 		clock = ClockFunc(time.Now)
 	}
 	return &Application{
-		access:   options.Access,
-		sessions: legacyEndStore{options.Sessions},
-		blobs:    options.StagedBlobs,
-		clock:    clock,
+		access:        options.Access,
+		sessions:      legacyEndStore{options.Sessions},
+		blobs:         options.StagedBlobs,
+		clock:         clock,
+		prepareSearch: options.PrepareSearch,
 	}, nil
 }
 
@@ -304,7 +310,7 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 	if err != nil {
 		return SearchResult{}, err
 	}
-	selected, err := acquireSnapshotForReadBranch(ctx, runtime, request.Branch)
+	selected, err := acquireSnapshotForSearch(ctx, runtime, request.Branch, request.IncludesRevision)
 	if err != nil {
 		return SearchResult{}, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
 	}
@@ -319,10 +325,9 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 		Terms:    request.Terms, Phrase: request.Phrase, Filter: filter,
 		IncludeSuperseded: request.IncludeSuperseded, Limit: request.Limit, MaxCitationsPerEntry: request.MaxCitations,
 	}
-	searchResult, err := runtime.searchSnapshot(ctx, snapshot, selected.store, q)
-	if err != nil {
-		return SearchResult{}, err
-	}
+	members := []*searchTargetMember{{runtime: runtime, selected: selected}}
+	target := SearchTarget{state: &searchTargetState{members: members, mode: request.SyncMode}}
+	defer target.state.closed.Store(true)
 	repos, err := a.selectedDependencies(request.Repos, request.AllRepos, runtime.options.Dependencies)
 	if err != nil {
 		return SearchResult{}, err
@@ -332,30 +337,35 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 		if err != nil {
 			return SearchResult{}, err
 		}
-		member, err := dependency.options.Graph.Current(ctx)
-		if err != nil {
-			return SearchResult{}, dependencyUnavailable()
-		}
-		memberQuery := q
-		if request.SyncMode == SearchSyncLocal {
-			memberQuery.SyncMode = SearchSyncNone
-		}
-		memberResult, err := dependency.searchSnapshot(ctx, member, dependency.options.Graph, memberQuery)
+		member, err := acquireSnapshotForSearch(ctx, dependency, "", "")
 		if err != nil {
 			return SearchResult{}, err
 		}
-		for i := range memberResult.Entries {
-			memberResult.Entries[i].RepoID = repoID
-		}
-		searchResult.Entries = append(searchResult.Entries, memberResult.Entries...)
+		defer member.releaseInto(&err)
+		target.state.members = append(target.state.members, &searchTargetMember{runtime: dependency, selected: member, repoID: repoID})
 	}
+	searchResult, coverage, err := a.searchTarget(ctx, target, q)
+	if err != nil {
+		return SearchResult{}, err
+	}
+
 	sort.SliceStable(searchResult.Entries, func(i, j int) bool { return searchResult.Entries[i].Score > searchResult.Entries[j].Score })
 	if limit := q.EffectiveLimit(); len(searchResult.Entries) > limit {
 		searchResult.Entries = searchResult.Entries[:limit]
 	}
 	var rendered bytes.Buffer
 	presenters.RenderSearch(&rendered, searchResult, snapshot.graph)
-	search := SearchResult{Project: runtime.options.Project, Results: strings.TrimRight(rendered.String(), "\n")}
+	search := SearchResult{Project: runtime.options.Project, Results: strings.TrimRight(rendered.String(), "\n"), Coverage: coverage}
+	for _, member := range coverage {
+		if !member.Complete {
+			search.Notice = "Search indexing is incomplete for the selected snapshots. Available matches are shown; retry later."
+			if search.Results != "" {
+				search.Results += "\n\n"
+			}
+			search.Results += search.Notice
+			break
+		}
+	}
 	for _, entry := range searchResult.Entries {
 		if entry.Entry != nil {
 			search.EntryIDs = append(search.EntryIDs, entry.DisplayID())

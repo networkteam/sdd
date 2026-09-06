@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -87,6 +88,8 @@ type Hit struct {
 type Index struct {
 	db         *chromem.DB
 	coll       *chromem.Collection
+	published  *chromem.Collection
+	manifest   *Manifest
 	indexDir   string // root of the index storage tree (passed to Open)
 	chromemDir string // sub-directory chromem-go writes its gob files into
 	// dirty records whether a mutation touched the collection during this
@@ -140,7 +143,11 @@ func loadStore(indexDir string) (*Index, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get/create collection %q: %w", CollectionName, err)
 	}
-	return &Index{db: db, coll: coll, indexDir: indexDir, chromemDir: chromemDir}, nil
+	manifest, err := LoadManifest(indexDir)
+	if err != nil {
+		return nil, err
+	}
+	return &Index{db: db, coll: coll, indexDir: indexDir, chromemDir: chromemDir, manifest: manifest}, nil
 }
 
 // ensureStoreDir creates the store directory tree so the advisory lock file
@@ -187,6 +194,25 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 	if entryID == "" {
 		return errors.New("entryID is required")
 	}
+	dims := 0
+	if i.indexDir != "" {
+		manifest, err := LoadManifest(i.indexDir)
+		if err != nil {
+			return err
+		}
+		for _, state := range manifest.Entries {
+			ids := state.AllChunkIDs()
+			if len(ids) == 0 {
+				continue
+			}
+			doc, err := i.coll.GetByID(ctx, ids[0])
+			if err != nil {
+				return err
+			}
+			dims = len(doc.Embedding)
+			break
+		}
+	}
 	for j, r := range rows {
 		if r.EntryID != entryID {
 			return fmt.Errorf("row %d: entry id %q does not match %q", j, r.EntryID, entryID)
@@ -194,6 +220,18 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 		if len(r.Embedding) == 0 {
 			return fmt.Errorf("row %d (chunk %s): embedding is empty", j, r.ChunkID)
 		}
+		if dims == 0 {
+			dims = len(r.Embedding)
+		}
+		if len(r.Embedding) != dims {
+			return fmt.Errorf("inconsistent vector dimensions")
+		}
+		for _, v := range r.Embedding {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				return fmt.Errorf("non-finite vector")
+			}
+		}
+
 	}
 
 	if len(oldChunkIDs) > 0 {
@@ -201,6 +239,7 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 			return fmt.Errorf("delete old chunks for %s: %w", entryID, err)
 		}
 		i.dirty = true
+		i.published = nil
 	}
 
 	if len(rows) == 0 {
@@ -216,10 +255,11 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 			Content:   r.Text,
 		})
 	}
-	if err := i.coll.AddDocuments(ctx, docs, 1); err != nil {
+	if err := i.addDocuments(ctx, docs); err != nil {
 		return fmt.Errorf("add chunks for %s: %w", entryID, err)
 	}
 	i.dirty = true
+	i.published = nil
 	return nil
 }
 
@@ -233,6 +273,7 @@ func (i *Index) DeleteEntry(ctx context.Context, chunkIDs []string) error {
 		return err
 	}
 	i.dirty = true
+	i.published = nil
 	return nil
 }
 
@@ -243,24 +284,27 @@ func (i *Index) Query(ctx context.Context, embedding []float32, nResults int) ([
 	if len(embedding) == 0 {
 		return nil, errors.New("query embedding is empty")
 	}
-	count := i.coll.Count()
+	collection, err := i.publishedCollection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	count := collection.Count()
 	if count == 0 {
 		return nil, nil
 	}
-	if nResults > count {
-		nResults = count
-	}
+	nResults = min(nResults, count)
 	if nResults <= 0 {
-		nResults = 0
+		return nil, nil
 	}
-	results, err := i.coll.QueryEmbedding(ctx, embedding, nResults, nil, nil)
+	results, err := collection.QueryEmbedding(ctx, embedding, nResults, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("vector query: %w", err)
 	}
 	hits := make([]Hit, 0, len(results))
-	for _, r := range results {
-		hits = append(hits, hitFromResult(r))
+	for _, result := range results {
+		hits = append(hits, hitFromResult(result))
 	}
+
 	return hits, nil
 }
 

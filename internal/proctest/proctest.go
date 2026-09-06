@@ -232,7 +232,7 @@ func NewWorld(t *testing.T, opts ...Option) *World {
 		WriteEntry(t, cfg.graphDir, entry)
 	}
 
-	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "proctest", GraphDir: cfg.graphDir})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "proctest", GraphDir: cfg.graphDir, Branch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func NewWorld(t *testing.T, opts ...Option) *World {
 	if len(cfg.branchDirs) > 0 {
 		targets := branchTargets{fallback: graph, graphs: map[string]sdd.GraphStore{"main": graph}}
 		for branch, dir := range cfg.branchDirs {
-			store, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "proctest", GraphDir: dir})
+			store, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "proctest", GraphDir: dir, Branch: branch})
 			if err != nil {
 				t.Fatal(err)
 			}

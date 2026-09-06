@@ -326,7 +326,7 @@ func TestBranchVectorAndHybridSearchUseSelectedAttachmentAuthorityAndRelease(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	branch, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: counterProject, GraphDir: branchDir})
+	branch, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: counterProject, GraphDir: branchDir, Branch: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}

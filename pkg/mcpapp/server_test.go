@@ -768,7 +768,7 @@ Branch-only nebula routing evidence exists exclusively on the bound branch.
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	branchGraph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "test", GraphDir: branchDir})
+	branchGraph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "test", GraphDir: branchDir, Branch: branch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -861,7 +861,7 @@ func TestToolContractSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	const want = "62724c76e938ff3fca52aa189b1ee63f5aeef0d63c40849fd6324acbc05ed5f8"
+	const want = "89d78a41c46e005588bd229cce01bde7bae13e5573eb82f11302704786e4da40"
 	if got != want {
 		t.Fatalf("MCP tool contract changed: got %s, want %s", got, want)
 	}
