@@ -1,3 +1,0 @@
-{{ define "json_response_rules" -}}
-Return exactly one JSON object with a required `findings` array. For no findings, return `{"findings":[]}`. Never omit `findings` or set it to `null`. Put all explanations and quoted source text inside the finding fields. Write no text outside the object and use no Markdown fences.
-{{- end }}

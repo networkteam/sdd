@@ -38,25 +38,23 @@ Check only these axes:
 
 ## Output format
 
-{{ template "json_response_rules" }}
-
-Example with one finding:
+Respond with a single JSON object matching this schema — nothing before or after, no code fences:
 
 {
   "findings": [
     {
-      "reasoning": "The draft refers to an earlier approach without identifying it, so a reader cannot tell what changed.",
-      "axis": "stranding",
-      "quote": "the earlier approach",
-      "repair": "write-in",
-      "severity": "substantive"
+      "reasoning": "one to three sentences working through what you noticed and why it fails the pull, ending in a conclusion",
+      "axis": "stranding" | "dilution" | "conflation" | "pointing" | "form",
+      "quote": "the draft's words at issue, verbatim",
+      "repair": "cut" | "write-in" | "split" | "point" | "reword",
+      "severity": "substantive" | "minor"
     }
   ]
 }
 
-**Field order matters: reasoning first, verdict last.** In `reasoning`, work through what you noticed and why it fails the pull in one to three sentences, ending in a conclusion. Then name the axis, repair, and severity; they are conclusions, assigned only after the reasoning has reached its own. If the reasoning concludes the concern does not hold, emit no finding at all — drop it from the array rather than emitting it at any severity.
+**Field order matters: reasoning first, verdict last.** The reasoning is your work — walk through what you noticed before naming the axis, repair, and severity; they are conclusions, assigned only after the reasoning has reached its own. If the reasoning concludes the concern does not hold, emit no finding at all — drop it from the array rather than emitting it at any severity.
 
-All five fields are required on every finding. `axis` must be `stranding`, `dilution`, `conflation`, `pointing`, or `form`. `repair` must be `cut`, `write-in`, `split`, `point`, or `reword`. `severity` must be `substantive` or `minor`. `severity` is `substantive` when the drafting dialogue should take the finding up, `minor` when folding it in or ignoring it is fine.
+All five fields are required on every finding. `severity` is `substantive` when the drafting dialogue should take the finding up, `minor` when folding it in or ignoring it is fine.
 
 {{ template "json_string_rules" }}
 
@@ -64,7 +62,7 @@ All five fields are required on every finding. `axis` must be `stranding`, `dilu
 
 ## Calibration
 
-No findings is a correct outcome. Do not stretch: a finding you would not defend is noise that costs more than it saves. When unsure whether something fails, it does not. Anything outside the five axes is out of scope.
+No findings is a correct outcome — return {"findings": []} without hesitation. Do not stretch: a finding you would not defend is noise that costs more than it saves. When unsure whether something fails, it does not. Anything outside the five axes is out of scope.
 {{- end }}
 
 {{ define "writing_guide_user" -}}
