@@ -20,20 +20,22 @@ const (
 
 // ReconcileSearchIndex maintains the runtime's current graph index. The host
 // authorizes the call; this operation does not resolve a request identity.
-func (r *ProjectRuntime) ReconcileSearchIndex(ctx context.Context, cmd ReconcileSearchIndexCmd) error {
+func (r *ProjectRuntime) ReconcileSearchIndex(ctx context.Context, cmd ReconcileSearchIndexCmd) (err error) {
 	namespace, err := r.indexNamespace()
 	if err != nil {
 		return err
 	}
-	snapshot, err := r.options.Graph.Current(ctx)
+	selected, err := acquireSnapshotForReadBranch(ctx, r, "")
 	if err != nil {
 		return err
 	}
-	hashes, err := r.currentEntryHashes(ctx, snapshot.graph.Entries, r.options.Graph)
+	defer selected.releaseInto(&err)
+	snapshot := selected.snapshot
+	hashes, err := r.currentEntryHashes(ctx, snapshot.graph.Entries, selected.store)
 	if err != nil {
 		return err
 	}
-	return r.reconcileSearchSnapshot(ctx, snapshot, r.options.Graph, namespace, hashes, cmd)
+	return r.reconcileSearchSnapshot(ctx, snapshot, selected.store, namespace, hashes, cmd)
 }
 
 func (r *ProjectRuntime) indexNamespace() (IndexNamespace, error) {

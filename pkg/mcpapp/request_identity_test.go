@@ -217,7 +217,7 @@ The HTTP identity test anchors its real mutation here.
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "identity-test", GraphDir: graphDir})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "identity-test", GraphDir: graphDir, Branch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}

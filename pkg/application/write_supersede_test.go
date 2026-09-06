@@ -54,7 +54,7 @@ func runSupersedeCapture(t *testing.T, supersedes []any) *model.Entry {
 	writeSupersedeWorkflowTarget(t, dir, supersedeSecondID, "The other earlier reading this capture replaces.")
 	writeSupersedeWorkflowTarget(t, dir, supersedeGroundID, supersedeGroundRef)
 
-	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: dir})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: dir, Branch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}

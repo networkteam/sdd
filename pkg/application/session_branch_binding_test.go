@@ -36,11 +36,12 @@ func newBranchBindingApplicationWithStore(t *testing.T, validator sdd.BranchVali
 	if wrap != nil {
 		sessionStore = wrap(sessionStore)
 	}
+	targets := sdd.TargetAcquirerFunc(func(_ context.Context, target sdd.MutationTarget) (*sdd.AcquiredTarget, error) {
+		return &sdd.AcquiredTarget{Target: target, Graph: graph, Release: func() error { return nil }}, nil
+	})
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, Graph: graph, Branches: validator,
-		Targets: sdd.TargetAcquirerFunc(func(_ context.Context, target sdd.MutationTarget) (*sdd.AcquiredTarget, error) {
-			return &sdd.AcquiredTarget{Target: target, Graph: graph, Release: func() error { return nil }}, nil
-		}),
+		Project: sdd.ProjectRef{ID: "example"}, Graph: branchReadFixture{GraphStore: graph, targets: targets, project: "example"}, Branches: validator,
+		Targets: targets,
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 		}),

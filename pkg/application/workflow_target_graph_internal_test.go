@@ -11,7 +11,29 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-type workflowTargetGraphStore struct{ snapshot *Snapshot }
+type workflowTargetGraphStore struct {
+	snapshot *Snapshot
+	reads    *workflowTargetAcquirer
+}
+
+func (s workflowTargetGraphStore) AcquireSnapshot(ctx context.Context, q SnapshotReadQuery) (*AcquiredSnapshot, error) {
+	if q.Branch == "" {
+		return &AcquiredSnapshot{Snapshot: s.snapshot, Attachments: s, Release: func() error { return nil }}, nil
+	}
+	if s.reads == nil {
+		return nil, fmt.Errorf("read branch unavailable")
+	}
+	s.reads.acquisitions++
+	if s.reads.err != nil {
+		return nil, s.reads.err
+	}
+	graph := s.reads.graphs[q.Branch]
+	if graph == nil {
+		return nil, fmt.Errorf("incomplete acquired snapshot")
+	}
+	snapshot, err := graph.Current(ctx)
+	return &AcquiredSnapshot{Snapshot: snapshot, Attachments: graph, Release: func() error { s.reads.releases++; return nil }}, err
+}
 
 func (s workflowTargetGraphStore) Current(context.Context) (*Snapshot, error) { return s.snapshot, nil }
 func (workflowTargetGraphStore) Apply(context.Context, string, MutationBatch, StagedBlobReader) (ApplyResult, error) {
@@ -93,7 +115,7 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	}}
 	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: base}, Targets: targets,
+		Graph: workflowTargetGraphStore{snapshot: base, reads: targets}, Targets: targets,
 	}}
 	app := &Application{access: workflowTargetAccess{runtime: runtime}}
 	workflow := &WorkflowSession{
@@ -186,7 +208,7 @@ func TestWorkflowEffectiveTargetPrecedenceIsSharedByReadsAndWrites(t *testing.T)
 	current := workflowTargetSnapshot(t, "current-r1", []EntryDocument{workflowBranchMarker("2026/07/22-120000-s-tac-cur.md")})
 	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: current}, Targets: &workflowTargetAcquirer{graphs: graphStores},
+		Graph: workflowTargetGraphStore{snapshot: current, reads: &workflowTargetAcquirer{graphs: graphStores}}, Targets: &workflowTargetAcquirer{graphs: graphStores},
 	}}
 	app := &Application{access: workflowTargetAccess{runtime: runtime}}
 
@@ -290,7 +312,7 @@ func TestWorkflowGraphCacheInvalidatesAcrossRebindingAndClear(t *testing.T) {
 	}}
 	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: base}, Targets: targets,
+		Graph: workflowTargetGraphStore{snapshot: base, reads: targets}, Targets: targets,
 	}}
 	app := &Application{access: workflowTargetAccess{runtime: runtime}}
 	workflow := &WorkflowSession{
@@ -322,7 +344,7 @@ func TestWorkflowSessionBindingDriftProvenanceOnlyForBindingTargets(t *testing.T
 	targets := &workflowTargetAcquirer{graphs: map[string]GraphStore{}, err: driftCause}
 	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: base}, Targets: targets,
+		Graph: workflowTargetGraphStore{snapshot: base, reads: targets}, Targets: targets,
 	}}
 	workflow := &WorkflowSession{
 		app: &Application{access: workflowTargetAccess{runtime: runtime}}, project: "example",
@@ -379,7 +401,7 @@ func TestWorkflowSessionBindingDriftProvenanceOnlyForBindingTargets(t *testing.T
 	incompleteTargets := &workflowTargetAcquirer{graphs: map[string]GraphStore{"drifted": nil}}
 	incompleteRuntime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: base}, Targets: incompleteTargets,
+		Graph: workflowTargetGraphStore{snapshot: base, reads: incompleteTargets}, Targets: incompleteTargets,
 	}}
 	incompleteWorkflow := &WorkflowSession{
 		app: &Application{access: workflowTargetAccess{runtime: incompleteRuntime}}, project: "example",
@@ -388,7 +410,7 @@ func TestWorkflowSessionBindingDriftProvenanceOnlyForBindingTargets(t *testing.T
 	_, incompleteErr := (&workflowGraphs{workflow: incompleteWorkflow}).CurrentFor(workflowTargetStore(t, nil))
 	if incompleteErr == nil ||
 		!strings.Contains(incompleteErr.Error(), `session is bound to branch "drifted"`) ||
-		!strings.Contains(incompleteErr.Error(), "target acquisition returned an incomplete runtime") ||
+		!strings.Contains(incompleteErr.Error(), "incomplete acquired snapshot") ||
 		strings.Contains(incompleteErr.Error(), "no longer resolves to a checkout") {
 		t.Fatalf("incomplete binding target error = %v", incompleteErr)
 	}

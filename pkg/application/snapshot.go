@@ -48,9 +48,11 @@ func (s *Snapshot) Revision() string {
 type SnapshotData struct {
 	Project  ProjectID
 	Revision string
-	Config   ProjectConfigDocument
-	Entries  []EntryDocument
-	WIP      []WIPDocument
+	// Config retains stored document data only. Effective read configuration
+	// comes exclusively from AcquiredSnapshot.Config or explicit runtime compatibility.
+	Config  ProjectConfigDocument
+	Entries []EntryDocument
+	WIP     []WIPDocument
 	// Unreadable records documents a store could not decode into structured
 	// form — a file whose YAML frontmatter would not parse, for example. They
 	// are carried as data rather than aborting the load: BuildSnapshot turns

@@ -169,7 +169,7 @@ func TestWorkflowCaptureFocusPersistsThroughRealNewEntry(t *testing.T) {
 	dir := t.TempDir()
 	writeFocusWorkflowTarget(t, dir, targetID)
 
-	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: dir})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: dir, Branch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}

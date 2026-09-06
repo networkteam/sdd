@@ -280,6 +280,26 @@ func (t *testBranchTargets) Acquire(_ context.Context, target sdd.MutationTarget
 	return &sdd.AcquiredTarget{Target: target, Graph: graph, Release: func() error { return nil }}, nil
 }
 
+type testBranchReadStore struct {
+	sdd.GraphStore
+	targets *testBranchTargets
+}
+
+func (s testBranchReadStore) AcquireSnapshot(ctx context.Context, q sdd.SnapshotReadQuery) (*sdd.AcquiredSnapshot, error) {
+	s.targets.mu.RLock()
+	err := s.targets.errors[q.Branch]
+	graph := s.targets.graphs[q.Branch]
+	if graph == nil {
+		graph = s.GraphStore
+	}
+	s.targets.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	q.Branch = ""
+	return graph.(sdd.SnapshotReader).AcquireSnapshot(ctx, q)
+}
+
 func (t *testBranchTargets) set(branch string, graph sdd.GraphStore) {
 	t.mu.Lock()
 	t.graphs[branch] = graph
@@ -332,7 +352,7 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	now := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(testRuntimeGeneration.Add(1)) * time.Hour)
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "test", DisplayName: "Test"}, DefaultBranch: "main", Language: language,
-		Graph: graph, Targets: targets,
+		Graph: testBranchReadStore{GraphStore: graph, targets: targets}, Targets: targets,
 		Branches: sdd.BranchValidatorFunc(func(_ context.Context, target sdd.MutationTarget) error {
 			if target.Project != "test" {
 				return fmt.Errorf("unexpected branch project %q", target.Project)

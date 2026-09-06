@@ -98,10 +98,12 @@ type SearchResult struct {
 }
 
 type ReadAttachmentRequest struct {
-	EntryID  string
-	Filename string
-	Offset   int64
-	MaxBytes int
+	Branch            string
+	BranchFromSession bool
+	EntryID           string
+	Filename          string
+	Offset            int64
+	MaxBytes          int
 }
 
 type ReadAttachmentResult struct {

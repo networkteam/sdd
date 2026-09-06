@@ -118,7 +118,9 @@ func (a *Application) applyOnAcquired(ctx context.Context, runtime *ProjectRunti
 	var apply ApplyResult
 	var applyErr error
 	for attempt := 1; ; attempt++ {
-		snapshot, readErr := acquired.Graph.Current(ctx)
+		snapshotRuntime := *runtime
+		snapshotRuntime.options.Graph = acquired.Graph
+		snapshot, _, readErr := readMaterializedSnapshot(ctx, &snapshotRuntime, "")
 		if readErr != nil {
 			return TransitionResult{Project: runtime.options.Project, Binding: binding, Apply: ApplyResult{State: MutationUnknown}}, &ApplicationError{Code: ErrorRecoveryRequired, Message: "reading mutation target before apply failed", Cause: readErr}
 		}

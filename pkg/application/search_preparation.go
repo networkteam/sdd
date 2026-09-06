@@ -66,6 +66,10 @@ func (t SearchTarget) Entries(ctx context.Context) iter.Seq2[SearchEntryRequirem
 				if !yield(item, err) || err != nil {
 					return
 				}
+				if t.state.closed.Load() {
+					yield(SearchEntryRequirement{}, fmt.Errorf("sdd: search target is no longer available"))
+					return
+				}
 			}
 		}
 	}

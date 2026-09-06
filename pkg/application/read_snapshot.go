@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// AttachmentPageReader is the read portion of GraphStore used by indexing.
+// AttachmentPageReader reads attachment bytes from one acquired source.
 type AttachmentPageReader interface {
 	ReadAttachmentPage(context.Context, string, string, int64, int) (AttachmentPage, error)
 }
@@ -26,7 +26,11 @@ type SnapshotReadQuery struct {
 type AcquiredSnapshot struct {
 	Snapshot    *Snapshot
 	Attachments AttachmentPageReader
-	Release     func() error
+	// Config is immutable committed configuration from this source revision.
+	// Nil explicitly uses runtime configuration; configuration read failures
+	// must be returned by the adapter, never converted to nil.
+	Config  *ProjectConfig
+	Release func() error
 }
 
 // SnapshotReader is an optional GraphStore capability for pinned reads. Hosts
@@ -62,7 +66,7 @@ func acquireReadSnapshot(ctx context.Context, graph GraphStore, project ProjectI
 	}
 	if err != nil {
 		if source != nil && source.Release != nil {
-			err = errors.Join(err, source.Release())
+			err = errors.Join(err, snapshotRelease(source.Release))
 		}
 		return nil, err
 	}
@@ -80,26 +84,56 @@ func (s pinnedGraphStore) ReadAttachmentPage(ctx context.Context, entry, name st
 }
 
 func acquireSnapshotForSearch(ctx context.Context, runtime *ProjectRuntime, branch, includes string) (*readSnapshotSelection, error) {
+	return acquireSnapshotSelection(ctx, runtime, SnapshotReadQuery{Branch: branch, IncludesRevision: includes})
+}
+
+func acquireSnapshotSelection(ctx context.Context, runtime *ProjectRuntime, q SnapshotReadQuery) (*readSnapshotSelection, error) {
+	if _, ok := runtime.options.Graph.(SnapshotReader); !ok {
+		if q.Branch != "" || q.ExactRevision != "" || q.IncludesRevision != "" {
+			return nil, markTargetAcquisitionError(MutationTarget{Project: runtime.Project().ID, Branch: q.Branch}, fmt.Errorf("sdd: graph store does not support selected snapshot reads"))
+		}
+		snapshot, err := runtime.options.Graph.Current(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &readSnapshotSelection{snapshot: snapshot, store: runtime.options.Graph, runtime: runtime}, nil
+	}
+	source, err := acquireReadSnapshot(ctx, runtime.options.Graph, runtime.Project().ID, q)
+	if err != nil {
+		return nil, markTargetAcquisitionError(MutationTarget{Project: runtime.Project().ID, Branch: q.Branch}, err)
+	}
+	return &readSnapshotSelection{
+		snapshot: source.Snapshot, store: pinnedGraphStore{GraphStore: runtime.options.Graph, source: source},
+		runtime: runtime.withReadConfig(source.Config), branch: q.Branch, release: source.Release,
+	}, nil
+}
+
+func (r *ProjectRuntime) withReadConfig(config *ProjectConfig) *ProjectRuntime {
+	if config == nil {
+		return r
+	}
+	clone := *r
+	clone.options.Language = config.Language
+	clone.options.Dependencies = append([]string(nil), config.Dependencies...)
+	return &clone
+}
+
+func readMaterializedSnapshot(ctx context.Context, runtime *ProjectRuntime, branch string) (snapshot *Snapshot, effective *ProjectRuntime, err error) {
 	selected, err := acquireSnapshotForReadBranch(ctx, runtime, branch)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if _, ok := selected.store.(SnapshotReader); !ok {
-		if includes == "" {
-			return selected, nil
-		}
-		err := fmt.Errorf("sdd: source cannot establish read-your-writes freshness")
-		selected.releaseInto(&err)
-		return nil, err
+	defer selected.releaseInto(&err)
+	return selected.snapshot, selected.runtime, nil
+}
+
+type snapshotReleaseError struct{ cause error }
+
+func (e *snapshotReleaseError) Error() string { return "releasing snapshot: " + e.cause.Error() }
+func (e *snapshotReleaseError) Unwrap() error { return e.cause }
+func snapshotRelease(release func() error) error {
+	if err := release(); err != nil {
+		return &snapshotReleaseError{cause: err}
 	}
-	source, err := acquireReadSnapshot(ctx, selected.store, runtime.Project().ID, SnapshotReadQuery{Branch: branch, IncludesRevision: includes})
-	if err != nil {
-		selected.releaseInto(&err)
-		return nil, err
-	}
-	return &readSnapshotSelection{snapshot: source.Snapshot, store: pinnedGraphStore{GraphStore: selected.store, source: source}, branch: branch, release: func() error {
-		err := source.Release()
-		selected.releaseInto(&err)
-		return err
-	}}, nil
+	return nil
 }

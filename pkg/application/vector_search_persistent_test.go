@@ -382,7 +382,7 @@ func newBranchCounterApp(t *testing.T, base sdd.GraphStore, targets sdd.TargetAc
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: counterProject, DisplayName: "Counter"}, DefaultBranch: "main",
-		Graph: base, Targets: targets,
+		Graph: branchReadFixture{GraphStore: base, targets: targets, project: counterProject}, Targets: targets,
 		Embedder:    embeddings,
 		SearchIndex: localadapter.NewPersistentSearchIndexStore(counterProject, cacheRoot, "counter/branch"),
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {

@@ -8,8 +8,8 @@ import (
 )
 
 // MutationTarget is the immutable canonical authority for one graph
-// mutation. Project identifies the session project in this delivery; Branch
-// names the concrete Git branch whose registered checkout owns the write.
+// mutation. Project identifies the project; Branch names its logical write
+// authority. Adapters resolve that authority to their storage.
 type MutationTarget struct {
 	Project ProjectID `json:"project"`
 	Branch  string    `json:"branch"`

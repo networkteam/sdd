@@ -85,7 +85,7 @@ Branch-targeted workflow reads need to follow the written artifact.
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project:       sdd.ProjectRef{ID: "example"},
 		DefaultBranch: "main",
-		Graph:         base,
+		Graph:         branchReadFixture{GraphStore: base, project: "example", targets: workflowBranchTargets{graphs: map[string]sdd.GraphStore{"main": base, "work": work, "explicit": explicit}}},
 		Targets: workflowBranchTargets{graphs: map[string]sdd.GraphStore{
 			"main":     base,
 			"work":     work,
@@ -288,7 +288,7 @@ This reference exists only on the bound work branch.
 	targetGraphs := map[string]sdd.GraphStore{"main": mainGraph, "work": workGraph}
 	rejectNextPreflight := false
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: currentGraph,
+		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: branchReadFixture{GraphStore: currentGraph, project: "example", targets: workflowBranchTargets{graphs: targetGraphs}},
 		Targets: workflowBranchTargets{graphs: targetGraphs},
 		Branches: sdd.BranchValidatorFunc(func(_ context.Context, target sdd.MutationTarget) error {
 			if targetGraphs[target.Branch] == nil {

@@ -299,7 +299,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: project, DisplayName: displayName}, DefaultBranch: cfg.DefaultBranch, Language: language,
-		Dependencies: dependencies, Graph: graph, Targets: targets, Branches: targets,
+		Dependencies: dependencies, Graph: localBranchReadStore{GraphStore: graph, branches: targets}, Targets: targets, Branches: targets,
 		Recovery: sdd.RecoveryAuthorizerFunc(func(_ context.Context, request sdd.RecoveryAccessRequest) error {
 			if request.Actor.Subject != request.OriginalSubject {
 				return &sdd.ApplicationError{Code: sdd.ErrorWriteDenied, Message: "cross-principal recovery is not authorized by the local runtime"}
@@ -409,9 +409,44 @@ func collectSessions(ctx context.Context, application *sdd.Application, retentio
 	}
 }
 
+type localBranchReadStore struct {
+	sdd.GraphStore
+	branches sdd.SnapshotReader
+}
+
+func (s localBranchReadStore) AcquireSnapshot(ctx context.Context, q sdd.SnapshotReadQuery) (*sdd.AcquiredSnapshot, error) {
+	if q.Branch != "" {
+		return s.branches.AcquireSnapshot(ctx, q)
+	}
+	return s.GraphStore.(sdd.SnapshotReader).AcquireSnapshot(ctx, q)
+}
+
 func newLocalMutationTargets(project sdd.ProjectID, serverCheckout string) (*localadapter.GitWorktreeAcquirer, error) {
 	return localadapter.NewGitWorktreeAcquirer(localadapter.GitWorktreeAcquirerOptions{
 		Project: project, ServerCheckout: serverCheckout,
+		ReadFactory: func(ctx context.Context, checkout string, q sdd.SnapshotReadQuery) (*sdd.AcquiredSnapshot, error) {
+			cfg, err := resolveConfigAt(filepath.Join(checkout, model.SDDDirName))
+			if err != nil {
+				return nil, err
+			}
+			if cfg == nil {
+				return nil, fmt.Errorf("read checkout %q has no SDD configuration", checkout)
+			}
+			id := sdd.ProjectID(cfg.RepoID)
+			if id == "" {
+				id = "local"
+			}
+			if id != project {
+				return nil, fmt.Errorf("read checkout %q does not contain project %s", checkout, project)
+			}
+			graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{
+				Project: project, GraphDir: meta.ResolveGraphDir(checkout, cfg), Branch: q.Branch,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return graph.AcquireSnapshot(ctx, q)
+		},
 		Factory: func(_ context.Context, checkout string, target sdd.MutationTarget) (sdd.GraphStore, []sdd.MutationFinalizer, func() error, error) {
 			targetCfg, cfgErr := resolveConfigAt(filepath.Join(checkout, model.SDDDirName))
 			if cfgErr != nil {
