@@ -21,11 +21,17 @@ type DiscoverSearchEntriesQuery struct {
 	// The caller owns the lease and releases it after consuming the iterator.
 	Source *AcquiredSnapshot
 	Cursor SearchDiscoveryCursor
+	// EntryIDs selects canonical full IDs. Nil means all; nonnil empty is invalid.
+	EntryIDs []string
 }
 
 // DiscoverSearchEntries hashes at most the current entry and never prepares
 // chunks. Stop iteration to stop I/O. A returned error ends the sequence.
-// Save each cursor atomically with enqueueing its missing descriptor.
+// Save each cursor atomically with enqueueing its missing descriptor. Cursors
+// bind revision, index namespace and the canonical selected ID set. Reordered
+// or duplicated IDs preserve scope; nil differs from every explicit selection.
+// Malformed IDs fail; valid absent or ineligible IDs yield no requirement.
+// Missing attachment bytes and other source/read failures remain errors.
 func (r *ProjectRuntime) DiscoverSearchEntries(ctx context.Context, q DiscoverSearchEntriesQuery) iter.Seq2[SearchEntryRequirement, error] {
 	return func(yield func(SearchEntryRequirement, error) bool) {
 		if err := validateAcquiredSnapshot(q.Source, r.options.Project.ID, ""); err != nil {
@@ -42,7 +48,7 @@ func (r *ProjectRuntime) DiscoverSearchEntries(ctx context.Context, q DiscoverSe
 			yield(SearchEntryRequirement{}, fmt.Errorf("sdd: entry publication capability is required"))
 			return
 		}
-		finder := finders.SearchEntriesFinder{Graph: q.Source.Snapshot.graph, Revision: q.Source.Snapshot.Revision(), Namespace: ns, Attachments: graphStoreAttachmentReader{store: q.Source.Attachments}, Store: store, ExcludeEmbedded: r.options.ExcludeEmbeddedFromIndex}
+		finder := finders.SearchEntriesFinder{Graph: q.Source.Snapshot.graph, Revision: q.Source.Snapshot.Revision(), Namespace: ns, Attachments: graphStoreAttachmentReader{store: q.Source.Attachments}, Store: store, EntryIDs: q.EntryIDs, ExcludeEmbedded: r.options.ExcludeEmbeddedFromIndex}
 		finder.Discover(ctx, q.Cursor)(yield)
 	}
 }

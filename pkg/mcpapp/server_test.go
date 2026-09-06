@@ -768,7 +768,7 @@ Branch-only nebula routing evidence exists exclusively on the bound branch.
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	branchGraph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "test", GraphDir: branchDir})
+	branchGraph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "test", GraphDir: branchDir, Branch: branch})
 	if err != nil {
 		t.Fatal(err)
 	}

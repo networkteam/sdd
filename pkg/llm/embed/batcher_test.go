@@ -323,3 +323,37 @@ func TestBatcherWindowStartsAtOldestItem(t *testing.T) {
 		wg.Wait()
 	})
 }
+
+func TestBatcherRejectsEntireRequestBeforeAdmission(t *testing.T) {
+	for _, mode := range []string{"bytes", "units", "measurement"} {
+		t.Run(mode, func(t *testing.T) {
+			options := batchOptions()
+			options.MaxItems = 1
+			options.MaxBytes = 2
+			if mode != "bytes" {
+				options.MaxBytes = 100
+				options.MaxUnits = 2
+				options.Measure = func(text string) (int, error) {
+					if mode == "measurement" && text == "bad" {
+						return 0, errors.New("cannot measure")
+					}
+					return len(text), nil
+				}
+			}
+			var calls atomic.Int32
+			b := newBatcher(t, func(_ context.Context, req embed.Request) (embed.Result, error) {
+				calls.Add(1)
+				return numberedVectors(req), nil
+			}, options)
+			if _, err := b.Embed(t.Context(), embed.Request{Purpose: embed.PurposeDocument, Texts: []string{"1", "2", "bad"}}); err == nil {
+				t.Fatal("invalid trailing text accepted")
+			}
+			if _, err := b.Embed(t.Context(), embed.Request{Purpose: embed.PurposeDocument, Texts: []string{"3"}}); err != nil {
+				t.Fatal(err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("invalid request dispatched work: calls=%d", calls.Load())
+			}
+		})
+	}
+}

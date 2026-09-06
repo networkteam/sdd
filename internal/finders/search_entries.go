@@ -22,6 +22,7 @@ type SearchEntriesFinder struct {
 	Attachments     chunking.AttachmentReader
 	Store           EntryPublicationReader
 	ExcludeEmbedded bool
+	EntryIDs        []string
 }
 
 func (f SearchEntriesFinder) Discover(ctx context.Context, cursor query.SearchDiscoveryCursor) iter.Seq2[query.SearchEntryRequirement, error] {
@@ -31,11 +32,20 @@ func (f SearchEntriesFinder) Discover(ctx context.Context, cursor query.SearchDi
 			fail(err)
 			return
 		}
-		if cursor != (query.SearchDiscoveryCursor{}) && (cursor.Revision != f.Revision || cursor.Namespace != f.Namespace) {
+		ids, selection, err := model.NormalizeEntrySelection(f.EntryIDs)
+		if err != nil {
+			fail(err)
+			return
+		}
+		if cursor != (query.SearchDiscoveryCursor{}) && (cursor.Revision != f.Revision || cursor.Namespace != f.Namespace || cursor.Selection != selection) {
 			fail(fmt.Errorf("sdd: discovery cursor does not match snapshot and index configuration"))
 			return
 		}
-		for _, entry := range f.Graph.EntriesAfter(cursor.AfterEntryID) {
+		if err := f.Graph.EntrySelectionLoadError(ids, cursor.AfterEntryID); err != nil {
+			fail(err)
+			return
+		}
+		for _, entry := range f.Graph.SelectedEntriesAfter(ids, cursor.AfterEntryID) {
 			if err := ctx.Err(); err != nil {
 				fail(err)
 				return
@@ -56,7 +66,7 @@ func (f SearchEntriesFinder) Discover(ctx context.Context, cursor query.SearchDi
 			}
 			item := query.SearchEntryRequirement{
 				Entry: types.SearchEntryDescriptor{Version: version, SourceRevision: f.Revision}, Published: published,
-				Cursor: query.SearchDiscoveryCursor{Revision: f.Revision, Namespace: f.Namespace, AfterEntryID: entry.ID},
+				Cursor: query.SearchDiscoveryCursor{Revision: f.Revision, Namespace: f.Namespace, AfterEntryID: entry.ID, Selection: selection},
 			}
 			if !yield(item, nil) {
 				return

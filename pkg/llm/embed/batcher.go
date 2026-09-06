@@ -113,6 +113,28 @@ func (b *Batcher) Embed(ctx context.Context, req Request) (Result, error) {
 	if req.Purpose != PurposeDocument {
 		return Result{}, fmt.Errorf("embed: unsupported batch purpose %q", req.Purpose)
 	}
+	units := make([]int, len(req.Texts))
+	for i, text := range req.Texts {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
+		if b.ctx.Err() != nil {
+			return Result{}, ErrBatcherClosed
+		}
+		if len(text) > b.options.MaxBytes {
+			return Result{}, fmt.Errorf("embed: text exceeds batch byte limit")
+		}
+		if b.options.Measure != nil {
+			value, err := b.options.Measure(text)
+			if err != nil {
+				return Result{}, err
+			}
+			if value < 0 || value > b.options.MaxUnits {
+				return Result{}, fmt.Errorf("embed: text exceeds provider unit limit")
+			}
+			units[i] = value
+		}
+	}
 	result := Result{Vectors: make([][]float32, len(req.Texts))}
 	replies := make(chan batchReply, min(len(req.Texts), b.options.MaxItems))
 	caller, cancel := context.WithCancel(ctx)
@@ -125,21 +147,8 @@ func (b *Batcher) Embed(ctx context.Context, req Request) (Result, error) {
 		if submitted < len(req.Texts) {
 			if next == nil {
 				text := req.Texts[submitted]
-				units := 0
-				if b.options.Measure != nil {
-					var err error
-					units, err = b.options.Measure(text)
-					if err != nil {
-						return Result{}, err
-					}
-					if units < 0 || units > b.options.MaxUnits {
-						return Result{}, fmt.Errorf("embed: text exceeds provider unit limit")
-					}
-				}
-				if len(text) > b.options.MaxBytes {
-					return Result{}, fmt.Errorf("embed: text exceeds batch byte limit")
-				}
-				next = &batchItem{text: text, index: submitted, units: units, caller: caller, reply: replies, queued: time.Now()}
+
+				next = &batchItem{text: text, index: submitted, units: units[submitted], caller: caller, reply: replies, queued: time.Now()}
 			}
 			admission, item = b.items, *next
 		}

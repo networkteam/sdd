@@ -32,6 +32,8 @@ type AcquiredSnapshot struct {
 // SnapshotReader is an optional GraphStore capability for pinned reads. Hosts
 // retain exact revisions independently of lease lifetime for durable jobs.
 // IncludesRevision is a causal guarantee, never lexical revision comparison.
+// Readers must honor Branch or reject it; an empty branch selects their current
+// authority. Target-scoped readers must validate nonempty branch requests.
 type SnapshotReader interface {
 	AcquireSnapshot(context.Context, SnapshotReadQuery) (*AcquiredSnapshot, error)
 }
@@ -90,7 +92,7 @@ func acquireSnapshotForSearch(ctx context.Context, runtime *ProjectRuntime, bran
 		selected.releaseInto(&err)
 		return nil, err
 	}
-	source, err := acquireReadSnapshot(ctx, selected.store, runtime.Project().ID, SnapshotReadQuery{IncludesRevision: includes})
+	source, err := acquireReadSnapshot(ctx, selected.store, runtime.Project().ID, SnapshotReadQuery{Branch: branch, IncludesRevision: includes})
 	if err != nil {
 		selected.releaseInto(&err)
 		return nil, err

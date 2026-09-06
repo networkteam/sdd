@@ -31,9 +31,11 @@ func (s snapshotAttachments) ReadAttachmentPage(ctx context.Context, entry, name
 
 // AcquireSnapshot retains immutable graph and attachment bytes while a lease
 // exists. Exact revisions survive concurrent Apply calls, not process restarts;
-// durable consumers supply their own revision-backed SnapshotReader.
+// durable consumers supply their own revision-backed SnapshotReader. Memory
+// scales with all graph and attachment bytes in live revisions. A nonempty
+// requested branch must match FilesystemGraphStoreOptions.Branch.
 func (s *FilesystemGraphStore) AcquireSnapshot(ctx context.Context, q app.SnapshotReadQuery) (*app.AcquiredSnapshot, error) {
-	if q.Branch != "" || (q.ExactRevision != "" && q.IncludesRevision != "") {
+	if (q.Branch != "" && q.Branch != s.branch) || (q.ExactRevision != "" && q.IncludesRevision != "") {
 		return nil, fmt.Errorf("sdd: invalid filesystem snapshot selection")
 	}
 	s.mu.Lock()
