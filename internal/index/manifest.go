@@ -2,6 +2,7 @@ package index
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -170,13 +171,18 @@ func (m *Manifest) Save(indexDir string) error {
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	file, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
 		return fmt.Errorf("write manifest tmp: %w", err)
+	}
+	_, writeErr := file.Write(data)
+	if err := errors.Join(writeErr, file.Sync(), file.Close()); err != nil {
+		return err
 	}
 	if err := os.Rename(tmp, final); err != nil {
 		return fmt.Errorf("rename manifest: %w", err)
 	}
-	return nil
+	return syncPublicationDirectory(indexDir)
 }
 
 // AddVersion records a version for an entry (monotonic accumulation). A version

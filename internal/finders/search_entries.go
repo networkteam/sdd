@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"slices"
-	"strings"
 
 	"github.com/networkteam/sdd/internal/chunking"
 	"github.com/networkteam/sdd/internal/model"
@@ -37,15 +35,12 @@ func (f SearchEntriesFinder) Discover(ctx context.Context, cursor query.SearchDi
 			fail(fmt.Errorf("sdd: discovery cursor does not match snapshot and index configuration"))
 			return
 		}
-		entries := slices.Clone(f.Graph.Entries)
-		slices.SortFunc(entries, func(a, b *model.Entry) int { return strings.Compare(a.ID, b.ID) })
-		start, _ := slices.BinarySearchFunc(entries, cursor.AfterEntryID, func(e *model.Entry, id string) int { return strings.Compare(e.ID, id) })
-		for _, entry := range entries[start:] {
+		for _, entry := range f.Graph.EntriesAfter(cursor.AfterEntryID) {
 			if err := ctx.Err(); err != nil {
 				fail(err)
 				return
 			}
-			if entry.ID <= cursor.AfterEntryID || !chunking.IncludeEntry(entry, f.ExcludeEmbedded) {
+			if !chunking.IncludeEntry(entry, f.ExcludeEmbedded) {
 				continue
 			}
 			hash, err := chunking.EntryStateHash(ctx, entry, f.Attachments)

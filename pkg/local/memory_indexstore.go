@@ -135,6 +135,11 @@ func (s *MemorySearchIndexStore) PublishEntry(ctx context.Context, version app.S
 	if s.published[version] {
 		return nil
 	}
+	for _, row := range rows {
+		if stored, ok := s.chunks[version.Namespace][row.Chunk.ID]; ok && (stored.Chunk.EntryID != version.EntryID || stored.Chunk.EntryHash != version.EntryHash) {
+			return fmt.Errorf("sdd: chunk ID conflicts with another entry version")
+		}
+	}
 	if err := s.validateDimensions(version.Namespace, rows); err != nil {
 		return err
 	}

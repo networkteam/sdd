@@ -2,6 +2,7 @@ package embed
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"sync"
@@ -25,14 +26,13 @@ type BatchOptions struct {
 	BufferItems int
 	Window      time.Duration
 	Concurrency int
-	Timeout     time.Duration
 	MaxUnits    int
 	Measure     func(string) (int, error)
 }
 
 // Batcher combines document requests over one fixed embedder configuration.
-// Query requests bypass the document queue and have a separate concurrency
-// slot. Shared calls use the batcher's lifetime, never a submitting caller's
+// Route queries separately and compose Bounded inside the batcher for
+// provider deadlines. Shared calls use the batcher's lifetime, never a caller's
 // context. Place Observed inside Batcher: document results carry zero Usage
 // because usage belongs to provider batches, not to participating callers.
 type Batcher struct {
@@ -42,10 +42,10 @@ type Batcher struct {
 	cancel   context.CancelFunc
 	items    chan batchItem
 	batches  chan []batchItem
-	query    chan struct{}
 	done     chan struct{}
 	wg       sync.WaitGroup
 	sequence atomic.Uint64
+	instance string
 }
 
 type batchItem struct {
@@ -87,11 +87,11 @@ func Attribution(ctx context.Context) BatchAttribution {
 }
 
 func NewBatcher(ctx context.Context, inner Embedder, options BatchOptions) (*Batcher, error) {
-	if inner == nil || options.MaxItems < 1 || options.MaxBytes < 1 || options.BufferItems < 1 || options.Concurrency < 1 || options.Window <= 0 || options.Timeout <= 0 || (options.Measure == nil) != (options.MaxUnits == 0) || options.MaxUnits < 0 {
+	if inner == nil || options.MaxItems < 1 || options.MaxBytes < 1 || options.BufferItems < 1 || options.Concurrency < 1 || options.Window <= 0 || (options.Measure == nil) != (options.MaxUnits == 0) || options.MaxUnits < 0 {
 		return nil, fmt.Errorf("embed: invalid batch options")
 	}
 	lifetime, cancel := context.WithCancel(ctx)
-	b := &Batcher{inner: inner, options: options, ctx: lifetime, cancel: cancel, items: make(chan batchItem, options.BufferItems), batches: make(chan []batchItem), query: make(chan struct{}, 1), done: make(chan struct{})}
+	b := &Batcher{instance: rand.Text(), inner: inner, options: options, ctx: lifetime, cancel: cancel, items: make(chan batchItem, options.BufferItems), batches: make(chan []batchItem), done: make(chan struct{})}
 	b.wg.Add(1 + options.Concurrency)
 	go b.collect()
 	for range options.Concurrency {
@@ -110,72 +110,58 @@ func (b *Batcher) Embed(ctx context.Context, req Request) (Result, error) {
 	if b.ctx.Err() != nil {
 		return Result{}, ErrBatcherClosed
 	}
-	if req.Purpose == PurposeQuery {
-		return b.embedQuery(ctx, req)
-	}
 	if req.Purpose != PurposeDocument {
 		return Result{}, fmt.Errorf("embed: unsupported batch purpose %q", req.Purpose)
 	}
 	result := Result{Vectors: make([][]float32, len(req.Texts))}
-	replies := make(chan batchReply, len(req.Texts))
-	// Cancellation also discards queued pieces if admission fails midway.
+	replies := make(chan batchReply, min(len(req.Texts), b.options.MaxItems))
 	caller, cancel := context.WithCancel(ctx)
 	defer cancel()
-	for i, text := range req.Texts {
-		units := 0
-		if b.options.Measure != nil {
-			var err error
-			units, err = b.options.Measure(text)
-			if err != nil {
-				return Result{}, err
+	submitted, received := 0, 0
+	var next *batchItem
+	for received < len(req.Texts) {
+		var admission chan batchItem
+		var item batchItem
+		if submitted < len(req.Texts) {
+			if next == nil {
+				text := req.Texts[submitted]
+				units := 0
+				if b.options.Measure != nil {
+					var err error
+					units, err = b.options.Measure(text)
+					if err != nil {
+						return Result{}, err
+					}
+					if units < 0 || units > b.options.MaxUnits {
+						return Result{}, fmt.Errorf("embed: text exceeds provider unit limit")
+					}
+				}
+				if len(text) > b.options.MaxBytes {
+					return Result{}, fmt.Errorf("embed: text exceeds batch byte limit")
+				}
+				next = &batchItem{text: text, index: submitted, units: units, caller: caller, reply: replies, queued: time.Now()}
 			}
-			if units < 0 || units > b.options.MaxUnits {
-				return Result{}, fmt.Errorf("embed: text exceeds provider unit limit")
-			}
+			admission, item = b.items, *next
 		}
-		if len(text) > b.options.MaxBytes {
-			return Result{}, fmt.Errorf("embed: text exceeds batch byte limit")
-		}
-		item := batchItem{text: text, index: i, units: units, caller: caller, reply: replies, queued: time.Now()}
 		select {
-		case b.items <- item:
-		case <-ctx.Done():
-			return Result{}, ctx.Err()
-		case <-b.ctx.Done():
-			return Result{}, ErrBatcherClosed
-		}
-	}
-	for range req.Texts {
-		select {
+		case admission <- item:
+			submitted++
+			next = nil
 		case reply := <-replies:
 			if reply.err != nil {
 				return Result{}, reply.err
 			}
 			result.Vectors[reply.index] = reply.vector
 			result.Identity = reply.identity
+			received++
 		case <-ctx.Done():
 			return Result{}, ctx.Err()
 		case <-b.ctx.Done():
 			return Result{}, ErrBatcherClosed
 		}
 	}
-	return result, nil
-}
 
-func (b *Batcher) embedQuery(ctx context.Context, req Request) (Result, error) {
-	select {
-	case b.query <- struct{}{}:
-	case <-ctx.Done():
-		return Result{}, ctx.Err()
-	case <-b.ctx.Done():
-		return Result{}, ErrBatcherClosed
-	}
-	defer func() { <-b.query }()
-	call, cancel := context.WithTimeout(ctx, b.options.Timeout)
-	stop := context.AfterFunc(b.ctx, cancel)
-	defer stop()
-	defer cancel()
-	return b.inner.Embed(call, req)
+	return result, nil
 }
 
 func (b *Batcher) collect() {
@@ -271,9 +257,8 @@ func (b *Batcher) dispatch(items []batchItem) {
 	if len(active) == 0 {
 		return
 	}
-	id := fmt.Sprintf("%p-%d", b, b.sequence.Add(1))
-	call, cancel := context.WithTimeout(context.WithValue(b.ctx, attributionKey{}, BatchAttribution{ID: id, Callers: callers}), b.options.Timeout)
-	defer cancel()
+	id := fmt.Sprintf("%s-%d", b.instance, b.sequence.Add(1))
+	call := context.WithValue(b.ctx, attributionKey{}, BatchAttribution{ID: id, Callers: callers})
 	result, err := b.inner.Embed(call, Request{Purpose: PurposeDocument, Texts: texts})
 	if err == nil {
 		err = validateBatchVectors(result.Vectors, len(active))
@@ -283,7 +268,11 @@ func (b *Batcher) dispatch(items []batchItem) {
 		if err == nil {
 			reply.vector = result.Vectors[i]
 		}
-		item.reply <- reply
+		select {
+		case item.reply <- reply:
+		case <-item.caller.Done():
+		case <-b.ctx.Done():
+		}
 	}
 }
 

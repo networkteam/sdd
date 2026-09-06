@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -56,10 +57,66 @@ func (i *Index) addDocuments(ctx context.Context, docs []chromem.Document) (err 
 	if err != nil {
 		return err
 	}
+	if err := filepath.WalkDir(i.chromemDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return syncPublicationDirectory(path)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	loaded, err := loadStore(i.indexDir)
 	if err != nil {
 		return err
 	}
 	i.db, i.coll = loaded.db, loaded.coll
 	return nil
+}
+
+// Build the published read view once per store snapshot, before nearest-N
+// selection, so unpublished rows neither fill the hit limit nor require an
+// all-candidate result allocation on each query.
+func (i *Index) publishedCollection(ctx context.Context) (*chromem.Collection, error) {
+	if i.indexDir == "" {
+		return i.coll, nil
+	}
+	if i.published != nil {
+		return i.published, nil
+	}
+	manifest := i.manifest
+	db := chromem.NewDB()
+	collection, err := db.GetOrCreateCollection(CollectionName, nil, embedFuncStub)
+	if err != nil {
+		return nil, err
+	}
+	for _, state := range manifest.Entries {
+		for _, version := range state.Versions {
+			for _, id := range version.ChunkIDs {
+				doc, err := i.coll.GetByID(ctx, id)
+				if err != nil {
+					return nil, err
+				}
+				if doc.Metadata[MetaEntryHash] != "" && doc.Metadata[MetaEntryHash] != version.Hash {
+					return nil, fmt.Errorf("index: published chunk version mismatch")
+				}
+				doc.Metadata[MetaEntryHash] = version.Hash
+				if err := collection.AddDocument(ctx, doc); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	i.published = collection
+	return collection, nil
+}
+
+func syncPublicationDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	return errors.Join(directory.Sync(), directory.Close())
 }

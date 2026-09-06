@@ -88,6 +88,8 @@ type Hit struct {
 type Index struct {
 	db         *chromem.DB
 	coll       *chromem.Collection
+	published  *chromem.Collection
+	manifest   *Manifest
 	indexDir   string // root of the index storage tree (passed to Open)
 	chromemDir string // sub-directory chromem-go writes its gob files into
 	// dirty records whether a mutation touched the collection during this
@@ -141,7 +143,11 @@ func loadStore(indexDir string) (*Index, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get/create collection %q: %w", CollectionName, err)
 	}
-	return &Index{db: db, coll: coll, indexDir: indexDir, chromemDir: chromemDir}, nil
+	manifest, err := LoadManifest(indexDir)
+	if err != nil {
+		return nil, err
+	}
+	return &Index{db: db, coll: coll, indexDir: indexDir, chromemDir: chromemDir, manifest: manifest}, nil
 }
 
 // ensureStoreDir creates the store directory tree so the advisory lock file
@@ -233,6 +239,7 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 			return fmt.Errorf("delete old chunks for %s: %w", entryID, err)
 		}
 		i.dirty = true
+		i.published = nil
 	}
 
 	if len(rows) == 0 {
@@ -252,6 +259,7 @@ func (i *Index) UpsertEntry(ctx context.Context, entryID string, oldChunkIDs []s
 		return fmt.Errorf("add chunks for %s: %w", entryID, err)
 	}
 	i.dirty = true
+	i.published = nil
 	return nil
 }
 
@@ -265,6 +273,7 @@ func (i *Index) DeleteEntry(ctx context.Context, chunkIDs []string) error {
 		return err
 	}
 	i.dirty = true
+	i.published = nil
 	return nil
 }
 
@@ -275,45 +284,27 @@ func (i *Index) Query(ctx context.Context, embedding []float32, nResults int) ([
 	if len(embedding) == 0 {
 		return nil, errors.New("query embedding is empty")
 	}
-	count := i.coll.Count()
+	collection, err := i.publishedCollection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	count := collection.Count()
 	if count == 0 {
 		return nil, nil
 	}
-	if nResults > count {
-		nResults = count
-	}
+	nResults = min(nResults, count)
 	if nResults <= 0 {
-		nResults = 0
+		return nil, nil
 	}
-	var manifest *Manifest
-	if i.indexDir != "" {
-		var err error
-		manifest, err = LoadManifest(i.indexDir)
-		if err != nil {
-			return nil, err
-		}
-	}
-	queryCount := nResults
-	if manifest != nil {
-		queryCount = count
-	}
-	results, err := i.coll.QueryEmbedding(ctx, embedding, queryCount, nil, nil)
+	results, err := collection.QueryEmbedding(ctx, embedding, nResults, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("vector query: %w", err)
 	}
 	hits := make([]Hit, 0, len(results))
-	for _, r := range results {
-		if manifest != nil {
-			hash := manifest.VersionHashForChunk(r.Metadata[MetaEntryID], r.ID)
-			if hash == "" || (r.Metadata[MetaEntryHash] != "" && hash != r.Metadata[MetaEntryHash]) {
-				continue
-			}
-		}
-		hits = append(hits, hitFromResult(r))
-		if len(hits) == nResults {
-			break
-		}
+	for _, result := range results {
+		hits = append(hits, hitFromResult(result))
 	}
+
 	return hits, nil
 }
 

@@ -66,3 +66,38 @@ func acquireReadSnapshot(ctx context.Context, graph GraphStore, project ProjectI
 	}
 	return source, nil
 }
+
+type pinnedGraphStore struct {
+	GraphStore
+	source *AcquiredSnapshot
+}
+
+func (s pinnedGraphStore) Current(context.Context) (*Snapshot, error) { return s.source.Snapshot, nil }
+func (s pinnedGraphStore) ReadAttachmentPage(ctx context.Context, entry, name string, offset int64, limit int) (AttachmentPage, error) {
+	return s.source.Attachments.ReadAttachmentPage(ctx, entry, name, offset, limit)
+}
+
+func acquireSnapshotForSearch(ctx context.Context, runtime *ProjectRuntime, branch, includes string) (*readSnapshotSelection, error) {
+	selected, err := acquireSnapshotForReadBranch(ctx, runtime, branch)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := selected.store.(SnapshotReader); !ok {
+		if includes == "" {
+			return selected, nil
+		}
+		err := fmt.Errorf("sdd: source cannot establish read-your-writes freshness")
+		selected.releaseInto(&err)
+		return nil, err
+	}
+	source, err := acquireReadSnapshot(ctx, selected.store, runtime.Project().ID, SnapshotReadQuery{IncludesRevision: includes})
+	if err != nil {
+		selected.releaseInto(&err)
+		return nil, err
+	}
+	return &readSnapshotSelection{snapshot: source.Snapshot, store: pinnedGraphStore{GraphStore: selected.store, source: source}, branch: branch, release: func() error {
+		err := source.Release()
+		selected.releaseInto(&err)
+		return err
+	}}, nil
+}

@@ -200,6 +200,7 @@ type StageAttachmentResult struct {
 // --- free reads -------------------------------------------------------------
 
 type SearchArgs struct {
+	IncludesRevision  string   `json:"includes_revision,omitempty" jsonschema:"require a selected revision containing this successful write"`
 	Session           string   `json:"session,omitempty" jsonschema:"session handle this connection is attached to (from start_session or resume_session); required — the read runs in that session's project and branch"`
 	Project           string   `json:"project,omitempty" jsonschema:"project to read in; defaults to the session's home project. Another project must lie in the home project's declared dependency closure and be one the principal can read"`
 	Terms             []string `json:"terms,omitempty" jsonschema:"text mode: regex terms combined with AND"`
@@ -215,7 +216,9 @@ type SearchArgs struct {
 }
 
 type SearchResult struct {
-	Results string `json:"results" jsonschema:"matching entries with citations"`
+	Coverage []sdd.SearchCoverage `json:"coverage,omitempty" jsonschema:"published entry coverage for each fixed search snapshot"`
+	Notice   string               `json:"notice,omitempty" jsonschema:"readable incomplete-indexing notice"`
+	Results  string               `json:"results" jsonschema:"matching entries with citations"`
 }
 
 type ViewArgs struct {
@@ -807,8 +810,8 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 		return nil, SearchResult{}, err
 	}
 	result, err := s.app.Search(ctx, s.requestIdentity(req), project, sdd.SearchRequest{
-		SyncMode: s.searchSyncMode,
-		Terms:    args.Terms, Phrase: args.Query, Type: args.Type, Layer: args.Layer, Kind: args.Kind,
+		SyncMode: s.searchSyncMode, IncludesRevision: args.IncludesRevision,
+		Terms: args.Terms, Phrase: args.Query, Type: args.Type, Layer: args.Layer, Kind: args.Kind,
 		IncludeSuperseded: args.IncludeSuperseded, Limit: limit, MaxCitations: maxCitations,
 		Branch: branch, BranchFromSession: branchFromSession, Repos: args.Repos, AllRepos: args.AllRepos,
 	})
@@ -822,7 +825,7 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 	if strings.TrimSpace(out) == "" {
 		out = "(no entries matched — try another phrasing, or proceed if the topic is genuinely new)"
 	}
-	return nil, SearchResult{Results: out}, nil
+	return nil, SearchResult{Results: out, Coverage: result.Coverage, Notice: result.Notice}, nil
 
 }
 

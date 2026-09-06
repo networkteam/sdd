@@ -37,8 +37,9 @@ type PersistentSearchIndexStore struct {
 	repoKey   string
 	now       func() time.Time
 
-	mu     sync.Mutex
-	caches map[string]*index.SnapshotCache // per store dir
+	mu        sync.Mutex
+	manifests map[string]*index.ManifestCache
+	caches    map[string]*index.SnapshotCache // per store dir
 	// reloads counts fresh snapshot loads, for tests that assert the cache
 	// reuses a snapshot until a write bumps the generation.
 	reloads atomic.Int64
@@ -55,6 +56,7 @@ func NewPersistentSearchIndexStore(project app.ProjectID, cacheRoot, repoKey str
 		repoKey:   repoKey,
 		now:       time.Now,
 		caches:    map[string]*index.SnapshotCache{},
+		manifests: map[string]*index.ManifestCache{},
 	}
 }
 
@@ -86,7 +88,7 @@ func (s *PersistentSearchIndexStore) IndexedEntries(_ context.Context, namespace
 	if err != nil {
 		return nil, err
 	}
-	manifest, err := index.LoadManifest(dir)
+	manifest, err := s.readManifest(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +109,7 @@ func (s *PersistentSearchIndexStore) Manifest(_ context.Context, namespace app.I
 	if err != nil {
 		return nil, err
 	}
-	manifest, err := index.LoadManifest(dir)
+	manifest, err := s.readManifest(dir)
 	if err != nil {
 		return nil, err
 	}

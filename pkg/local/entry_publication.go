@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/networkteam/sdd/internal/index"
 	app "github.com/networkteam/sdd/pkg/application"
@@ -16,7 +17,7 @@ func (s *PersistentSearchIndexStore) EntryPublished(ctx context.Context, version
 	if err != nil {
 		return false, err
 	}
-	manifest, err := index.LoadManifest(dir)
+	manifest, err := s.readManifest(dir)
 	if err != nil {
 		return false, err
 	}
@@ -49,6 +50,22 @@ func (s *PersistentSearchIndexStore) PublishEntry(ctx context.Context, version a
 		if publishedVersion(manifest, version) {
 			return nil
 		}
+		incoming := make(map[string]bool, len(chunks))
+		for _, chunk := range chunks {
+			incoming[chunk.Chunk.ID] = true
+		}
+		for entry, state := range manifest.Entries {
+			for _, stored := range state.Versions {
+				if entry == version.EntryID && stored.Hash == version.EntryHash {
+					continue
+				}
+				for _, id := range stored.ChunkIDs {
+					if incoming[id] {
+						return fmt.Errorf("sdd: chunk ID conflicts with another published version")
+					}
+				}
+			}
+		}
 		rows := make([]index.Row, len(chunks))
 		ids := make([]string, len(chunks))
 		for i, chunk := range chunks {
@@ -61,4 +78,15 @@ func (s *PersistentSearchIndexStore) PublishEntry(ctx context.Context, version a
 		manifest.AddVersion(version.EntryID, index.EntryVersion{Hash: version.EntryHash, Fingerprint: version.Namespace.Fingerprint, ChunkIDs: ids, IndexedAt: s.now()})
 		return manifest.Save(dir)
 	})
+}
+
+func (s *PersistentSearchIndexStore) readManifest(dir string) (*index.Manifest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cache := s.manifests[dir]
+	if cache == nil {
+		cache = &index.ManifestCache{}
+		s.manifests[dir] = cache
+	}
+	return cache.Read(dir)
 }

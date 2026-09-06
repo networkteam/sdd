@@ -71,6 +71,8 @@ type ShowResult struct {
 }
 
 type SearchRequest struct {
+	// IncludesRevision asks the source to observe a revision containing this write.
+	IncludesRevision string
 	// SyncMode is required, including for text-only requests.
 	SyncMode          SearchSyncMode
 	Terms             []string
@@ -88,6 +90,8 @@ type SearchRequest struct {
 }
 
 type SearchResult struct {
+	Coverage []SearchCoverage
+	Notice   string
 	Project  ProjectRef
 	Results  string
 	EntryIDs []string

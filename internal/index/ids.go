@@ -44,21 +44,12 @@ func AttachmentChunkID(entryID, attachmentPath string, n int) string {
 	return fmt.Sprintf("%s#attach-%s-%d", entryID, short, n)
 }
 
-// VersionSegment derives the short version tag embedded in a versioned chunk ID
-// from an entry-state hash — the first 8 hex chars, enough to distinguish an
-// entry's stored versions while keeping IDs bounded. It is an identity tag
-// only: the FULL entry hash lives in the row's entry_hash metadata and in the
-// manifest, and that is what read-time freshness compares against. A hash
-// shorter than 8 chars (only in tests) is used whole.
-func VersionSegment(entryHash string) string {
-	if len(entryHash) >= 8 {
-		return entryHash[:8]
-	}
-	return entryHash
-}
+// VersionSegment preserves the full hash so different published versions
+// cannot overwrite one another through a truncated chunk identity.
+func VersionSegment(entryHash string) string { return entryHash }
 
 // SummaryChunkIDVersioned is the version-qualified summary chunk ID:
-// entryID#v-<hash8>#summary. New writes mint versioned IDs so a changed entry
+// entryID#v-<hash>#summary. New writes mint versioned IDs so a changed entry
 // adds a version rather than overwriting the old one — two branches holding
 // different versions of one entry each own their own rows in the shared store.
 func SummaryChunkIDVersioned(entryID, entryHash string) string {
@@ -66,13 +57,13 @@ func SummaryChunkIDVersioned(entryID, entryHash string) string {
 }
 
 // BodyChunkIDVersioned is the version-qualified n-th body chunk ID:
-// entryID#v-<hash8>#body-N.
+// entryID#v-<hash>#body-N.
 func BodyChunkIDVersioned(entryID, entryHash string, n int) string {
 	return fmt.Sprintf("%s#v-%s#body-%d", entryID, VersionSegment(entryHash), n)
 }
 
 // AttachmentChunkIDVersioned is the version-qualified n-th attachment chunk ID:
-// entryID#v-<hash8>#attach-<p6>-N.
+// entryID#v-<hash>#attach-<p6>-N.
 func AttachmentChunkIDVersioned(entryID, entryHash, attachmentPath string, n int) string {
 	h := sha256.Sum256([]byte(attachmentPath))
 	short := hex.EncodeToString(h[:3])
