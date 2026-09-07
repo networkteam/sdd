@@ -1153,6 +1153,7 @@ type materializedGraphView struct {
 type workflowGraphs struct {
 	workflow *WorkflowSession
 	views    map[MutationTarget]*materializedGraphView
+	sources  map[MutationTarget]*materializedGraphView
 }
 
 func (g *workflowGraphs) Current() (*model.Graph, error) {
@@ -1184,11 +1185,12 @@ func (g *workflowGraphs) targetView(target MutationTarget, fromBinding bool) (*m
 	if view := g.views[target]; view != nil {
 		return view, nil
 	}
-	snapshot, runtime, err := readMaterializedSnapshot(g.workflow.ctx, runtime, target.Branch)
+	source, err := g.sourceView(runtime, target.Branch)
 	if err != nil {
 		return nil, withSessionBindingTargetError(g.workflow.branch, fromBinding, err)
 	}
-	snapshot, err = g.workflow.app.snapshotWithDependenciesFrom(g.workflow.ctx, g.workflow.identity, runtime, snapshot)
+	runtime = source.runtime
+	snapshot, err := g.workflow.app.snapshotWithDependenciesFrom(g.workflow.ctx, g.workflow.identity, runtime, source.snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -1200,7 +1202,27 @@ func (g *workflowGraphs) targetView(target MutationTarget, fromBinding bool) (*m
 	return view, nil
 }
 
-func (g *workflowGraphs) Invalidate() { g.views = nil }
+func (g *workflowGraphs) sourceView(runtime *ProjectRuntime, branch string) (*materializedGraphView, error) {
+	target := MutationTarget{Project: runtime.options.Project.ID, Branch: branch}
+	if view := g.sources[target]; view != nil {
+		return view, nil
+	}
+	snapshot, selected, err := readMaterializedSnapshot(g.workflow.ctx, runtime, branch)
+	if err != nil {
+		return nil, err
+	}
+	if g.sources == nil {
+		g.sources = make(map[MutationTarget]*materializedGraphView)
+	}
+	view := &materializedGraphView{snapshot: snapshot, runtime: selected}
+	g.sources[target] = view
+	return view, nil
+}
+
+func (g *workflowGraphs) Invalidate() {
+	g.views = nil
+	g.sources = nil
+}
 
 func (w *WorkflowSession) readInfo() (InfoResult, error) {
 	view, err := w.graphs.targetView(MutationTarget{Project: w.project, Branch: w.branch}, w.branch != "")

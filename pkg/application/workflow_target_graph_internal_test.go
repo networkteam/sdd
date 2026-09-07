@@ -563,3 +563,87 @@ Target-aware graph test procedure.
 	}
 	return store
 }
+
+type workflowClosureStore struct {
+	workflowTargetGraphStore
+	dependencies []string
+	acquisitions int
+}
+
+func (s *workflowClosureStore) AcquireSnapshot(_ context.Context, q SnapshotReadQuery) (*AcquiredSnapshot, error) {
+	s.acquisitions++
+	return &AcquiredSnapshot{Snapshot: s.snapshot, Config: &ProjectConfig{Dependencies: append([]string(nil), s.dependencies...)}, Attachments: s, Release: func() error { return nil }}, nil
+}
+
+type workflowClosureAccess struct {
+	workflowTargetAccess
+	projects map[ProjectID]*ProjectRuntime
+	denied   bool
+	checks   int
+}
+
+func (a *workflowClosureAccess) ResolveProject(_ context.Context, _ Principal, id ProjectID, _ Access) (*ProjectRuntime, error) {
+	a.checks++
+	if a.denied && id == "target" {
+		return nil, errors.New("access revoked")
+	}
+	return a.projects[id], nil
+}
+func (a *workflowClosureAccess) ResolveDependency(_ context.Context, _ Principal, _ ProjectID, dependency string) (*ProjectRuntime, error) {
+	return a.projects[ProjectID(dependency)], nil
+}
+
+// The operation boundary and repeated graph requests are internal engine seams.
+func TestWorkflowDependencyClosureReusesOperationSources(t *testing.T) {
+	for _, changed := range []ProjectID{"home", "middle"} {
+		t.Run(string(changed), func(t *testing.T) {
+			stores := map[ProjectID]*workflowClosureStore{}
+			access := &workflowClosureAccess{projects: map[ProjectID]*ProjectRuntime{}}
+			for _, id := range []ProjectID{"home", "middle", "target"} {
+				snapshot, err := BuildSnapshot(t.Context(), SnapshotData{Project: id, Revision: string(id) + "-r1"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				store := &workflowClosureStore{workflowTargetGraphStore: workflowTargetGraphStore{snapshot: snapshot}}
+				stores[id] = store
+				access.projects[id] = &ProjectRuntime{options: ProjectRuntimeOptions{Project: ProjectRef{ID: id}, Graph: store}}
+			}
+			stores["home"].dependencies = []string{"middle"}
+			stores["middle"].dependencies = []string{"target"}
+			w := &WorkflowSession{app: &Application{access: access}, project: "home", branch: "work"}
+			w.graphs = &workflowGraphs{workflow: w}
+			w.setOperation(t.Context(), RequestIdentity{Subject: "reader"})
+			target := MutationTarget{Project: "target"}
+			first, err := w.graphs.targetView(target, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stores[changed].dependencies = nil
+			checks := access.checks
+			second, err := w.graphs.targetView(target, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first != second {
+				t.Fatal("target view changed within operation")
+			}
+			if access.checks <= checks {
+				t.Fatal("cached view bypassed authorization")
+			}
+			for id, store := range stores {
+				if store.acquisitions != 1 {
+					t.Fatalf("%s acquired %d times", id, store.acquisitions)
+				}
+			}
+			access.denied = true
+			if _, err := w.graphs.targetView(target, false); err == nil {
+				t.Fatal("cached view bypassed revoked authorization")
+			}
+			access.denied = false
+			w.setOperation(t.Context(), RequestIdentity{Subject: "reader"})
+			if _, err := w.graphs.targetView(target, false); err == nil || !strings.Contains(err.Error(), "dependency closure") {
+				t.Fatalf("next operation ignored configuration change: %v", err)
+			}
+		})
+	}
+}

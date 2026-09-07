@@ -365,7 +365,7 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 			return SearchResult{}, err
 		}
 		defer member.releaseInto(&err)
-		target.state.members = append(target.state.members, &searchTargetMember{runtime: dependency, selected: member, repoID: repoID})
+		target.state.members = append(target.state.members, &searchTargetMember{runtime: member.runtime, selected: member, repoID: repoID})
 	}
 	searchResult, coverage, err := a.searchTarget(ctx, target, q)
 	if err != nil {

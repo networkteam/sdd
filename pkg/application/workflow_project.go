@@ -107,7 +107,7 @@ func (w *WorkflowSession) targetRuntime(project ProjectID, required Access) (*Pr
 		_, runtime, err := w.app.resolve(w.ctx, w.identity, w.project, required)
 		return runtime, err
 	}
-	_, runtime, err := w.app.resolveTargetProject(w.ctx, w.identity, home, project, required, w.branch)
+	_, runtime, err := w.app.resolveTargetProject(w.ctx, w.identity, home, project, required, w.branch, w.graphs.sourceView)
 	return runtime, err
 }
 
@@ -143,7 +143,7 @@ func (w *WorkflowSession) ReadScope(ctx context.Context, identity RequestIdentit
 // principal — and the principal is a member of the target, asked with the
 // access the operation needs. Reading a dependency inside the home view and
 // being in it are different questions; this is the second.
-func (a *Application) resolveTargetProject(ctx context.Context, identity RequestIdentity, home *ProjectRuntime, target ProjectID, required Access, homeBranch string) (Principal, *ProjectRuntime, error) {
+func (a *Application) resolveTargetProject(ctx context.Context, identity RequestIdentity, home *ProjectRuntime, target ProjectID, required Access, homeBranch string, sourceView func(*ProjectRuntime, string) (*materializedGraphView, error)) (Principal, *ProjectRuntime, error) {
 	principal, err := a.resolvePrincipal(ctx, identity)
 	if err != nil {
 		return Principal{}, nil, err
@@ -153,13 +153,13 @@ func (a *Application) resolveTargetProject(ctx context.Context, identity Request
 		return principal, runtime, err
 	}
 	if required == AccessRead {
-		_, selected, err := readMaterializedSnapshot(ctx, home, homeBranch)
+		selected, err := sourceView(home, homeBranch)
 		if err != nil {
 			return Principal{}, nil, err
 		}
-		home = selected
+		home = selected.runtime
 	}
-	if err := a.inDependencyClosure(ctx, principal, home, target, required == AccessRead); err != nil {
+	if err := a.inDependencyClosure(ctx, principal, home, target, required == AccessRead, sourceView); err != nil {
 		return Principal{}, nil, err
 	}
 	runtime, err := a.resolveProject(ctx, principal, target, required)
@@ -175,18 +175,18 @@ func (a *Application) resolveTargetProject(ctx context.Context, identity Request
 // behind it is a valid target. Membership is a property of the resolved
 // project, never of the declared string: a declaration names a repo ID, and
 // only the composition knows which project carries it.
-func (a *Application) inDependencyClosure(ctx context.Context, principal Principal, home *ProjectRuntime, target ProjectID, readConfig bool) error {
+func (a *Application) inDependencyClosure(ctx context.Context, principal Principal, home *ProjectRuntime, target ProjectID, readConfig bool, sourceView func(*ProjectRuntime, string) (*materializedGraphView, error)) error {
 	seen := map[ProjectID]bool{home.options.Project.ID: true}
 	queue := []*ProjectRuntime{home}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
 		if readConfig && current != home {
-			_, selected, err := readMaterializedSnapshot(ctx, current, "")
+			selected, err := sourceView(current, "")
 			if err != nil {
 				return err
 			}
-			current = selected
+			current = selected.runtime
 		}
 		for _, dependency := range current.options.Dependencies {
 			runtime, err := a.access.ResolveDependency(ctx, principal, current.options.Project.ID, dependency)
