@@ -10,7 +10,6 @@ import (
 	"github.com/networkteam/sdd/internal/textsplitter"
 	"github.com/networkteam/sdd/pkg/application/types"
 	"github.com/networkteam/sdd/pkg/llm/embed"
-	"github.com/networkteam/slogutils"
 )
 
 type EntryPublisher interface {
@@ -69,7 +68,6 @@ func (h SearchEntryHandler) Index(ctx context.Context, cmd command.IndexSearchEn
 	if err := h.Store.PublishEntry(ctx, key, rows); err != nil {
 		return err
 	}
-	slogutils.FromContext(ctx).DebugContext(ctx, "published search entry", "project", key.Namespace.Project, "entry", key.EntryID, "hash", key.EntryHash, "chunks", len(rows))
 	if cmd.OnPublished != nil {
 		cmd.OnPublished(key.EntryID, len(rows))
 	}
