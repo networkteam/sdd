@@ -69,7 +69,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		Doc:       engine.FuncDoc{Name: "sessionInfo", Doc: "Session framing: local participant, configured language, available search modes, and actionable recovery notices."},
 		ServeSafe: true,
 		Fn: func(*engine.Context, map[string]any) (any, error) {
-			info, err := w.app.Info(w.ctx, w.identity, w.project, InfoRequest{})
+			info, err := w.readInfo()
 			if err != nil {
 				return nil, err
 			}
@@ -112,10 +112,13 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 			if rec, ok := args["recovery"].(bool); ok && !rec {
 				omitRecovery = true
 			}
-			target, fromBinding := w.effectiveTarget(ctx.Store)
-			result, err := w.app.View(w.ctx, w.identity, target.Project, ViewRequest{Layout: layout, Branch: target.Branch, Budget: servedViewBudget, OmitRecovery: omitRecovery})
+			view, err := w.graphs.viewFor(ctx.Store)
 			if err != nil {
-				return nil, w.withSessionBindingTargetError(err, fromBinding)
+				return nil, err
+			}
+			result, err := w.app.viewFromSnapshot(w.ctx, w.identity, view.runtime, view.snapshot, ViewRequest{Layout: layout, Budget: servedViewBudget, OmitRecovery: omitRecovery})
+			if err != nil {
+				return nil, err
 			}
 			return result.Sections, nil
 		},
@@ -163,14 +166,16 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 					}
 				}
 			}
-			target, fromBinding := w.effectiveTarget(ctx.Store)
-			result, err := w.app.Show(w.ctx, w.identity, target.Project, ShowRequest{
+			view, err := w.graphs.viewFor(ctx.Store)
+			if err != nil {
+				return nil, err
+			}
+			result, err := showFromSnapshot(view.runtime, view.snapshot, ShowRequest{
 				IDs: ids, UpDepth: workflowIntArg(args, "up", query.DefaultUpDepth), DownDepth: workflowIntArg(args, "down", query.DefaultDownDepth),
-				Branch: target.Branch,
 				Budget: serveChainBudget,
 			})
 			if err != nil {
-				return nil, w.withSessionBindingTargetError(err, fromBinding)
+				return nil, err
 			}
 			w.session.LogRead("inject:entryChains", result.FullIDs, result.SummaryIDs)
 			return result.Entries, nil
@@ -192,11 +197,7 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		Doc:       engine.FuncDoc{Name: "procedureList", Doc: "The live playbook moves, one line each: canonical, a compact signature of its accepted start params, and the first sentence of the head entry's summary. Shell-class procedures are excluded — they enter through start_session."},
 		ServeSafe: true,
 		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
-			result, err := w.app.Procedures(w.ctx, w.identity, w.projectFor(ctx.Store), ProcedureListRequest{})
-			if err != nil {
-				return nil, err
-			}
-			return result.Procedures, nil
+			return renderProcedureList(ctx.Graph), nil
 		},
 	}); err != nil {
 		return err

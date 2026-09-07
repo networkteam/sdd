@@ -179,6 +179,20 @@ func (b branchTargets) Acquire(_ context.Context, target sdd.MutationTarget) (*s
 	return &sdd.AcquiredTarget{Target: target, Graph: graph, Release: func() error { return nil }}, nil
 }
 
+type branchReadStore struct {
+	sdd.GraphStore
+	targets branchTargets
+}
+
+func (s branchReadStore) AcquireSnapshot(ctx context.Context, q sdd.SnapshotReadQuery) (*sdd.AcquiredSnapshot, error) {
+	graph := s.targets.graphs[q.Branch]
+	if graph == nil {
+		graph = s.GraphStore
+	}
+	q.Branch = ""
+	return graph.(sdd.SnapshotReader).AcquireSnapshot(ctx, q)
+}
+
 // World is one project: a real application over temp stores with a scripted
 // LLM. GraphDir is the on-disk graph — real writes land there.
 type World struct {
@@ -259,6 +273,7 @@ func NewWorld(t *testing.T, opts ...Option) *World {
 			targets.graphs[branch] = store
 		}
 		options.Targets = targets
+		options.Graph = branchReadStore{GraphStore: graph, targets: targets}
 		options.Branches = sdd.BranchValidatorFunc(func(context.Context, sdd.MutationTarget) error { return nil })
 	}
 	runtime, err := sdd.NewProjectRuntime(options)

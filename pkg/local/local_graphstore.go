@@ -422,7 +422,11 @@ func (s *FilesystemGraphStore) ReadAttachmentPage(_ context.Context, entryID, fi
 	if err := s.recoverPendingTransactionsLocked(); err != nil {
 		return app.AttachmentPage{}, err
 	}
-	return app.PageAttachment(os.DirFS(s.dir), ".", entryID, filename, offset, maxBytes)
+	page, err := app.PageAttachment(os.DirFS(s.dir), ".", entryID, filename, offset, maxBytes)
+	if err != nil {
+		return app.AttachmentPage{}, err
+	}
+	return attachmentPageWithLocalPath(page, s.dir, entryID)
 }
 
 func (s *FilesystemGraphStore) lock() (*flock.Flock, error) {

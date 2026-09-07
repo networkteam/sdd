@@ -41,7 +41,7 @@ func (rootAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectI
 
 func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 	graphDir := writeFixtureGraph(t)
-	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "root-test", GraphDir: graphDir})
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "root-test", GraphDir: graphDir, Branch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}

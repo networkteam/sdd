@@ -114,7 +114,8 @@ func (a *Application) CurrentSnapshot(ctx context.Context, identity RequestIdent
 	if err != nil {
 		return nil, err
 	}
-	return runtime.options.Graph.Current(ctx)
+	snapshot, _, err := readMaterializedSnapshot(ctx, runtime, "")
+	return snapshot, err
 }
 
 // StageBlob resolves current read access before placing immutable bytes in
@@ -159,7 +160,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 	if err != nil {
 		return CreateEntryResult{}, err
 	}
-	snapshot, err := a.snapshotWithDependenciesFrom(ctx, identity, runtime, targetSnapshot)
+	snapshot, err := a.snapshotWithDependencyPolicy(ctx, identity, runtime, targetSnapshot, false)
 	if err != nil {
 		return CreateEntryResult{}, err
 	}
@@ -422,7 +423,10 @@ func snapshotMutationTarget(ctx context.Context, runtime *ProjectRuntime, target
 			err = errors.Join(err, fmt.Errorf("releasing mutation target %s after snapshot: %w", target.Branch, releaseErr))
 		}
 	}()
-	return acquired.Graph.Current(ctx)
+	selectedRuntime := *runtime
+	selectedRuntime.options.Graph = acquired.Graph
+	snapshot, _, err = readMaterializedSnapshot(ctx, &selectedRuntime, "")
+	return snapshot, err
 }
 
 func newMutationID(prefix string) (string, error) {

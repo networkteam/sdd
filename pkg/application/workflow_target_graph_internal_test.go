@@ -11,7 +11,29 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-type workflowTargetGraphStore struct{ snapshot *Snapshot }
+type workflowTargetGraphStore struct {
+	snapshot *Snapshot
+	reads    *workflowTargetAcquirer
+}
+
+func (s workflowTargetGraphStore) AcquireSnapshot(ctx context.Context, q SnapshotReadQuery) (*AcquiredSnapshot, error) {
+	if q.Branch == "" {
+		return &AcquiredSnapshot{Snapshot: s.snapshot, Attachments: s, Release: func() error { return nil }}, nil
+	}
+	if s.reads == nil {
+		return nil, fmt.Errorf("read branch unavailable")
+	}
+	s.reads.acquisitions++
+	if s.reads.err != nil {
+		return nil, s.reads.err
+	}
+	graph := s.reads.graphs[q.Branch]
+	if graph == nil {
+		return nil, fmt.Errorf("incomplete acquired snapshot")
+	}
+	snapshot, err := graph.Current(ctx)
+	return &AcquiredSnapshot{Snapshot: snapshot, Attachments: graph, Release: func() error { s.reads.releases++; return nil }}, err
+}
 
 func (s workflowTargetGraphStore) Current(context.Context) (*Snapshot, error) { return s.snapshot, nil }
 func (workflowTargetGraphStore) Apply(context.Context, string, MutationBatch, StagedBlobReader) (ApplyResult, error) {
@@ -93,7 +115,7 @@ func TestWorkflowContextUsesBranchTargetForSummaryAndPredicates(t *testing.T) {
 	}}
 	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: base}, Targets: targets,
+		Graph: workflowTargetGraphStore{snapshot: base, reads: targets}, Targets: targets,
 	}}
 	app := &Application{access: workflowTargetAccess{runtime: runtime}}
 	workflow := &WorkflowSession{
@@ -186,7 +208,7 @@ func TestWorkflowEffectiveTargetPrecedenceIsSharedByReadsAndWrites(t *testing.T)
 	current := workflowTargetSnapshot(t, "current-r1", []EntryDocument{workflowBranchMarker("2026/07/22-120000-s-tac-cur.md")})
 	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: current}, Targets: &workflowTargetAcquirer{graphs: graphStores},
+		Graph: workflowTargetGraphStore{snapshot: current, reads: &workflowTargetAcquirer{graphs: graphStores}}, Targets: &workflowTargetAcquirer{graphs: graphStores},
 	}}
 	app := &Application{access: workflowTargetAccess{runtime: runtime}}
 
@@ -290,7 +312,7 @@ func TestWorkflowGraphCacheInvalidatesAcrossRebindingAndClear(t *testing.T) {
 	}}
 	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: base}, Targets: targets,
+		Graph: workflowTargetGraphStore{snapshot: base, reads: targets}, Targets: targets,
 	}}
 	app := &Application{access: workflowTargetAccess{runtime: runtime}}
 	workflow := &WorkflowSession{
@@ -322,7 +344,7 @@ func TestWorkflowSessionBindingDriftProvenanceOnlyForBindingTargets(t *testing.T
 	targets := &workflowTargetAcquirer{graphs: map[string]GraphStore{}, err: driftCause}
 	runtime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: base}, Targets: targets,
+		Graph: workflowTargetGraphStore{snapshot: base, reads: targets}, Targets: targets,
 	}}
 	workflow := &WorkflowSession{
 		app: &Application{access: workflowTargetAccess{runtime: runtime}}, project: "example",
@@ -379,7 +401,7 @@ func TestWorkflowSessionBindingDriftProvenanceOnlyForBindingTargets(t *testing.T
 	incompleteTargets := &workflowTargetAcquirer{graphs: map[string]GraphStore{"drifted": nil}}
 	incompleteRuntime := &ProjectRuntime{options: ProjectRuntimeOptions{
 		Project: ProjectRef{ID: "example"}, DefaultBranch: "main",
-		Graph: workflowTargetGraphStore{snapshot: base}, Targets: incompleteTargets,
+		Graph: workflowTargetGraphStore{snapshot: base, reads: incompleteTargets}, Targets: incompleteTargets,
 	}}
 	incompleteWorkflow := &WorkflowSession{
 		app: &Application{access: workflowTargetAccess{runtime: incompleteRuntime}}, project: "example",
@@ -388,7 +410,7 @@ func TestWorkflowSessionBindingDriftProvenanceOnlyForBindingTargets(t *testing.T
 	_, incompleteErr := (&workflowGraphs{workflow: incompleteWorkflow}).CurrentFor(workflowTargetStore(t, nil))
 	if incompleteErr == nil ||
 		!strings.Contains(incompleteErr.Error(), `session is bound to branch "drifted"`) ||
-		!strings.Contains(incompleteErr.Error(), "target acquisition returned an incomplete runtime") ||
+		!strings.Contains(incompleteErr.Error(), "incomplete acquired snapshot") ||
 		strings.Contains(incompleteErr.Error(), "no longer resolves to a checkout") {
 		t.Fatalf("incomplete binding target error = %v", incompleteErr)
 	}
@@ -540,4 +562,88 @@ Target-aware graph test procedure.
 		t.Fatal(err)
 	}
 	return store
+}
+
+type workflowClosureStore struct {
+	workflowTargetGraphStore
+	dependencies []string
+	acquisitions int
+}
+
+func (s *workflowClosureStore) AcquireSnapshot(_ context.Context, q SnapshotReadQuery) (*AcquiredSnapshot, error) {
+	s.acquisitions++
+	return &AcquiredSnapshot{Snapshot: s.snapshot, Config: &ProjectConfig{Dependencies: append([]string(nil), s.dependencies...)}, Attachments: s, Release: func() error { return nil }}, nil
+}
+
+type workflowClosureAccess struct {
+	workflowTargetAccess
+	projects map[ProjectID]*ProjectRuntime
+	denied   bool
+	checks   int
+}
+
+func (a *workflowClosureAccess) ResolveProject(_ context.Context, _ Principal, id ProjectID, _ Access) (*ProjectRuntime, error) {
+	a.checks++
+	if a.denied && id == "target" {
+		return nil, errors.New("access revoked")
+	}
+	return a.projects[id], nil
+}
+func (a *workflowClosureAccess) ResolveDependency(_ context.Context, _ Principal, _ ProjectID, dependency string) (*ProjectRuntime, error) {
+	return a.projects[ProjectID(dependency)], nil
+}
+
+// The operation boundary and repeated graph requests are internal engine seams.
+func TestWorkflowDependencyClosureReusesOperationSources(t *testing.T) {
+	for _, changed := range []ProjectID{"home", "middle"} {
+		t.Run(string(changed), func(t *testing.T) {
+			stores := map[ProjectID]*workflowClosureStore{}
+			access := &workflowClosureAccess{projects: map[ProjectID]*ProjectRuntime{}}
+			for _, id := range []ProjectID{"home", "middle", "target"} {
+				snapshot, err := BuildSnapshot(t.Context(), SnapshotData{Project: id, Revision: string(id) + "-r1"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				store := &workflowClosureStore{workflowTargetGraphStore: workflowTargetGraphStore{snapshot: snapshot}}
+				stores[id] = store
+				access.projects[id] = &ProjectRuntime{options: ProjectRuntimeOptions{Project: ProjectRef{ID: id}, Graph: store}}
+			}
+			stores["home"].dependencies = []string{"middle"}
+			stores["middle"].dependencies = []string{"target"}
+			w := &WorkflowSession{app: &Application{access: access}, project: "home", branch: "work"}
+			w.graphs = &workflowGraphs{workflow: w}
+			w.setOperation(t.Context(), RequestIdentity{Subject: "reader"})
+			target := MutationTarget{Project: "target"}
+			first, err := w.graphs.targetView(target, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stores[changed].dependencies = nil
+			checks := access.checks
+			second, err := w.graphs.targetView(target, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first != second {
+				t.Fatal("target view changed within operation")
+			}
+			if access.checks <= checks {
+				t.Fatal("cached view bypassed authorization")
+			}
+			for id, store := range stores {
+				if store.acquisitions != 1 {
+					t.Fatalf("%s acquired %d times", id, store.acquisitions)
+				}
+			}
+			access.denied = true
+			if _, err := w.graphs.targetView(target, false); err == nil {
+				t.Fatal("cached view bypassed revoked authorization")
+			}
+			access.denied = false
+			w.setOperation(t.Context(), RequestIdentity{Subject: "reader"})
+			if _, err := w.graphs.targetView(target, false); err == nil || !strings.Contains(err.Error(), "dependency closure") {
+				t.Fatalf("next operation ignored configuration change: %v", err)
+			}
+		})
+	}
 }

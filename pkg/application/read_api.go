@@ -12,7 +12,12 @@ const (
 	DefaultShowDownDepth = query.DefaultDownDepth
 )
 
-type InfoRequest struct{}
+// InfoRequest selects current read authority when Branch is empty.
+// A selected branch that cannot be acquired returns an error.
+type InfoRequest struct {
+	Branch            string
+	BranchFromSession bool
+}
 
 type InfoResult struct {
 	Project     ProjectRef
@@ -98,10 +103,12 @@ type SearchResult struct {
 }
 
 type ReadAttachmentRequest struct {
-	EntryID  string
-	Filename string
-	Offset   int64
-	MaxBytes int
+	Branch            string
+	BranchFromSession bool
+	EntryID           string
+	Filename          string
+	Offset            int64
+	MaxBytes          int
 }
 
 type ReadAttachmentResult struct {

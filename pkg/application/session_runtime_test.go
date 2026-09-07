@@ -387,7 +387,7 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 	}
 	llmCalls := 0
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph, Targets: targets,
+		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: branchReadFixture{GraphStore: graph, targets: targets, project: "example"}, Targets: targets,
 		LLM: pkgllm.RunnerFunc(func(_ context.Context, request pkgllm.Request) (pkgllm.Result, error) {
 			identity := pkgllm.Identity{Provider: "test", Model: "test"}
 			if targets.isActive() {
@@ -840,7 +840,7 @@ func newDurableApplicationWithHomeAndTargets(t *testing.T, home sdd.GraphStore, 
 	}
 	blobs := &trackingBlobStore{StagedBlobStore: baseBlobs}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: home, Targets: targets,
+		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: branchReadFixture{GraphStore: home, targets: targets, project: "example"}, Targets: targets,
 		Recovery: sdd.RecoveryAuthorizerFunc(func(context.Context, sdd.RecoveryAccessRequest) error { return nil }),
 		LLM: pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 			return pkgllm.Result{Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil

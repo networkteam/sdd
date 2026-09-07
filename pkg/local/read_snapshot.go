@@ -20,13 +20,20 @@ type retainedSnapshot struct {
 	leases   int
 }
 
-type snapshotAttachments struct{ files fs.FS }
+type snapshotAttachments struct {
+	files fs.FS
+	dir   string
+}
 
 func (s snapshotAttachments) ReadAttachmentPage(ctx context.Context, entry, name string, offset int64, limit int) (app.AttachmentPage, error) {
 	if err := ctx.Err(); err != nil {
 		return app.AttachmentPage{}, err
 	}
-	return app.PageAttachment(s.files, ".", entry, name, offset, limit)
+	page, err := app.PageAttachment(s.files, ".", entry, name, offset, limit)
+	if err != nil {
+		return app.AttachmentPage{}, err
+	}
+	return attachmentPageWithLocalPath(page, s.dir, entry)
 }
 
 // AcquireSnapshot retains immutable graph and attachment bytes while a lease
@@ -101,7 +108,7 @@ func (s *FilesystemGraphStore) AcquireSnapshot(ctx context.Context, q app.Snapsh
 func (s *FilesystemGraphStore) leaseSnapshot(retained *retainedSnapshot) *app.AcquiredSnapshot {
 	retained.leases++
 	var once sync.Once
-	return &app.AcquiredSnapshot{Snapshot: retained.snapshot, Attachments: snapshotAttachments{files: retained.files}, Release: func() error {
+	return &app.AcquiredSnapshot{Snapshot: retained.snapshot, Attachments: snapshotAttachments{files: retained.files, dir: s.dir}, Release: func() error {
 		once.Do(func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()
@@ -187,4 +194,13 @@ func freezeGraphFS(ctx context.Context, dir string) (*zip.Reader, error) {
 		return nil, err
 	}
 	return zip.NewReader(bytes.NewReader(buffer.Bytes()), int64(buffer.Len()))
+}
+
+func attachmentPageWithLocalPath(page app.AttachmentPage, dir, entry string) (app.AttachmentPage, error) {
+	relative, err := app.AttachmentDirRelPath(entry)
+	if err != nil {
+		return app.AttachmentPage{}, err
+	}
+	page.LocalPath, err = filepath.Abs(filepath.Join(dir, relative, page.Filename))
+	return page, err
 }

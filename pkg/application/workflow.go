@@ -811,7 +811,7 @@ func (w *WorkflowSession) LogRead(ctx context.Context, identity RequestIdentity,
 // alone; there is no Go-constant fallback.
 func (w *WorkflowSession) Framing(ctx context.Context, identity RequestIdentity) ([]string, error) {
 	w.setOperation(ctx, identity)
-	info, err := w.app.Info(ctx, identity, w.project, InfoRequest{})
+	info, err := w.readInfo()
 	if err != nil {
 		return nil, err
 	}
@@ -1064,6 +1064,9 @@ func (b *bufferSink) Append(event engine.Event) error {
 func (w *WorkflowSession) setOperation(ctx context.Context, identity RequestIdentity) {
 	w.ctx = ctx
 	w.identity = identity
+	if w.graphs != nil {
+		w.graphs.Invalidate()
+	}
 }
 
 func (w *WorkflowSession) setLabel(label string) error {
@@ -1142,82 +1145,95 @@ func (w *WorkflowSession) publicServe(serve *engine.Serve) *WorkflowServe {
 	return result
 }
 
+type materializedGraphView struct {
+	snapshot *Snapshot
+	runtime  *ProjectRuntime
+}
+
 type workflowGraphs struct {
 	workflow *WorkflowSession
-	snapshot *Snapshot
-	targets  map[MutationTarget]*Snapshot
+	views    map[MutationTarget]*materializedGraphView
+	sources  map[MutationTarget]*materializedGraphView
 }
 
 func (g *workflowGraphs) Current() (*model.Graph, error) {
-	if g.snapshot != nil {
-		return g.snapshot.graph, nil
-	}
-	_, runtime, err := g.workflow.app.resolve(g.workflow.ctx, g.workflow.identity, g.workflow.project, AccessRead)
+	view, err := g.targetView(MutationTarget{Project: g.workflow.project, Branch: g.workflow.branch}, g.workflow.branch != "")
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := g.workflow.app.snapshotWithDependencies(g.workflow.ctx, g.workflow.identity, runtime)
-	if err != nil {
-		return nil, err
-	}
-	g.snapshot = snapshot
-	return snapshot.graph, nil
+	return view.snapshot.graph, nil
 }
 
-// CurrentFor resolves the graph authority carried by a procedure instance: the
-// project it targets, on the branch its state or the session binding names.
 func (g *workflowGraphs) CurrentFor(store *engine.Store) (*model.Graph, error) {
-	target, fromBinding := g.workflow.effectiveTarget(store)
-	if target.Branch == "" && target.Project == g.workflow.project {
-		return g.Current()
+	view, err := g.viewFor(store)
+	if err != nil {
+		return nil, err
 	}
-	return g.currentTarget(target, fromBinding)
+	return view.snapshot.graph, nil
 }
 
-func (g *workflowGraphs) currentTarget(target MutationTarget, fromBinding bool) (*model.Graph, error) {
+func (g *workflowGraphs) viewFor(store *engine.Store) (*materializedGraphView, error) {
+	target, fromBinding := g.workflow.effectiveTarget(store)
+	return g.targetView(target, fromBinding)
+}
+
+func (g *workflowGraphs) targetView(target MutationTarget, fromBinding bool) (*materializedGraphView, error) {
 	runtime, err := g.workflow.targetRuntime(target.Project, AccessRead)
 	if err != nil {
 		return nil, err
 	}
-	if snapshot := g.targets[target]; snapshot != nil {
-		return snapshot.graph, nil
+	if view := g.views[target]; view != nil {
+		return view, nil
 	}
-	var snapshot *Snapshot
-	if target.Branch == "" {
-		// Another project's view on its configured default: its graph as the
-		// store serves it, no acquisition — reads in it need no write authority.
-		snapshot, err = runtime.options.Graph.Current(g.workflow.ctx)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		resolved, err := resolveMutationTarget(runtime, target)
-		if err != nil {
-			return nil, err
-		}
-		// A cache miss deliberately uses the same short-lived acquisition as a
-		// write snapshot. Local acquisition is a checkout lookup; remote target
-		// acquirers may clone, so remote compositions should accelerate this seam
-		// with their read cache while preserving explicit target authority.
-		snapshot, err = snapshotMutationTarget(g.workflow.ctx, runtime, resolved)
-		if err != nil {
-			return nil, withSessionBindingTargetError(g.workflow.branch, fromBinding, err)
-		}
+	source, err := g.sourceView(runtime, target.Branch)
+	if err != nil {
+		return nil, withSessionBindingTargetError(g.workflow.branch, fromBinding, err)
 	}
-	snapshot, err = g.workflow.app.snapshotWithDependenciesFrom(g.workflow.ctx, g.workflow.identity, runtime, snapshot)
+	runtime = source.runtime
+	snapshot, err := g.workflow.app.snapshotWithDependenciesFrom(g.workflow.ctx, g.workflow.identity, runtime, source.snapshot)
 	if err != nil {
 		return nil, err
 	}
-	if g.targets == nil {
-		g.targets = make(map[MutationTarget]*Snapshot)
+	if g.views == nil {
+		g.views = make(map[MutationTarget]*materializedGraphView)
 	}
-	g.targets[target] = snapshot
-	return snapshot.graph, nil
+	view := &materializedGraphView{snapshot: snapshot, runtime: runtime}
+	g.views[target] = view
+	return view, nil
+}
+
+func (g *workflowGraphs) sourceView(runtime *ProjectRuntime, branch string) (*materializedGraphView, error) {
+	target := MutationTarget{Project: runtime.options.Project.ID, Branch: branch}
+	if view := g.sources[target]; view != nil {
+		return view, nil
+	}
+	snapshot, selected, err := readMaterializedSnapshot(g.workflow.ctx, runtime, branch)
+	if err != nil {
+		return nil, err
+	}
+	if g.sources == nil {
+		g.sources = make(map[MutationTarget]*materializedGraphView)
+	}
+	view := &materializedGraphView{snapshot: snapshot, runtime: selected}
+	g.sources[target] = view
+	return view, nil
 }
 
 func (g *workflowGraphs) Invalidate() {
-	g.snapshot = nil
-	g.targets = nil
+	g.views = nil
+	g.sources = nil
+}
+
+func (w *WorkflowSession) readInfo() (InfoResult, error) {
+	view, err := w.graphs.targetView(MutationTarget{Project: w.project, Branch: w.branch}, w.branch != "")
+	if err != nil {
+		return InfoResult{}, err
+	}
+	principal, err := w.app.resolvePrincipal(w.ctx, w.identity)
+	if err != nil {
+		return InfoResult{}, err
+	}
+	return w.app.infoFromRuntime(w.ctx, principal, view.runtime)
 }
 
 type workflowSink struct{ workflow *WorkflowSession }

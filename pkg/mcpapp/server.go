@@ -30,22 +30,18 @@ type Options struct {
 	// (stdio transport). Local clients get absolute paths in read results
 	// (read_attachment) so they can read files directly instead of paging.
 	LocalClient bool
-	// LocalAttachmentPath optionally adds the local-only path hint to
-	// read_attachment results. Canonical attachment reads remain path-free.
-	LocalAttachmentPath func(entryID, filename string) (string, error)
-	Version             string
+	Version     string
 }
 
 // Server wires the MCP protocol surface to the engine and the SDD read and
 // write layers.
 type Server struct {
-	mcp                 *mcp.Server
-	app                 *sdd.Application
-	searchSyncMode      sdd.SearchSyncMode
-	localIdentity       sdd.RequestIdentity
-	local               bool
-	localAttachmentPath func(string, string) (string, error)
-	version             string
+	mcp            *mcp.Server
+	app            *sdd.Application
+	searchSyncMode sdd.SearchSyncMode
+	localIdentity  sdd.RequestIdentity
+	local          bool
+	version        string
 	// sessions caches loaded sessions by ID. The transport holds no state
 	// about a dialogue: nothing is keyed to a connection, and no connection
 	// event acts on a session (d-cpt-aen).
@@ -68,13 +64,12 @@ func New(opts Options) (*Server, error) {
 		return nil, errors.New("mcpapp: Application is required")
 	}
 	s := &Server{
-		app:                 opts.Application,
-		searchSyncMode:      opts.SearchSyncMode,
-		localIdentity:       opts.LocalIdentity,
-		local:               opts.LocalClient,
-		localAttachmentPath: opts.LocalAttachmentPath,
-		version:             opts.Version,
-		sessions:            newSessionCache(),
+		app:            opts.Application,
+		searchSyncMode: opts.SearchSyncMode,
+		localIdentity:  opts.LocalIdentity,
+		local:          opts.LocalClient,
+		version:        opts.Version,
+		sessions:       newSessionCache(),
 	}
 	s.mcp = mcp.NewServer(&mcp.Implementation{
 		Name:    "sdd",

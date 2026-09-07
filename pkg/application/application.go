@@ -80,11 +80,24 @@ func NewApplication(options ApplicationOptions) (*Application, error) {
 
 func (a *Application) now() time.Time { return a.clock.Now() }
 
-func (a *Application) Info(ctx context.Context, identity RequestIdentity, project ProjectID, _ InfoRequest) (InfoResult, error) {
+func (a *Application) Info(ctx context.Context, identity RequestIdentity, project ProjectID, request InfoRequest) (InfoResult, error) {
+	result, err := a.infoForBranch(ctx, identity, project, request.Branch)
+	return result, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
+}
+
+func (a *Application) infoForBranch(ctx context.Context, identity RequestIdentity, project ProjectID, branch string) (InfoResult, error) {
 	principal, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return InfoResult{}, err
 	}
+	_, runtime, err = readMaterializedSnapshot(ctx, runtime, branch)
+	if err != nil {
+		return InfoResult{}, err
+	}
+	return a.infoFromRuntime(ctx, principal, runtime)
+}
+
+func (a *Application) infoFromRuntime(ctx context.Context, principal Principal, runtime *ProjectRuntime) (InfoResult, error) {
 	search := "text"
 	if runtime.options.Embedder != nil && runtime.options.SearchIndex != nil {
 		search = "vector,text"
@@ -167,6 +180,7 @@ func (a *Application) Lint(ctx context.Context, identity RequestIdentity, projec
 		return nil, err
 	}
 	defer selected.releaseInto(&err)
+	runtime = selected.runtime
 	registry, err := ProcedureRegistry()
 	if err != nil {
 		return nil, err
@@ -188,7 +202,11 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 		return ViewResult{}, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
 	}
 	defer selected.releaseInto(&err)
-	snapshot := selected.snapshot
+	runtime = selected.runtime
+	return a.viewFromSnapshot(ctx, identity, runtime, selected.snapshot, request)
+}
+
+func (a *Application) viewFromSnapshot(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime, snapshot *Snapshot, request ViewRequest) (ViewResult, error) {
 	layout, err := query.ParseLayout(request.Layout)
 	if err != nil {
 		return ViewResult{}, err
@@ -217,9 +235,9 @@ func (a *Application) View(ctx context.Context, identity RequestIdentity, projec
 		if err != nil {
 			return ViewResult{}, err
 		}
-		member, err := dependency.options.Graph.Current(ctx)
+		member, _, err := readMaterializedSnapshot(ctx, dependency, "")
 		if err != nil {
-			return ViewResult{}, dependencyUnavailable()
+			return ViewResult{}, err
 		}
 		memberResult, err := member.finder.View(query.ViewQuery{Layout: layout})
 		if err != nil {
@@ -267,11 +285,16 @@ func (a *Application) Show(ctx context.Context, identity RequestIdentity, projec
 		return ShowResult{}, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
 	}
 	defer selected.releaseInto(&err)
+	runtime = selected.runtime
 	local := selected.snapshot
 	snapshot, err := a.snapshotWithDependenciesFrom(ctx, identity, runtime, local)
 	if err != nil {
 		return ShowResult{}, err
 	}
+	return showFromSnapshot(runtime, snapshot, request)
+}
+
+func showFromSnapshot(runtime *ProjectRuntime, snapshot *Snapshot, request ShowRequest) (ShowResult, error) {
 	up, down := request.UpDepth, request.DownDepth
 	if up < 0 || down < 0 {
 		return ShowResult{}, fmt.Errorf("sdd: show depths cannot be negative")
@@ -315,6 +338,7 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 		return SearchResult{}, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
 	}
 	defer selected.releaseInto(&err)
+	runtime = selected.runtime
 	snapshot := selected.snapshot
 	filter, err := publicGraphFilter(request)
 	if err != nil {
@@ -342,7 +366,7 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 			return SearchResult{}, err
 		}
 		defer member.releaseInto(&err)
-		target.state.members = append(target.state.members, &searchTargetMember{runtime: dependency, selected: member, repoID: repoID})
+		target.state.members = append(target.state.members, &searchTargetMember{runtime: member.runtime, selected: member, repoID: repoID})
 	}
 	searchResult, coverage, err := a.searchTarget(ctx, target, q)
 	if err != nil {
@@ -377,75 +401,58 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 type readSnapshotSelection struct {
 	snapshot *Snapshot
 	store    GraphStore
+	runtime  *ProjectRuntime
 	release  func() error
 	branch   string
 }
 
-// acquireSnapshotForReadBranch selects only the local project's read
-// authority. Empty means the runtime's current graph, not DefaultBranch:
-// DefaultBranch is a write-routing fallback and may intentionally point at a
-// different checkout. A concrete branch stays acquired until the caller has
-// finished reading both the snapshot and its attachments.
+// Empty branch keeps current read authority, independently of write routing.
 func acquireSnapshotForReadBranch(ctx context.Context, runtime *ProjectRuntime, branch string) (*readSnapshotSelection, error) {
-	if branch == "" {
-		snapshot, err := runtime.options.Graph.Current(ctx)
-		if err != nil {
-			return nil, err
-		}
-		return &readSnapshotSelection{snapshot: snapshot, store: runtime.options.Graph}, nil
-	}
-	target, err := resolveMutationTarget(runtime, MutationTarget{Project: runtime.options.Project.ID, Branch: branch})
-	if err != nil {
-		return nil, err
-	}
-	acquired, err := runtime.acquire(ctx, target)
-	if err != nil {
-		return nil, err
-	}
-	snapshot, err := acquired.Graph.Current(ctx)
-	if err != nil {
-		releaseErr := acquired.Release()
-		if releaseErr != nil {
-			releaseErr = fmt.Errorf("releasing read target %s after snapshot failure: %w", branch, releaseErr)
-		}
-		return nil, errors.Join(err, releaseErr)
-	}
-	return &readSnapshotSelection{snapshot: snapshot, store: acquired.Graph, release: acquired.Release, branch: branch}, nil
+	return acquireSnapshotSelection(ctx, runtime, SnapshotReadQuery{Branch: branch})
 }
 
 func (s *readSnapshotSelection) releaseInto(errp *error) {
 	if s == nil || s.release == nil {
 		return
 	}
-	if releaseErr := s.release(); releaseErr != nil {
+	release := s.release
+	s.release = nil
+	if releaseErr := snapshotRelease(release); releaseErr != nil {
 		*errp = errors.Join(*errp, fmt.Errorf("releasing read target %s: %w", s.branch, releaseErr))
 	}
 }
 
-func (a *Application) ReadAttachment(ctx context.Context, identity RequestIdentity, project ProjectID, request ReadAttachmentRequest) (ReadAttachmentResult, error) {
+func (a *Application) ReadAttachment(ctx context.Context, identity RequestIdentity, project ProjectID, request ReadAttachmentRequest) (result ReadAttachmentResult, err error) {
 	_, runtime, err := a.resolve(ctx, identity, project, AccessRead)
 	if err != nil {
 		return ReadAttachmentResult{}, err
 	}
+	selected, err := acquireSnapshotForReadBranch(ctx, runtime, request.Branch)
+	if err != nil {
+		return ReadAttachmentResult{}, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
+	}
+	defer selected.releaseInto(&err)
+	runtime = selected.runtime
 	entryID := request.EntryID
-	store := runtime.options.Graph
 	if repoID, memberID, qualified := model.SplitCrossRepoID(request.EntryID); qualified {
 		dependency, depErr := a.dependency(ctx, identity, runtime, repoID)
 		if depErr != nil {
 			return ReadAttachmentResult{}, depErr
 		}
-		store = dependency.options.Graph
+		member, depErr := acquireSnapshotForReadBranch(ctx, dependency, "")
+		if depErr != nil {
+			return ReadAttachmentResult{}, depErr
+		}
+		defer member.releaseInto(&err)
+		selected = member
 		entryID = memberID
 	}
-	snapshot, err := store.Current(ctx)
-	if err != nil {
-		return ReadAttachmentResult{}, err
-	}
+	snapshot := selected.snapshot
 	entry, ok := snapshot.graph.ByID[entryID]
 	if !ok {
 		return ReadAttachmentResult{}, fmt.Errorf("entry not found: %s", entryID)
 	}
-	page, err := store.ReadAttachmentPage(ctx, entryID, request.Filename, request.Offset, request.MaxBytes)
+	page, err := selected.store.ReadAttachmentPage(ctx, entryID, request.Filename, request.Offset, request.MaxBytes)
 	if err != nil {
 		return ReadAttachmentResult{}, err
 	}
@@ -461,12 +468,16 @@ func (a *Application) Procedures(ctx context.Context, identity RequestIdentity, 
 	if err != nil {
 		return ProcedureListResult{}, err
 	}
-	snapshot, err := runtime.options.Graph.Current(ctx)
+	snapshot, _, err := readMaterializedSnapshot(ctx, runtime, "")
 	if err != nil {
 		return ProcedureListResult{}, err
 	}
+	return ProcedureListResult{Project: runtime.options.Project, Procedures: renderProcedureList(snapshot.graph)}, nil
+}
+
+func renderProcedureList(graph *model.Graph) string {
 	var lines []string
-	for _, chain := range snapshot.graph.ProcedureChains() {
+	for _, chain := range graph.ProcedureChains() {
 		head := chain.Head
 		if head == nil || head.Canonical == "" || head.IsShellProcedure() || head.IsTaskProcedure() || len(chain.LiveHeads) == 0 {
 			continue
@@ -481,7 +492,7 @@ func (a *Application) Procedures(ctx context.Context, identity RequestIdentity, 
 		lines = append(lines, fmt.Sprintf("- %s%s — %s", head.Canonical, signature, head.FirstSummarySentence()))
 	}
 	sort.Strings(lines)
-	return ProcedureListResult{Project: runtime.options.Project, Procedures: strings.Join(lines, "\n")}, nil
+	return strings.Join(lines, "\n")
 }
 
 func (a *Application) resolvePrincipal(ctx context.Context, identity RequestIdentity) (Principal, error) {
@@ -585,7 +596,7 @@ func (r *ProjectRuntime) searchSnapshot(ctx context.Context, snapshot *Snapshot,
 }
 
 func (a *Application) snapshotWithDependencies(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime) (*Snapshot, error) {
-	base, err := runtime.options.Graph.Current(ctx)
+	base, runtime, err := readMaterializedSnapshot(ctx, runtime, "")
 	if err != nil {
 		return nil, err
 	}
@@ -593,6 +604,10 @@ func (a *Application) snapshotWithDependencies(ctx context.Context, identity Req
 }
 
 func (a *Application) snapshotWithDependenciesFrom(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime, base *Snapshot) (*Snapshot, error) {
+	return a.snapshotWithDependencyPolicy(ctx, identity, runtime, base, true)
+}
+
+func (a *Application) snapshotWithDependencyPolicy(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime, base *Snapshot, requireSources bool) (*Snapshot, error) {
 	if len(runtime.options.Dependencies) == 0 {
 		return base, nil
 	}
@@ -601,19 +616,40 @@ func (a *Application) snapshotWithDependenciesFrom(ctx context.Context, identity
 		return nil, err
 	}
 	local := model.NewGraph(append([]*model.Entry(nil), base.graph.Entries...))
+	type memberResult struct {
+		graph *model.Graph
+		err   error
+	}
+	members := make(map[string]memberResult, len(runtime.options.Dependencies))
+	for _, repoID := range runtime.options.Dependencies {
+		dependency, depErr := a.access.ResolveDependency(ctx, principal, runtime.options.Project.ID, repoID)
+		if depErr != nil || dependency == nil {
+			members[repoID] = memberResult{err: dependencyUnavailable()}
+			continue
+		}
+		selected, readErr := acquireSnapshotForReadBranch(ctx, dependency, "")
+		if readErr != nil {
+			var cleanup *snapshotReleaseError
+			if requireSources || errors.As(readErr, &cleanup) {
+				return nil, readErr
+			}
+			// A write's existing ref validation decides whether an unavailable
+			// dependency matters; eagerly loading it adds no new write gate.
+			members[repoID] = memberResult{err: dependencyUnavailable()}
+			continue
+		}
+		members[repoID] = memberResult{graph: model.NewGraph(append([]*model.Entry(nil), selected.snapshot.graph.Entries...))}
+		selected.releaseInto(&readErr)
+		if readErr != nil {
+			return nil, readErr
+		}
+	}
 	model.NewMultiGraph(local, append([]string(nil), runtime.options.Dependencies...), func(repoID string) (*model.Graph, error) {
-		if !slices.Contains(runtime.options.Dependencies, repoID) {
+		member, ok := members[repoID]
+		if !ok {
 			return nil, dependencyUnavailable()
 		}
-		dependency, err := a.access.ResolveDependency(ctx, principal, runtime.options.Project.ID, repoID)
-		if err != nil || dependency == nil {
-			return nil, dependencyUnavailable()
-		}
-		snapshot, err := dependency.options.Graph.Current(ctx)
-		if err != nil {
-			return nil, dependencyUnavailable()
-		}
-		return model.NewGraph(append([]*model.Entry(nil), snapshot.graph.Entries...)), nil
+		return member.graph, member.err
 	})
 	clone := *base
 	clone.graph = local
