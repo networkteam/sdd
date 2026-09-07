@@ -47,15 +47,29 @@ func (p *embedProgress) onBatchStart(ids []string, chunks int) {
 func (p *embedProgress) onEntryIndexed(_ string, chunks int) {
 	p.chunks += chunks
 	p.reporter.Add(1)
-	p.reporter.SetNote(fmt.Sprintf("%s · %d chunks published", p.batchNote, p.chunks))
+	prefix := p.batchNote
+	if chunks == 0 {
+		prefix = p.curRepo
+		p.batchNote = ""
+	}
+	note := fmt.Sprintf("%d chunks published", p.chunks)
+	if prefix != "" {
+		note = prefix + " · " + note
+	}
+	p.reporter.SetNote(note)
 }
 
-func (p *embedProgress) onRepoStart(id string) { p.curRepo = id }
+func (p *embedProgress) onRepoStart(id string) {
+	p.curRepo = id
+	p.batchNote = ""
+	p.reporter.SetNote("")
+}
 
 // onPhase maps a handler-reported freshening phase onto the footer and clears
 // the stale embed note — a cache pull is not embedding any batch.
 func (p *embedProgress) onPhase(ph model.Phase) {
 	if ph == model.PhaseConnecting || ph == model.PhaseSyncing {
+		p.batchNote = ""
 		p.reporter.SetNote("")
 	}
 	p.reporter.SetPhase(ph)

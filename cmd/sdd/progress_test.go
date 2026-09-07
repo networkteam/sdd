@@ -55,3 +55,44 @@ func TestEmbedProgressCountsPublishedEntries(t *testing.T) {
 		t.Fatalf("progress = %+v", progress)
 	}
 }
+
+func TestEmbedProgressEmptyEntries(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		previousBatch bool
+		repo          string
+		want          string
+	}{
+		{name: "first local entry", want: "0 chunks published"},
+		{name: "local entry after batch", previousBatch: true, want: "3 chunks published"},
+		{name: "first connected entry", repo: "current", want: "current · 0 chunks published"},
+		{name: "new repository after batch", previousBatch: true, repo: "current", want: "current · 3 chunks published"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newEmbedProgress()
+			done := 1
+			if tc.previousBatch {
+				cmd := p.connected(false)
+				if tc.repo != "" {
+					cmd.OnRepoStart("previous")
+				}
+				cmd.OnPlanned(1)
+				cmd.OnBatchStart([]string{"a"}, 3)
+				cmd.OnEntryIndexed("a", 3)
+				done++
+			}
+			if tc.repo != "" {
+				cmd := p.connected(false)
+				cmd.OnRepoStart(tc.repo)
+				cmd.OnPhase(model.PhaseSyncing)
+			}
+			cmd := p.lazyFill()
+			cmd.OnPlanned(1)
+			cmd.OnEntryIndexed("empty", 0)
+			progress, ok := p.reporter.Recv()
+			if !ok || progress.Note != tc.want || progress.Done != done || progress.Total != done {
+				t.Fatalf("progress = %+v, want note %q and %d completed entries", progress, tc.want, done)
+			}
+		})
+	}
+}
