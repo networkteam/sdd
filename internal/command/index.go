@@ -13,13 +13,8 @@ type BuildIndexCmd struct {
 	// an up-to-date row set.
 	Force bool
 
-	// OnPlanned is called once, after the skip pass decides what to embed and
-	// before the first round-trip, with the total chunk count across all
-	// entries to be embedded. Optional; the authoritative progress total —
-	// embedding time scales with chunks, and this count comes from the same
-	// skip logic that produces the work, so the bar's denominator matches what
-	// actually runs.
-	OnPlanned func(totalChunks int)
+	// OnPlanned reports the number of entries needing indexing after selection.
+	OnPlanned func(totalEntries int)
 
 	// OnBatchStart is called before each embedding round-trip with the entry
 	// IDs in that batch and their combined chunk count. Optional; names the
@@ -29,8 +24,7 @@ type BuildIndexCmd struct {
 	OnBatchStart func(entryIDs []string, chunkCount int)
 
 	// OnEntryIndexed is called once per entry after its rows are upserted, with
-	// the entry's chunk count. Optional; advances the progress bar by that many
-	// chunks as work completes.
+	// the entry's chunk count. Progress advances by one published entry.
 	OnEntryIndexed func(entryID string, chunkCount int)
 
 	// OnEntrySkipped is called for entries whose manifest record matches
@@ -49,8 +43,8 @@ type BuildIndexCmd struct {
 // switch is paid lazily rather than requiring an explicit warm-up.
 type LazyFillIndexCmd struct {
 	// OnPlanned mirrors BuildIndexCmd's callback — fired once with the total
-	// chunk count to embed, the authoritative progress total.
-	OnPlanned func(totalChunks int)
+	// entry count to index, the authoritative progress total.
+	OnPlanned func(totalEntries int)
 
 	// OnBatchStart mirrors BuildIndexCmd's callback — fired before each
 	// embedding round-trip with the batch's entry IDs and combined chunk count,
@@ -58,7 +52,7 @@ type LazyFillIndexCmd struct {
 	OnBatchStart func(entryIDs []string, chunkCount int)
 
 	// OnEntryIndexed mirrors BuildIndexCmd's callback — the per-entry chunk
-	// count that advances the bar as work completes.
+	// count; the bar advances by one entry as publication completes.
 	OnEntryIndexed func(entryID string, chunkCount int)
 
 	// OnComplete is called once after lazy-fill finishes, with the count
@@ -91,10 +85,10 @@ type BuildConnectedIndexesCmd struct {
 	OnPhase func(phase model.Phase)
 
 	// OnPlanned fires once per repo, after that repo's skip pass, with the
-	// chunk count to embed for it. The caller accumulates these into a
+	// entry count to index for it. The caller accumulates these into a
 	// running total — the bar's denominator grows as each repo is reached,
 	// because member work is only known after its cache is fresh.
-	OnPlanned func(chunks int)
+	OnPlanned func(entries int)
 
 	// OnBatchStart mirrors BuildIndexCmd's callback — fired before each
 	// embedding round-trip with the batch's entry IDs and combined chunk
@@ -102,6 +96,6 @@ type BuildConnectedIndexesCmd struct {
 	OnBatchStart func(entryIDs []string, chunkCount int)
 
 	// OnEntryIndexed mirrors BuildIndexCmd's callback — the per-entry chunk
-	// count that advances the bar as work completes.
+	// count; the bar advances by one entry as publication completes.
 	OnEntryIndexed func(entryID string, chunkCount int)
 }

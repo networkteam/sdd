@@ -282,7 +282,10 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	cacheRoot := registry.CacheRoot()
 	baseRepoKey := persistentIndexRepoKey(cfg, stableRepoRoot)
 	baseIndex := localadapter.NewPersistentSearchIndexStore(project, cacheRoot, baseRepoKey)
-	embeddings := localEmbedder.Embedder
+	var embeddings embed.Embedder
+	if localEmbedder.Embedder != nil {
+		embeddings = localEmbedder
+	}
 	targets, err := newLocalMutationTargets(project, filepath.Dir(sddDir))
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
@@ -332,7 +335,10 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		// connected-repository storage contract) and exclude embedded entries,
 		// so binary-shipped base facts embed once per machine in the base store,
 		// not once per connected repo.
-		memberEmbedder := crossEmbedder.Embedder
+		var memberEmbedder embed.Embedder
+		if crossEmbedder.Embedder != nil {
+			memberEmbedder = crossEmbedder
+		}
 		memberIndex := localadapter.NewPersistentSearchIndexStore(sdd.ProjectID(dependency), cacheRoot, dependency)
 		options := sdd.ProjectRuntimeOptions{
 			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: dependency}, Graph: memberGraph,

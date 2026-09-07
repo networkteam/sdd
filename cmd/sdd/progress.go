@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/networkteam/sdd/internal/cliout"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/model"
@@ -9,20 +11,22 @@ import (
 // embedProgress bridges the embedding and cache-freshening command callbacks
 // onto one cliout.Reporter, shared by `sdd index` and `sdd search`.
 type embedProgress struct {
-	reporter *cliout.Reporter
-	total    int
-	curRepo  string
+	reporter  *cliout.Reporter
+	total     int
+	curRepo   string
+	chunks    int
+	batchNote string
 }
 
 func newEmbedProgress() *embedProgress {
 	r := cliout.NewReporter()
-	r.SetUnit("chunks")
+	r.SetUnit("entries")
 	return &embedProgress{reporter: r}
 }
 
 // onPlanned grows the running total (member work is only known after each cache
 // is fresh) and declares the indexing phase once real embedding work is planned
-// — a zero-chunk (warm) plan neither advances the bar nor arms a footer.
+// — an empty (warm) plan neither advances the bar nor arms a footer.
 func (p *embedProgress) onPlanned(n int) {
 	if n > 0 {
 		p.reporter.SetPhase(model.PhaseIndexing)
@@ -36,10 +40,15 @@ func (p *embedProgress) onBatchStart(ids []string, chunks int) {
 	if p.curRepo != "" {
 		note = p.curRepo + " · " + note
 	}
-	p.reporter.SetNote(note)
+	p.batchNote = note
+	p.reporter.SetNote(fmt.Sprintf("%s · %d chunks published", note, p.chunks))
 }
 
-func (p *embedProgress) onEntryIndexed(_ string, chunks int) { p.reporter.Add(chunks) }
+func (p *embedProgress) onEntryIndexed(_ string, chunks int) {
+	p.chunks += chunks
+	p.reporter.Add(1)
+	p.reporter.SetNote(fmt.Sprintf("%s · %d chunks published", p.batchNote, p.chunks))
+}
 
 func (p *embedProgress) onRepoStart(id string) { p.curRepo = id }
 

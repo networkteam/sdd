@@ -28,7 +28,6 @@ type exerciseStats struct {
 	mu       sync.Mutex
 	Calls    int `json:"calls"`
 	Tokens   int `json:"tokens"`
-	Shared   int `json:"shared_batches"`
 	MaxItems int `json:"max_items"`
 }
 
@@ -38,9 +37,6 @@ func (s *exerciseStats) RecordCall(ctx context.Context, stat llm.CallStat) {
 	s.Calls++
 	s.Tokens += stat.Usage.InputTokens
 	s.MaxItems = max(s.MaxItems, stat.Items)
-	if len(embed.Attribution(ctx).Callers) > 1 {
-		s.Shared++
-	}
 }
 
 type exerciseStore struct {
@@ -61,7 +57,6 @@ type exerciseReport struct {
 	Failed       int           `json:"failed"`
 	Calls        int           `json:"calls"`
 	Tokens       int           `json:"tokens"`
-	Shared       int           `json:"shared_batches"`
 	MaxItems     int           `json:"max_items"`
 	Peak         int32         `json:"peak_provider_calls"`
 	Elapsed      time.Duration `json:"elapsed"`
@@ -115,17 +110,9 @@ func TestEntryIndexingExerciseWorker(t *testing.T) {
 		return inner.Embed(ctx, req)
 	}}
 	observed := embed.Observed(embed.Bounded(tracked, 2*time.Minute), stats)
-	batcher, err := embed.NewBatcher(t.Context(), observed, embed.BatchOptions{MaxItems: 32, MaxBytes: 128 * 1024, BufferItems: 4, Window: 10 * time.Millisecond, Concurrency: concurrency})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := batcher.Close(t.Context()); err != nil {
-			t.Error(err)
-		}
-	}()
+	documents := embed.Batched(observed, 32)
 	store := exerciseStore{PersistentSearchIndexStore: local.NewPersistentSearchIndexStore("exercise", filepath.Join(root, "index"), "exercise"), fail: os.Getenv("SDD_INDEX_EXERCISE_FAIL") == "1"}
-	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{Project: sdd.ProjectRef{ID: "exercise"}, Graph: graph, SearchIndex: store, Embedder: batcher, ExcludeEmbeddedFromIndex: true, LLM: llm.RunnerFunc(func(context.Context, llm.Request) (llm.Result, error) { return llm.Result{}, nil })})
+	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{Project: sdd.ProjectRef{ID: "exercise"}, Graph: graph, SearchIndex: store, Embedder: documents, ExcludeEmbeddedFromIndex: true, LLM: llm.RunnerFunc(func(context.Context, llm.Request) (llm.Result, error) { return llm.Result{}, nil })})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,10 +130,10 @@ func TestEntryIndexingExerciseWorker(t *testing.T) {
 	report := exerciseReport{}
 	started := time.Now()
 	var workers sync.WaitGroup
-	for range 8 {
+	for range concurrency {
 		workers.Go(func() {
 			for entry := range jobs {
-				ctx := embed.WithCaller(t.Context(), entry.Version.EntryID)
+				ctx := t.Context()
 				err := runtime.IndexSearchEntry(ctx, sdd.IndexSearchEntryCmd{Entry: entry, OnPublished: func(id string, _ int) { mu.Lock(); report.Published++; fmt.Println("COMMITTED", id); mu.Unlock() }})
 				if err != nil {
 					mu.Lock()
@@ -180,7 +167,6 @@ func TestEntryIndexingExerciseWorker(t *testing.T) {
 	stats.mu.Lock()
 	report.Calls = stats.Calls
 	report.Tokens = stats.Tokens
-	report.Shared = stats.Shared
 	report.MaxItems = stats.MaxItems
 	stats.mu.Unlock()
 	report.Peak = peak.Load()

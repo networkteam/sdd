@@ -117,10 +117,11 @@
 // enqueue. Deduplicate indexing by full SearchEntryVersion, and run IndexSearchEntry
 // with source retention through retries. Queue state never establishes coverage.
 //
-// Share one document batcher per embedding configuration and process. Compose
-// query routing separately and provider deadlines and observation inside it.
-// Configure explicit limits and measure provider/query latency in the consumer's
-// workload; cross-process limits belong to the consumer. See embed.Batcher.
+// Consumers own concurrent document batching behind embed.Embedder. Compose
+// query routing separately and provider deadlines and observation per provider
+// call. embed.Batched splits oversized requests; it does not combine callers.
+// Local CLI and MCP indexing share incremental synchronous packing and publish
+// complete entries as batches finish. Chunk preparation retains only active work.
 //
 // Deploy publication-aware retrieval before asynchronous writers. The derivation
 // schema participates in entry hashes, so prior rows can remain stored while

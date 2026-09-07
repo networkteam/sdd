@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/networkteam/slogutils"
 
@@ -36,37 +35,62 @@ type SearchIndexHandler struct {
 type versionKey struct{ entryID, entryHash string }
 
 func (h *SearchIndexHandler) complete(ctx context.Context, entries []*model.Entry, hashes map[string]string, skip func(types.CanonicalChunk) bool) error {
-	if store, ok := h.Store.(EntryPublisher); ok {
+	publisher, complete := h.Store.(EntryPublisher)
+	inputs := func(yield func(indexInput, error) bool) {
 		for _, entry := range entries {
-			hash := hashes[entry.ID]
-			if hash == "" {
-				var err error
-				hash, err = chunking.EntryStateHash(ctx, entry, h.Attachments)
+			version := types.SearchEntryVersion{Namespace: h.Namespace, EntryID: entry.ID, EntryHash: hashes[entry.ID]}
+			if version.EntryHash == "" {
+				hash, err := chunking.EntryStateHash(ctx, entry, h.Attachments)
 				if err != nil {
+					yield(indexInput{}, err)
+					return
+				}
+				version.EntryHash = hash
+			}
+			if complete {
+				present, err := publisher.EntryPublished(ctx, version)
+				if err != nil {
+					yield(indexInput{}, err)
+					return
+				}
+				if present {
+					continue
+				}
+			}
+			if !yield(indexInput{entry: entry, version: version}, nil) {
+				return
+			}
+		}
+	}
+	if complete {
+		skip = nil
+	}
+	err := indexStream(ctx, inputs, h.Embedder, h.Attachments, textsplitter.NewSplitter(), skip,
+		func(ctx context.Context, entry *model.IndexWork) error {
+			if complete {
+				if err := types.ValidateEntryPublication(entry.Version, entry.Rows); err != nil {
+					return err
+				}
+				if err := publisher.PublishEntry(ctx, entry.Version, entry.Rows); err != nil {
+					return err
+				}
+			} else {
+				if len(entry.Rows) == 0 {
+					return nil
+				}
+				if err := h.Store.Reconcile(ctx, h.Namespace, h.Revision, entry.Rows, nil); err != nil {
 					return err
 				}
 			}
-			handler := SearchEntryHandler{Store: store, Embedder: h.Embedder, Entry: entry, Attachments: h.Attachments}
-			cmd := command.IndexSearchEntryCmd{
-				Entry: types.SearchEntryDescriptor{Version: types.SearchEntryVersion{Namespace: h.Namespace, EntryID: entry.ID, EntryHash: hash}, SourceRevision: h.Revision},
-				OnPublished: func(id string, count int) {
-					h.entries++
-					h.chunks += count
-					if h.cmd.OnEntryIndexed != nil {
-						h.cmd.OnEntryIndexed(id, count)
-					}
-				},
+			h.entries++
+			h.chunks += len(entry.Rows)
+			if h.cmd.OnEntryIndexed != nil {
+				h.cmd.OnEntryIndexed(entry.Version.EntryID, len(entry.Rows))
 			}
-			if err := handler.Index(ctx, cmd); err != nil {
-				return err
-			}
-		}
-	} else {
-		for _, entry := range entries {
-			if err := h.embedEntries(ctx, h.Namespace, []*model.Entry{entry}, hashes, skip); err != nil {
-				return err
-			}
-		}
+			return nil
+		}, nil)
+	if err != nil {
+		return err
 	}
 
 	if h.cmd.OnComplete != nil {
@@ -124,80 +148,4 @@ func (h *SearchIndexHandler) reconcileByChunkIdentity(ctx context.Context, names
 		return ok && ref.ContentHash == chunk.ContentHash
 	}
 	return h.complete(ctx, entries, hashes, keep)
-}
-
-func (h *SearchIndexHandler) embedEntries(ctx context.Context, namespace types.IndexNamespace, entries []*model.Entry, hashes map[string]string, skip func(types.CanonicalChunk) bool) error {
-	if len(entries) == 0 {
-		return nil
-	}
-	attachments := h.Attachments
-	splitter := textsplitter.NewSplitter()
-
-	var pending []types.CanonicalChunk
-	for _, entry := range entries {
-		hash := hashes[entry.ID]
-		if hash == "" {
-			h, err := chunking.EntryStateHash(ctx, entry, attachments)
-			if err != nil {
-				return err
-			}
-			hash = h
-		}
-		chunks, err := chunking.DeriveChunks(ctx, entry, hash, splitter, attachments)
-		if err != nil {
-			return err
-		}
-		for _, c := range chunks {
-			chunk := chunking.CanonicalChunk(entry.ID, hash, c)
-			if skip != nil && skip(chunk) {
-				continue
-			}
-			pending = append(pending, chunk)
-		}
-	}
-	if len(pending) == 0 {
-		return nil
-	}
-	texts := make([]string, len(pending))
-	for i, chunk := range pending {
-		texts[i] = chunk.Text
-	}
-	embedded, err := h.Embedder.Embed(ctx, embed.Request{Purpose: embed.PurposeDocument, Texts: texts})
-	if err != nil {
-		return err
-	}
-	if len(embedded.Vectors) != len(pending) {
-		return fmt.Errorf("sdd: embedder returned %d vectors for %d inputs", len(embedded.Vectors), len(pending))
-	}
-	dims := 0
-	upserts := make([]types.IndexedChunk, 0, len(pending))
-	for i, vector := range embedded.Vectors {
-		if len(vector) == 0 {
-			return fmt.Errorf("sdd: embedding vector %d is empty", i)
-		}
-		if dims == 0 {
-			dims = len(vector)
-		}
-		if len(vector) != dims {
-			return fmt.Errorf("sdd: embedding vector %d has %d dimensions, want %d", i, len(vector), dims)
-		}
-		upserts = append(upserts, types.IndexedChunk{Chunk: pending[i], Vector: vector})
-	}
-	if err := h.Store.Reconcile(ctx, namespace, h.Revision, upserts, nil); err != nil {
-		return err
-	}
-	counts := make(map[string]int)
-	for _, chunk := range pending {
-		counts[chunk.EntryID]++
-	}
-	for _, entry := range entries {
-		if count := counts[entry.ID]; count > 0 {
-			h.entries++
-			if h.cmd.OnEntryIndexed != nil {
-				h.cmd.OnEntryIndexed(entry.ID, count)
-			}
-		}
-	}
-	h.chunks += len(pending)
-	return nil
 }

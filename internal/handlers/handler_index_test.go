@@ -193,15 +193,16 @@ func TestIndexHandler_BuildFiresOnBatchStart(t *testing.T) {
 
 	var batches [][]string
 	var batchChunks []int
-	plannedChunks := -1
+	plannedEntries := -1
 	indexedChunks := 0
+	indexedEntries := 0
 	cmd := &command.BuildIndexCmd{
-		OnPlanned: func(total int) { plannedChunks = total },
+		OnPlanned: func(total int) { plannedEntries = total },
 		OnBatchStart: func(ids []string, chunks int) {
 			batches = append(batches, ids)
 			batchChunks = append(batchChunks, chunks)
 		},
-		OnEntryIndexed: func(_ string, chunks int) { indexedChunks += chunks },
+		OnEntryIndexed: func(_ string, chunks int) { indexedChunks += chunks; indexedEntries++ },
 	}
 	if err := h.Build(context.Background(), cmd); err != nil {
 		t.Fatalf("Build: %v", err)
@@ -219,19 +220,13 @@ func TestIndexHandler_BuildFiresOnBatchStart(t *testing.T) {
 	if got := withoutEmbedded(t, batchedIDs); len(got) != 2 {
 		t.Errorf("batches carried %d project entry IDs, want 2 (%v)", len(got), batchedIDs)
 	}
-	// The planned total is the chunk sum, and it must equal both the batch's
-	// announced chunk count and the chunks reported as entries complete — the
-	// bar's denominator and numerator come from the same work set, so it lands
-	// on 100% exactly when the work does.
-	if plannedChunks <= 0 {
-		t.Errorf("OnPlanned reported %d chunks, want > 0", plannedChunks)
+	if plannedEntries <= 0 || plannedEntries != indexedEntries {
+		t.Errorf("planned %d entries, published %d", plannedEntries, indexedEntries)
 	}
-	if announcedChunks != plannedChunks {
-		t.Errorf("announced batch chunks %d != planned total %d", announcedChunks, plannedChunks)
+	if announcedChunks != indexedChunks {
+		t.Errorf("announced %d chunks, published %d", announcedChunks, indexedChunks)
 	}
-	if indexedChunks != plannedChunks {
-		t.Errorf("indexed chunks %d != planned total %d", indexedChunks, plannedChunks)
-	}
+
 }
 
 func TestIndexHandler_BuildSkipsUnchanged(t *testing.T) {

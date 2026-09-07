@@ -2,7 +2,8 @@ package types
 
 import (
 	"fmt"
-	"math"
+
+	"github.com/networkteam/sdd/internal/model/vectors"
 )
 
 // SearchEntryVersion is the publication and deduplication key. Revision is
@@ -31,31 +32,13 @@ func ValidateEntryPublication(version SearchEntryVersion, chunks []IndexedChunk)
 		return fmt.Errorf("sdd: incomplete entry version")
 	}
 	seen := make(map[string]bool, len(chunks))
-	dims := 0
-	for _, row := range chunks {
+	embeddings := make([][]float32, len(chunks))
+	for i, row := range chunks {
 		if row.Chunk.EntryID != version.EntryID || row.Chunk.EntryHash != version.EntryHash || row.Chunk.ID == "" || seen[row.Chunk.ID] {
 			return fmt.Errorf("sdd: invalid or duplicate chunk identity %q", row.Chunk.ID)
 		}
 		seen[row.Chunk.ID] = true
-		if len(row.Vector) == 0 {
-			return fmt.Errorf("sdd: empty vector for %s", row.Chunk.ID)
-		}
-		if dims == 0 {
-			dims = len(row.Vector)
-		}
-		if len(row.Vector) != dims {
-			return fmt.Errorf("sdd: inconsistent vector dimensions")
-		}
-		norm := float64(0)
-		for _, v := range row.Vector {
-			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
-				return fmt.Errorf("sdd: non-finite vector")
-			}
-			norm += float64(v) * float64(v)
-		}
-		if norm == 0 {
-			return fmt.Errorf("sdd: zero vector")
-		}
+		embeddings[i] = row.Vector
 	}
-	return nil
+	return vectors.Validate(embeddings, len(chunks))
 }

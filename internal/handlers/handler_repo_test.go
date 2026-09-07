@@ -228,7 +228,7 @@ func TestBuildConnectedIndexes_FreshensAndFills(t *testing.T) {
 	fill := &command.BuildConnectedIndexesCmd{
 		OnRepoStart:    func(id string) { startedRepos = append(startedRepos, id) },
 		OnPlanned:      func(n int) { planned += n },
-		OnEntryIndexed: func(_ string, n int) { indexed += n },
+		OnEntryIndexed: func(_ string, _ int) { indexed++ },
 	}
 	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, indexEmbedder(emb), fill); err != nil {
 		t.Fatalf("BuildConnectedIndexes: %v", err)
@@ -241,10 +241,10 @@ func TestBuildConnectedIndexes_FreshensAndFills(t *testing.T) {
 		t.Errorf("OnRepoStart calls = %v, want [%s]", startedRepos, repoID)
 	}
 	if planned == 0 {
-		t.Error("expected planned chunks > 0")
+		t.Error("expected planned entries > 0")
 	}
 	if indexed != planned {
-		t.Errorf("indexed %d chunks, planned %d — every planned chunk should land", indexed, planned)
+		t.Errorf("indexed %d entries, planned %d — every planned entry should land", indexed, planned)
 	}
 
 	// The member index lives under the machine-global (repo-id, fingerprint)
