@@ -240,6 +240,10 @@ func parseWritingGuideResult(output string) (*WritingGuideResult, error) {
 		return nil, fmt.Errorf("parsing writing-guide JSON: %w", err)
 	}
 
+	if resp.Findings == nil {
+		return nil, fmt.Errorf("findings must be a non-null array")
+	}
+
 	findings := make([]GuideFinding, 0, len(resp.Findings))
 	for i, f := range resp.Findings {
 		axis := strings.ToLower(strings.TrimSpace(f.Axis))

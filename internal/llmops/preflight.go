@@ -554,7 +554,7 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (llm.Request, e
 //
 // Empty findings array means "no findings". The parser tolerates prose
 // surrounding the JSON object (LLM preambles, code fences) by scanning for
-// the first balanced {...}. Malformed JSON, missing keys, unknown severity
+// a single valid JSON object. Malformed JSON, missing keys, unknown severity
 // values — all return errors so infrastructure failures stay distinct from
 // findings.
 func parsePreflightResult(output string) (*PreflightResult, error) {
@@ -572,6 +572,10 @@ func parsePreflightResult(output string) (*PreflightResult, error) {
 	}
 	if err := json.Unmarshal([]byte(jsonText), &resp); err != nil {
 		return nil, fmt.Errorf("parsing pre-flight JSON: %w", err)
+	}
+
+	if resp.Findings == nil {
+		return nil, fmt.Errorf("findings must be a non-null array")
 	}
 
 	findings := make([]Finding, 0, len(resp.Findings))
@@ -596,27 +600,28 @@ func parsePreflightResult(output string) (*PreflightResult, error) {
 	return &PreflightResult{Findings: findings}, nil
 }
 
-// extractJSONObject returns the first balanced {...} in the input, skipping
-// any surrounding prose or code fences. Returns an error if no object is
-// found or braces are unbalanced. String-escape aware so braces inside
-// JSON strings don't confuse the balance counter. Shared by every JSON-shaped
-// LLM check (pre-flight, writing guide).
+// Balanced non-JSON literals are prose; multiple JSON objects are ambiguous.
+// Inspect only outermost groups so nested findings cannot become the result.
 func extractJSONObject(output string) (string, error) {
 	output = strings.TrimSpace(output)
 	if output == "" {
 		return "", fmt.Errorf("empty LLM response")
 	}
 
-	start := strings.Index(output, "{")
-	if start < 0 {
-		return "", fmt.Errorf("no JSON object found in LLM response: %q", output)
-	}
-
+	start := 0
+	var object string
 	depth := 0
 	inString := false
 	escape := false
-	for i := start; i < len(output); i++ {
+	for i := 0; i < len(output); i++ {
 		c := output[i]
+		if depth == 0 {
+			if c == '{' {
+				start = i
+				depth = 1
+			}
+			continue
+		}
 		if escape {
 			escape = false
 			continue
@@ -638,11 +643,23 @@ func extractJSONObject(output string) (string, error) {
 		case '}':
 			depth--
 			if depth == 0 {
-				return output[start : i+1], nil
+				candidate := output[start : i+1]
+				if json.Valid([]byte(candidate)) {
+					if object != "" {
+						return "", fmt.Errorf("multiple JSON objects found in LLM response")
+					}
+					object = candidate
+				}
 			}
 		}
 	}
-	return "", fmt.Errorf("unbalanced JSON braces in LLM response: %q", output)
+	if depth != 0 {
+		return "", fmt.Errorf("unbalanced JSON braces in LLM response: %q", output)
+	}
+	if object == "" {
+		return "", fmt.Errorf("no JSON object found in LLM response: %q", output)
+	}
+	return object, nil
 }
 
 func parseSeverity(s string) (Severity, error) {
