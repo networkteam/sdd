@@ -1065,12 +1065,10 @@ func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, a
 		Name: page.Filename, Content: string(page.Content), Offset: page.Offset, NextOffset: page.NextOffset,
 		TotalBytes: page.TotalSize, More: page.More, Available: result.Available,
 	}
-	if s.local && s.localAttachmentPath != nil {
-		output.Path, err = s.localAttachmentPath(args.ID, page.Filename)
-		if err != nil {
-			return nil, ReadAttachmentResult{}, err
-		}
+	if s.local {
+		output.Path = page.LocalPath
 	}
+
 	return nil, output, nil
 
 }
@@ -1081,11 +1079,11 @@ func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, args InfoAr
 		return nil, InfoResult{}, err
 	}
 	defer ss.mu.Unlock()
-	project, _, _, err := s.readScope(ctx, req, ss, args.Project)
+	project, branch, branchFromSession, err := s.readScope(ctx, req, ss, args.Project)
 	if err != nil {
 		return nil, InfoResult{}, err
 	}
-	info, err := s.app.Info(ctx, s.requestIdentity(req), project, sdd.InfoRequest{})
+	info, err := s.app.Info(ctx, s.requestIdentity(req), project, sdd.InfoRequest{Branch: branch, BranchFromSession: branchFromSession})
 	if err != nil {
 		return nil, InfoResult{}, err
 	}

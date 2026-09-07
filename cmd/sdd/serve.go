@@ -85,14 +85,7 @@ func serveCmd() *cli.Command {
 				Application:   application,
 				LocalIdentity: identity,
 				LocalClient:   transport == "stdio",
-				LocalAttachmentPath: func(entryID, filename string) (string, error) {
-					attachDir, pathErr := sdd.AttachmentDirRelPath(entryID)
-					if pathErr != nil {
-						return "", pathErr
-					}
-					return filepath.Abs(filepath.Join(dir, attachDir, filename))
-				},
-				Version: version,
+				Version:       version,
 			})
 			if err != nil {
 				return err

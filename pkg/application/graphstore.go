@@ -81,6 +81,9 @@ type AttachmentMaterialization struct {
 }
 
 type AttachmentPage struct {
+	// LocalPath is an optional absolute path supplied by the attachment source
+	// for clients sharing its filesystem. It does not extend source retention.
+	LocalPath  string
 	Filename   string
 	Content    []byte
 	Offset     int64

@@ -384,13 +384,6 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 	}
 	opts := mcpserver.Options{SearchSyncMode: sdd.SearchSyncAll,
 		Application: application, LocalIdentity: sdd.RequestIdentity{Subject: "tester"}, Version: "test",
-		LocalAttachmentPath: func(entryID, filename string) (string, error) {
-			dir, pathErr := model.AttachDirRelPath(entryID)
-			if pathErr != nil {
-				return "", pathErr
-			}
-			return filepath.Abs(filepath.Join(graphDir, dir, filename))
-		},
 	}
 	for _, m := range mutate {
 		m(&opts)
@@ -3494,5 +3487,68 @@ func TestEmbeddedCatchupProcedure(t *testing.T) {
 	}}, &serve)
 	if serve.Status != "completed" {
 		t.Fatalf("pursue should complete the check-in, got %s at %q", serve.Status, serve.Step)
+	}
+}
+
+type configuredReadStore struct {
+	sdd.GraphStore
+	language string
+}
+
+func (s configuredReadStore) AcquireSnapshot(ctx context.Context, q sdd.SnapshotReadQuery) (*sdd.AcquiredSnapshot, error) {
+	source, err := s.GraphStore.(sdd.SnapshotReader).AcquireSnapshot(ctx, q)
+	if err == nil {
+		source.Config = &sdd.ProjectConfig{Language: s.language}
+	}
+	return source, err
+}
+
+func TestBoundInfoAndAttachmentPathUseSelectedSource(t *testing.T) {
+	env := newTestServer(t, nil, "", "", func(o *mcpserver.Options) { o.LocalClient = true })
+	branchDir := t.TempDir()
+	relative, err := sdd.AttachmentDirRelPath(fixtureGapID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryRelative := relative + ".md"
+	content, err := os.ReadFile(filepath.Join(env.graphDir, entryRelative))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(branchDir, relative), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(branchDir, entryRelative), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	attachment := filepath.Join(branchDir, relative, "branch-only.txt")
+	if err := os.WriteFile(attachment, []byte("Branch-only immutable attachment"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	graph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "test", GraphDir: branchDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.targets.set("work", configuredReadStore{GraphStore: graph, language: "de"})
+	cs := connect(t, env.srv)
+	session := openSession(t, cs).Session
+	var binding mcpserver.BindBranchResult
+	call(t, cs, "bind_branch", map[string]any{"session": session, "branch": "work"}, &binding)
+	var info mcpserver.InfoResult
+	call(t, cs, "info", map[string]any{"session": session}, &info)
+	if info.Language != "de" {
+		t.Fatalf("branch language lost: %+v", info)
+	}
+	var page mcpserver.ReadAttachmentResult
+	call(t, cs, "read_attachment", map[string]any{"session": session, "id": fixtureGapID, "name": "branch-only.txt"}, &page)
+	if page.Path != attachment {
+		t.Fatalf("path=%q want %q", page.Path, attachment)
+	}
+	bytes, err := os.ReadFile(page.Path)
+	if err != nil || string(bytes) != page.Content {
+		t.Fatalf("path does not identify returned content: %q %v", bytes, err)
+	}
+	if _, err := os.Stat(filepath.Join(env.graphDir, relative, "branch-only.txt")); !os.IsNotExist(err) {
+		t.Fatalf("attachment unexpectedly exists in base: %v", err)
 	}
 }

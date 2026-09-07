@@ -44,6 +44,16 @@
 // not a newly imposed write precondition. Acquired read configuration introduces
 // no new write validations or changes to write-time configuration precedence.
 //
+// InfoRequest.Branch selects the read authority; an empty branch intentionally
+// selects current authority. MCP forwards the session binding for Info.
+//
+// AttachmentPage.LocalPath is optional source-provided metadata for clients
+// sharing the adapter filesystem. Filesystem sources return their own checkout
+// path under attachment immutability; the hint does not retain that checkout.
+// MCP forwards it only to local clients and never constructs filesystem paths.
+// Compositions using mcpapp.Options.LocalAttachmentPath must remove that callback
+// and supply paths from their attachment reader instead.
+//
 // # Local composition
 //
 // FilesystemGraphStore pins graph and attachment bytes in memory and deliberately

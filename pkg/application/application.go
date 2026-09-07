@@ -80,8 +80,9 @@ func NewApplication(options ApplicationOptions) (*Application, error) {
 
 func (a *Application) now() time.Time { return a.clock.Now() }
 
-func (a *Application) Info(ctx context.Context, identity RequestIdentity, project ProjectID, _ InfoRequest) (InfoResult, error) {
-	return a.infoForBranch(ctx, identity, project, "")
+func (a *Application) Info(ctx context.Context, identity RequestIdentity, project ProjectID, request InfoRequest) (InfoResult, error) {
+	result, err := a.infoForBranch(ctx, identity, project, request.Branch)
+	return result, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
 }
 
 func (a *Application) infoForBranch(ctx context.Context, identity RequestIdentity, project ProjectID, branch string) (InfoResult, error) {

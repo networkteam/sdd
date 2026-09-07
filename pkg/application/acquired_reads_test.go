@@ -345,3 +345,34 @@ func TestWorkflowServeUsesOneViewAndRefreshesNextOperation(t *testing.T) {
 		}
 	}
 }
+
+func TestInfoSelectsRequestedAuthorityWithoutFallback(t *testing.T) {
+	snapshot := acquiredSnapshot(t, "base", "r1", "Info source")
+	var branches []string
+	store := acquiredReadStore{acquire: func(_ context.Context, q sdd.SnapshotReadQuery) (*sdd.AcquiredSnapshot, error) {
+		branches = append(branches, q.Branch)
+		if q.Branch == "missing" {
+			return nil, errors.New("source unavailable")
+		}
+		language := "en"
+		if q.Branch == "work" {
+			language = "de"
+		}
+		return &sdd.AcquiredSnapshot{Snapshot: snapshot, Config: &sdd.ProjectConfig{Language: language}, Attachments: staticGraphStore{}, Release: func() error { return nil }}, nil
+	}}
+	app := preparationApp(t, acquiredRuntime(t, "base", store), nil, nil)
+	identity := sdd.RequestIdentity{Subject: "reader"}
+	for _, tc := range []struct{ branch, language string }{{"", "en"}, {"work", "de"}} {
+		info, err := app.Info(t.Context(), identity, "base", sdd.InfoRequest{Branch: tc.branch})
+		if err != nil || info.Language != tc.language {
+			t.Fatalf("info=%+v err=%v", info, err)
+		}
+	}
+	_, err := app.Info(t.Context(), identity, "base", sdd.InfoRequest{Branch: "missing", BranchFromSession: true})
+	if err == nil || !strings.Contains(err.Error(), "session is bound") {
+		t.Fatalf("missing branch error: %v", err)
+	}
+	if strings.Join(branches, ",") != ",work,missing" {
+		t.Fatalf("unexpected acquisitions: %v", branches)
+	}
+}
