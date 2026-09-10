@@ -1,6 +1,6 @@
 ---
 metadata:
-    sdd-content-hash: fc9f862a1117260d72b72b4c56ec1cfd09b4702b9e09bd66307d95ef45829656
+    sdd-content-hash: df4c8bc2d0b28895a5c8f11377ba1ee1b5aecaded791d00c7853320f85fdb6f9
     sdd-version: dev
 ---
 # sdd search
@@ -98,6 +98,8 @@ Vector mode reads from a machine-global index — a content-addressed store keye
 
 - **`sdd index`** — explicit warm-up: builds chunks for every entry on disk. Run once on a fresh clone, after a major batch of new entries, or after changing the embedding model. `--force` re-embeds everything regardless.
 - **Lazy fill** — `sdd search` automatically chunks and embeds entries that are present on disk but missing from (or stale against) the index before the query runs. The first search after a branch switch or new captures may emit a few `lazy-indexed` lines; subsequent searches are fast.
+
+Neither path deletes: every embedded entry state stays in the store, so several sdd binaries can share it. `sdd index gc` reports the stored versions by group and `sdd index gc --drop <group>` (or `--drop stale`) removes what this checkout no longer searches.
 
 `sdd lint` reports `Index:` health when an embedding provider is configured: total entries indexed and the count of entries indexed under a different fingerprint (drift). Drift converges as entries are re-embedded by `sdd search` or `sdd index --force`.
 
