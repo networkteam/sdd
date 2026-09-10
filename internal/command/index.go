@@ -3,14 +3,15 @@ package command
 import "github.com/networkteam/sdd/internal/model"
 
 // BuildIndexCmd warms up the search index by chunking, embedding, and
-// upserting every entry on disk. Existing rows for re-indexed entries are
-// dropped before the new rows land. The command is idempotent — re-running
+// upserting every entry on disk. The command is idempotent — re-running
 // Build over an up-to-date index is a no-op when Force is false (entries
 // whose hash and fingerprint match the manifest are skipped); Force=true
-// re-embeds and re-upserts everything regardless.
+// re-embeds everything regardless. Nothing else is deleted: versions
+// accumulate until `sdd index gc` (DropIndexVersionsCmd) removes them.
 type BuildIndexCmd struct {
 	// Force re-embeds every entry even when the manifest already records
-	// an up-to-date row set.
+	// an up-to-date row set, replacing the entry's versions under the current
+	// derivation rule and leaving versions of other rules in place.
 	Force bool
 
 	// OnPlanned reports the number of entries needing indexing after selection.
@@ -98,4 +99,17 @@ type BuildConnectedIndexesCmd struct {
 	// OnEntryIndexed mirrors BuildIndexCmd's callback — the per-entry chunk
 	// count; the bar advances by one entry as publication completes.
 	OnEntryIndexed func(entryID string, chunkCount int)
+}
+
+// DropIndexVersionsCmd deletes stored index versions by group — the `sdd index
+// gc --drop` path, the only deletion besides a force rebuild (d-tac-c9c). Groups
+// are the names `sdd index gc` reports (index.VersionGroups); the stale
+// selector expands to every droppable group. Naming the current group or an
+// absent one fails before anything is deleted.
+type DropIndexVersionsCmd struct {
+	Groups []string
+
+	// OnDropped reports what was removed: versions, their chunk rows, and the
+	// bytes those rows occupied. Fires once, also when nothing matched.
+	OnDropped func(versions, chunks int, bytes int64)
 }

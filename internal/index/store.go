@@ -332,3 +332,61 @@ func ReadCached(ctx context.Context, indexDir string, cache *SnapshotCache, fn f
 	}
 	return reloaded, fn(cache.index)
 }
+
+// ReadManifestLocked loads only the manifest under the store's shared lock —
+// what a report over stored versions needs, without decoding the vector rows.
+func ReadManifestLocked(ctx context.Context, indexDir string) (*Manifest, error) {
+	if err := ensureStoreDir(indexDir); err != nil {
+		return nil, err
+	}
+	l := lockFile(indexDir)
+	if _, err := l.TryRLockContext(ctx, lockRetryInterval); err != nil {
+		return nil, fmt.Errorf("acquiring index read lock at %s: %w", indexDir, err)
+	}
+	defer func() { _ = l.Unlock() }()
+	return LoadManifest(indexDir)
+}
+
+// documentPath is where chromem-go persists one row: one gob file per
+// document, named by a hash of its ID, under a directory named by a hash of
+// the collection. Mirrors chromem's unexported layout so a group of rows can be
+// sized without loading the store; a layout change there only skews sizes.
+func documentPath(indexDir, chunkID string) string {
+	short := func(name string) string {
+		sum := sha256.Sum256([]byte(name))
+		return hex.EncodeToString(sum[:4])
+	}
+	return filepath.Join(indexDir, "chromem", short(CollectionName), short(chunkID)+".gob")
+}
+
+// DocumentsSize sums the on-disk size of the given rows. A row without a file
+// counts zero.
+func DocumentsSize(indexDir string, chunkIDs []string) int64 {
+	var total int64
+	for _, id := range chunkIDs {
+		if info, err := os.Stat(documentPath(indexDir, id)); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
+}
+
+// StoreSize is the on-disk size of the whole store directory.
+func StoreSize(indexDir string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(indexDir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	return total, err
+}

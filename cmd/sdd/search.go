@@ -179,12 +179,13 @@ func newEmbedder(cfg model.EmbeddingConfig) (handlers.IndexEmbedder, error) {
 
 func indexCmd() *cli.Command {
 	return &cli.Command{
-		Name:  "index",
-		Usage: "Build or refresh the search index over .sdd/graph",
+		Name:     "index",
+		Usage:    "Build or refresh the search index over .sdd/graph",
+		Commands: []*cli.Command{indexGCCmd()},
 		Flags: append(embeddingFlags(),
 			&cli.BoolFlag{
 				Name:  "force",
-				Usage: "Re-embed every entry, even those whose hash and fingerprint match the manifest",
+				Usage: "Re-embed every entry, even those whose hash and fingerprint match the manifest; stored versions of other derivation rules stay",
 			},
 			&cli.StringSliceFlag{
 				Name:  "repo",
@@ -296,6 +297,11 @@ func indexCmd() *cli.Command {
 				if crossRepo {
 					detail = fmt.Sprintf("(%d skipped) + %d connected repo(s) in %s",
 						doneSkipped, len(repoIDs), time.Since(start).Round(time.Millisecond))
+				}
+				// Nothing collects on its own any more, so the store size is
+				// the prompt for `sdd index gc` (d-tac-c9c).
+				if size, err := index.StoreSize(idxDir); err == nil {
+					detail += " · store " + presenters.HumanBytes(size)
 				}
 				presenters.RenderResultLine(os.Stdout,
 					fmt.Sprintf("indexed %d entries", doneIndexed), detail)
