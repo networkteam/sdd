@@ -23,7 +23,7 @@ import (
 // and upserting; the SearchFinder is pure-read and consults the index
 // via index.Index directly.
 //
-// Two operations:
+// Three operations:
 //
 //   - Build (sdd index): full warm-up over every entry on disk. Skips
 //     entries whose manifest record is up-to-date unless Force is set.
@@ -31,6 +31,9 @@ import (
 //   - LazyFill (sdd search prelude): reconciles the manifest against
 //     entries on disk — re-embeds entries that are missing, or whose
 //     content hash / embedder fingerprint differs from the stored state.
+//
+//   - DropVersions (sdd index gc --drop): the only path that deletes stored
+//     versions; Build and LazyFill only add.
 type IndexHandler struct {
 	graphDir    string
 	indexDir    string
@@ -144,21 +147,17 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 		return fmt.Errorf("loading manifest: %w", err)
 	}
 	fingerprint := h.embedder.Fingerprint()
-	currentHashes := map[string]string{}
+	currentHashes, err := h.currentEntryHashes(ctx, g)
+	if err != nil {
+		return err
+	}
 	var work []indexInput
 	skipped := 0
 	for _, entry := range g.Entries {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if !chunking.IncludeEntry(entry, h.excludeEmbedded) {
+		hash, ok := currentHashes[entry.ID]
+		if !ok {
 			continue
 		}
-		hash, err := chunking.EntryStateHash(ctx, entry, h.attachments)
-		if err != nil {
-			return err
-		}
-		currentHashes[entry.ID] = hash
 		if !force && manifest.Entries[entry.ID].HasVersion(hash, fingerprint) {
 			skipped++
 			if onSkipped != nil {
@@ -195,13 +194,31 @@ func (h *IndexHandler) indexEntriesLocked(ctx context.Context, idx *index.Index,
 	if err != nil {
 		return err
 	}
-	if err := h.collectGarbage(ctx, idx, manifest, currentHashes); err != nil {
-		return err
-	}
 	if onComplete != nil {
 		onComplete(indexed, skipped)
 	}
 	return nil
+}
+
+// currentEntryHashes maps every indexable entry of the graph to its state hash
+// — the checkout's current versions, which the skip pass and version grouping
+// compare against.
+func (h *IndexHandler) currentEntryHashes(ctx context.Context, g *model.Graph) (map[string]string, error) {
+	hashes := make(map[string]string, len(g.Entries))
+	for _, entry := range g.Entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !chunking.IncludeEntry(entry, h.excludeEmbedded) {
+			continue
+		}
+		hash, err := chunking.EntryStateHash(ctx, entry, h.attachments)
+		if err != nil {
+			return nil, err
+		}
+		hashes[entry.ID] = hash
+	}
+	return hashes, nil
 }
 
 func (h *IndexHandler) publishIndexEntry(ctx context.Context, idx *index.Index, manifest *index.Manifest, entry *model.IndexWork, force bool) error {
@@ -215,40 +232,86 @@ func (h *IndexHandler) publishIndexEntry(ctx context.Context, idx *index.Index, 
 		ids[i] = c.ID
 		rows[i] = index.Row{EntryID: c.EntryID, EntryHash: c.EntryHash, ChunkID: c.ID, Text: c.Text, Body: c.Body, Breadcrumb: c.Breadcrumb, Depth: c.Depth, IsSummary: c.IsSummary, IsAttachment: c.IsAttachment, SourceAttachmentPath: c.SourceAttachmentPath, ContentHash: c.ContentHash, ModelFingerprint: entry.Version.Namespace.Fingerprint, Embedding: row.Vector}
 	}
-	var old []string
-	if force {
-		old = manifest.Entries[entry.Version.EntryID].AllChunkIDs()
-	}
-	if err := idx.UpsertEntry(ctx, entry.Version.EntryID, old, rows); err != nil {
+	if err := idx.UpsertEntry(ctx, entry.Version.EntryID, nil, rows); err != nil {
 		return err
 	}
-	version := index.EntryVersion{Hash: entry.Version.EntryHash, Fingerprint: entry.Version.Namespace.Fingerprint, ChunkIDs: ids, IndexedAt: h.now()}
-	if force {
-		manifest.SetSingleVersion(entry.Version.EntryID, version)
-	} else {
+	version := index.EntryVersion{Hash: entry.Version.EntryHash, Fingerprint: entry.Version.Namespace.Fingerprint, Derivation: index.DerivationCurrent, ChunkIDs: ids, IndexedAt: h.now()}
+	if !force {
 		manifest.AddVersion(entry.Version.EntryID, version)
+		return manifest.Save(h.indexDir)
 	}
-	return manifest.Save(h.indexDir)
+	// Force replaces only this binary's own derivation rule: another rule's
+	// versions belong to another binary sharing the store (d-tac-c9c). The
+	// replaced rows go after the manifest save, for the reason DropVersions
+	// gives; rows the new version reuses (same hash) are kept.
+	replaced := manifest.Entries[entry.Version.EntryID].ChunkIDsOf(index.DerivationCurrent)
+	manifest.SetDerivationVersion(entry.Version.EntryID, version)
+	if err := manifest.Save(h.indexDir); err != nil {
+		return err
+	}
+	kept := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		kept[id] = true
+	}
+	var stale []string
+	for _, id := range replaced {
+		if !kept[id] {
+			stale = append(stale, id)
+		}
+	}
+	return idx.DeleteEntry(ctx, stale)
 }
 
-// collectGarbage drops stored versions that are neither a current version (in
-// currentHashes, the writer's graph) nor within the retention window, deleting
-// their rows from the index and persisting the pruned manifest. It runs inside
-// the write session under the exclusive lock — one of the two sanctioned delete
-// paths (the other is a force rebuild); reads never delete. Revisiting a stale
-// branch after collection re-embeds that branch's changed entries: bounded and
-// self-healing, since vectors are derived data.
-func (h *IndexHandler) collectGarbage(ctx context.Context, idx *index.Index, manifest *index.Manifest, currentHashes map[string]string) error {
-	dropped := manifest.CollectStaleVersions(currentHashes, h.now(), index.VersionRetention)
-	if len(dropped) == 0 {
+// DropVersions deletes the version groups cmd names from the store — the
+// deliberate collection `sdd index gc --drop` runs (d-tac-c9c). Selection is
+// resolved against the checkout's current hashes under the exclusive lock, so a
+// concurrent writer cannot move a version between groups mid-drop.
+func (h *IndexHandler) DropVersions(ctx context.Context, cmd *command.DropIndexVersionsCmd) error {
+	if cmd == nil || len(cmd.Groups) == 0 {
+		return errors.New("DropIndexVersionsCmd with at least one group is required")
+	}
+	g, err := h.reader.CurrentGraph(h.graphDir)
+	if err != nil {
+		return fmt.Errorf("loading graph: %w", err)
+	}
+	return index.WriteStore(ctx, h.indexDir, func(idx *index.Index) error {
+		manifest, err := index.LoadManifest(h.indexDir)
+		if err != nil {
+			return fmt.Errorf("loading manifest: %w", err)
+		}
+		current, err := h.currentEntryHashes(ctx, g)
+		if err != nil {
+			return err
+		}
+		selected, missing, err := manifest.SelectGroups(cmd.Groups, current)
+		if err != nil {
+			return err
+		}
+		chunkIDs, versions := manifest.DropGroups(selected, current)
+		bytes := index.DocumentsSize(h.indexDir, chunkIDs)
+		// The manifest must never name a row that is gone: reads materialize
+		// it row by row and fail on a missing one. So the manifest is saved
+		// first and rows are deleted after; a delete that fails leaves orphan
+		// files nothing reads, and the sweep below removes them on the next run.
+		if versions > 0 {
+			if err := manifest.Save(h.indexDir); err != nil {
+				return fmt.Errorf("save manifest after drop: %w", err)
+			}
+			if err := idx.DeleteEntry(ctx, chunkIDs); err != nil {
+				return fmt.Errorf("deleting index rows: %w", err)
+			}
+		}
+		orphans, orphanBytes, err := index.Orphans(h.indexDir, manifest)
+		if err != nil {
+			return err
+		}
+		if err := idx.RemoveFiles(orphans); err != nil {
+			return fmt.Errorf("removing orphan rows: %w", err)
+		}
+		slogutils.FromContext(ctx).Info("dropped index versions", "groups", selected, "missing", missing, "versions", versions, "chunks", len(chunkIDs), "orphans", len(orphans))
+		if cmd.OnDropped != nil {
+			cmd.OnDropped(command.DroppedIndexVersions{Versions: versions, Chunks: len(chunkIDs), Orphans: len(orphans), Bytes: bytes + orphanBytes, Missing: missing})
+		}
 		return nil
-	}
-	if err := idx.DeleteEntry(ctx, dropped); err != nil {
-		return fmt.Errorf("garbage-collecting stale versions: %w", err)
-	}
-	if err := manifest.Save(h.indexDir); err != nil {
-		return fmt.Errorf("save manifest after garbage collection: %w", err)
-	}
-	slogutils.FromContext(ctx).Info("garbage-collected stale index versions", "chunks", len(dropped))
-	return nil
+	})
 }

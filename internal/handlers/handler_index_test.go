@@ -376,11 +376,9 @@ func TestIndexHandler_BuildPicksUpEntryEdits(t *testing.T) {
 	}
 }
 
-// A changed entry accumulates a version on the lazy path (no delete-on-change),
-// and the write-session GC drops a version once it is neither current nor
-// within the retention window — deleting only through the sanctioned
-// write-session path.
-func TestIndexHandler_GarbageCollectsStaleVersions(t *testing.T) {
+// A changed entry accumulates a version on the write path and nothing collects
+// it: versions leave the store only through DropVersions (d-tac-c9c).
+func TestIndexHandler_WritesNeverDeleteVersions(t *testing.T) {
 	t.Parallel()
 
 	graphDir := t.TempDir()
@@ -398,39 +396,185 @@ func TestIndexHandler_GarbageCollectsStaleVersions(t *testing.T) {
 		Now:      func() time.Time { return clock },
 	})
 
-	// First fill: entry indexed as version 1 at the initial clock time.
 	if err := h.LazyFill(context.Background(), &command.LazyFillIndexCmd{}); err != nil {
 		t.Fatalf("first fill: %v", err)
+	}
+	writeEntry(t, graphDir, id, "body", "new summary")
+	clock = clock.Add(90 * 24 * time.Hour)
+	if err := h.LazyFill(context.Background(), &command.LazyFillIndexCmd{}); err != nil {
+		t.Fatalf("second fill: %v", err)
+	}
+
+	manifest, err := index.LoadManifest(indexDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions := manifest.Entries[id].Versions
+	if len(versions) != 2 {
+		t.Fatalf("entry has %d versions after an edit, want 2 (nothing collects)", len(versions))
+	}
+	for _, v := range versions {
+		if v.Derivation != index.DerivationCurrent {
+			t.Errorf("version %s recorded derivation %q, want %q", v.Hash, v.Derivation, index.DerivationCurrent)
+		}
+	}
+}
+
+// seedForeignVersion stores a row and manifest version the way a binary of a
+// previous release would: an eight-character version segment and no derivation
+// record.
+func seedForeignVersion(t *testing.T, indexDir, entryID string) {
+	t.Helper()
+	chunkID := entryID + "#v-abcdef01#summary"
+	err := index.WriteStore(context.Background(), indexDir, func(idx *index.Index) error {
+		manifest, err := index.LoadManifest(indexDir)
+		if err != nil {
+			return err
+		}
+		row := index.Row{EntryID: entryID, EntryHash: "foreign", ChunkID: chunkID, Text: "old", Body: "old", IsSummary: true, ModelFingerprint: "fake/v1/4", Embedding: []float32{1, 0, 0, 0}}
+		if err := idx.UpsertEntry(context.Background(), entryID, nil, []index.Row{row}); err != nil {
+			return err
+		}
+		manifest.AddVersion(entryID, index.EntryVersion{Hash: "foreign", Fingerprint: "fake/v1/4", ChunkIDs: []string{chunkID}, IndexedAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)})
+		return manifest.Save(indexDir)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func countRows(t *testing.T, indexDir string) int {
+	t.Helper()
+	var n int
+	err := index.ReadStore(context.Background(), indexDir, func(idx *index.Index) error {
+		n = idx.Count()
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A force rebuild replaces only this binary's own derivation rule; a version
+// another release wrote into the shared store survives, rows included.
+func TestIndexHandler_ForceKeepsOtherDerivations(t *testing.T) {
+	t.Parallel()
+
+	graphDir := t.TempDir()
+	indexDir := t.TempDir()
+	id := "20260101-100000-s-tac-aaa"
+	writeEntry(t, graphDir, id, "body", "summary")
+	seedForeignVersion(t, indexDir, id)
+
+	emb := &fakeEmbedder{}
+	h := NewIndexHandler(IndexHandlerOptions{GraphDir: graphDir, IndexDir: indexDir, Embedder: indexEmbedder(emb), Reader: readFinderFor(t)})
+	if err := h.Build(context.Background(), &command.BuildIndexCmd{}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	rowsBefore := countRows(t, indexDir)
+	if err := h.Build(context.Background(), &command.BuildIndexCmd{Force: true}); err != nil {
+		t.Fatalf("force build: %v", err)
+	}
+
+	manifest, err := index.LoadManifest(indexDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions := manifest.Entries[id].Versions
+	if len(versions) != 2 {
+		t.Fatalf("entry has %d versions after force, want the foreign one plus the rebuilt one", len(versions))
+	}
+	if versions[0].Hash != "foreign" || versions[1].Derivation != index.DerivationCurrent {
+		t.Errorf("versions after force = %+v", versions)
+	}
+	if rows := countRows(t, indexDir); rows != rowsBefore {
+		t.Errorf("row count after force = %d, want %d (force replaces, never shrinks another rule)", rows, rowsBefore)
+	}
+}
+
+func TestIndexHandler_DropVersions(t *testing.T) {
+	t.Parallel()
+
+	graphDir := t.TempDir()
+	indexDir := t.TempDir()
+	id := "20260101-100000-s-tac-aaa"
+	writeEntry(t, graphDir, id, "body", "summary")
+	seedForeignVersion(t, indexDir, id)
+
+	emb := &fakeEmbedder{}
+	h := NewIndexHandler(IndexHandlerOptions{GraphDir: graphDir, IndexDir: indexDir, Embedder: indexEmbedder(emb), Reader: readFinderFor(t)})
+	if err := h.Build(context.Background(), &command.BuildIndexCmd{}); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	rowsBefore := countRows(t, indexDir)
+
+	err := h.DropVersions(context.Background(), &command.DropIndexVersionsCmd{Groups: []string{index.GroupCurrent}})
+	if err == nil {
+		t.Fatal("dropping the current group must fail")
+	}
+	if rows := countRows(t, indexDir); rows != rowsBefore {
+		t.Fatalf("a refused drop deleted rows: %d, want %d", rows, rowsBefore)
+	}
+
+	var got command.DroppedIndexVersions
+	err = h.DropVersions(context.Background(), &command.DropIndexVersionsCmd{
+		Groups:    []string{index.GroupPreDerivation, "v7"},
+		OnDropped: func(d command.DroppedIndexVersions) { got = d },
+	})
+	if err != nil {
+		t.Fatalf("drop v0: %v", err)
+	}
+	if got.Versions != 1 || got.Chunks != 1 || got.Bytes == 0 {
+		t.Errorf("OnDropped = %+v, want 1 version, 1 chunk, >0 bytes", got)
+	}
+	if len(got.Missing) != 1 || got.Missing[0] != "v7" {
+		t.Errorf("missing groups = %v, want the absent v7 reported, not an error", got.Missing)
+	}
+	if rows := countRows(t, indexDir); rows != rowsBefore-1 {
+		t.Errorf("row count after drop = %d, want %d", rows, rowsBefore-1)
 	}
 	manifest, err := index.LoadManifest(indexDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(manifest.Entries[id].Versions); got != 1 {
-		t.Fatalf("after first fill entry has %d versions, want 1", got)
+	if versions := manifest.Entries[id].Versions; len(versions) != 1 || versions[0].Derivation != index.DerivationCurrent {
+		t.Errorf("versions after drop = %+v, want only the current one", versions)
 	}
 
-	// Change the entry (summary regen) and advance the clock past the retention
-	// window. The lazy fill adds version 2; version 1 is now neither current nor
-	// recent, so GC drops it.
-	writeEntry(t, graphDir, id, "body", "new summary")
-	clock = clock.Add(index.VersionRetention + 24*time.Hour)
-	if err := h.LazyFill(context.Background(), &command.LazyFillIndexCmd{}); err != nil {
-		t.Fatalf("second fill: %v", err)
+	// Nothing stale remains: the umbrella selector is a no-op, not an error.
+	err = h.DropVersions(context.Background(), &command.DropIndexVersionsCmd{
+		Groups:    []string{index.GroupStale},
+		OnDropped: func(d command.DroppedIndexVersions) { got = d },
+	})
+	if err != nil || got.Versions != 0 || got.Chunks != 0 || got.Orphans != 0 {
+		t.Errorf("stale drop on a clean store = (%+v, %v), want a no-op", got, err)
 	}
 
-	manifest, err = index.LoadManifest(indexDir)
+	// A row file no manifest version references — what a delete that failed
+	// after the manifest save leaves — goes on the next drop run.
+	seedForeignVersion(t, indexDir, id)
+	err = index.WriteStore(context.Background(), indexDir, func(*index.Index) error {
+		manifest, err := index.LoadManifest(indexDir)
+		if err != nil {
+			return err
+		}
+		manifest.DropGroups([]string{index.GroupPreDerivation}, nil)
+		return manifest.Save(indexDir)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	versions := manifest.Entries[id].Versions
-	if len(versions) != 1 {
-		t.Fatalf("after GC entry has %d versions, want 1 (stale version collected)", len(versions))
+	rowsBefore = countRows(t, indexDir)
+	err = h.DropVersions(context.Background(), &command.DropIndexVersionsCmd{
+		Groups:    []string{index.GroupStale},
+		OnDropped: func(d command.DroppedIndexVersions) { got = d },
+	})
+	if err != nil || got.Versions != 0 || got.Orphans != 1 || got.Bytes == 0 {
+		t.Errorf("orphan sweep = (%+v, %v), want one orphan removed", got, err)
 	}
-	// The surviving version is the current (new) one — the stale version's rows
-	// were the ones deleted.
-	if versions[0].Fingerprint != emb.Fingerprint() {
-		t.Errorf("surviving version fingerprint = %q, want %q", versions[0].Fingerprint, emb.Fingerprint())
+	if rows := countRows(t, indexDir); rows != rowsBefore-1 {
+		t.Errorf("row count after sweep = %d, want %d", rows, rowsBefore-1)
 	}
 }
 

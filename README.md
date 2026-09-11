@@ -472,6 +472,8 @@ embedding:
 
 After configuring an embedding provider, run `sdd index` once to embed the existing graph. `sdd search` lazy-fills new entries as they're captured. `sdd info` shows `Search: vector,text` when an embedding provider is configured, `Search: text` when not.
 
+The index store only grows on its own: every entry state ever embedded stays until you remove it, so binaries of different sdd versions sharing one store never evict each other's work. `sdd index` prints the store size. `sdd index gc` lists the stored versions by group — the versions this checkout searches, leftovers from other branches, and versions written under the derivation rule of a previous sdd release — and `sdd index gc --drop <group>` deletes one group (`--drop stale` deletes everything this checkout does not search). Drop a previous release's group once no process of that version is still running.
+
 ## Browsing the graph yourself
 
 Day to day, the agent calls the CLI for you. A few commands are useful to run yourself when you want to look around.

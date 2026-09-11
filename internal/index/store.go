@@ -332,3 +332,106 @@ func ReadCached(ctx context.Context, indexDir string, cache *SnapshotCache, fn f
 	}
 	return reloaded, fn(cache.index)
 }
+
+// ReadManifestLocked runs fn against the manifest under the store's shared
+// lock, without decoding the vector rows — what a report over stored versions
+// needs. fn runs inside the lock so file sizes it reads match the manifest.
+func ReadManifestLocked(ctx context.Context, indexDir string, fn func(*Manifest) error) error {
+	if err := ensureStoreDir(indexDir); err != nil {
+		return err
+	}
+	l := lockFile(indexDir)
+	if _, err := l.TryRLockContext(ctx, lockRetryInterval); err != nil {
+		return fmt.Errorf("acquiring index read lock at %s: %w", indexDir, err)
+	}
+	defer func() { _ = l.Unlock() }()
+	manifest, err := LoadManifest(indexDir)
+	if err != nil {
+		return err
+	}
+	return fn(manifest)
+}
+
+// documentPath is where chromem-go persists one row: one gob file per
+// document, named by a hash of its ID, under a directory named by a hash of
+// the collection. Mirrors chromem's unexported layout so a group of rows can be
+// sized without loading the store; a layout change there only skews sizes.
+func documentPath(indexDir, chunkID string) string {
+	short := func(name string) string {
+		sum := sha256.Sum256([]byte(name))
+		return hex.EncodeToString(sum[:4])
+	}
+	return filepath.Join(indexDir, "chromem", short(CollectionName), short(chunkID)+".gob")
+}
+
+// DocumentsSize sums the on-disk size of the given rows. A row without a file
+// counts zero.
+func DocumentsSize(indexDir string, chunkIDs []string) int64 {
+	var total int64
+	for _, id := range chunkIDs {
+		if info, err := os.Stat(documentPath(indexDir, id)); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
+}
+
+// StoreSize is the on-disk size of the whole store directory.
+func StoreSize(indexDir string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(indexDir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	return total, err
+}
+
+// Orphans lists the row files under the collection directory that no version
+// in m references, with their total size. They are what a delete that failed
+// after the manifest was saved leaves behind; nothing reads them, and
+// `sdd index gc --drop` removes them so that failure converges. chromem's
+// collection metadata file is not a row and is never listed.
+func Orphans(indexDir string, m *Manifest) ([]string, int64, error) {
+	referenced := map[string]bool{}
+	for _, state := range m.Entries {
+		for _, id := range state.AllChunkIDs() {
+			referenced[documentPath(indexDir, id)] = true
+		}
+	}
+	collectionDir := filepath.Dir(documentPath(indexDir, ""))
+	entries, err := os.ReadDir(collectionDir)
+	if os.IsNotExist(err) {
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing index rows at %s: %w", collectionDir, err)
+	}
+	var paths []string
+	var total int64
+	for _, entry := range entries {
+		path := filepath.Join(collectionDir, entry.Name())
+		if entry.IsDir() || referenced[path] || entry.Name() == chromemMetadataFile {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, 0, err
+		}
+		paths = append(paths, path)
+		total += info.Size()
+	}
+	return paths, total, nil
+}
+
+// chromemMetadataFile is the collection's own metadata gob beside the rows.
+const chromemMetadataFile = "00000000.gob"

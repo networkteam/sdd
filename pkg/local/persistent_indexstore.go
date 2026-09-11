@@ -29,8 +29,7 @@ import (
 //
 // Reconciliation is monotonic: it accumulates chunks for immutable-entry
 // versions and never deletes based on request filters — the sanctioned delete
-// paths are the CLI's explicit rebuild and write-session version GC, not the
-// search path.
+// paths are the CLI's `sdd index gc` and force rebuild, not the search path.
 type PersistentSearchIndexStore struct {
 	project   app.ProjectID
 	cacheRoot string
@@ -185,6 +184,7 @@ func (s *PersistentSearchIndexStore) Reconcile(ctx context.Context, namespace ap
 			manifest.AddVersion(group.id, index.EntryVersion{
 				Hash:        group.hash,
 				Fingerprint: namespace.Fingerprint,
+				Derivation:  index.DerivationCurrent,
 				ChunkIDs:    chunkIDs,
 				IndexedAt:   s.now(),
 			})

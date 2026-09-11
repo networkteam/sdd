@@ -106,8 +106,8 @@ func DeriveChunks(ctx context.Context, entry *model.Entry, entryHash string, spl
 // definition CanonicalChunk.EntryHash and the CLI manifest hash share.
 func EntryStateHash(ctx context.Context, entry *model.Entry, attachments AttachmentReader) (string, error) {
 	hh := sha256.New()
-	// Bump when fixed derivation rules change so publication cannot reuse old chunks.
-	hh.Write([]byte("sdd-entry-derivation-v1\n"))
+	// The rule name changes every hash, so a new rule never reuses old chunks.
+	hh.Write([]byte("sdd-entry-derivation-" + index.DerivationCurrent + "\n"))
 	hh.Write([]byte(entry.Content))
 	hh.Write([]byte("\n--summary--\n"))
 	hh.Write([]byte(entry.Summary))

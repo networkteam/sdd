@@ -18,9 +18,10 @@ import (
 // Multi-version is the point: the shared machine-global store is written from
 // several checkouts/branches (d-cpt-6cq), and a changed entry (summary
 // regeneration, a mechanical fix) adds a version instead of overwriting the
-// old one, so two branches never flip-flop each other's rows. A stale version
-// is dropped only by write-session GC or an explicit `--force` rebuild — never
-// by a read.
+// old one, so two branches never flip-flop each other's rows. Versions are
+// dropped only on request — `sdd index gc`, or a `--force` rebuild replacing
+// the entry's versions under the current derivation rule (d-tac-c9c) — never
+// by a read or an ordinary write.
 //
 // Schema evolution: a v1 manifest recorded exactly one state per entry as a
 // flat {hash, fingerprint, chunk_ids, indexed_at} object. That shape still
@@ -46,9 +47,9 @@ type EntryState struct {
 }
 
 // EntryVersion is one stored version of an entry: the material it was built
-// from (Hash), the embedder that produced it (Fingerprint), the chunk IDs it
-// contributed (ChunkIDs), and when it was indexed (IndexedAt, which the
-// retention side of GC reads).
+// from (Hash), the embedder that produced it (Fingerprint), the derivation rule
+// that cut it (Derivation), the chunk IDs it contributed (ChunkIDs), and when
+// it was indexed (IndexedAt).
 type EntryVersion struct {
 	// Hash is the entry-state hash (entry content + summary + attachment
 	// bytes) this version was built from. Read-time freshness keeps a hit only
@@ -58,12 +59,19 @@ type EntryVersion struct {
 	// chunks. Within one store (keyed per fingerprint) this is constant, but
 	// it is retained per version for lint drift reporting.
 	Fingerprint string `json:"fingerprint"`
+	// Derivation is the derivation rule this version was written under
+	// (DerivationCurrent at write time). Versions written before the field
+	// existed leave it empty and are classified by chunk-ID shape instead; a
+	// binary that predates the field drops it on save, and the same
+	// classification recovers it. Unlike Fingerprint it never partitions the
+	// store: a rule change recuts chunks in the same vector space.
+	Derivation string `json:"derivation,omitempty"`
 	// ChunkIDs are the IDs this version contributed. Used to resolve a hit's
-	// version (legacy rows carry no entry_hash metadata) and to delete a
-	// version's rows during GC or a force rebuild.
+	// version (legacy rows carry no entry_hash metadata), to size and delete a
+	// version's rows in `sdd index gc`, and to replace them in a force rebuild.
 	ChunkIDs []string `json:"chunk_ids"`
-	// IndexedAt is when this version was last written. The retention window in
-	// version GC reads it; nothing else depends on it.
+	// IndexedAt is when this version was last written; `sdd index gc` reports
+	// it per group.
 	IndexedAt time.Time `json:"indexed_at"`
 }
 
@@ -121,8 +129,7 @@ func (s EntryState) HasVersion(hash, fingerprint string) bool {
 	return false
 }
 
-// AllChunkIDs returns every chunk ID across all of the entry's versions —
-// what a force rebuild deletes before writing the single current version.
+// AllChunkIDs returns every chunk ID across all of the entry's versions.
 func (s EntryState) AllChunkIDs() []string {
 	var out []string
 	for _, v := range s.Versions {
@@ -188,8 +195,8 @@ func (m *Manifest) Save(indexDir string) error {
 // AddVersion records a version for an entry (monotonic accumulation). A version
 // with the same Hash is replaced in place (idempotent re-embed of the same
 // state); otherwise the version is appended, leaving prior versions intact —
-// this is the no-delete lazy write path. The force/rebuild path uses
-// SetSingleVersion instead.
+// this is the no-delete write path. The force/rebuild path uses
+// SetDerivationVersion instead.
 func (m *Manifest) AddVersion(entryID string, v EntryVersion) {
 	if m.Entries == nil {
 		m.Entries = map[string]EntryState{}
@@ -204,16 +211,6 @@ func (m *Manifest) AddVersion(entryID string, v EntryVersion) {
 	}
 	state.Versions = append(state.Versions, v)
 	m.Entries[entryID] = state
-}
-
-// SetSingleVersion collapses an entry to exactly the given version, discarding
-// any others. Used by the force rebuild path, whose caller has already deleted
-// the entry's old chunk rows from the index.
-func (m *Manifest) SetSingleVersion(entryID string, v EntryVersion) {
-	if m.Entries == nil {
-		m.Entries = map[string]EntryState{}
-	}
-	m.Entries[entryID] = EntryState{Versions: []EntryVersion{v}}
 }
 
 // VersionHashForChunk returns the state hash of the version that owns chunkID,
