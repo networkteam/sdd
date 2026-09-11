@@ -92,6 +92,9 @@ that version has stopped.`,
 					Groups: drop,
 					OnDropped: func(d command.DroppedIndexVersions) {
 						detail := fmt.Sprintf("%d chunks, %s freed", d.Chunks, presenters.HumanBytes(d.Bytes))
+						if d.Orphans > 0 {
+							detail += fmt.Sprintf(" · %d orphan files removed", d.Orphans)
+						}
 						if len(d.Missing) > 0 {
 							detail += fmt.Sprintf(" · no %s group here", strings.Join(d.Missing, ", "))
 						}

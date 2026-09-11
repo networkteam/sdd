@@ -167,3 +167,43 @@ func TestDocumentsSizeMatchesStoredRows(t *testing.T) {
 		t.Errorf("StoreSize = %d, %v", total, err)
 	}
 }
+
+// A row file the manifest does not reference is an orphan; a referenced one
+// and chromem's own metadata file are not.
+func TestOrphans(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := context.Background()
+	rows := []index.Row{
+		{EntryID: "e1", EntryHash: "h", ChunkID: "e1#v-h#summary", Text: "a", Body: "a", IsSummary: true, ModelFingerprint: "fp", Embedding: []float32{1, 0}},
+		{EntryID: "e1", EntryHash: "h", ChunkID: "e1#v-h#body-0", Text: "b", Body: "b", ModelFingerprint: "fp", Embedding: []float32{0, 1}},
+	}
+	err := index.WriteStore(ctx, dir, func(idx *index.Index) error {
+		return idx.UpsertEntry(ctx, "e1", nil, rows)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &index.Manifest{Version: 1, Entries: map[string]index.EntryState{
+		"e1": {Versions: []index.EntryVersion{{Hash: "h", ChunkIDs: []string{rows[0].ChunkID}}}},
+	}}
+	paths, bytes, err := index.Orphans(dir, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || bytes == 0 {
+		t.Fatalf("orphans = %v (%d bytes), want the one unreferenced row file", paths, bytes)
+	}
+	err = index.WriteStore(ctx, dir, func(idx *index.Index) error {
+		return idx.RemoveFiles(paths)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths, _, err := index.Orphans(dir, m); err != nil || len(paths) != 0 {
+		t.Errorf("orphans after removal = %v, %v", paths, err)
+	}
+	if size := index.DocumentsSize(dir, []string{rows[0].ChunkID}); size == 0 {
+		t.Error("the referenced row was removed along with the orphan")
+	}
+}

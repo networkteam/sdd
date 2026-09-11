@@ -547,8 +547,34 @@ func TestIndexHandler_DropVersions(t *testing.T) {
 		Groups:    []string{index.GroupStale},
 		OnDropped: func(d command.DroppedIndexVersions) { got = d },
 	})
-	if err != nil || got.Versions != 0 || got.Chunks != 0 {
+	if err != nil || got.Versions != 0 || got.Chunks != 0 || got.Orphans != 0 {
 		t.Errorf("stale drop on a clean store = (%+v, %v), want a no-op", got, err)
+	}
+
+	// A row file no manifest version references — what a delete that failed
+	// after the manifest save leaves — goes on the next drop run.
+	seedForeignVersion(t, indexDir, id)
+	err = index.WriteStore(context.Background(), indexDir, func(*index.Index) error {
+		manifest, err := index.LoadManifest(indexDir)
+		if err != nil {
+			return err
+		}
+		manifest.DropGroups([]string{index.GroupPreDerivation}, nil)
+		return manifest.Save(indexDir)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rowsBefore = countRows(t, indexDir)
+	err = h.DropVersions(context.Background(), &command.DropIndexVersionsCmd{
+		Groups:    []string{index.GroupStale},
+		OnDropped: func(d command.DroppedIndexVersions) { got = d },
+	})
+	if err != nil || got.Versions != 0 || got.Orphans != 1 || got.Bytes == 0 {
+		t.Errorf("orphan sweep = (%+v, %v), want one orphan removed", got, err)
+	}
+	if rows := countRows(t, indexDir); rows != rowsBefore-1 {
+		t.Errorf("row count after sweep = %d, want %d", rows, rowsBefore-1)
 	}
 }
 

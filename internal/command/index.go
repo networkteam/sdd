@@ -118,7 +118,9 @@ type DropIndexVersionsCmd struct {
 type DroppedIndexVersions struct {
 	Versions int
 	Chunks   int
-	// Bytes the removed rows occupied on disk.
+	// Orphans counts row files removed that no manifest version referenced.
+	Orphans int
+	// Bytes the removed rows and orphans occupied on disk.
 	Bytes int64
 	// Missing lists requested groups this store did not hold.
 	Missing []string

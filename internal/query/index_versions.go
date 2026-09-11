@@ -35,4 +35,9 @@ type IndexVersionsResult struct {
 	Entries  int
 	Bytes    int64
 	Groups   []IndexVersionGroup
+	// OrphanFiles are row files no manifest version references — left by a
+	// delete that failed after the manifest was saved. Every `--drop` run
+	// removes them.
+	OrphanFiles int
+	OrphanBytes int64
 }

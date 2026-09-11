@@ -38,6 +38,11 @@ func (f *Finder) IndexVersions(ctx context.Context, q query.IndexVersionsQuery) 
 			return fmt.Errorf("sizing store %s: %w", q.IndexDir, err)
 		}
 		result.Entries, result.Bytes = len(manifest.Entries), total
+		orphans, orphanBytes, err := index.Orphans(q.IndexDir, manifest)
+		if err != nil {
+			return err
+		}
+		result.OrphanFiles, result.OrphanBytes = len(orphans), orphanBytes
 		for _, g := range manifest.VersionGroups(current) {
 			result.Groups = append(result.Groups, query.IndexVersionGroup{
 				Name: g.Name, Versions: g.Versions, Entries: g.Entries, Oldest: g.Oldest, Newest: g.Newest,

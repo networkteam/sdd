@@ -395,3 +395,43 @@ func StoreSize(indexDir string) (int64, error) {
 	}
 	return total, err
 }
+
+// Orphans lists the row files under the collection directory that no version
+// in m references, with their total size. They are what a delete that failed
+// after the manifest was saved leaves behind; nothing reads them, and
+// `sdd index gc --drop` removes them so that failure converges. chromem's
+// collection metadata file is not a row and is never listed.
+func Orphans(indexDir string, m *Manifest) ([]string, int64, error) {
+	referenced := map[string]bool{}
+	for _, state := range m.Entries {
+		for _, id := range state.AllChunkIDs() {
+			referenced[documentPath(indexDir, id)] = true
+		}
+	}
+	collectionDir := filepath.Dir(documentPath(indexDir, ""))
+	entries, err := os.ReadDir(collectionDir)
+	if os.IsNotExist(err) {
+		return nil, 0, nil
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing index rows at %s: %w", collectionDir, err)
+	}
+	var paths []string
+	var total int64
+	for _, entry := range entries {
+		path := filepath.Join(collectionDir, entry.Name())
+		if entry.IsDir() || referenced[path] || entry.Name() == chromemMetadataFile {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, 0, err
+		}
+		paths = append(paths, path)
+		total += info.Size()
+	}
+	return paths, total, nil
+}
+
+// chromemMetadataFile is the collection's own metadata gob beside the rows.
+const chromemMetadataFile = "00000000.gob"

@@ -277,6 +277,22 @@ func (i *Index) DeleteEntry(ctx context.Context, chunkIDs []string) error {
 	return nil
 }
 
+// RemoveFiles deletes row files chromem no longer needs to know about — the
+// orphans Orphans lists — and marks the store changed so readers reload. A file
+// already gone is not an error.
+func (i *Index) RemoveFiles(paths []string) error {
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if len(paths) > 0 {
+		i.dirty = true
+		i.published = nil
+	}
+	return nil
+}
+
 // Query returns the top-N matches for the given query embedding. The
 // nResults parameter is clamped to the collection's current count to
 // avoid chromem-go's "n_results larger than collection" behavior.

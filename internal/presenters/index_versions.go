@@ -42,6 +42,9 @@ func RenderIndexVersionsTable(dst io.Writer, results []*query.IndexVersionsResul
 			})
 		}
 		fmt.Fprintln(w, ruledTable([]string{"GROUP", "VERSIONS", "ENTRIES", "OLDEST", "NEWEST", "SIZE", "STATUS"}, data, 1))
+		if r.OrphanFiles > 0 {
+			fmt.Fprintln(w, " "+clrWarn.Render(fmt.Sprintf("%d orphan row files (%s) not referenced by the manifest — any --drop run removes them", r.OrphanFiles, HumanBytes(r.OrphanBytes))))
+		}
 	}
 }
 
@@ -53,11 +56,13 @@ func dayOrDash(t time.Time) string {
 }
 
 type indexVersionsJSON struct {
-	Store    string             `json:"store"`
-	IndexDir string             `json:"index_dir"`
-	Entries  int                `json:"entries"`
-	Bytes    int64              `json:"bytes"`
-	Groups   []indexVersionJSON `json:"groups"`
+	Store       string             `json:"store"`
+	IndexDir    string             `json:"index_dir"`
+	Entries     int                `json:"entries"`
+	Bytes       int64              `json:"bytes"`
+	Groups      []indexVersionJSON `json:"groups"`
+	OrphanFiles int                `json:"orphan_files"`
+	OrphanBytes int64              `json:"orphan_bytes"`
 }
 
 type indexVersionJSON struct {
@@ -75,7 +80,7 @@ type indexVersionJSON struct {
 func RenderIndexVersionsJSON(w io.Writer, results []*query.IndexVersionsResult) error {
 	out := make([]indexVersionsJSON, 0, len(results))
 	for _, r := range results {
-		store := indexVersionsJSON{Store: r.Label, IndexDir: r.IndexDir, Entries: r.Entries, Bytes: r.Bytes, Groups: []indexVersionJSON{}}
+		store := indexVersionsJSON{Store: r.Label, IndexDir: r.IndexDir, Entries: r.Entries, Bytes: r.Bytes, Groups: []indexVersionJSON{}, OrphanFiles: r.OrphanFiles, OrphanBytes: r.OrphanBytes}
 		for _, g := range r.Groups {
 			store.Groups = append(store.Groups, indexVersionJSON{
 				Group: g.Name, Versions: g.Versions, Entries: g.Entries,

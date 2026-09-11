@@ -232,22 +232,34 @@ func (h *IndexHandler) publishIndexEntry(ctx context.Context, idx *index.Index, 
 		ids[i] = c.ID
 		rows[i] = index.Row{EntryID: c.EntryID, EntryHash: c.EntryHash, ChunkID: c.ID, Text: c.Text, Body: c.Body, Breadcrumb: c.Breadcrumb, Depth: c.Depth, IsSummary: c.IsSummary, IsAttachment: c.IsAttachment, SourceAttachmentPath: c.SourceAttachmentPath, ContentHash: c.ContentHash, ModelFingerprint: entry.Version.Namespace.Fingerprint, Embedding: row.Vector}
 	}
-	// Force replaces only this binary's own derivation rule: another rule's
-	// versions belong to another binary sharing the store (d-tac-c9c).
-	var old []string
-	if force {
-		old = manifest.Entries[entry.Version.EntryID].ChunkIDsOf(index.DerivationCurrent)
-	}
-	if err := idx.UpsertEntry(ctx, entry.Version.EntryID, old, rows); err != nil {
+	if err := idx.UpsertEntry(ctx, entry.Version.EntryID, nil, rows); err != nil {
 		return err
 	}
 	version := index.EntryVersion{Hash: entry.Version.EntryHash, Fingerprint: entry.Version.Namespace.Fingerprint, Derivation: index.DerivationCurrent, ChunkIDs: ids, IndexedAt: h.now()}
-	if force {
-		manifest.SetDerivationVersion(entry.Version.EntryID, version)
-	} else {
+	if !force {
 		manifest.AddVersion(entry.Version.EntryID, version)
+		return manifest.Save(h.indexDir)
 	}
-	return manifest.Save(h.indexDir)
+	// Force replaces only this binary's own derivation rule: another rule's
+	// versions belong to another binary sharing the store (d-tac-c9c). The
+	// replaced rows go after the manifest save, for the reason DropVersions
+	// gives; rows the new version reuses (same hash) are kept.
+	replaced := manifest.Entries[entry.Version.EntryID].ChunkIDsOf(index.DerivationCurrent)
+	manifest.SetDerivationVersion(entry.Version.EntryID, version)
+	if err := manifest.Save(h.indexDir); err != nil {
+		return err
+	}
+	kept := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		kept[id] = true
+	}
+	var stale []string
+	for _, id := range replaced {
+		if !kept[id] {
+			stale = append(stale, id)
+		}
+	}
+	return idx.DeleteEntry(ctx, stale)
 }
 
 // DropVersions deletes the version groups cmd names from the store — the
@@ -277,23 +289,28 @@ func (h *IndexHandler) DropVersions(ctx context.Context, cmd *command.DropIndexV
 		}
 		chunkIDs, versions := manifest.DropGroups(selected, current)
 		bytes := index.DocumentsSize(h.indexDir, chunkIDs)
-		// Rows go first, then the manifest. A failed save leaves manifest
-		// references to rows that no longer exist, which no read serves and
-		// a rerun deletes as a no-op before saving again — so the failure
-		// converges instead of leaving orphan rows a legacy hit could serve.
-		if len(chunkIDs) > 0 {
-			if err := idx.DeleteEntry(ctx, chunkIDs); err != nil {
-				return fmt.Errorf("deleting index rows: %w", err)
-			}
-		}
+		// The manifest must never name a row that is gone: reads materialize
+		// it row by row and fail on a missing one. So the manifest is saved
+		// first and rows are deleted after; a delete that fails leaves orphan
+		// files nothing reads, and the sweep below removes them on the next run.
 		if versions > 0 {
 			if err := manifest.Save(h.indexDir); err != nil {
 				return fmt.Errorf("save manifest after drop: %w", err)
 			}
+			if err := idx.DeleteEntry(ctx, chunkIDs); err != nil {
+				return fmt.Errorf("deleting index rows: %w", err)
+			}
 		}
-		slogutils.FromContext(ctx).Info("dropped index versions", "groups", selected, "missing", missing, "versions", versions, "chunks", len(chunkIDs))
+		orphans, orphanBytes, err := index.Orphans(h.indexDir, manifest)
+		if err != nil {
+			return err
+		}
+		if err := idx.RemoveFiles(orphans); err != nil {
+			return fmt.Errorf("removing orphan rows: %w", err)
+		}
+		slogutils.FromContext(ctx).Info("dropped index versions", "groups", selected, "missing", missing, "versions", versions, "chunks", len(chunkIDs), "orphans", len(orphans))
 		if cmd.OnDropped != nil {
-			cmd.OnDropped(command.DroppedIndexVersions{Versions: versions, Chunks: len(chunkIDs), Bytes: bytes, Missing: missing})
+			cmd.OnDropped(command.DroppedIndexVersions{Versions: versions, Chunks: len(chunkIDs), Orphans: len(orphans), Bytes: bytes + orphanBytes, Missing: missing})
 		}
 		return nil
 	})
