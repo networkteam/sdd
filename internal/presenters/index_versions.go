@@ -1,42 +1,101 @@
 package presenters
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"text/tabwriter"
+	"strconv"
+	"time"
 
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/networkteam/sdd/internal/query"
 )
 
-// RenderIndexVersions writes the `sdd index gc` report: one block per store
-// with its size and entry count, then a table of version groups. The current
-// group is marked kept so the reader sees what a drop would never touch.
-func RenderIndexVersions(dst io.Writer, results []*query.IndexVersionsResult) {
+// RenderIndexVersionsTable writes the styled `sdd index gc` report for the
+// interactive TTY path, in the shape of `sdd stats`: a title line, then per
+// store a heading, a source line, and a header-ruled table of version groups.
+// The colorprofile writer strips color for non-terminals and NO_COLOR
+// (d-cpt-mvb).
+func RenderIndexVersionsTable(dst io.Writer, results []*query.IndexVersionsResult) {
 	w := colorprofile.NewWriter(dst, os.Environ())
-	for i, r := range results {
-		if i > 0 {
-			fmt.Fprintln(w)
-		}
-		fmt.Fprintf(w, "%s %s\n", clrQual.Render("store "+r.Label), clrFaint.Render(fmt.Sprintf("%s · %d entries · %s", HumanBytes(r.Bytes), r.Entries, r.IndexDir)))
+	fmt.Fprintln(w, " "+clrHeading.Render("sdd index gc")+clrBody.Render(fmt.Sprintf(" — %d store(s)", len(results))))
+	for _, r := range results {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, " "+clrHeading.Render(r.Label))
+		fmt.Fprintln(w, " "+clrBody.Render(fmt.Sprintf("%s · %d entries · %s", HumanBytes(r.Bytes), r.Entries, r.IndexDir)))
+		fmt.Fprintln(w)
 		if len(r.Groups) == 0 {
-			fmt.Fprintln(w, "  no stored versions")
+			fmt.Fprintln(w, " no stored versions")
 			continue
 		}
-		tw := tabwriter.NewWriter(w, 2, 4, 2, ' ', 0)
-		fmt.Fprintln(tw, "  group\tversions\tentries\toldest\tnewest\tsize\t")
+		data := make([][]string, 0, len(r.Groups))
 		for _, g := range r.Groups {
-			note := ""
+			status := "droppable"
 			if !g.Droppable {
-				note = "kept"
+				status = "kept"
 			}
-			fmt.Fprintf(tw, "  %s\t%d\t%d\t%s\t%s\t%s\t%s\n", g.Name, g.Versions, g.Entries,
-				g.Oldest.Format("2006-01-02"), g.Newest.Format("2006-01-02"), HumanBytes(g.Bytes), note)
+			data = append(data, []string{
+				g.Name, strconv.Itoa(g.Versions), strconv.Itoa(g.Entries),
+				dayOrDash(g.Oldest), dayOrDash(g.Newest), HumanBytes(g.Bytes), status,
+			})
 		}
-		_ = tw.Flush()
+		fmt.Fprintln(w, ruledTable([]string{"GROUP", "VERSIONS", "ENTRIES", "OLDEST", "NEWEST", "SIZE", "STATUS"}, data, 1))
 	}
+}
+
+func dayOrDash(t time.Time) string {
+	if t.IsZero() {
+		return "—"
+	}
+	return t.Format("2006-01-02")
+}
+
+type indexVersionsJSON struct {
+	Store    string             `json:"store"`
+	IndexDir string             `json:"index_dir"`
+	Entries  int                `json:"entries"`
+	Bytes    int64              `json:"bytes"`
+	Groups   []indexVersionJSON `json:"groups"`
+}
+
+type indexVersionJSON struct {
+	Group     string  `json:"group"`
+	Versions  int     `json:"versions"`
+	Entries   int     `json:"entries"`
+	Oldest    *string `json:"oldest"`
+	Newest    *string `json:"newest"`
+	Bytes     int64   `json:"bytes"`
+	Droppable bool    `json:"droppable"`
+}
+
+// RenderIndexVersionsJSON writes the same report as structured JSON on the
+// agent / non-TTY path — one object per store, groups as an array, no chrome.
+func RenderIndexVersionsJSON(w io.Writer, results []*query.IndexVersionsResult) error {
+	out := make([]indexVersionsJSON, 0, len(results))
+	for _, r := range results {
+		store := indexVersionsJSON{Store: r.Label, IndexDir: r.IndexDir, Entries: r.Entries, Bytes: r.Bytes, Groups: []indexVersionJSON{}}
+		for _, g := range r.Groups {
+			store.Groups = append(store.Groups, indexVersionJSON{
+				Group: g.Name, Versions: g.Versions, Entries: g.Entries,
+				Oldest: rfc3339OrNull(g.Oldest), Newest: rfc3339OrNull(g.Newest),
+				Bytes: g.Bytes, Droppable: g.Droppable,
+			})
+		}
+		out = append(out, store)
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func rfc3339OrNull(t time.Time) *string {
+	if t.IsZero() {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339)
+	return &s
 }
 
 // HumanBytes formats a byte count in the unit that keeps it under four digits.

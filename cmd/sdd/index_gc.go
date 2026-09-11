@@ -53,6 +53,10 @@ that version has stopped.`,
 				Name:  "all-repos",
 				Usage: "Also cover every connected repo's store",
 			},
+			&cli.StringFlag{
+				Name:  "format",
+				Usage: "Report format: auto (default — styled table on a TTY, JSON otherwise) or json",
+			},
 		),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			stores, emb, reader, err := selectIndexStores(cmd)
@@ -71,7 +75,12 @@ that version has stopped.`,
 					}
 					results = append(results, r)
 				}
-				presenters.RenderIndexVersions(os.Stdout, results)
+				// Same split as sdd stats: agents and pipes get JSON, a
+				// terminal gets the styled table (d-cpt-owo).
+				if cmd.String("format") == "json" || !isTerminal(os.Stdout) {
+					return presenters.RenderIndexVersionsJSON(os.Stdout, results)
+				}
+				presenters.RenderIndexVersionsTable(os.Stdout, results)
 				return nil
 			}
 			for _, s := range stores {

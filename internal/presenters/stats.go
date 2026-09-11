@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/networkteam/sdd/internal/model"
@@ -79,7 +77,7 @@ func renderModelTable(w io.Writer, rows []model.ModelRollup) {
 			humanLatency(l.P50), humanLatency(l.P90), humanLatency(l.Max),
 		})
 	}
-	fmt.Fprintln(w, statsTable(
+	fmt.Fprintln(w, ruledTable(
 		[]string{"MODEL", "PROVIDER", "CALLS", "IN", "OUT", "CACHE R", "CACHE W", "OUT/S", "P50", "P90", "MAX"},
 		data, 2))
 }
@@ -111,7 +109,7 @@ func renderOpTable(w io.Writer, rows []model.OpRollup) {
 			humanLatency(l.Max),
 		})
 	}
-	fmt.Fprintln(w, statsTable(
+	fmt.Fprintln(w, ruledTable(
 		[]string{"OP", "CALLS", "FAILED", "ITEMS", "IN", "OUT", "OUT/S", "P50", "P90", "MAX"},
 		data, 1))
 }
@@ -123,30 +121,6 @@ func outRate(m model.StatMetrics) string {
 		return "—"
 	}
 	return humanRate(m.OutputTokensPerSec())
-}
-
-// statsTable builds a header-ruled, borderless table. The first leftCols
-// columns are left-aligned text; the rest are right-aligned numerics.
-func statsTable(headers []string, rows [][]string, leftCols int) string {
-	return table.New().
-		Border(lipgloss.NormalBorder()).
-		BorderTop(false).BorderBottom(false).BorderLeft(false).
-		BorderRight(false).BorderColumn(false).BorderRow(false).
-		BorderHeader(true).
-		BorderStyle(clrFaint).
-		Headers(headers...).
-		Rows(rows...).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			s := lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1)
-			if row == table.HeaderRow {
-				s = s.Inherit(clrKey)
-			}
-			if col >= leftCols {
-				s = s.Align(lipgloss.Right)
-			}
-			return s
-		}).
-		Render()
 }
 
 // rangeLabel describes the report's time window for the header line.
