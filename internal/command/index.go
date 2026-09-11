@@ -104,12 +104,22 @@ type BuildConnectedIndexesCmd struct {
 // DropIndexVersionsCmd deletes stored index versions by group — the `sdd index
 // gc --drop` path, the only deletion besides a force rebuild (d-tac-c9c). Groups
 // are the names `sdd index gc` reports (index.VersionGroups); the stale
-// selector expands to every droppable group. Naming the current group or an
-// absent one fails before anything is deleted.
+// selector expands to every droppable group. Cleanup is best effort: a group
+// this store does not hold is skipped and reported, only the current group is
+// refused.
 type DropIndexVersionsCmd struct {
 	Groups []string
 
-	// OnDropped reports what was removed: versions, their chunk rows, and the
-	// bytes those rows occupied. Fires once, also when nothing matched.
-	OnDropped func(versions, chunks int, bytes int64)
+	// OnDropped reports the outcome once, also when nothing matched.
+	OnDropped func(DroppedIndexVersions)
+}
+
+// DroppedIndexVersions is one store's drop outcome.
+type DroppedIndexVersions struct {
+	Versions int
+	Chunks   int
+	// Bytes the removed rows occupied on disk.
+	Bytes int64
+	// Missing lists requested groups this store did not hold.
+	Missing []string
 }

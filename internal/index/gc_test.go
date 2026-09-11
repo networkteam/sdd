@@ -3,7 +3,6 @@ package index_test
 import (
 	"context"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -85,25 +84,25 @@ func TestSelectGroups(t *testing.T) {
 	m := mixedManifest(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
 	current := map[string]string{"e1": fullHash}
 
-	stale, err := m.SelectGroups([]string{index.GroupStale}, current)
-	if err != nil {
-		t.Fatal(err)
+	stale, missing, err := m.SelectGroups([]string{index.GroupStale}, current)
+	if err != nil || len(missing) != 0 {
+		t.Fatal(err, missing)
 	}
 	if want := []string{index.GroupLegacy, index.GroupPreDerivation, index.GroupBranch}; !slices.Equal(stale, want) {
 		t.Errorf("stale = %v, want %v", stale, want)
 	}
 
-	one, err := m.SelectGroups([]string{index.GroupPreDerivation, index.GroupPreDerivation}, current)
+	one, _, err := m.SelectGroups([]string{index.GroupPreDerivation, index.GroupPreDerivation}, current)
 	if err != nil || !slices.Equal(one, []string{index.GroupPreDerivation}) {
 		t.Errorf("named selection = %v, %v", one, err)
 	}
 
-	if _, err := m.SelectGroups([]string{index.GroupCurrent}, current); err == nil {
+	if _, _, err := m.SelectGroups([]string{index.GroupCurrent}, current); err == nil {
 		t.Error("selecting the current group must fail")
 	}
-	_, err = m.SelectGroups([]string{"v7"}, current)
-	if err == nil || !strings.Contains(err.Error(), index.GroupPreDerivation) {
-		t.Errorf("unknown group error = %v, want the droppable names listed", err)
+	selected, missing, err := m.SelectGroups([]string{"v7", index.GroupPreDerivation}, current)
+	if err != nil || !slices.Equal(selected, []string{index.GroupPreDerivation}) || !slices.Equal(missing, []string{"v7"}) {
+		t.Errorf("absent group: selected %v, missing %v, err %v; want the present one selected and v7 reported missing", selected, missing, err)
 	}
 }
 

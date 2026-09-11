@@ -333,18 +333,23 @@ func ReadCached(ctx context.Context, indexDir string, cache *SnapshotCache, fn f
 	return reloaded, fn(cache.index)
 }
 
-// ReadManifestLocked loads only the manifest under the store's shared lock —
-// what a report over stored versions needs, without decoding the vector rows.
-func ReadManifestLocked(ctx context.Context, indexDir string) (*Manifest, error) {
+// ReadManifestLocked runs fn against the manifest under the store's shared
+// lock, without decoding the vector rows — what a report over stored versions
+// needs. fn runs inside the lock so file sizes it reads match the manifest.
+func ReadManifestLocked(ctx context.Context, indexDir string, fn func(*Manifest) error) error {
 	if err := ensureStoreDir(indexDir); err != nil {
-		return nil, err
+		return err
 	}
 	l := lockFile(indexDir)
 	if _, err := l.TryRLockContext(ctx, lockRetryInterval); err != nil {
-		return nil, fmt.Errorf("acquiring index read lock at %s: %w", indexDir, err)
+		return fmt.Errorf("acquiring index read lock at %s: %w", indexDir, err)
 	}
 	defer func() { _ = l.Unlock() }()
-	return LoadManifest(indexDir)
+	manifest, err := LoadManifest(indexDir)
+	if err != nil {
+		return err
+	}
+	return fn(manifest)
 }
 
 // documentPath is where chromem-go persists one row: one gob file per

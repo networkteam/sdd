@@ -517,17 +517,19 @@ func TestIndexHandler_DropVersions(t *testing.T) {
 		t.Fatalf("a refused drop deleted rows: %d, want %d", rows, rowsBefore)
 	}
 
-	var gotVersions, gotChunks int
-	var gotBytes int64
+	var got command.DroppedIndexVersions
 	err = h.DropVersions(context.Background(), &command.DropIndexVersionsCmd{
-		Groups:    []string{index.GroupPreDerivation},
-		OnDropped: func(versions, chunks int, bytes int64) { gotVersions, gotChunks, gotBytes = versions, chunks, bytes },
+		Groups:    []string{index.GroupPreDerivation, "v7"},
+		OnDropped: func(d command.DroppedIndexVersions) { got = d },
 	})
 	if err != nil {
 		t.Fatalf("drop v0: %v", err)
 	}
-	if gotVersions != 1 || gotChunks != 1 || gotBytes == 0 {
-		t.Errorf("OnDropped = (%d, %d, %d), want (1, 1, >0)", gotVersions, gotChunks, gotBytes)
+	if got.Versions != 1 || got.Chunks != 1 || got.Bytes == 0 {
+		t.Errorf("OnDropped = %+v, want 1 version, 1 chunk, >0 bytes", got)
+	}
+	if len(got.Missing) != 1 || got.Missing[0] != "v7" {
+		t.Errorf("missing groups = %v, want the absent v7 reported, not an error", got.Missing)
 	}
 	if rows := countRows(t, indexDir); rows != rowsBefore-1 {
 		t.Errorf("row count after drop = %d, want %d", rows, rowsBefore-1)
@@ -543,10 +545,10 @@ func TestIndexHandler_DropVersions(t *testing.T) {
 	// Nothing stale remains: the umbrella selector is a no-op, not an error.
 	err = h.DropVersions(context.Background(), &command.DropIndexVersionsCmd{
 		Groups:    []string{index.GroupStale},
-		OnDropped: func(versions, chunks int, _ int64) { gotVersions, gotChunks = versions, chunks },
+		OnDropped: func(d command.DroppedIndexVersions) { got = d },
 	})
-	if err != nil || gotVersions != 0 || gotChunks != 0 {
-		t.Errorf("stale drop on a clean store = (%d, %d, %v), want a no-op", gotVersions, gotChunks, err)
+	if err != nil || got.Versions != 0 || got.Chunks != 0 {
+		t.Errorf("stale drop on a clean store = (%+v, %v), want a no-op", got, err)
 	}
 }
 

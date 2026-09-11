@@ -271,12 +271,16 @@ func (h *IndexHandler) DropVersions(ctx context.Context, cmd *command.DropIndexV
 		if err != nil {
 			return err
 		}
-		selected, err := manifest.SelectGroups(cmd.Groups, current)
+		selected, missing, err := manifest.SelectGroups(cmd.Groups, current)
 		if err != nil {
 			return err
 		}
 		chunkIDs, versions := manifest.DropGroups(selected, current)
 		bytes := index.DocumentsSize(h.indexDir, chunkIDs)
+		// Rows go first, then the manifest. A failed save leaves manifest
+		// references to rows that no longer exist, which no read serves and
+		// a rerun deletes as a no-op before saving again — so the failure
+		// converges instead of leaving orphan rows a legacy hit could serve.
 		if len(chunkIDs) > 0 {
 			if err := idx.DeleteEntry(ctx, chunkIDs); err != nil {
 				return fmt.Errorf("deleting index rows: %w", err)
@@ -287,9 +291,9 @@ func (h *IndexHandler) DropVersions(ctx context.Context, cmd *command.DropIndexV
 				return fmt.Errorf("save manifest after drop: %w", err)
 			}
 		}
-		slogutils.FromContext(ctx).Info("dropped index versions", "groups", selected, "versions", versions, "chunks", len(chunkIDs))
+		slogutils.FromContext(ctx).Info("dropped index versions", "groups", selected, "missing", missing, "versions", versions, "chunks", len(chunkIDs))
 		if cmd.OnDropped != nil {
-			cmd.OnDropped(versions, len(chunkIDs), bytes)
+			cmd.OnDropped(command.DroppedIndexVersions{Versions: versions, Chunks: len(chunkIDs), Bytes: bytes, Missing: missing})
 		}
 		return nil
 	})

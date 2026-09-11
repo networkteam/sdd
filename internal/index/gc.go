@@ -159,35 +159,32 @@ func (m *Manifest) VersionGroups(currentHashes map[string]string) []VersionGroup
 }
 
 // SelectGroups resolves `--drop` names against the groups present: GroupStale
-// expands to every droppable group, any other name must be a present droppable
-// group. Naming GroupCurrent or an absent group is an error, so a typo drops
-// nothing.
-func (m *Manifest) SelectGroups(names []string, currentHashes map[string]string) ([]string, error) {
-	groups := m.VersionGroups(currentHashes)
+// expands to every droppable group, a present droppable group selects itself,
+// and a name this store does not hold is returned in missing so the caller can
+// say so — cleanup is best effort across stores, not all-or-nothing. Only
+// GroupCurrent is an error: dropping what the checkout searches is never meant.
+func (m *Manifest) SelectGroups(names []string, currentHashes map[string]string) (selected, missing []string, err error) {
 	var available []string
-	for _, g := range groups {
+	for _, g := range m.VersionGroups(currentHashes) {
 		if g.Droppable {
 			available = append(available, g.Name)
 		}
 	}
-	var selected []string
 	for _, name := range names {
 		switch {
 		case name == GroupStale:
 			selected = append(selected, available...)
 		case name == GroupCurrent:
-			return nil, fmt.Errorf("group %s is what this checkout searches and cannot be dropped", name)
+			return nil, nil, fmt.Errorf("group %s is what this checkout searches and cannot be dropped", name)
 		case slices.Contains(available, name):
 			selected = append(selected, name)
 		default:
-			if len(available) == 0 {
-				return nil, fmt.Errorf("unknown group %q: nothing to drop", name)
-			}
-			return nil, fmt.Errorf("unknown group %q: droppable groups are %s", name, strings.Join(available, ", "))
+			missing = append(missing, name)
 		}
 	}
 	slices.Sort(selected)
-	return slices.Compact(selected), nil
+	slices.Sort(missing)
+	return slices.Compact(selected), slices.Compact(missing), nil
 }
 
 // DropGroups removes every version in the selected groups and returns the

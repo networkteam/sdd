@@ -31,20 +31,23 @@ func (f *Finder) IndexVersions(ctx context.Context, q query.IndexVersionsQuery) 
 		current[entry.ID] = hash
 	}
 
-	manifest, err := index.ReadManifestLocked(ctx, q.IndexDir)
+	result := &query.IndexVersionsResult{Label: q.Label, IndexDir: q.IndexDir}
+	err = index.ReadManifestLocked(ctx, q.IndexDir, func(manifest *index.Manifest) error {
+		total, err := index.StoreSize(q.IndexDir)
+		if err != nil {
+			return fmt.Errorf("sizing store %s: %w", q.IndexDir, err)
+		}
+		result.Entries, result.Bytes = len(manifest.Entries), total
+		for _, g := range manifest.VersionGroups(current) {
+			result.Groups = append(result.Groups, query.IndexVersionGroup{
+				Name: g.Name, Versions: g.Versions, Entries: g.Entries, Oldest: g.Oldest, Newest: g.Newest,
+				Bytes: index.DocumentsSize(q.IndexDir, g.ChunkIDs), Droppable: g.Droppable,
+			})
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	total, err := index.StoreSize(q.IndexDir)
-	if err != nil {
-		return nil, fmt.Errorf("sizing store %s: %w", q.IndexDir, err)
-	}
-	result := &query.IndexVersionsResult{Label: q.Label, IndexDir: q.IndexDir, Entries: len(manifest.Entries), Bytes: total}
-	for _, g := range manifest.VersionGroups(current) {
-		result.Groups = append(result.Groups, query.IndexVersionGroup{
-			Name: g.Name, Versions: g.Versions, Entries: g.Entries, Oldest: g.Oldest, Newest: g.Newest,
-			Bytes: index.DocumentsSize(q.IndexDir, g.ChunkIDs), Droppable: g.Droppable,
-		})
 	}
 	return result, nil
 }

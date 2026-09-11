@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v3"
 
@@ -89,10 +90,12 @@ that version has stopped.`,
 				})
 				err := h.DropVersions(ctx, &command.DropIndexVersionsCmd{
 					Groups: drop,
-					OnDropped: func(versions, chunks int, bytes int64) {
-						presenters.RenderResultLine(os.Stdout,
-							fmt.Sprintf("dropped %d versions from %s", versions, s.label),
-							fmt.Sprintf("%d chunks, %s freed", chunks, presenters.HumanBytes(bytes)))
+					OnDropped: func(d command.DroppedIndexVersions) {
+						detail := fmt.Sprintf("%d chunks, %s freed", d.Chunks, presenters.HumanBytes(d.Bytes))
+						if len(d.Missing) > 0 {
+							detail += fmt.Sprintf(" · no %s group here", strings.Join(d.Missing, ", "))
+						}
+						presenters.RenderResultLine(os.Stdout, fmt.Sprintf("dropped %d versions from %s", d.Versions, s.label), detail)
 					},
 				})
 				if err != nil {
@@ -107,7 +110,8 @@ that version has stopped.`,
 // selectIndexStores resolves the local store plus the connected stores the
 // --repo/--all-repos flags select, under the same embedder rule `sdd index`
 // uses: cross-repo work runs in the shared global vector space. Connected
-// caches are read as they are; nothing is pulled.
+// caches are read as they are; nothing is pulled, and a repo without a cache
+// has no store to clean, so it is skipped with a note.
 func selectIndexStores(cmd *cli.Command) ([]indexStore, handlers.IndexEmbedder, *finders.Finder, error) {
 	repoSelection := cmd.StringSlice("repo")
 	allRepos := cmd.Bool("all-repos")
@@ -156,6 +160,7 @@ func selectIndexStores(cmd *cli.Command) ([]indexStore, handlers.IndexEmbedder, 
 			return nil, emb, nil, err
 		}
 		if !repos.IsCloned(cacheDir) {
+			presenters.RenderResultLine(os.Stderr, "skipped "+repoID, "no local cache, so no index store; `sdd index --repo "+repoID+"` creates one")
 			continue
 		}
 		cacheGraph, err := repos.GraphDir(cacheDir)
