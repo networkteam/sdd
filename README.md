@@ -16,7 +16,7 @@ SDD records your project's reasoning as an immutable decision graph — signals 
 
 ## How you use it
 
-You work in Claude Code or Codex through the `/sdd-engine` skill. `sdd init` registers the `sdd` MCP server for the configured agents, and the engine serves the session step by step — check-in, capture, decisions, evaluation, grooming — all through dialogue. The `sdd` CLI underneath stores entries and derives state from the graph; you rarely invoke it directly. The older skill-driven `/sdd` flow still ships but is deprecated: v0.18.0 will remove it and rename `/sdd-engine` to `/sdd`.
+You work in Claude Code or Codex through the `/sdd` skill. `sdd init` registers the `sdd` MCP server for the configured agents, and the engine serves the session step by step — check-in, capture, decisions, evaluation, grooming — all through dialogue. The `sdd` CLI underneath stores entries and derives state from the graph; you rarely invoke it directly. The skill-driven `/sdd` flow of v0.17.0 and earlier is gone: `/sdd` is the engine door, and `sdd init` removes the legacy skill files it once installed.
 
 ## How it feels
 
@@ -97,23 +97,18 @@ See [Configuration](#configuration) for re-running, version bumps, and non-inter
 In **Claude Code**, run:
 
 ```
-/sdd-engine
+/sdd
 ```
 
 In **OpenAI Codex**, invoke the skill:
 
 ```
-$sdd-engine
+$sdd
 ```
 
 The engine opens the session with an orientation — where the project stands and the moves available. Everything after that is dialogue. See [Multiple agents](#multiple-agents) for how the same skill source renders to each.
 
-<details>
-<summary><strong>Deprecated:</strong> the skill-driven <code>/sdd</code> flow</summary>
-
-The original `/sdd` skill (`$sdd` on Codex) still works in v0.17.0 and opens with the same graph state. It is deprecated: v0.18.0 will remove the legacy skills and rename `/sdd-engine` to `/sdd`.
-
-</details>
+Upgrading from v0.17.0 or earlier: `/sdd` used to be the skill-driven flow and `/sdd-engine` the engine door. Now `/sdd` is the engine door, and `sdd init` removes the legacy skill files it installed before — unmodified copies are deleted, edited ones are kept and named in the output.
 
 ## What's here today
 
@@ -149,7 +144,7 @@ A session covers a handful of common moves. You don't pick a mode — you just t
 ### Bootstrap
 
 ```
-> /sdd-engine
+> /sdd
 
 Claude: This graph is empty. Want me to walk through bootstrap?
         We'll capture who's on the project and what it's pulling
@@ -163,7 +158,7 @@ Bootstrap walks you through capturing your project's actors (participants) and s
 Every session starts here. The check-in renders a colleague-style briefing — what's in flight, what changed recently, what wants your next move.
 
 ```
-> /sdd-engine
+> /sdd
 
 Claude: *Current focus: get the importer unblocked.*
 
@@ -320,7 +315,7 @@ Each graph has a single authoring language configured as `language: <locale>` in
 - **Captured entry text is written in the configured language.** Dialogue with the agent can flow freely in any language, but what lands in the graph is canonicalized, so the graph stays coherent across sessions. The engine hands the configured language to the agent as it drafts, and to the checks that read the draft: pre-flight flags an entry whose language doesn't match as drift and blocks the capture, and generated summaries follow the configured language rather than the source material's.
 - **The technical surface stays English.** YAML frontmatter, CLI tokens, entry IDs, and section headers like `## Acceptance criteria` are canonical identifiers. CLI output (`sdd info`, `sdd view`, `sdd show`) also stays English.
 
-Translated SDD vocabulary (types, kinds, layers, status labels) ships for German (`de`) as a reference in the deprecated `/sdd` skill tree, which v0.18.0 removes along with the rest of those skills.
+Translated SDD vocabulary (types, kinds, layers, status labels) ships for German (`de`) inside the binary; the engine serves it once per session when the graph language is `de`.
 
 ## Connected repos
 
@@ -389,8 +384,8 @@ Run non-interactively by passing every required flag: `sdd init --scope project 
 
 SDD runs on more than one agent harness. Skills are authored once as agent-neutral templates and rendered per agent into that agent's own committed directory:
 
-- **Claude Code** — `.claude/skills/`, invoked as `/sdd-engine`.
-- **OpenAI Codex** — `.agents/skills/` (the open [Agent Skills standard](https://agentskills.io)), invoked as `$sdd-engine`.
+- **Claude Code** — `.claude/skills/`, invoked as `/sdd`.
+- **OpenAI Codex** — `.agents/skills/` (the open [Agent Skills standard](https://agentskills.io)), invoked as `$sdd`.
 
 A committed `supported_agents` list in `.sdd/config.yaml` records which agents the project renders; `sdd init` offers a multi-select on a fresh project and re-renders every listed agent on each run. Add agents with `sdd init --agents claude,codex`.
 

@@ -92,7 +92,7 @@ sdd/
 │   ├── engine/             # Workflow engine: procedure specs, typed store, choosers, session event log
 │   ├── proctest/           # Integration harness + per-procedure behavior suites over the real application
 │   └── bundledskills/      # Skill source of truth (agent-neutral templates), embedded via //go:embed
-│       └── templates/      # Neutral *.md.tmpl skill tree, rendered per agent (sdd, sdd-catchup, sdd-explore, sdd-groom)
+│       └── templates/      # Neutral *.md.tmpl skill tree, rendered per agent (sdd, plus the interim vocabulary reference)
 ├── pkg/                    # Exported packages — the only public Go surface (d-tac-zhc)
 │   ├── llm/                # Public LLM contract: Runner over Request/Result/Identity/Usage (d-cpt-q6n)
 │   ├── application/        # Protocol-neutral runtime + composition root (CLI and MCP are shells over it)

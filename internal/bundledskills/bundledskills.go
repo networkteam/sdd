@@ -119,7 +119,7 @@ func skillDirs() ([]string, error) {
 // renderSkill parses every template file under one skill into a shared template
 // set (so `{{ template }}` includes resolve across files), then executes each
 // file with data. Templates are named by their skill-relative output path
-// (`.tmpl` stripped), e.g. "SKILL.md", "references/ref-kinds.md". Parsing all
+// (`.tmpl` stripped), e.g. "SKILL.md", "references/vocabulary-de.md". Parsing all
 // files before executing any lets a file include another regardless of order.
 func renderSkill(skill string, funcs template.FuncMap, data renderData) ([]model.SkillBundleEntry, error) {
 	skillRoot := path.Join(templatesRoot, skill)
@@ -169,11 +169,10 @@ func renderSkill(skill string, funcs template.FuncMap, data renderData) ([]model
 }
 
 // ReadReference returns the body (frontmatter stripped) of a reference template
-// in the embedded bundle. Pre-flight uses this to inject the canonical ref-kind
-// vocabulary into its prompt from the same source the skill ships. The reference
-// is read raw rather than executed — the vocabulary fragment is agent-neutral
-// and carries no template directives, so its source bytes equal its rendered
-// output.
+// in the embedded bundle. The engine serves the locale vocabulary from here
+// until it moves into the graph (d-cpt-xob). The reference is read raw rather
+// than executed — it is agent-neutral and carries no template directives, so
+// its source bytes equal its rendered output.
 func ReadReference(skill, relPath string) ([]byte, error) {
 	full := path.Join(templatesRoot, skill, relPath+templateExt)
 	data, err := templatesFS.ReadFile(full)

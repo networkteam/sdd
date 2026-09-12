@@ -110,8 +110,8 @@ type PerRepoConfig struct {
 	RepoID string `yaml:"repo_id,omitempty"`
 	// Language is a locale code (e.g. "de", "en", "de-DE") that governs the
 	// graph's authored language. Captured entries are written in this
-	// language; the /sdd skill renders translated vocabulary to users via
-	// bundled translation references. Empty means English (default). A
+	// language; the engine serves the matching bundled vocabulary reference
+	// so user-facing terms render translated. Empty means English (default). A
 	// property of the repository (all contributors author in it), which is
 	// why it is not part of the shared BaseConfig overlay.
 	Language string `yaml:"language,omitempty"`
@@ -531,8 +531,8 @@ func FormatConfig(cfg PerRepoConfig) string {
 		defaultBranchBlock += "# default_branch: main\n"
 	}
 	languageBlock := "# Graph language — locale code for the language captured entries are\n" +
-		"# authored in. Empty means English (default). The /sdd skill reads the\n" +
-		"# matching references/vocabulary-<locale>.md when rendering to users.\n"
+		"# authored in. Empty means English (default). The engine serves the\n" +
+		"# matching bundled vocabulary-<locale> reference when rendering to users.\n"
 	if cfg.Language != "" {
 		languageBlock += "language: " + cfg.Language + "\n"
 	} else {

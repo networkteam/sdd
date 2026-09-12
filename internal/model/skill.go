@@ -86,11 +86,11 @@ const (
 // SkillBundleEntry is one file in the embedded skill bundle — the content as
 // shipped inside the sdd binary, without install-time stamps.
 type SkillBundleEntry struct {
-	// Skill is the top-level skill directory (e.g. "sdd", "sdd-explore").
+	// Skill is the top-level skill directory (e.g. "sdd").
 	Skill string
 
 	// RelPath is the path inside the skill directory (e.g. "SKILL.md",
-	// "references/framework-concepts.md"). Forward-slash separators.
+	// "references/vocabulary-de.md"). Forward-slash separators.
 	RelPath string
 
 	// Content is the raw file bytes as embedded.

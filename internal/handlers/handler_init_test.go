@@ -137,20 +137,20 @@ func TestInit_RendersMultipleAgents(t *testing.T) {
 		t.Errorf("config.yaml missing supported_agents selection:\n%s", cfgData)
 	}
 
-	// The Codex render must carry its own profile's deviations from the
-	// catch-up conditional and the inject helper — not Claude's.
+	// The Codex render must carry its own profile's frontmatter — not Claude's.
 	codexSkill, err := os.ReadFile(filepath.Join(tmp, ".agents/skills/sdd/SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(codexSkill), "Then invoke the `/sdd-catchup` sub-skill via the Skill tool") {
-		t.Error("Codex render leaked the Claude branch of the catch-up conditional")
+	if !strings.Contains(string(codexSkill), "compatibility: Designed for OpenAI Codex") {
+		t.Error("Codex render missing the compatibility field")
 	}
-	if !strings.Contains(string(codexSkill), "Then run the `sdd-catchup` skill") {
-		t.Error("Codex render missing the else branch of the catch-up conditional")
+	claudeSkill, err := os.ReadFile(filepath.Join(tmp, ".claude/skills/sdd/SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(string(codexSkill), "Run `sdd info`") {
-		t.Error("Codex render missing the instructed-injection form")
+	if strings.Contains(string(claudeSkill), "compatibility:") {
+		t.Error("Claude render must not carry a compatibility field")
 	}
 }
 
@@ -1051,9 +1051,9 @@ func TestInit_PrunePreservesModifiedSkill(t *testing.T) {
 	if _, err := os.Stat(modified); err != nil {
 		t.Errorf("modified file must be preserved without --force: %v", err)
 	}
-	// A pristine sibling in another skill dir is gone.
-	if _, err := os.Stat(filepath.Join(tmp, ".agents/skills/sdd-catchup/SKILL.md")); !os.IsNotExist(err) {
-		t.Errorf("pristine codex skill should be pruned, stat err = %v", err)
+	// A pristine sibling in the same render is gone.
+	if _, err := os.Stat(filepath.Join(tmp, ".agents/skills/sdd/references/vocabulary-de.md")); !os.IsNotExist(err) {
+		t.Errorf("pristine codex reference should be pruned, stat err = %v", err)
 	}
 	// The parent dir survives because it still holds the modified file.
 	if _, err := os.Stat(filepath.Join(tmp, ".agents/skills")); err != nil {

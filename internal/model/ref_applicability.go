@@ -61,7 +61,7 @@ type RefKindCell struct {
 }
 
 // refKindMatrix declares every (ref kind × target class) cell. Keep the notes
-// aligned with the canonical vocabulary in references/ref-kinds.md — the
+// aligned with the ref-kind vocabulary fact (20260828-160000-s-prc-rfk) — the
 // definitions live there; the notes here carry only the per-cell reading.
 var refKindMatrix = map[RefKind]map[RefTargetClass]RefKindCell{
 	RefKindGroundedIn: {
