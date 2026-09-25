@@ -150,3 +150,18 @@ func TestWritingGuideEval_ConflatedDraftYieldsConflation(t *testing.T) {
 		return hasAxis(r, "conflation")
 	})
 }
+
+// TestWritingGuideEval_TypographicQuotesStayValidJSON pins the JSON contract
+// for drafts quoted with typographic quotation marks: German „…“ close with
+// U+201C, which the model tends to echo as an unescaped straight quote when it
+// cites the draft, breaking the response. Any findings are fine — the case
+// fails only on unparseable output.
+func TestWritingGuideEval_TypographicQuotesStayValidJSON(t *testing.T) {
+	draft := &model.Entry{
+		Type: model.TypeSignal, Kind: model.KindDone, Layer: model.LayerTactical,
+		Content: "Die nutzersichtbaren Bestie-Code-Texte sind umformuliert und über MR !106 nach `main` gemergt: Kein Button spricht mehr von „Code einlösen“ — die Wording-Direktive ist umgesetzt, und der Paywall-Einstieg verspricht keine Store-Code-Einlösung mehr.\n\n" +
+			"- Auf Bennos Wunsch wurden die begleitenden Fließtexte angeglichen: In `NoBestie.tsx` heißt es jetzt „… oder nutze einen Bestie-Code …“ statt „löse … ein“, und die Fehlermeldung spricht von „Verbindungslink“ statt „Einladungslink“.\n" +
+			"- Die Schreibweise ist auf „Bestie-Code“ mit Bindestrich vereinheitlicht.",
+	}
+	runGuideEvalPassRate(t, draft, blockingTier, func(*llmops.WritingGuideResult) error { return nil })
+}

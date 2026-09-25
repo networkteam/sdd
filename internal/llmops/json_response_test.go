@@ -78,6 +78,8 @@ func TestCheckersJSONResponse(t *testing.T) {
 				{name: "nested_code_literal", output: "Reviewed Options{Child: Child{Enabled: true}}.\n" + checker.payload, want: 1},
 				{name: "quoted_prose", output: "The \"review\" follows.\n" + checker.payload, want: 1},
 				{name: "escaped_strings", output: strings.Replace(checker.payload, "The", `Quoted \"{x}\" and C:\\tmp affect the`, 1), want: 1},
+				{name: "typographic_quotes", output: strings.Replace(checker.payload, "The", "„Quoted“ and «cited» affect the", 1), want: 1},
+				{name: "typographic_quote_normalized_unescaped", output: strings.Replace(checker.payload, "The", `„Quoted" affects the`, 1), wantErr: true},
 				{name: "two_results", output: checker.payload + "\n" + checker.payload, wantErr: true},
 				{name: "clean_result_after_findings", output: checker.payload + `{"findings":[]}`, wantErr: true},
 				{name: "empty_object_after_payload", output: checker.payload + "\n{}", wantErr: true},
