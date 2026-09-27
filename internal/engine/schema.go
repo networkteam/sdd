@@ -294,10 +294,12 @@ func schemaForType(t VarType, desc string) map[string]any {
 			"additionalProperties": false,
 		}
 	case TypeEntryKind:
-		schema = map[string]any{"type": "string", "enum": []any{
-			"gap", "fact", "question", "insight", "done", "actor", "annotation",
-			"directive", "activity", "plan", "contract", "aspiration", "role", "focus", "procedure",
-		}}
+		kinds := append(model.SignalKindValues(), model.DecisionKindValues()...)
+		enum := make([]any, 0, len(kinds))
+		for _, k := range kinds {
+			enum = append(enum, string(k))
+		}
+		schema = map[string]any{"type": "string", "enum": enum}
 	case TypeLayer:
 		schema = map[string]any{"type": "string", "enum": []any{
 			"strategic", "conceptual", "tactical", "operational", "process",

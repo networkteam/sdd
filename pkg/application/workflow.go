@@ -420,8 +420,18 @@ func (a *Application) newWorkflow(ctx context.Context, identity RequestIdentity,
 	}
 	w.engine = engine.New(registry, w.graphs, engine.WithTemplateValues(map[string]any{
 		"kindAuthoringFactIDs": basefacts.AuthoringFactIDs(),
+		"signalKinds":          joinKinds(model.SignalKindValues()),
+		"decisionKinds":        joinKinds(model.DecisionKindValues()),
 	}))
 	return w, nil
+}
+
+func joinKinds(kinds []model.Kind) string {
+	names := make([]string, len(kinds))
+	for i, k := range kinds {
+		names[i] = string(k)
+	}
+	return strings.Join(names, ", ")
 }
 
 func (w *WorkflowSession) ID() SessionID { return w.binding.SessionID }

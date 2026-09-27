@@ -61,6 +61,32 @@ func TestUserDialogueOpeningRendersFactPointersFromData(t *testing.T) {
 	}
 }
 
+func TestUserDialogueOpeningRendersKindListsFromModel(t *testing.T) {
+	world := proctest.NewWorld(t)
+	_, serve := openShell(t, world, "dlg-kinds")
+
+	for _, kinds := range [][]model.Kind{model.SignalKindValues(), model.DecisionKindValues()} {
+		names := make([]string, len(kinds))
+		for i, k := range kinds {
+			names[i] = string(k)
+		}
+		want := "(kinds: " + strings.Join(names, ", ") + ")"
+		if !strings.Contains(serve.Instructions, want) {
+			t.Fatalf("opening kind list missing %q:\n%s", want, serve.Instructions)
+		}
+	}
+
+	entries, err := baseprocedures.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Canonical == "user-dialogue" && strings.Contains(entry.Content, "(kinds: gap") {
+			t.Fatal("the shipped shell entry hard-codes a kind list")
+		}
+	}
+}
+
 func TestUserDialogueOpeningOmitsEmptyFactIndex(t *testing.T) {
 	t.Skip("not expressible over the real application: the shipped base facts " +
 		"(internal/basefacts) merge into every graph and enroll in the fact index, " +
