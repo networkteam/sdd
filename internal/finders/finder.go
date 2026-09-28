@@ -26,6 +26,7 @@ type Finder struct {
 	writingGuideRunner llm.Runner
 	cfg                *model.PerRepoConfig
 	gitSyncer          GitSyncer
+	gitHistory         GitHistory
 	repos              *repos.Registry
 	procedureRegistry  *engine.Registry
 }
@@ -38,6 +39,9 @@ type Options struct {
 	WritingGuideRunner llm.Runner
 	Config             *model.PerRepoConfig
 	GitSyncer          GitSyncer
+	// GitHistory supplies revision and arrival provenance for the graph
+	// export. Nil exports without it.
+	GitHistory GitHistory
 	// Repos is the pure read surface over the connected repos — the only
 	// cross-repo capability a finder holds (no clone, no pull). Nil means no
 	// connected-repos support: cross-repo refs stay unresolved.
@@ -55,6 +59,7 @@ func New(opts Options) *Finder {
 		writingGuideRunner: opts.WritingGuideRunner,
 		cfg:                opts.Config,
 		gitSyncer:          opts.GitSyncer,
+		gitHistory:         opts.GitHistory,
 		repos:              opts.Repos,
 		procedureRegistry:  opts.ProcedureRegistry,
 	}
@@ -86,4 +91,13 @@ func (f *Finder) declaredDependencies() ([]string, error) {
 		return nil, fmt.Errorf("declared dependencies unavailable: no per-repo config")
 	}
 	return f.cfg.Dependencies, nil
+}
+
+// localRepoID returns the repo's canonical identity from config; "" means the
+// repo declares none (local-only).
+func (f *Finder) localRepoID() (string, error) {
+	if f.cfg == nil {
+		return "", fmt.Errorf("repo ID unavailable: no per-repo config")
+	}
+	return f.cfg.RepoID, nil
 }
