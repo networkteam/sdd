@@ -17,6 +17,9 @@ type exportJSON struct {
 	Experimental bool             `json:"experimental"`
 	GeneratedAt  string           `json:"generated_at"`
 	Repos        []exportRepoJSON `json:"repos"`
+	// Embedded lists the base entries once; an ID from any repo that names
+	// one resolves here (query.ExportResult).
+	Embedded []exportEntryJSON `json:"embedded"`
 }
 
 type exportRepoJSON struct {
@@ -24,6 +27,7 @@ type exportRepoJSON struct {
 	Local       bool              `json:"local"`
 	Unavailable bool              `json:"unavailable,omitempty"`
 	Revision    string            `json:"revision,omitempty"`
+	Selection   *selectionJSON    `json:"selection,omitempty"`
 	Entries     []exportEntryJSON `json:"entries"`
 	WIP         []exportWIPJSON   `json:"wip"`
 	LoadIssues  []loadIssueJSON   `json:"load_issues,omitempty"`
@@ -64,9 +68,14 @@ type exportEntryJSON struct {
 	FocusWhen        *focusWhenJSON         `json:"focus_when,omitempty"`
 	Involvement      []involvementJSON      `json:"involvement,omitempty"`
 	Preflight        string                 `json:"preflight,omitempty"`
-	Embedded         bool                   `json:"embedded,omitempty"`
 	Warnings         []warningJSON          `json:"warnings,omitempty"`
 	Attachments      []exportAttachmentJSON `json:"attachments,omitempty"`
+}
+
+type selectionJSON struct {
+	Mode         query.ExportDependencies `json:"mode"`
+	Hops         *int                     `json:"hops,omitempty"`
+	TotalEntries int                      `json:"total_entries"`
 }
 
 type refJSON struct {
@@ -129,11 +138,20 @@ type loadIssueJSON struct {
 
 // RenderExportJSON writes the experimental whole-graph export document.
 func RenderExportJSON(w io.Writer, r *query.ExportResult) error {
-	out := exportJSON{Experimental: true, GeneratedAt: r.GeneratedAt.Format(time.RFC3339), Repos: []exportRepoJSON{}}
+	out := exportJSON{
+		Experimental: true, GeneratedAt: r.GeneratedAt.Format(time.RFC3339),
+		Repos: []exportRepoJSON{}, Embedded: []exportEntryJSON{},
+	}
 	for _, repo := range r.Repos {
 		rj := exportRepoJSON{
 			RepoID: repo.RepoID, Local: repo.Local, Unavailable: repo.Unavailable, Revision: repo.Revision,
 			Entries: []exportEntryJSON{}, WIP: []exportWIPJSON{},
+		}
+		if sel := repo.Selection; sel != nil {
+			rj.Selection = &selectionJSON{Mode: sel.Mode, TotalEntries: sel.TotalEntries}
+			if sel.Mode == query.ExportDependenciesReferenced {
+				rj.Selection.Hops = &sel.Hops
+			}
 		}
 		for _, e := range repo.Entries {
 			rj.Entries = append(rj.Entries, exportEntryJSONFrom(e))
@@ -149,6 +167,9 @@ func RenderExportJSON(w io.Writer, r *query.ExportResult) error {
 		}
 		out.Repos = append(out.Repos, rj)
 	}
+	for _, e := range r.Embedded {
+		out.Embedded = append(out.Embedded, exportEntryJSONFrom(e))
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
@@ -163,7 +184,7 @@ func exportEntryJSONFrom(x query.ExportEntry) exportEntryJSON {
 		ClosedBy: x.ClosedBy, SupersededBy: x.SupersededBy, Closes: e.Closes, Supersedes: e.Supersedes,
 		Heat: x.Heat, InDegree: x.InDegree, Summary: e.Summary, Body: e.Content,
 		Canonical: e.Canonical, Aliases: e.Aliases, Class: e.Class, Actor: e.Actor, Override: e.Override,
-		FocusActors: e.FocusActors, FocusWhen: focusWhenJSONFrom(e.FocusWhen), Preflight: e.Preflight, Embedded: e.Embedded,
+		FocusActors: e.FocusActors, FocusWhen: focusWhenJSONFrom(e.FocusWhen), Preflight: e.Preflight,
 	}
 	if p, err := model.ParseID(e.ID); err == nil {
 		ej.ShortID = p.TypeCode + "-" + p.LayerCode + "-" + p.Suffix

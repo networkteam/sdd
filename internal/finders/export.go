@@ -40,9 +40,9 @@ var attachmentTypes = map[string]string{
 	".json":     "application/json",
 }
 
-// Export assembles the held graph and the selected connected repos into one
-// document carrying each entry with the attributes the engine derives for it
-// in its owning graph (see query.ExportQuery).
+// Export assembles the held graph and its dependency repos into one document
+// carrying each entry with the attributes the engine derives for it in its
+// owning graph (see query.ExportQuery).
 func (gf *GraphFinder) Export(ctx context.Context, q query.ExportQuery) (*query.ExportResult, error) {
 	if gf.graph == nil {
 		return nil, fmt.Errorf("export: graph is required")
@@ -51,17 +51,33 @@ func (gf *GraphFinder) Export(ctx context.Context, q query.ExportQuery) (*query.
 	if err != nil {
 		return nil, err
 	}
-	decay, err := model.DecayByName(model.DefaultDecayName)
-	if err != nil {
+	x := exporter{now: q.Now}
+	if x.decay, err = model.DecayByName(model.DefaultDecayName); err != nil {
 		return nil, err
 	}
 
-	local, err := gf.exportRepo(ctx, repoID, true, decay, q.Now)
+	local, err := gf.exportRepo(ctx, x, repoID, nil)
 	if err != nil {
 		return nil, err
 	}
+	local.Local = true
 	result := &query.ExportResult{GeneratedAt: q.Now, Repos: []query.ExportRepo{local}}
-	for _, id := range q.RepoIDs {
+	for _, e := range gf.graph.Entries {
+		if e.Embedded {
+			result.Embedded = append(result.Embedded, x.entry(gf.graph, e, nil))
+		}
+	}
+	if q.Dependencies == query.ExportDependenciesNone {
+		return result, nil
+	}
+
+	var cited map[string]map[string]bool
+	if q.Dependencies == query.ExportDependenciesReferenced {
+		if cited, err = model.CitedAcross(gf.graph, q.DependencyIDs, q.Hops); err != nil {
+			return nil, err
+		}
+	}
+	for _, id := range q.DependencyIDs {
 		member, err := gf.graph.MemberGraph(id)
 		if err != nil {
 			return nil, fmt.Errorf("loading graph for %s: %w", id, err)
@@ -70,60 +86,98 @@ func (gf *GraphFinder) Export(ctx context.Context, q query.ExportQuery) (*query.
 			result.Repos = append(result.Repos, query.ExportRepo{RepoID: id, Unavailable: true})
 			continue
 		}
-		repo, err := gf.finder.OnGraph(member).exportRepo(ctx, id, false, decay, q.Now)
+		var selected map[string]bool
+		if cited != nil {
+			selected = cited[id]
+			if selected == nil {
+				selected = map[string]bool{}
+			}
+		}
+		repo, err := gf.finder.OnGraph(member).exportRepo(ctx, x, id, selected)
 		if err != nil {
 			return nil, err
 		}
+		repo.Selection = &query.ExportSelection{Mode: q.Dependencies, Hops: q.Hops, TotalEntries: ownEntries(member)}
 		result.Repos = append(result.Repos, repo)
 	}
 	return result, nil
 }
 
-// exportRepo exports the held graph. Embedded base entries are identical in
-// every graph, so only the local repo carries them.
-func (gf *GraphFinder) exportRepo(ctx context.Context, repoID string, local bool, decay model.DecayFunc, now time.Time) (query.ExportRepo, error) {
+// exporter holds what every exported entry is derived against.
+type exporter struct {
+	decay    model.DecayFunc
+	now      time.Time
+	arrivals map[string]time.Time
+}
+
+// exportRepo exports the held graph's own entries (embedded base entries are
+// exported once, outside any repo), restricted to selected when non-nil.
+func (gf *GraphFinder) exportRepo(ctx context.Context, x exporter, repoID string, selected map[string]bool) (query.ExportRepo, error) {
 	g := gf.graph
-	wip, err := gf.WIPMarkers()
+	keep := func(id string) bool { return selected == nil || selected[id] }
+	markers, err := gf.WIPMarkers()
 	if err != nil {
 		return query.ExportRepo{}, err
 	}
-	repo := query.ExportRepo{RepoID: repoID, Local: local, WIP: wip, LoadIssues: g.LoadIssues}
+	repo := query.ExportRepo{RepoID: repoID, LoadIssues: g.LoadIssues}
+	for _, m := range markers {
+		if keep(m.Entry) {
+			repo.WIP = append(repo.WIP, m)
+		}
+	}
 
-	var arrivals map[string]time.Time
 	if h, dir := gf.finder.gitHistory, g.GraphDir(); h != nil && dir != "" && h.InWorkTree(ctx, dir) {
 		if repo.Revision, err = h.HeadRevision(ctx, dir); err != nil {
 			return query.ExportRepo{}, err
 		}
-		if arrivals, err = h.FileArrivals(ctx, dir); err != nil {
+		if x.arrivals, err = h.FileArrivals(ctx, dir); err != nil {
 			return query.ExportRepo{}, err
 		}
 	}
 
 	for _, e := range g.Entries {
-		if e.Embedded && !local {
+		if e.Embedded || !keep(e.ID) {
 			continue
 		}
-		entry := query.ExportEntry{
-			Entry:        e,
-			Status:       g.DerivedStatus(e),
-			ClosedBy:     g.ClosedBy[e.ID],
-			SupersededBy: g.SupersededBy[e.ID],
-			Topics:       g.EffectiveTopics(e),
-			Heat:         model.HeatScore(g, e, decay, now),
-			InDegree:     int(model.InDegreeScore(g, e)),
-		}
-		if key, ok := g.DisplayID(e.ID); ok && key != e.ID {
-			entry.FullID = key
-		}
-		if rel, err := model.IDToRelPath(e.ID); err == nil {
-			entry.LandedAt = arrivals[filepath.ToSlash(rel)]
-		}
-		if entry.Attachments, err = gf.exportAttachments(e); err != nil {
+		attachments, err := gf.exportAttachments(e)
+		if err != nil {
 			return query.ExportRepo{}, err
 		}
-		repo.Entries = append(repo.Entries, entry)
+		repo.Entries = append(repo.Entries, x.entry(g, e, attachments))
 	}
 	return repo, nil
+}
+
+// entry derives one entry's exported attributes in its owning graph g.
+func (x exporter) entry(g *model.Graph, e *model.Entry, attachments []query.ExportAttachment) query.ExportEntry {
+	entry := query.ExportEntry{
+		Entry:        e,
+		Status:       g.DerivedStatus(e),
+		ClosedBy:     g.ClosedBy[e.ID],
+		SupersededBy: g.SupersededBy[e.ID],
+		Topics:       g.EffectiveTopics(e),
+		Heat:         model.HeatScore(g, e, x.decay, x.now),
+		InDegree:     int(model.InDegreeScore(g, e)),
+		Attachments:  attachments,
+	}
+	if key, ok := g.DisplayID(e.ID); ok && key != e.ID {
+		entry.FullID = key
+	}
+	if rel, err := model.IDToRelPath(e.ID); err == nil {
+		entry.LandedAt = x.arrivals[filepath.ToSlash(rel)]
+	}
+	return entry
+}
+
+// ownEntries counts a graph's entries apart from the embedded base entries.
+func ownEntries(g *model.Graph) int {
+	n := 0
+	for _, e := range g.Entries {
+		if !e.Embedded {
+			n++
+		}
+	}
+	return n
 }
 
 // exportAttachments describes an entry's attachments through the shared
