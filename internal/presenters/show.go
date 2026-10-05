@@ -224,7 +224,7 @@ func truncatedIDs(refs []model.TruncatedRef) string {
 // node takes the bracketed unresolved marker in this slot instead.
 func treeQualifier(item model.ShowTreeItem) string {
 	if repo := unresolvedRepo(item); repo != "" {
-		return "[unresolved: repo " + repo + "]"
+		return "[unresolved: repo " + string(repo) + "]"
 	}
 	kind := entryKindLabel(item.Entry)
 	status := formatStatusTrailValue(item.Status, item.SupersedePath)
@@ -261,7 +261,7 @@ func treeSentence(item model.ShowTreeItem, primaryID string) string {
 
 // unresolvedRepo returns the target repo-id when the node is a cross-repo
 // reference whose graph is not available locally, else "".
-func unresolvedRepo(item model.ShowTreeItem) string {
+func unresolvedRepo(item model.ShowTreeItem) model.RepoID {
 	if item.Entry != nil || item.CrossRepoID == "" {
 		return ""
 	}

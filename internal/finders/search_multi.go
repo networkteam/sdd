@@ -8,6 +8,7 @@ import (
 	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/index"
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/repos"
 )
@@ -81,7 +82,7 @@ func MultiSearch(ctx context.Context, local *SearchFinder, q query.SearchQuery) 
 // repo's cache graph dir and per-repo index (vector mode only). nil means the
 // repo is not available — not connected or not cached — which the caller
 // reports.
-func searchMember(q query.SearchQuery, repoID string, local *SearchFinder) (*SearchFinder, error) {
+func searchMember(q query.SearchQuery, repoID model.RepoID, local *SearchFinder) (*SearchFinder, error) {
 	member, err := local.graph.MemberGraph(repoID)
 	if err != nil {
 		return nil, err
@@ -101,7 +102,7 @@ func searchMember(q query.SearchQuery, repoID string, local *SearchFinder) (*Sea
 	if q.Phrase != "" && local.embedder != nil {
 		// The member index is the same machine-global store the repo's own
 		// checkout uses — keyed by (repo-id, fingerprint), embedded once.
-		storeDir := index.StoreDir(local.repos.CacheRoot(), repoID, local.embedder.Fingerprint())
+		storeDir := index.StoreDir(local.repos.CacheRoot(), index.RepoKey(repoID, cacheDir), local.embedder.Fingerprint())
 		store, err = index.Open(storeDir)
 		if err != nil {
 			return nil, fmt.Errorf("opening index for %s: %w", repoID, err)

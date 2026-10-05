@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // storeSubdir namespaces index stores under the cache root. It cannot
@@ -35,9 +37,9 @@ const localKeyPrefix = "local"
 // root under the "local" namespace. A moved identity-less repo therefore
 // re-embeds — accepted: `sdd init` migration covers the common case, and
 // minting a synthetic ID would invent a second identity concept.
-func RepoKey(repoID, repoRoot string) string {
+func RepoKey(repoID types.RepoID, repoRoot string) string {
 	if repoID != "" {
-		return repoID
+		return string(repoID)
 	}
 	sum := sha256.Sum256([]byte(repoRoot))
 	return localKeyPrefix + "/" + hex.EncodeToString(sum[:])[:12]

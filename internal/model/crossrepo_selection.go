@@ -4,10 +4,10 @@ package model
 // returns every reached repo ID once, in first-reached order, never root
 // itself. declared returns a reached repo's own declarations; a repo it cannot
 // resolve returns none, so it stays listed but nothing behind it is reached.
-func DependencyClosure(root string, direct []string, declared func(repoID string) ([]string, error)) ([]string, error) {
-	seen := map[string]bool{root: true}
-	var closure []string
-	queue := append([]string(nil), direct...)
+func DependencyClosure(root RepoID, direct []RepoID, declared func(repoID RepoID) ([]RepoID, error)) ([]RepoID, error) {
+	seen := map[RepoID]bool{root: true}
+	var closure []RepoID
+	queue := append([]RepoID(nil), direct...)
 	for len(queue) > 0 {
 		repoID := queue[0]
 		queue = queue[1:]
@@ -31,19 +31,19 @@ func DependencyClosure(root string, direct []string, declared func(repoID string
 // bare ID within that entry's repo, a cross-repo ID into the repo it names.
 // Only repos in scope are entered, and embedded entries are never selected
 // (no repo owns them). The result maps repo ID to the selected entry IDs.
-func CitedAcross(local *Graph, scope []string, hops int) (map[string]map[string]bool, error) {
-	inScope := make(map[string]bool, len(scope))
+func CitedAcross(local *Graph, scope []RepoID, hops int) (map[RepoID]map[string]bool, error) {
+	inScope := make(map[RepoID]bool, len(scope))
 	for _, repoID := range scope {
 		inScope[repoID] = true
 	}
 	type step struct {
-		repoID string
+		repoID RepoID
 		entry  *Entry
 		depth  int
 	}
-	selected := map[string]map[string]bool{}
+	selected := map[RepoID]map[string]bool{}
 	var queue []step
-	add := func(repoID, id string, depth int) error {
+	add := func(repoID RepoID, id string, depth int) error {
 		if !inScope[repoID] || selected[repoID][id] {
 			return nil
 		}

@@ -117,7 +117,7 @@ that version has stopped.`,
 // caches are read as they are; nothing is pulled, and a repo without a cache
 // has no store to clean, so it is skipped with a note.
 func selectIndexStores(cmd *cli.Command) ([]indexStore, handlers.IndexEmbedder, *finders.Finder, error) {
-	repoSelection := cmd.StringSlice("repo")
+	repoSelection := repoIDArgs(cmd.StringSlice("repo"))
 	allRepos := cmd.Bool("all-repos")
 	crossRepo := allRepos || len(repoSelection) > 0
 
@@ -164,7 +164,7 @@ func selectIndexStores(cmd *cli.Command) ([]indexStore, handlers.IndexEmbedder, 
 			return nil, emb, nil, err
 		}
 		if !repos.IsCloned(cacheDir) {
-			presenters.RenderResultLine(cmd.ErrWriter, "skipped "+repoID, "no local cache, so no index store; `sdd index --repo "+repoID+"` creates one")
+			presenters.RenderResultLine(cmd.ErrWriter, "skipped "+string(repoID), "no local cache, so no index store; `sdd index --repo "+string(repoID)+"` creates one")
 			continue
 		}
 		cacheGraph, err := repos.GraphDir(cacheDir)
@@ -172,7 +172,7 @@ func selectIndexStores(cmd *cli.Command) ([]indexStore, handlers.IndexEmbedder, 
 			return nil, emb, nil, err
 		}
 		stores = append(stores, indexStore{
-			label: repoID, graphDir: cacheGraph, indexDir: index.StoreDir(reg.CacheRoot(), repoID, emb.Fingerprint()), excludeEmbedded: true,
+			label: string(repoID), graphDir: cacheGraph, indexDir: index.StoreDir(reg.CacheRoot(), index.RepoKey(repoID, cacheDir), emb.Fingerprint()), excludeEmbedded: true,
 		})
 	}
 	return stores, emb, reader, nil

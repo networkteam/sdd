@@ -38,7 +38,7 @@ type ExportQuery struct {
 	Dependencies ExportDependencies
 	// DependencyIDs is the local repo's declared dependency closure, in walk
 	// order (model.DependencyClosure).
-	DependencyIDs []string
+	DependencyIDs []model.RepoID
 	// Hops bounds the upstream expansion of ExportDependenciesReferenced.
 	Hops int
 	// Now is the reference time heat is computed against.
@@ -66,7 +66,7 @@ type ExportResult struct {
 // loadable cache. Revision is empty when the graph is not inside a git work
 // tree. Selection is set for dependency repos.
 type ExportRepo struct {
-	RepoID      string
+	RepoID      model.RepoID
 	Local       bool
 	Unavailable bool
 	Revision    string

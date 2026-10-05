@@ -111,7 +111,7 @@ func resolveIndexStore(emb embed.Embedder) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	repoID := ""
+	var repoID model.RepoID
 	if cfg != nil {
 		repoID = cfg.RepoID
 	}
@@ -196,7 +196,7 @@ func indexCmd() *cli.Command {
 			},
 		),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			repoSelection := cmd.StringSlice("repo")
+			repoSelection := repoIDArgs(cmd.StringSlice("repo"))
 			allRepos := cmd.Bool("all-repos")
 			crossRepo := allRepos || len(repoSelection) > 0
 
@@ -251,7 +251,7 @@ func indexCmd() *cli.Command {
 
 			var reg *repos.Registry
 			var mgr *repos.Manager
-			var repoIDs []string
+			var repoIDs []model.RepoID
 			if crossRepo {
 				reg, mgr, err = defaultRepos()
 				if err != nil {
@@ -379,7 +379,7 @@ func searchCmd() *cli.Command {
 			if len(terms) == 0 && phrase == "" {
 				return fmt.Errorf("at least one of --term or --query is required")
 			}
-			repoSelection := cmd.StringSlice("repo")
+			repoSelection := repoIDArgs(cmd.StringSlice("repo"))
 			allRepos := cmd.Bool("all-repos")
 			crossRepo := allRepos || len(repoSelection) > 0
 

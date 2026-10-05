@@ -43,10 +43,10 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 	for _, project := range []struct {
 		id           sdd.ProjectID
 		dir          string
-		dependencies []string
+		dependencies []sdd.RepoID
 		branch       string
 	}{
-		{id: "project-a", dir: filepath.Join(root, "project-a"), dependencies: []string{"example.test/b"}, branch: "main"},
+		{id: "project-a", dir: filepath.Join(root, "project-a"), dependencies: []sdd.RepoID{"example.test/b"}, branch: "main"},
 		{id: "project-b", dir: graphB},
 		{id: "project-c", dir: filepath.Join(root, "project-c")},
 	} {
@@ -76,7 +76,7 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 		permissions: map[string]map[sdd.ProjectID]compositionPermission{
 			"alice": {"project-a": {read: true, write: true}, "project-b": {read: true, write: true}, "project-c": {read: true}},
 		},
-		dependencies: map[string]sdd.ProjectID{"example.test/b": "project-b"},
+		dependencies: map[sdd.RepoID]sdd.ProjectID{"example.test/b": "project-b"},
 	}
 	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: access, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {

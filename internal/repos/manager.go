@@ -53,7 +53,7 @@ func (m *Manager) EnsureCloned(ctx context.Context, repo ConnectedRepo, dir stri
 	if repo.RepoID != "" {
 		attrs = append([]any{"repo", repo.RepoID}, attrs...)
 	}
-	name := repo.RepoID
+	name := string(repo.RepoID)
 	if name == "" {
 		name = repo.CloneURL
 	}

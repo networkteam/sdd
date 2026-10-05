@@ -61,7 +61,7 @@ import (
 // coverage is never "kind-of an actor". The one medium is the serve-budget
 // finding on procedure specs, advisory by design: overshoot is a risk, not a
 // defect, and the spec still runs (d-tac-rzi).
-func mechanicalPreflight(entry *model.Entry, graph *model.Graph, declaredDeps []string, resolver engine.QueryResolver) []query.Finding {
+func mechanicalPreflight(entry *model.Entry, graph *model.Graph, declaredDeps []model.RepoID, resolver engine.QueryResolver) []query.Finding {
 	if entry == nil || graph == nil {
 		return nil
 	}
@@ -199,7 +199,7 @@ const (
 
 // crossRepoRefResolver resolves a cross-repo target against the cached
 // remote graph. nil means no repo is resolvable.
-type crossRepoRefResolver func(repoID, entryID string) crossRepoRefResolution
+type crossRepoRefResolver func(repoID model.RepoID, entryID string) crossRepoRefResolution
 
 // graphCrossRepoResolver resolves through the graph's cross-graph assembly
 // (the MultiGraph the GraphSource attached): member graphs load lazily from
@@ -207,7 +207,7 @@ type crossRepoRefResolver func(repoID, entryID string) crossRepoRefResolution
 // it refreshes caches for referenced repos before pre-flight runs, so this
 // resolver reads the live cache state.
 func graphCrossRepoResolver(graph *model.Graph) crossRepoRefResolver {
-	return func(repoID, entryID string) crossRepoRefResolution {
+	return func(repoID model.RepoID, entryID string) crossRepoRefResolution {
 		member, err := graph.MemberGraph(repoID)
 		if err != nil || member == nil {
 			return crossRepoRepoUnavailable
@@ -231,8 +231,8 @@ func graphCrossRepoResolver(graph *model.Graph) crossRepoRefResolver {
 // required-by) are exempt from resolution — their target may legitimately
 // be absent. Local refs are not checked here: a dangling local ref already
 // hard-blocks at write-time validation, before pre-flight runs.
-func crossRepoResolutionFindings(entry *model.Entry, resolve crossRepoRefResolver, declaredDeps []string) []query.Finding {
-	declared := make(map[string]bool, len(declaredDeps))
+func crossRepoResolutionFindings(entry *model.Entry, resolve crossRepoRefResolver, declaredDeps []model.RepoID) []query.Finding {
+	declared := make(map[model.RepoID]bool, len(declaredDeps))
 	for _, d := range declaredDeps {
 		declared[d] = true
 	}

@@ -1057,7 +1057,7 @@ func TestMechanical_CrossRepoRef_DeclaredButUnconnectedBlocks(t *testing.T) {
 			{ID: "github.com/networkteam/other:20260601-120000-s-tac-abc", Kind: model.RefKindGroundedIn},
 		},
 	}
-	got := mechanicalPreflight(proposed, graph, []string{"github.com/networkteam/other"}, nil)
+	got := mechanicalPreflight(proposed, graph, []model.RepoID{"github.com/networkteam/other"}, nil)
 	found := false
 	for _, f := range got {
 		if f.Category == "cross-repo-ref-unresolved" && f.Severity == query.SeverityHigh {
@@ -1084,7 +1084,7 @@ func TestMechanical_CrossRepoRef_ForwardClassExemptFromResolution(t *testing.T) 
 			{ID: "github.com/networkteam/other:20260601-130000-d-tac-def", Kind: model.RefKindRequiredBy},
 		},
 	}
-	for _, f := range mechanicalPreflight(proposed, graph, []string{"github.com/networkteam/other"}, nil) {
+	for _, f := range mechanicalPreflight(proposed, graph, []model.RepoID{"github.com/networkteam/other"}, nil) {
 		if f.Category == "cross-repo-ref-unresolved" || f.Category == "cross-repo-dep-undeclared" {
 			t.Errorf("declared forward-class cross-repo refs must pass, got %+v", f)
 		}
@@ -1102,18 +1102,18 @@ func TestMechanical_CrossRepoRef_ResolverOutcomes(t *testing.T) {
 		},
 	}
 
-	resolved := func(repoID, entryID string) crossRepoRefResolution {
+	resolved := func(repoID model.RepoID, entryID string) crossRepoRefResolution {
 		if repoID != "github.com/networkteam/other" || entryID != "20260601-120000-s-tac-abc" {
 			t.Errorf("resolver got (%q, %q)", repoID, entryID)
 		}
 		return crossRepoEntryResolved
 	}
-	if got := crossRepoResolutionFindings(entry, resolved, []string{"github.com/networkteam/other"}); len(got) != 0 {
+	if got := crossRepoResolutionFindings(entry, resolved, []model.RepoID{"github.com/networkteam/other"}); len(got) != 0 {
 		t.Errorf("resolved target must produce no findings, got %+v", got)
 	}
 
-	missing := func(string, string) crossRepoRefResolution { return crossRepoEntryMissing }
-	got := crossRepoResolutionFindings(entry, missing, []string{"github.com/networkteam/other"})
+	missing := func(model.RepoID, string) crossRepoRefResolution { return crossRepoEntryMissing }
+	got := crossRepoResolutionFindings(entry, missing, []model.RepoID{"github.com/networkteam/other"})
 	if len(got) != 1 || got[0].Severity != query.SeverityHigh {
 		t.Fatalf("missing entry must produce one high finding, got %+v", got)
 	}
@@ -1121,8 +1121,8 @@ func TestMechanical_CrossRepoRef_ResolverOutcomes(t *testing.T) {
 		t.Errorf("missing-entry finding should name the absence, got %q", got[0].Observation)
 	}
 
-	unavailable := func(string, string) crossRepoRefResolution { return crossRepoRepoUnavailable }
-	got = crossRepoResolutionFindings(entry, unavailable, []string{"github.com/networkteam/other"})
+	unavailable := func(model.RepoID, string) crossRepoRefResolution { return crossRepoRepoUnavailable }
+	got = crossRepoResolutionFindings(entry, unavailable, []model.RepoID{"github.com/networkteam/other"})
 	if len(got) != 1 || got[0].Severity != query.SeverityHigh {
 		t.Fatalf("unavailable repo must produce one high finding, got %+v", got)
 	}

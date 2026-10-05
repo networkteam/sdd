@@ -13,8 +13,8 @@ import (
 // the identity, horizon, and layout facts every checkout shares, never the
 // machine-local overlay.
 type ProjectConfig struct {
-	RepoID        string
-	Dependencies  []string
+	RepoID        RepoID
+	Dependencies  []RepoID
 	DefaultBranch string
 	Language      string
 	// GraphDir is repository-relative, .sdd/graph when the file leaves it unset.
@@ -45,7 +45,7 @@ func ReadProjectConfigFS(fsys fs.FS) (ProjectConfig, error) {
 		graphDir = model.DefaultGraphDir
 	}
 	return ProjectConfig{
-		RepoID: cfg.RepoID, Dependencies: append([]string(nil), cfg.Dependencies...),
+		RepoID: cfg.RepoID, Dependencies: append([]RepoID(nil), cfg.Dependencies...),
 		DefaultBranch: cfg.DefaultBranch, Language: cfg.Language, GraphDir: graphDir,
 	}, nil
 }

@@ -3,7 +3,13 @@ package model
 import (
 	"fmt"
 	"strings"
+
+	"github.com/networkteam/sdd/pkg/application/types"
 )
+
+// RepoID is defined in pkg/application/types, where the exported surface can
+// name it.
+type RepoID = types.RepoID
 
 // Cross-repo reference IDs take the form <repo-id>:<entry-id>, where the
 // repo-id is the target repository's canonical URL-shaped identity
@@ -20,12 +26,17 @@ import (
 // all — it does not validate either part (see ValidateCrossRepoID), so
 // callers can distinguish "not cross-repo shaped" from "cross-repo shaped
 // but malformed".
-func SplitCrossRepoID(id string) (repoID, entryID string, isCrossRepo bool) {
+func SplitCrossRepoID(id string) (repoID RepoID, entryID string, isCrossRepo bool) {
 	before, after, found := strings.Cut(id, ":")
 	if !found {
 		return "", "", false
 	}
-	return before, after, true
+	return RepoID(before), after, true
+}
+
+// CrossRepoID renders the <repo-id>:<entry-id> form of an entry in repoID.
+func CrossRepoID(repoID RepoID, entryID string) string {
+	return string(repoID) + ":" + entryID
 }
 
 // IsCrossRepoID reports whether id is cross-repo shaped (contains a colon).
@@ -35,9 +46,9 @@ func IsCrossRepoID(id string) bool {
 
 // CrossRepoIDs collects the distinct repo IDs named by cross-repo
 // (<repo-id>:<entry-id>) arguments, in first-seen order.
-func CrossRepoIDs(ids []string) []string {
-	seen := map[string]bool{}
-	var out []string
+func CrossRepoIDs(ids []string) []RepoID {
+	seen := map[RepoID]bool{}
+	var out []RepoID
 	for _, id := range ids {
 		if repoID, _, ok := SplitCrossRepoID(id); ok && !seen[repoID] {
 			seen[repoID] = true
@@ -50,11 +61,11 @@ func CrossRepoIDs(ids []string) []string {
 // ValidateRepoID checks that repoID is URL-shaped: a dotted hostname
 // followed by at least one path segment (host/path, the Go-module
 // convention), each segment limited to letters, digits, '.', '-' and '_'.
-func ValidateRepoID(repoID string) error {
+func ValidateRepoID(repoID RepoID) error {
 	if repoID == "" {
 		return fmt.Errorf("repo ID is empty")
 	}
-	segments := strings.Split(repoID, "/")
+	segments := strings.Split(string(repoID), "/")
 	if len(segments) < 2 {
 		return fmt.Errorf("repo ID %q must be host/path (e.g. github.com/org/repo)", repoID)
 	}
@@ -90,7 +101,7 @@ func isRepoIDChar(c rune) bool {
 // (git@host:org/repo) is folded into host/path, and the host lowercases
 // (path case is preserved). An empty or unrecognizable remote returns an
 // error — a repo without a derivable identity stays local-only.
-func DeriveRepoID(remoteURL string) (string, error) {
+func DeriveRepoID(remoteURL string) (RepoID, error) {
 	raw := strings.TrimSpace(remoteURL)
 	if raw == "" {
 		return "", fmt.Errorf("remote URL is empty")
@@ -121,7 +132,7 @@ func DeriveRepoID(remoteURL string) (string, error) {
 	if i := strings.IndexByte(host, ':'); i >= 0 {
 		host = host[:i]
 	}
-	id := host + raw[slash:]
+	id := RepoID(host + raw[slash:])
 	if err := ValidateRepoID(id); err != nil {
 		return "", fmt.Errorf("remote URL %q does not derive a valid repo ID: %w", remoteURL, err)
 	}

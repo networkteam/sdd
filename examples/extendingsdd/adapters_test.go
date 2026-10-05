@@ -61,7 +61,7 @@ func (r accessResolver) AuthorizeSession(ctx context.Context, request sdd.Sessio
 	return sdd.OwnerOnly(ctx, request)
 }
 
-func (r accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+func (r accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	return r.runtime, nil
 }
 

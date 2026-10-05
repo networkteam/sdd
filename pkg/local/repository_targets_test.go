@@ -172,7 +172,7 @@ func (runtimeAccess) ListProjects(context.Context, sdd.Principal) (sdd.ProjectLi
 func (a runtimeAccess) ResolveProject(context.Context, sdd.Principal, sdd.ProjectID, sdd.Access) (*sdd.ProjectRuntime, error) {
 	return a.runtime, nil
 }
-func (runtimeAccess) ResolveDependency(_ context.Context, _ sdd.Principal, _ sdd.ProjectID, dependency string) (*sdd.ProjectRuntime, error) {
+func (runtimeAccess) ResolveDependency(_ context.Context, _ sdd.Principal, _ sdd.ProjectID, dependency sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	return nil, fmt.Errorf("no dependency %s", dependency)
 }
 func (runtimeAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {

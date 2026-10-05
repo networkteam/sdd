@@ -87,7 +87,7 @@ func TestCaptureUsesAcquiredLanguageAndDependencies(t *testing.T) {
 	dependency := acquiredRuntime(t, "example.org/dependency", staticGraphStore{snapshot: acquiredSnapshot(t, "example.org/dependency", "dependency-r1", "Declared source dependency.")})
 	var purposes []llm.Purpose
 	f := newWriteFixture(t, writeFixtureOptions{
-		SourceConfig: &sdd.ProjectConfig{Language: "de", Dependencies: []string{"example.org/dependency"}},
+		SourceConfig: &sdd.ProjectConfig{Language: "de", Dependencies: []sdd.RepoID{"example.org/dependency"}},
 		Dependency:   dependency,
 		Runner: llm.RunnerFunc(func(_ context.Context, request llm.Request) (llm.Result, error) {
 			purposes = append(purposes, request.Purpose)

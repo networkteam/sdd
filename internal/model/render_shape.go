@@ -70,7 +70,7 @@ type RefExpansion struct {
 	// UnresolvedRepo names the target repo of a cross-repo ref whose graph
 	// is not available locally; the presenter renders it as
 	// `[unresolved: repo <id>]` in place of a status segment.
-	UnresolvedRepo string
+	UnresolvedRepo RepoID
 }
 
 // Shape implements SectionData.

@@ -3,6 +3,12 @@ package types
 // ProjectID identifies a project within a composition.
 type ProjectID string
 
+// RepoID is a repository's canonical URL-shaped identity (host/path, e.g.
+// github.com/networkteam/sdd): what a per-repo config declares as its own
+// identity and its dependencies, and the prefix of a cross-repo entry ID. It
+// is not a ProjectID: AccessResolver.ResolveDependency maps one to the other.
+type RepoID string
+
 // IndexNamespace keys one reconciled vector index. The fingerprint pins the
 // embedding model (and thus the dimensionality), so dimensions are not part
 // of the identity — stores enforce vector-length consistency per namespace

@@ -26,7 +26,7 @@ func expandRefs(g *model.Graph, entries []*model.Entry, inactiveOnly bool) [][]m
 		for _, ref := range e.Refs {
 			var status model.Status
 			var supersedePath []string
-			var unresolvedRepo string
+			var unresolvedRepo model.RepoID
 			if target, owner, ok := g.ResolveAcross(ref.ID); ok {
 				// Status and supersede trail derive in the owning graph —
 				// for a cross-repo target that is the cached member graph,

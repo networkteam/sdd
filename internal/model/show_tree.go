@@ -322,7 +322,7 @@ func (g *Graph) itemStatus(e *Entry) (Status, []string) {
 // only prefixes the resulting IDs.
 func (g *Graph) QualifiedItemStatus(e *Entry) (Status, []string) {
 	status, path := g.itemStatus(e)
-	if g.repoPrefix == "" {
+	if g.repoID == "" {
 		return status, path
 	}
 	if status.By != "" {

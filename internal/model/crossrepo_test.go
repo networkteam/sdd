@@ -9,7 +9,7 @@ import (
 func TestSplitCrossRepoID(t *testing.T) {
 	tests := []struct {
 		in          string
-		repoID      string
+		repoID      RepoID
 		entryID     string
 		isCrossRepo bool
 	}{
@@ -30,7 +30,7 @@ func TestSplitCrossRepoID(t *testing.T) {
 }
 
 func TestValidateRepoID(t *testing.T) {
-	valid := []string{
+	valid := []RepoID{
 		"github.com/networkteam/sdd",
 		"gitlab.example.org/group/subgroup/repo",
 		"host.com/repo",
@@ -40,7 +40,7 @@ func TestValidateRepoID(t *testing.T) {
 			t.Errorf("ValidateRepoID(%q): unexpected error: %v", id, err)
 		}
 	}
-	invalid := []string{
+	invalid := []RepoID{
 		"",
 		"norepo",              // no path
 		"github.com",          // host only
@@ -60,7 +60,7 @@ func TestValidateRepoID(t *testing.T) {
 func TestDeriveRepoID(t *testing.T) {
 	tests := []struct {
 		in   string
-		want string
+		want RepoID
 	}{
 		// ssh and https forms of the same remote normalize equal.
 		{"git@github.com:networkteam/sdd.git", "github.com/networkteam/sdd"},

@@ -9,14 +9,14 @@ import (
 )
 
 func TestDependencyClosure(t *testing.T) {
-	declarations := map[string][]string{
+	declarations := map[RepoID][]RepoID{
 		"a": {"c", "root"},
 		"b": {"c", "d", "x"},
 		"c": {"a"},
 		"d": nil,
 		"e": {"f"},
 	}
-	declared := func(repoID string) ([]string, error) {
+	declared := func(repoID RepoID) ([]RepoID, error) {
 		if repoID == "broken" {
 			return nil, errors.New("unreadable config")
 		}
@@ -26,13 +26,13 @@ func TestDependencyClosure(t *testing.T) {
 
 	for _, tt := range []struct {
 		name   string
-		direct []string
-		want   []string
+		direct []RepoID
+		want   []RepoID
 	}{
-		{name: "breadth-first, each once, never root", direct: []string{"a", "b"}, want: []string{"a", "b", "c", "d", "x"}},
-		{name: "duplicate direct dependencies", direct: []string{"d", "d"}, want: []string{"d"}},
+		{name: "breadth-first, each once, never root", direct: []RepoID{"a", "b"}, want: []RepoID{"a", "b", "c", "d", "x"}},
+		{name: "duplicate direct dependencies", direct: []RepoID{"d", "d"}, want: []RepoID{"d"}},
 		{name: "no dependencies", direct: nil, want: nil},
-		{name: "transitive chain", direct: []string{"e"}, want: []string{"e", "f"}},
+		{name: "transitive chain", direct: []RepoID{"e"}, want: []RepoID{"e", "f"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := DependencyClosure("root", tt.direct, declared)
@@ -45,7 +45,7 @@ func TestDependencyClosure(t *testing.T) {
 		})
 	}
 
-	if _, err := DependencyClosure("root", []string{"d", "broken"}, declared); err == nil {
+	if _, err := DependencyClosure("root", []RepoID{"d", "broken"}, declared); err == nil {
 		t.Error("a declaration read error was swallowed")
 	}
 }
@@ -81,7 +81,7 @@ func TestCitedAcross(t *testing.T) {
 		base,
 	})
 	deepGraph := NewGraph([]*Entry{entry("20260201-100000-s-cpt-xxx")})
-	NewMultiGraph(local, []string{dep}, func(repoID string) (*Graph, error) {
+	NewMultiGraph(local, []RepoID{dep}, func(repoID RepoID) (*Graph, error) {
 		switch repoID {
 		case dep:
 			return depGraph, nil
@@ -92,13 +92,13 @@ func TestCitedAcross(t *testing.T) {
 		}
 		return nil, nil
 	})
-	scope := []string{dep, deep, gone}
+	scope := []RepoID{dep, deep, gone}
 
-	flatten := func(selected map[string]map[string]bool) string {
+	flatten := func(selected map[RepoID]map[string]bool) string {
 		var out []string
 		for _, repoID := range slices.Sorted(maps.Keys(selected)) {
 			for _, id := range slices.Sorted(maps.Keys(selected[repoID])) {
-				out = append(out, repoID+":"+id)
+				out = append(out, CrossRepoID(repoID, id))
 			}
 		}
 		return strings.Join(out, " ")
@@ -131,8 +131,8 @@ func TestCitedAcross(t *testing.T) {
 
 	t.Run("a member that fails to load is an error", func(t *testing.T) {
 		broken := NewGraph([]*Entry{entry("20260410-100000-d-tac-brk", withRefs(bad+":20260401-100000-s-cpt-bad"))})
-		NewMultiGraph(broken, []string{bad}, func(string) (*Graph, error) { return nil, errors.New("broken cache") })
-		if _, err := CitedAcross(broken, []string{bad}, 1); err == nil {
+		NewMultiGraph(broken, []RepoID{bad}, func(RepoID) (*Graph, error) { return nil, errors.New("broken cache") })
+		if _, err := CitedAcross(broken, []RepoID{bad}, 1); err == nil {
 			t.Error("the load error was swallowed")
 		}
 	})

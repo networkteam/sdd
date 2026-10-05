@@ -77,7 +77,7 @@ type BuildConnectedIndexesCmd struct {
 	// OnRepoStart fires before each repo's fill begins, naming the repo
 	// whose member index is about to be reconciled. Optional; lets the
 	// caller label the work in flight per repo.
-	OnRepoStart func(repoID string)
+	OnRepoStart func(repoID model.RepoID)
 
 	// OnPhase reports the active stage as the fill moves from freshening caches
 	// (syncing) to embedding (indexing). Optional; the CLI maps it onto the

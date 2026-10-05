@@ -1257,8 +1257,8 @@ func TestInit_RepoIDDerivation(t *testing.T) {
 		cmd := *base
 		cmd.RepoRoot = tmp
 		cmd.RemoteURL = "git@github.com:networkteam/other.git"
-		var written string
-		cmd.OnRepoIDWritten = func(id string) { written = id }
+		var written model.RepoID
+		cmd.OnRepoIDWritten = func(id model.RepoID) { written = id }
 		if err := h.Init(context.Background(), &cmd); err != nil {
 			t.Fatal(err)
 		}
@@ -1307,8 +1307,8 @@ func TestInit_RepoIDDerivation(t *testing.T) {
 		cmd2 := *base
 		cmd2.RepoRoot = tmp
 		cmd2.RemoteURL = "https://github.com/networkteam/other.git"
-		var written string
-		cmd2.OnRepoIDWritten = func(id string) { written = id }
+		var written model.RepoID
+		cmd2.OnRepoIDWritten = func(id model.RepoID) { written = id }
 		if err := h.Init(context.Background(), &cmd2); err != nil {
 			t.Fatal(err)
 		}
@@ -1320,7 +1320,7 @@ func TestInit_RepoIDDerivation(t *testing.T) {
 		cmd3 := *base
 		cmd3.RepoRoot = tmp
 		cmd3.RemoteURL = "https://example.com/team/moved.git"
-		cmd3.OnRepoIDWritten = func(id string) { t.Errorf("recorded repo_id overwritten with %q", id) }
+		cmd3.OnRepoIDWritten = func(id model.RepoID) { t.Errorf("recorded repo_id overwritten with %q", id) }
 		if err := h.Init(context.Background(), &cmd3); err != nil {
 			t.Fatal(err)
 		}

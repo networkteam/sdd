@@ -16,7 +16,7 @@ import (
 	"github.com/networkteam/sdd/pkg/local"
 )
 
-func preparedRuntime(t *testing.T, project sdd.ProjectID, dependencies ...string) (*sdd.ProjectRuntime, *local.FilesystemGraphStore, string) {
+func preparedRuntime(t *testing.T, project sdd.ProjectID, dependencies ...sdd.RepoID) (*sdd.ProjectRuntime, *local.FilesystemGraphStore, string) {
 	t.Helper()
 	dir := t.TempDir()
 	putSearchEntry(t, dir, "aaa", "Alpha searchable body.")

@@ -109,12 +109,12 @@ func TestMergeConfig_SyncOverlay(t *testing.T) {
 }
 
 func TestMergeConfig_DependenciesOverlay(t *testing.T) {
-	base := &PerRepoConfig{Dependencies: []string{"github.com/org/one"}}
+	base := &PerRepoConfig{Dependencies: []RepoID{"github.com/org/one"}}
 	got := MergeConfig(base, &PerRepoConfig{})
 	if len(got.Dependencies) != 1 || got.Dependencies[0] != "github.com/org/one" {
 		t.Errorf("empty overlay should preserve dependencies, got %v", got.Dependencies)
 	}
-	got = MergeConfig(base, &PerRepoConfig{Dependencies: []string{"github.com/org/two"}})
+	got = MergeConfig(base, &PerRepoConfig{Dependencies: []RepoID{"github.com/org/two"}})
 	if len(got.Dependencies) != 1 || got.Dependencies[0] != "github.com/org/two" {
 		t.Errorf("overlay should replace dependencies, got %v", got.Dependencies)
 	}

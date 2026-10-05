@@ -267,7 +267,7 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 // words are safe to bold wholesale.
 func styledQualifier(item model.ShowTreeItem) string {
 	if repo := unresolvedRepo(item); repo != "" {
-		return clrFaint.Render("[unresolved: repo " + repo + "]")
+		return clrFaint.Render("[unresolved: repo " + string(repo) + "]")
 	}
 	kind := entryKindLabel(item.Entry)
 	status := formatStatusTrailValue(item.Status, item.SupersedePath)

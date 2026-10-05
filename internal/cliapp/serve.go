@@ -19,6 +19,7 @@ import (
 	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/git"
+	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/repos"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
@@ -199,7 +200,7 @@ type localRuntimeAccess struct {
 	project      sdd.ProjectID
 	participant  string
 	runtime      *sdd.ProjectRuntime
-	dependencies map[string]*sdd.ProjectRuntime
+	dependencies map[sdd.RepoID]*sdd.ProjectRuntime
 	projects     map[sdd.ProjectID]*sdd.ProjectRuntime
 }
 
@@ -234,7 +235,7 @@ func (a *localRuntimeAccess) AuthorizeSession(ctx context.Context, request sdd.S
 	return sdd.OwnerOnly(ctx, request)
 }
 
-func (a *localRuntimeAccess) ResolveDependency(_ context.Context, _ sdd.Principal, _ sdd.ProjectID, dependency string) (*sdd.ProjectRuntime, error) {
+func (a *localRuntimeAccess) ResolveDependency(_ context.Context, _ sdd.Principal, _ sdd.ProjectID, dependency sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	runtime := a.dependencies[dependency]
 	if runtime == nil {
 		return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
@@ -246,7 +247,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	displayName := filepath.Base(filepath.Dir(sddDir))
 	participant := ""
 	language := ""
-	var dependencies []string
+	var dependencies []sdd.RepoID
 	if cfg != nil {
 		participant = cfg.Participant
 		language = cfg.Language
@@ -316,7 +317,7 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 	}
 	access := &localRuntimeAccess{
 		project: project, participant: participant, runtime: runtime,
-		dependencies: map[string]*sdd.ProjectRuntime{}, projects: map[sdd.ProjectID]*sdd.ProjectRuntime{},
+		dependencies: map[sdd.RepoID]*sdd.ProjectRuntime{}, projects: map[sdd.ProjectID]*sdd.ProjectRuntime{},
 	}
 	for _, dependency := range dependencies {
 		cacheDir, cacheErr := registry.CacheDir(dependency)
@@ -345,9 +346,9 @@ func buildLocalApplication(ctx context.Context, cmd *cli.Command, graphDir, sddD
 		if crossEmbedder.Embedder != nil {
 			memberEmbedder = crossEmbedder
 		}
-		memberIndex := localadapter.NewPersistentSearchIndexStore(sdd.ProjectID(dependency), cacheRoot, dependency)
+		memberIndex := localadapter.NewPersistentSearchIndexStore(sdd.ProjectID(dependency), cacheRoot, index.RepoKey(dependency, cacheDir))
 		options := sdd.ProjectRuntimeOptions{
-			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: dependency}, Graph: memberGraph,
+			Project: sdd.ProjectRef{ID: sdd.ProjectID(dependency), DisplayName: string(dependency)}, Graph: memberGraph,
 			Embedder: memberEmbedder, SearchIndex: optionalSearchIndex(memberEmbedder, memberIndex), LLM: runner,
 			ExcludeEmbeddedFromIndex: true,
 		}
@@ -422,7 +423,7 @@ func optionalSearchIndex(embeddings embed.Embedder, index sdd.SearchIndexStore) 
 // repoIDOf returns the committed repo_id, or "" when unconfigured — the input
 // to index.RepoKey, which hashes the repo root under the "local" namespace
 // when there is no declared ID.
-func repoIDOf(cfg *model.PerRepoConfig) string {
+func repoIDOf(cfg *model.PerRepoConfig) model.RepoID {
 	if cfg == nil {
 		return ""
 	}

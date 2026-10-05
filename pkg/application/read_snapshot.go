@@ -114,7 +114,7 @@ func (r *ProjectRuntime) withReadConfig(config *ProjectConfig) *ProjectRuntime {
 	}
 	clone := *r
 	clone.options.Language = config.Language
-	clone.options.Dependencies = append([]string(nil), config.Dependencies...)
+	clone.options.Dependencies = append([]RepoID(nil), config.Dependencies...)
 	return &clone
 }
 

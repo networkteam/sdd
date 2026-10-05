@@ -92,8 +92,8 @@ type GlobalConfig struct {
 // URL its cache clones from. CloneURL is per-user (ssh vs https), RepoID is
 // identical for everyone (declared in the target repo's committed config).
 type ConnectedRepo struct {
-	RepoID   string `yaml:"repo_id"`
-	CloneURL string `yaml:"clone_url"`
+	RepoID   model.RepoID `yaml:"repo_id"`
+	CloneURL string       `yaml:"clone_url"`
 }
 
 // LoadConfigFrom reads a user-global config from an explicit path. A missing
@@ -124,7 +124,7 @@ func ParseGlobalConfig(data []byte) (*GlobalConfig, error) {
 }
 
 // Connected returns the connection for repoID, if present.
-func (c *GlobalConfig) Connected(repoID string) (ConnectedRepo, bool) {
+func (c *GlobalConfig) Connected(repoID model.RepoID) (ConnectedRepo, bool) {
 	for _, r := range c.Repos {
 		if r.RepoID == repoID {
 			return r, true
@@ -167,8 +167,8 @@ func (c *GlobalConfig) AddRepo(repo ConnectedRepo) error {
 // repo_ids) that have no connection in this user-global config — the gap
 // `sdd init` reports after a fresh clone, since the clone_url half of a
 // connection is per-user and cannot ride in the committed declaration.
-func (c *GlobalConfig) UnconnectedDependencies(deps []string) []string {
-	var missing []string
+func (c *GlobalConfig) UnconnectedDependencies(deps []model.RepoID) []model.RepoID {
+	var missing []model.RepoID
 	for _, dep := range deps {
 		if _, ok := c.Connected(dep); !ok {
 			missing = append(missing, dep)
@@ -181,12 +181,12 @@ func (c *GlobalConfig) UnconnectedDependencies(deps []string) []string {
 // set: all=true means every connected repo; an explicitly named repo that
 // is not connected is an error — silent narrowing would misreport
 // coverage. An empty selection resolves to nil.
-func (c *GlobalConfig) SelectRepoIDs(named []string, all bool) ([]string, error) {
+func (c *GlobalConfig) SelectRepoIDs(named []model.RepoID, all bool) ([]model.RepoID, error) {
 	if !all && len(named) == 0 {
 		return nil, nil
 	}
 	if all {
-		ids := make([]string, 0, len(c.Repos))
+		ids := make([]model.RepoID, 0, len(c.Repos))
 		for _, r := range c.Repos {
 			ids = append(ids, r.RepoID)
 		}

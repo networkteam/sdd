@@ -11,7 +11,7 @@ func TestPreflightAndCreateEntryAcceptDeclaredCrossRepoRef(t *testing.T) {
 		snapshot: acquiredSnapshot(t, "example.org/dep", "r1", "The foreign target entry."),
 	})
 	f := newWriteFixture(t, writeFixtureOptions{
-		Dependencies: []string{"example.org/dep"}, Dependency: dependency,
+		Dependencies: []sdd.RepoID{"example.org/dep"}, Dependency: dependency,
 	})
 	draft := f.identifiedDraft(sdd.EntryDraft{
 		Kind: "gap", Layer: "tactical", Confidence: "high",

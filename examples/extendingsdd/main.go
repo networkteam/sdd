@@ -47,7 +47,7 @@ func (r externalAccess) ResolveProject(_ context.Context, _ sdd.Principal, proje
 	return r.runtime, nil
 }
 
-func (r externalAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+func (r externalAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
 

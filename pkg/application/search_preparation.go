@@ -23,7 +23,7 @@ type searchTargetState struct {
 type searchTargetMember struct {
 	runtime  *ProjectRuntime
 	selected *readSnapshotSelection
-	repoID   string
+	repoID   RepoID
 }
 
 type SearchTargetProject struct {

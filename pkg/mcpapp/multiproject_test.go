@@ -50,7 +50,7 @@ func (multiAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAcce
 	return sdd.OwnerOnly(ctx, request)
 }
 
-func (a multiAccess) ResolveDependency(_ context.Context, _ sdd.Principal, _ sdd.ProjectID, dependency string) (*sdd.ProjectRuntime, error) {
+func (a multiAccess) ResolveDependency(_ context.Context, _ sdd.Principal, _ sdd.ProjectID, dependency sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	if runtime := a.runtimes[sdd.ProjectID(dependency)]; runtime != nil {
 		return runtime, nil
 	}
@@ -63,9 +63,9 @@ func newProjectRuntime(t *testing.T, id sdd.ProjectID, dependencies ...sdd.Proje
 	if err != nil {
 		t.Fatal(err)
 	}
-	var declared []string
+	var declared []sdd.RepoID
 	for _, dependency := range dependencies {
-		declared = append(declared, string(dependency))
+		declared = append(declared, sdd.RepoID(dependency))
 	}
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: id, DisplayName: "Project " + string(id)}, DefaultBranch: "main",

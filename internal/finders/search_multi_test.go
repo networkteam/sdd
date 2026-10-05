@@ -101,7 +101,7 @@ func TestMultiSearchTextAcrossRepos(t *testing.T) {
 
 	// An explicitly named unconnected repo errors rather than narrowing.
 	q.AllRepos = false
-	q.Repos = []string{"example.com/team/unknown"}
+	q.Repos = []model.RepoID{"example.com/team/unknown"}
 	if _, err := MultiSearch(context.Background(), local, q); err == nil {
 		t.Error("unconnected named repo must error")
 	}

@@ -67,7 +67,7 @@ func (*failAtPrincipalResolver) AuthorizeSession(ctx context.Context, request sd
 	return sdd.OwnerOnly(ctx, request)
 }
 
-func (*failAtPrincipalResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+func (*failAtPrincipalResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
 

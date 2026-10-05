@@ -65,7 +65,7 @@ func (gf *GraphFinder) Export(ctx context.Context, q query.ExportQuery) (*query.
 		return result, nil
 	}
 
-	var cited map[string]map[string]bool
+	var cited map[model.RepoID]map[string]bool
 	if q.Dependencies == query.ExportDependenciesReferenced {
 		if cited, err = model.CitedAcross(gf.graph, q.DependencyIDs, q.Hops); err != nil {
 			return nil, err
@@ -119,7 +119,7 @@ func (x exporter) addEmbedded(result *query.ExportResult, listed map[string]bool
 
 // exportRepo exports the held graph's own entries (embedded base entries are
 // exported once, outside any repo), restricted to selected when non-nil.
-func (gf *GraphFinder) exportRepo(ctx context.Context, x exporter, repoID string, selected map[string]bool) (query.ExportRepo, error) {
+func (gf *GraphFinder) exportRepo(ctx context.Context, x exporter, repoID model.RepoID, selected map[string]bool) (query.ExportRepo, error) {
 	g := gf.graph
 	keep := func(id string) bool { return selected == nil || selected[id] }
 	markers, err := gf.WIPMarkers()

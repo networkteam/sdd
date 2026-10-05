@@ -297,7 +297,7 @@ func (accessResolver) ListProjects(context.Context, sdd.Principal) (sdd.ProjectL
 func (accessResolver) ResolveProject(context.Context, sdd.Principal, sdd.ProjectID, sdd.Access) (*sdd.ProjectRuntime, error) {
 	return nil, nil
 }
-func (accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+func (accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	return nil, nil
 }
 func (accessResolver) AuthorizeSession(ctx context.Context, request sdd.SessionAccessRequest) error {

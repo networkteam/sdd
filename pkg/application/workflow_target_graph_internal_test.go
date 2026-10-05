@@ -81,7 +81,7 @@ func (a workflowTargetAccess) AuthorizeSession(ctx context.Context, request Sess
 	return OwnerOnly(ctx, request)
 }
 
-func (a workflowTargetAccess) ResolveDependency(context.Context, Principal, ProjectID, string) (*ProjectRuntime, error) {
+func (a workflowTargetAccess) ResolveDependency(context.Context, Principal, ProjectID, RepoID) (*ProjectRuntime, error) {
 	return nil, nil
 }
 
@@ -511,7 +511,7 @@ func TestFactIndexQueryReturnsModelRowsWithoutDependencies(t *testing.T) {
 		ID: "20260719-120100-s-tac-rem", Type: model.TypeSignal, Layer: model.LayerTactical,
 		Kind: model.KindFact, Topics: []model.TopicPath{topic}, Index: remoteIndex,
 	}})
-	model.NewMultiGraph(local, []string{"example/remote"}, func(string) (*model.Graph, error) { return remote, nil })
+	model.NewMultiGraph(local, []RepoID{"example/remote"}, func(RepoID) (*model.Graph, error) { return remote, nil })
 
 	workflow := &WorkflowSession{}
 	registry := engine.NewRegistry()
@@ -613,13 +613,13 @@ Target-aware graph test procedure.
 
 type workflowClosureStore struct {
 	workflowTargetGraphStore
-	dependencies []string
+	dependencies []RepoID
 	acquisitions int
 }
 
 func (s *workflowClosureStore) AcquireSnapshot(_ context.Context, q SnapshotReadQuery) (*AcquiredSnapshot, error) {
 	s.acquisitions++
-	return &AcquiredSnapshot{Snapshot: s.snapshot, Config: &ProjectConfig{Dependencies: append([]string(nil), s.dependencies...)}, Attachments: s, Release: func() error { return nil }}, nil
+	return &AcquiredSnapshot{Snapshot: s.snapshot, Config: &ProjectConfig{Dependencies: append([]RepoID(nil), s.dependencies...)}, Attachments: s, Release: func() error { return nil }}, nil
 }
 
 type workflowClosureAccess struct {
@@ -636,7 +636,7 @@ func (a *workflowClosureAccess) ResolveProject(_ context.Context, _ Principal, i
 	}
 	return a.projects[id], nil
 }
-func (a *workflowClosureAccess) ResolveDependency(_ context.Context, _ Principal, _ ProjectID, dependency string) (*ProjectRuntime, error) {
+func (a *workflowClosureAccess) ResolveDependency(_ context.Context, _ Principal, _ ProjectID, dependency RepoID) (*ProjectRuntime, error) {
 	return a.projects[ProjectID(dependency)], nil
 }
 
@@ -655,8 +655,8 @@ func TestWorkflowDependencyClosureReusesOperationSources(t *testing.T) {
 				stores[id] = store
 				access.projects[id] = &ProjectRuntime{options: ProjectRuntimeOptions{Project: ProjectRef{ID: id}, Graph: store}}
 			}
-			stores["home"].dependencies = []string{"middle"}
-			stores["middle"].dependencies = []string{"target"}
+			stores["home"].dependencies = []RepoID{"middle"}
+			stores["middle"].dependencies = []RepoID{"target"}
 			w := &WorkflowSession{app: &Application{access: access}, project: "home", branch: "work"}
 			w.graphs = &workflowGraphs{workflow: w}
 			w.setOperation(t.Context(), RequestIdentity{Subject: "reader"})

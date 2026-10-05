@@ -60,7 +60,7 @@ func TestEmbedProgressEmptyEntries(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		previousBatch bool
-		repo          string
+		repo          model.RepoID
 		want          string
 	}{
 		{name: "first local entry", want: "0 chunks published"},

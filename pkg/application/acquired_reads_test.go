@@ -34,7 +34,7 @@ func (f attachmentPageFunc) ReadAttachmentPage(ctx context.Context, id, name str
 	return f(ctx, id, name, offset, limit)
 }
 
-func acquiredRuntime(t *testing.T, project string, graph sdd.GraphStore, dependencies ...string) *sdd.ProjectRuntime {
+func acquiredRuntime(t *testing.T, project string, graph sdd.GraphStore, dependencies ...sdd.RepoID) *sdd.ProjectRuntime {
 	t.Helper()
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: sdd.ProjectID(project)}, Graph: graph, DefaultBranch: "write-default", Language: "runtime-language", Dependencies: dependencies,
@@ -122,7 +122,7 @@ func TestAcquiredReadsUseReadAuthorityAndRelease(t *testing.T) {
 func TestAcquiredConfigurationIsPerOperationAndHasOneAuthority(t *testing.T) {
 	base := acquiredSnapshot(t, "base", "r1", "sourcehometoken")
 	dep := acquiredSnapshot(t, "dep", "d1", "sourcedeptoken")
-	sourceConfig := &sdd.ProjectConfig{Language: "source-language", Dependencies: []string{}}
+	sourceConfig := &sdd.ProjectConfig{Language: "source-language", Dependencies: []sdd.RepoID{}}
 	var compatibility atomic.Bool
 	var calls atomic.Int32
 	store := acquiredReadStore{acquire: func(context.Context, sdd.SnapshotReadQuery) (*sdd.AcquiredSnapshot, error) {
@@ -285,7 +285,7 @@ func TestAcquiredReadCancellationReleasesSource(t *testing.T) {
 func TestSourceConfigurationCannotGrantDependencyAccess(t *testing.T) {
 	snapshot := acquiredSnapshot(t, "base", "r1", "Body")
 	released := 0
-	config := &sdd.ProjectConfig{Dependencies: []string{"dep"}}
+	config := &sdd.ProjectConfig{Dependencies: []sdd.RepoID{"dep"}}
 	store := acquiredReadStore{acquire: func(context.Context, sdd.SnapshotReadQuery) (*sdd.AcquiredSnapshot, error) {
 		return &sdd.AcquiredSnapshot{Snapshot: snapshot, Config: config, Attachments: staticGraphStore{}, Release: func() error { released++; return nil }}, nil
 	}}

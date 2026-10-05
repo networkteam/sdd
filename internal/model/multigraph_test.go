@@ -33,7 +33,7 @@ func multiFixture(t *testing.T) (*Graph, *Graph) {
 	succ := entry("20260401-100000-d-cpt-suc", withSupersedes("20260331-080000-d-cpt-old"))
 	member := NewGraph([]*Entry{baseMember, rem, old, succ})
 
-	NewMultiGraph(local, []string{otherRepo}, func(repoID string) (*Graph, error) {
+	NewMultiGraph(local, []RepoID{otherRepo}, func(repoID RepoID) (*Graph, error) {
 		if repoID == otherRepo {
 			return member, nil
 		}
@@ -105,7 +105,7 @@ func TestResolveUnionID(t *testing.T) {
 func TestResolveUnionID_Ambiguity(t *testing.T) {
 	local := NewGraph([]*Entry{entry("20260101-100000-d-tac-dup")})
 	member := NewGraph([]*Entry{entry("20260202-200000-d-tac-dup")})
-	NewMultiGraph(local, []string{otherRepo}, func(repoID string) (*Graph, error) {
+	NewMultiGraph(local, []RepoID{otherRepo}, func(repoID RepoID) (*Graph, error) {
 		if repoID == otherRepo {
 			return member, nil
 		}
@@ -124,7 +124,7 @@ func TestResolveUnionID_Ambiguity(t *testing.T) {
 
 func TestMultiGraph_MemberLoadErrorPropagates(t *testing.T) {
 	local := NewGraph([]*Entry{entry("20260410-100200-d-tac-ccc")})
-	NewMultiGraph(local, []string{"example.com/team/broken"}, func(repoID string) (*Graph, error) {
+	NewMultiGraph(local, []RepoID{"example.com/team/broken"}, func(repoID RepoID) (*Graph, error) {
 		return nil, fmt.Errorf("corrupt cache")
 	})
 	if _, err := local.MemberGraph("example.com/team/broken"); err == nil {

@@ -69,7 +69,7 @@ func writeRefExpansion(w io.Writer, ref model.RefExpansion) {
 	sb.WriteString(ref.ID)
 	if ref.UnresolvedRepo != "" {
 		sb.WriteString(" [unresolved: repo ")
-		sb.WriteString(ref.UnresolvedRepo)
+		sb.WriteString(string(ref.UnresolvedRepo))
 		sb.WriteString("]")
 	} else if s := FormatStatusTrail(ref.Status, ref.SupersedePath); s != "" {
 		sb.WriteString(" ")

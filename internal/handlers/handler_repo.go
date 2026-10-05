@@ -151,7 +151,7 @@ func (h *Handler) connectRepo(repo repos.ConnectedRepo) error {
 	})
 }
 
-func (h *Handler) declareDependency(repoID string, cmd *command.RepoAddCmd) (bool, error) {
+func (h *Handler) declareDependency(repoID model.RepoID, cmd *command.RepoAddCmd) (bool, error) {
 	if h.sddDir == "" {
 		return false, nil
 	}
@@ -255,7 +255,7 @@ func (h *Handler) RepoRemove(ctx context.Context, cmd *command.RepoRemoveCmd) er
 		}
 	}
 
-	remaining := slices.DeleteFunc(slices.Clone(cfgFile.Dependencies), func(d string) bool { return d == cmd.RepoID })
+	remaining := slices.DeleteFunc(slices.Clone(cfgFile.Dependencies), func(d model.RepoID) bool { return d == cmd.RepoID })
 	if err := file.patch(func(existing []byte) ([]byte, error) {
 		patched, err := model.SetYAMLSequence(existing, "dependencies", remaining)
 		if err != nil {
@@ -280,7 +280,7 @@ func (h *Handler) RepoRemove(ctx context.Context, cmd *command.RepoRemoveCmd) er
 // cross-repo reference into repoID — the refs a `repo remove` of that
 // dependency would orphan. Cross-repo lifecycle effects (closes, supersedes)
 // are within-graph only, so only Refs can point across the boundary.
-func (h *Handler) strandedRefs(repoID string) ([]command.StrandedRef, error) {
+func (h *Handler) strandedRefs(repoID model.RepoID) ([]command.StrandedRef, error) {
 	if h.reader == nil || h.graphDir == "" {
 		return nil, nil
 	}
@@ -366,7 +366,7 @@ func (h *Handler) RepoSync(ctx context.Context, cmd *command.RepoSyncCmd) error 
 // points into (lazy clone + cooldown pull) so capture-time resolution reads
 // live state. Unconnected repos are skipped — resolve-or-block reports them.
 func (h *Handler) freshenReferencedRepos(ctx context.Context, refs []model.Ref) error {
-	repoIDs := referencedRepoIDs(refs)
+	repoIDs := model.CrossRepoIDs(model.RefIDs(refs))
 	if len(repoIDs) == 0 {
 		return nil
 	}
@@ -382,7 +382,7 @@ func (h *Handler) freshenReferencedRepos(ctx context.Context, refs []model.Ref) 
 // trigger no fetch.
 func (h *Handler) fetchOnMiss(ctx context.Context, graph *model.Graph, refs []model.Ref) *model.Graph {
 	logger := slogutils.FromContext(ctx)
-	var stale []string
+	var stale []model.RepoID
 	for _, r := range refs {
 		repoID, entryID, ok := model.SplitCrossRepoID(r.ID)
 		if !ok || model.IsForwardClassRefKind(r.Kind) {
@@ -434,19 +434,6 @@ func (h *Handler) fetchOnMiss(ctx context.Context, graph *model.Graph, refs []mo
 	return reloaded
 }
 
-// referencedRepoIDs collects the distinct repo IDs a ref set points into.
-func referencedRepoIDs(refs []model.Ref) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, r := range refs {
-		if repoID, _, ok := model.SplitCrossRepoID(r.ID); ok && !seen[repoID] {
-			seen[repoID] = true
-			out = append(out, repoID)
-		}
-	}
-	return out
-}
-
 // PrepareCrossRepoSearch runs the side-effect half of a cross-graph
 // search, mirroring how the local lazy-fill precedes the search finder:
 // resolve the query's repo selection, bring those caches up to date, and —
@@ -488,7 +475,7 @@ func (h *Handler) PrepareCrossRepoSearch(ctx context.Context, q query.SearchQuer
 // fill.Force is set (only `sdd index --repo/--all-repos --force`), each member
 // store is fully rebuilt rather than lazily reconciled, repairing stale or
 // corrupt connected indexes.
-func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, embedder IndexEmbedder, fill *command.BuildConnectedIndexesCmd) error {
+func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []model.RepoID, embedder IndexEmbedder, fill *command.BuildConnectedIndexesCmd) error {
 	if h.repos == nil {
 		return errNoRepos
 	}
@@ -523,7 +510,7 @@ func (h *Handler) BuildConnectedIndexes(ctx context.Context, repoIDs []string, e
 		// One machine-global store per (repo-id, fingerprint): the same
 		// index the repo's own checkout would use, embedded once. The handler
 		// loads and locks the store itself at write time (index.WriteStore).
-		idxDir := index.StoreDir(h.repos.Registry().CacheRoot(), repoID, embedder.Fingerprint())
+		idxDir := index.StoreDir(h.repos.Registry().CacheRoot(), index.RepoKey(repoID, cacheDir), embedder.Fingerprint())
 		ih := NewIndexHandler(IndexHandlerOptions{
 			GraphDir:        graphDir,
 			IndexDir:        idxDir,

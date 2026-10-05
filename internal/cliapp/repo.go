@@ -43,7 +43,8 @@ func repoCmd() *cli.Command {
 					// Result fields are captured in the callbacks and rendered
 					// after the transient view tears down — printing to stdout
 					// mid-view would corrupt the footer the coordinator owns.
-					var addedRepoID, addedCacheDir, declaredRepoID string
+					var addedRepoID, declaredRepoID model.RepoID
+					var addedCacheDir string
 					var alreadyDeclared, haveAdded, haveDeclared bool
 					// A phase-only reporter (no chunk total) so the footer label
 					// tracks the reported stage — connecting → cloning — rather
@@ -51,10 +52,10 @@ func repoCmd() *cli.Command {
 					reporter := cliout.NewReporter()
 					addCmd := &command.RepoAddCmd{
 						CloneURL: cmd.Args().First(),
-						OnAdded: func(repoID, cacheDir string) {
+						OnAdded: func(repoID model.RepoID, cacheDir string) {
 							addedRepoID, addedCacheDir, haveAdded = repoID, cacheDir, true
 						},
-						OnDeclared: func(repoID string, already bool) {
+						OnDeclared: func(repoID model.RepoID, already bool) {
 							declaredRepoID, alreadyDeclared, haveDeclared = repoID, already, true
 						},
 						OnPhase: reporter.SetPhase,
@@ -141,12 +142,12 @@ func repoCmd() *cli.Command {
 						return err
 					}
 					return h.RepoRemove(ctx, &command.RepoRemoveCmd{
-						RepoID: cmd.Args().First(),
+						RepoID: model.RepoID(cmd.Args().First()),
 						Force:  cmd.Bool("force"),
-						OnRemoved: func(repoID string) {
+						OnRemoved: func(repoID model.RepoID) {
 							fmt.Fprintf(cmd.Writer, "removed dependency %s from .sdd/config.yaml\n", repoID)
 						},
-						OnStranded: func(repoID string, stranded []command.StrandedRef) {
+						OnStranded: func(repoID model.RepoID, stranded []command.StrandedRef) {
 							fmt.Fprintf(cmd.ErrWriter, "warning: --force stranded %d ref(s) into %s:\n", len(stranded), repoID)
 							for _, s := range stranded {
 								fmt.Fprintf(cmd.ErrWriter, "  %s  %s  %s\n", s.EntryID, s.Kind, s.RefID)
@@ -165,8 +166,8 @@ func repoCmd() *cli.Command {
 						return err
 					}
 					return h.RepoSync(ctx, &command.RepoSyncCmd{
-						RepoIDs: cmd.Args().Slice(),
-						OnSynced: func(repoID string) {
+						RepoIDs: repoIDArgs(cmd.Args().Slice()),
+						OnSynced: func(repoID model.RepoID) {
 							fmt.Fprintf(cmd.Writer, "synced %s\n", repoID)
 						},
 					})
@@ -211,9 +212,21 @@ func repoHandler(errWriter io.Writer) (*handlers.Handler, error) {
 	}), nil
 }
 
+// repoIDArgs types repo IDs given as command-line text.
+func repoIDArgs(args []string) []model.RepoID {
+	if len(args) == 0 {
+		return nil
+	}
+	ids := make([]model.RepoID, len(args))
+	for i, arg := range args {
+		ids[i] = model.RepoID(arg)
+	}
+	return ids
+}
+
 // freshenRepoCaches brings the named connected repos' caches up to date
 // before a read (lazy clone + cooldown pull). A no-op for an empty list.
-func freshenRepoCaches(ctx context.Context, errWriter io.Writer, repoIDs []string) error {
+func freshenRepoCaches(ctx context.Context, errWriter io.Writer, repoIDs []model.RepoID) error {
 	if len(repoIDs) == 0 {
 		return nil
 	}

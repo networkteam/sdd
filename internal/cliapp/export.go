@@ -61,7 +61,7 @@ func exportCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			var dependencyIDs []string
+			var dependencyIDs []model.RepoID
 			if mode != query.ExportDependenciesNone && cfg != nil {
 				if dependencyIDs, err = dependencyClosure(ctx, cmd.ErrWriter, cfg); err != nil {
 					return err
@@ -98,13 +98,13 @@ func exportCmd() *cli.Command {
 // each reached repo's cache is freshened, then its own declarations are read
 // from its committed config with the reader `sdd serve` composes dependency
 // projects from.
-func dependencyClosure(ctx context.Context, errWriter io.Writer, cfg *model.PerRepoConfig) ([]string, error) {
+func dependencyClosure(ctx context.Context, errWriter io.Writer, cfg *model.PerRepoConfig) ([]model.RepoID, error) {
 	reg, _, err := defaultRepos()
 	if err != nil {
 		return nil, err
 	}
-	return model.DependencyClosure(cfg.RepoID, cfg.Dependencies, func(repoID string) ([]string, error) {
-		if err := freshenRepoCaches(ctx, errWriter, []string{repoID}); err != nil {
+	return model.DependencyClosure(cfg.RepoID, cfg.Dependencies, func(repoID model.RepoID) ([]model.RepoID, error) {
+		if err := freshenRepoCaches(ctx, errWriter, []model.RepoID{repoID}); err != nil {
 			return nil, err
 		}
 		cacheDir, err := reg.CacheDir(repoID)

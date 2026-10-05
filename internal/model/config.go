@@ -107,7 +107,7 @@ type PerRepoConfig struct {
 	// references into this graph. Auto-derived from the git remote by
 	// `sdd init` and committed in .sdd/config.yaml — identical for every
 	// user, never user-chosen. Empty for local-only repos.
-	RepoID string `yaml:"repo_id,omitempty"`
+	RepoID RepoID `yaml:"repo_id,omitempty"`
 	// Language is a locale code (e.g. "de", "en", "de-DE") that governs the
 	// graph's authored language. Captured entries are written in this
 	// language; the engine serves the matching bundled vocabulary reference
@@ -133,7 +133,7 @@ type PerRepoConfig struct {
 	// clone carries what it needs connected. How this machine reaches each
 	// dependency (clone URL, cache) is per-user and lives in the global
 	// config's repos list, never here.
-	Dependencies []string `yaml:"dependencies,omitempty"`
+	Dependencies []RepoID `yaml:"dependencies,omitempty"`
 }
 
 // SyncConfig governs background sync awareness: the auto-fetch cooldown and
@@ -526,7 +526,7 @@ func FormatConfig(cfg PerRepoConfig) string {
 		"# identical for every user. Other graphs reference entries here as\n" +
 		"# <repo_id>:<entry-id>. Empty means local-only (no remote identity).\n"
 	if cfg.RepoID != "" {
-		repoIDBlock += "repo_id: " + cfg.RepoID + "\n"
+		repoIDBlock += "repo_id: " + string(cfg.RepoID) + "\n"
 	} else {
 		repoIDBlock += "# repo_id: github.com/org/repo\n"
 	}

@@ -25,7 +25,7 @@ type compositionAccess struct {
 	permissions map[string]map[sdd.ProjectID]compositionPermission
 	// dependencies maps a declared repo ID to the project carrying it; a
 	// declaration without a mapping resolves to the project of the same name.
-	dependencies map[string]sdd.ProjectID
+	dependencies map[sdd.RepoID]sdd.ProjectID
 }
 
 func (a *compositionAccess) ResolvePrincipal(_ context.Context, identity sdd.RequestIdentity) (sdd.Principal, error) {
@@ -74,7 +74,7 @@ func (a *compositionAccess) AuthorizeSession(ctx context.Context, request sdd.Se
 	return sdd.OwnerOnly(ctx, request)
 }
 
-func (a *compositionAccess) ResolveDependency(ctx context.Context, principal sdd.Principal, _ sdd.ProjectID, dependency string) (*sdd.ProjectRuntime, error) {
+func (a *compositionAccess) ResolveDependency(ctx context.Context, principal sdd.Principal, _ sdd.ProjectID, dependency sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	project, mapped := a.dependencies[dependency]
 	if !mapped {
 		project = sdd.ProjectID(dependency)
@@ -127,7 +127,7 @@ Project B is readable as an authorized dependency.`), 0o644); err != nil {
 		return pkgllm.Result{Text: `{"findings":[]}`, Identity: pkgllm.Identity{Provider: "test", Model: "test"}}, nil
 	})
 	runtimeA, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "project-a", DisplayName: "Project A"}, Dependencies: []string{"project-b"},
+		Project: sdd.ProjectRef{ID: "project-a", DisplayName: "Project A"}, Dependencies: []sdd.RepoID{"project-b"},
 		Graph: storeA, LLM: llm,
 	})
 	if err != nil {
