@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/networkteam/sdd/internal/engine"
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // An instance targets a project: recorded when the start call names one,
@@ -171,39 +172,62 @@ func (a *Application) resolveTargetProject(ctx context.Context, identity Request
 }
 
 // inDependencyClosure walks the declared dependencies transitively from home
-// through the configurations the composition can reach. A dependency the
-// composition cannot resolve is not part of the reachable closure, so nothing
-// behind it is a valid target. Membership is a property of the resolved
-// project, never of the declared string: a declaration names a repo ID, and
-// only the composition knows which project carries it.
+// through the configurations the composition can reach (model.DependencyClosure).
+// Membership is a property of the resolved project, never of the declared repo
+// ID: only the composition knows which project carries it.
 func (a *Application) inDependencyClosure(ctx context.Context, principal Principal, home *ProjectRuntime, target ProjectID, readConfig bool, sourceView func(*ProjectRuntime, string) (*materializedGraphView, error)) error {
-	seen := map[ProjectID]bool{home.options.Project.ID: true}
-	queue := []*ProjectRuntime{home}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		if readConfig && current != home {
-			selected, err := sourceView(current, "")
-			if err != nil {
-				return err
-			}
-			current = selected.runtime
+	homeID := home.options.Project.ID
+	declarations := &accessDependencies{
+		access: a.access, principal: principal, home: homeID, readConfig: readConfig, sourceView: sourceView,
+		runtimes: map[ProjectID]*ProjectRuntime{homeID: home},
+	}
+	for id, err := range model.DependencyClosure(ctx, homeID, declarations) {
+		if err != nil {
+			return err
 		}
-		for _, dependency := range current.options.Dependencies {
-			runtime, err := a.access.ResolveDependency(ctx, principal, current.options.Project.ID, dependency)
-			if err != nil || runtime == nil {
-				continue
-			}
-			id := runtime.options.Project.ID
-			if id == target {
-				return nil
-			}
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			queue = append(queue, runtime)
+		if id == target {
+			return nil
 		}
 	}
-	return &ApplicationError{Code: ErrorProjectUnavailable, Message: fmt.Sprintf("project %s is not in the declared dependency closure of %s", target, home.options.Project.ID)}
+	return &ApplicationError{Code: ErrorProjectUnavailable, Message: fmt.Sprintf("project %s is not in the declared dependency closure of %s", target, homeID)}
+}
+
+// accessDependencies is serve's step of the closure walk, built per walk. A
+// project's declarations resolve per principal and per declaring project
+// through the AccessResolver; a dependency the composition cannot resolve is
+// not part of the reachable closure, so nothing behind it is a valid target.
+// The runtimes it resolved are kept so the next step reads their
+// declarations, and with readConfig a dependency's declarations come from its
+// selected source view, as a read sees them.
+type accessDependencies struct {
+	access     AccessResolver
+	principal  Principal
+	home       ProjectID
+	readConfig bool
+	sourceView func(*ProjectRuntime, string) (*materializedGraphView, error)
+	runtimes   map[ProjectID]*ProjectRuntime
+}
+
+func (d *accessDependencies) Dependencies(ctx context.Context, id ProjectID) ([]ProjectID, error) {
+	current := d.runtimes[id]
+	if d.readConfig && id != d.home {
+		selected, err := d.sourceView(current, "")
+		if err != nil {
+			return nil, err
+		}
+		current = selected.runtime
+	}
+	var resolved []ProjectID
+	for _, dependency := range current.options.Dependencies {
+		runtime, err := d.access.ResolveDependency(ctx, d.principal, current.options.Project.ID, dependency)
+		if err != nil || runtime == nil {
+			continue
+		}
+		dependencyID := runtime.options.Project.ID
+		if _, known := d.runtimes[dependencyID]; !known {
+			d.runtimes[dependencyID] = runtime
+		}
+		resolved = append(resolved, dependencyID)
+	}
+	return resolved, nil
 }
