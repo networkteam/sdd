@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"slices"
@@ -8,20 +9,47 @@ import (
 	"testing"
 )
 
-func TestDependencyClosure(t *testing.T) {
-	declarations := map[RepoID][]RepoID{
-		"a": {"c", "root"},
-		"b": {"c", "d", "x"},
-		"c": {"a"},
-		"d": nil,
-		"e": {"f"},
+// declarations resolves each key to the dependencies it declares, recording
+// the keys it was asked about; "x" stands for a dependency that cannot be
+// resolved, so it declares nothing.
+type declarations struct {
+	declared map[RepoID][]RepoID
+	ctx      context.Context
+	asked    []RepoID
+}
+
+func (d *declarations) Dependencies(ctx context.Context, k RepoID) ([]RepoID, error) {
+	if ctx != d.ctx {
+		return nil, errors.New("the walk's context did not reach the resolver")
 	}
-	declared := func(repoID RepoID) ([]RepoID, error) {
-		if repoID == "broken" {
-			return nil, errors.New("unreadable config")
+	d.asked = append(d.asked, k)
+	if k == "broken" {
+		return nil, errors.New("unreadable config")
+	}
+	return d.declared[k], nil
+}
+
+func TestDependencyClosure(t *testing.T) {
+	newResolver := func(ctx context.Context, direct ...RepoID) *declarations {
+		return &declarations{ctx: ctx, declared: map[RepoID][]RepoID{
+			"root": direct,
+			"a":    {"c", "root"},
+			"b":    {"c", "d", "x"},
+			"c":    {"a"},
+			"d":    nil,
+			"e":    {"f"},
+		}}
+	}
+	collect := func(t *testing.T, ctx context.Context, r *declarations) []RepoID {
+		t.Helper()
+		var got []RepoID
+		for k, err := range DependencyClosure(ctx, RepoID("root"), r) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, k)
 		}
-		// "x" stands for a repo that cannot be resolved: it declares nothing.
-		return declarations[repoID], nil
+		return got
 	}
 
 	for _, tt := range []struct {
@@ -35,19 +63,38 @@ func TestDependencyClosure(t *testing.T) {
 		{name: "transitive chain", direct: []RepoID{"e"}, want: []RepoID{"e", "f"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := DependencyClosure("root", tt.direct, declared)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !slices.Equal(got, tt.want) {
+			if got := collect(t, t.Context(), newResolver(t.Context(), tt.direct...)); !slices.Equal(got, tt.want) {
 				t.Errorf("closure = %v, want %v", got, tt.want)
 			}
 		})
 	}
 
-	if _, err := DependencyClosure("root", []RepoID{"d", "broken"}, declared); err == nil {
-		t.Error("a declaration read error was swallowed")
-	}
+	t.Run("a resolver error ends the walk", func(t *testing.T) {
+		var got []RepoID
+		var errs int
+		for k, err := range DependencyClosure(t.Context(), RepoID("root"), newResolver(t.Context(), "broken", "e")) {
+			if err != nil {
+				errs++
+				continue
+			}
+			got = append(got, k)
+		}
+		if errs != 1 || !slices.Equal(got, []RepoID{"broken", "e"}) {
+			t.Errorf("yielded %v and %d errors, want [broken e] and one error, nothing behind it", got, errs)
+		}
+	})
+
+	t.Run("breaking out stops the walk", func(t *testing.T) {
+		r := newResolver(t.Context(), "a", "b")
+		for k := range DependencyClosure(t.Context(), RepoID("root"), r) {
+			if k == "b" {
+				break
+			}
+		}
+		if !slices.Equal(r.asked, []RepoID{"root"}) {
+			t.Errorf("resolver asked about %v after the break, want only [root]", r.asked)
+		}
+	})
 }
 
 func TestCitedAcross(t *testing.T) {

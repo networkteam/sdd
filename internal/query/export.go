@@ -34,11 +34,9 @@ func ParseExportDependencies(s string) (ExportDependencies, error) {
 // document. EXPERIMENTAL: built on the internal model; the shape is not a
 // stable read contract.
 type ExportQuery struct {
-	// Dependencies selects what each dependency repo contributes.
+	// Dependencies selects what each repo in the local repo's declared
+	// dependency closure (DependencyClosureQuery) contributes.
 	Dependencies ExportDependencies
-	// DependencyIDs is the local repo's declared dependency closure, in walk
-	// order (model.DependencyClosure).
-	DependencyIDs []model.RepoID
 	// Hops bounds the upstream expansion of ExportDependenciesReferenced.
 	Hops int
 	// Now is the reference time heat is computed against.

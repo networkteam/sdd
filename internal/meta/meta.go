@@ -4,9 +4,11 @@
 package meta
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"time"
 
@@ -110,6 +112,27 @@ func readConfigFile(path string) (*model.PerRepoConfig, error) {
 		// The path names which file carries the offense — the parse error
 		// itself already names the key and line.
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+// ErrNotAnSDDProject reports a tree without a committed .sdd/config.yaml.
+var ErrNotAnSDDProject = errors.New("sdd: no .sdd/config.yaml in the tree")
+
+// ReadCommittedConfigFS reads the committed .sdd/config.yaml from a
+// repository root, never the machine-local overlay: what every checkout of
+// the repository shares, and all a dependency's cache tells about it.
+func ReadCommittedConfigFS(fsys fs.FS) (*model.PerRepoConfig, error) {
+	raw, err := fs.ReadFile(fsys, path.Join(model.SDDDirName, "config.yaml"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNotAnSDDProject
+	}
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := model.ParseConfig(raw)
+	if err != nil {
+		return nil, fmt.Errorf("sdd: .sdd/config.yaml: %w", err)
 	}
 	return cfg, nil
 }

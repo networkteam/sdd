@@ -1,11 +1,9 @@
 package application
 
 import (
-	"errors"
-	"fmt"
 	"io/fs"
-	"path"
 
+	"github.com/networkteam/sdd/internal/meta"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -22,23 +20,16 @@ type ProjectConfig struct {
 }
 
 // ErrNotAnSDDProject reports a tree without a committed .sdd/config.yaml.
-var ErrNotAnSDDProject = errors.New("sdd: no .sdd/config.yaml in the tree")
+var ErrNotAnSDDProject = meta.ErrNotAnSDDProject
 
 // ReadProjectConfigFS reads the committed configuration from a repository
-// root. It shares the parser with the CLI's own config resolution, so both
-// read one schema; a composition that also needs the local overlay or the
-// tool settings is holding a checkout of its own and uses the CLI.
+// root. It shares the reader with the CLI, so both read one schema; a
+// composition that also needs the local overlay or the tool settings is
+// holding a checkout of its own and uses the CLI.
 func ReadProjectConfigFS(fsys fs.FS) (ProjectConfig, error) {
-	raw, err := fs.ReadFile(fsys, path.Join(model.SDDDirName, "config.yaml"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return ProjectConfig{}, ErrNotAnSDDProject
-	}
+	cfg, err := meta.ReadCommittedConfigFS(fsys)
 	if err != nil {
 		return ProjectConfig{}, err
-	}
-	cfg, err := model.ParseConfig(raw)
-	if err != nil {
-		return ProjectConfig{}, fmt.Errorf("sdd: .sdd/config.yaml: %w", err)
 	}
 	graphDir := cfg.GraphDir
 	if graphDir == "" {

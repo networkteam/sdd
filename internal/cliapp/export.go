@@ -2,17 +2,16 @@ package cliapp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/command"
+	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
-	sddapp "github.com/networkteam/sdd/pkg/application"
 	"github.com/urfave/cli/v3"
 )
 
@@ -57,17 +56,6 @@ func exportCmd() *cli.Command {
 				return fmt.Errorf("--hops applies only to --dependencies referenced")
 			}
 
-			cfg, err := loadConfig()
-			if err != nil {
-				return err
-			}
-			var dependencyIDs []model.RepoID
-			if mode != query.ExportDependenciesNone && cfg != nil {
-				if dependencyIDs, err = dependencyClosure(ctx, cmd.ErrWriter, cfg); err != nil {
-					return err
-				}
-			}
-
 			dir, err := resolveGraphDir(cmd)
 			if err != nil {
 				return err
@@ -76,12 +64,17 @@ func exportCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
+			if mode != query.ExportDependenciesNone {
+				if err := freshenDependencyClosure(ctx, cmd.ErrWriter, f); err != nil {
+					return err
+				}
+			}
 			g, err := f.CurrentGraph(dir)
 			if err != nil {
 				return err
 			}
 			result, err := f.OnGraph(g).Export(ctx, query.ExportQuery{
-				Dependencies: mode, DependencyIDs: dependencyIDs, Hops: hops, Now: time.Now(),
+				Dependencies: mode, Hops: hops, Now: time.Now(),
 			})
 			if err != nil {
 				return err
@@ -94,32 +87,25 @@ func exportCmd() *cli.Command {
 	}
 }
 
-// dependencyClosure resolves the repo's declared dependencies transitively:
-// each reached repo's cache is freshened, then its own declarations are read
-// from its committed config with the reader `sdd serve` composes dependency
-// projects from.
-func dependencyClosure(ctx context.Context, errWriter io.Writer, cfg *model.PerRepoConfig) ([]model.RepoID, error) {
-	reg, _, err := defaultRepos()
+// freshenDependencyClosure brings the caches of the declared dependency
+// closure up to date before the export assembles its graphs. A freshened cache
+// can declare more, so the closure is recomputed until freshening changes
+// nothing.
+func freshenDependencyClosure(ctx context.Context, errWriter io.Writer, f *finders.Finder) error {
+	h, err := repoHandler(errWriter)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return model.DependencyClosure(cfg.RepoID, cfg.Dependencies, func(repoID model.RepoID) ([]model.RepoID, error) {
-		if err := freshenRepoCaches(ctx, errWriter, []model.RepoID{repoID}); err != nil {
-			return nil, err
-		}
-		cacheDir, err := reg.CacheDir(repoID)
+	for {
+		closure, err := f.DependencyClosure(ctx, query.DependencyClosureQuery{})
 		if err != nil {
-			return nil, err
+			return err
 		}
-		dependencyCfg, err := sddapp.ReadProjectConfigFS(os.DirFS(cacheDir))
-		if errors.Is(err, sddapp.ErrNotAnSDDProject) {
-			return nil, nil
+		changed, err := h.EnsureReposFresh(ctx, command.EnsureReposFreshCmd{RepoIDs: closure})
+		if err != nil || !changed {
+			return err
 		}
-		if err != nil {
-			return nil, fmt.Errorf("reading config of dependency %s: %w", repoID, err)
-		}
-		return dependencyCfg.Dependencies, nil
-	})
+	}
 }
 
 // writeFileAtomic renders into a temp file beside path and renames it over
