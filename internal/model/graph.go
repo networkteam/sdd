@@ -30,11 +30,11 @@ type Graph struct {
 	// for a standalone graph). Set by NewMultiGraph so traversal code
 	// holding any *Graph can resolve cross-repo references.
 	multi *MultiGraph
-	// repoPrefix qualifies this graph's entries on cross-graph surfaces:
-	// "<repo-id>:" for a member graph loaded from a connected repo's cache,
-	// "" for the local graph. Embedded (binary-scoped) entries stay bare
-	// regardless — they are identical in every member graph.
-	repoPrefix string
+	// repoID qualifies this graph's entries on cross-graph surfaces as
+	// <repo-id>:<entry-id>: set for a member graph loaded from a connected
+	// repo's cache, "" for the local graph. Embedded (binary-scoped) entries
+	// stay bare regardless — they are identical in every member graph.
+	repoID RepoID
 }
 
 // nodeKeyFor is the graph-qualified identity of an entry for rendering and
@@ -42,22 +42,22 @@ type Graph struct {
 // (the (repo-id, entry-id) dedup key in colon form), while embedded entries
 // key by bare ID so exactly one copy ever surfaces.
 func (g *Graph) nodeKeyFor(e *Entry) string {
-	if g.repoPrefix == "" || e.Embedded {
+	if g.repoID == "" || e.Embedded {
 		return e.ID
 	}
-	return g.repoPrefix + e.ID
+	return CrossRepoID(g.repoID, e.ID)
 }
 
 // qualifyID prefixes a member-graph entry ID for display outside its graph;
 // embedded entries and local-graph entries stay bare.
 func (g *Graph) qualifyID(id string) string {
-	if g.repoPrefix == "" {
+	if g.repoID == "" {
 		return id
 	}
 	if e, ok := g.ByID[id]; ok && e.Embedded {
 		return id
 	}
-	return g.repoPrefix + id
+	return CrossRepoID(g.repoID, id)
 }
 
 // LoadIssue records one entry the I/O loader could not parse: the entry ID or
@@ -701,7 +701,7 @@ func (g *Graph) resolveCandidates(match func(*Entry) bool) []resolvedCandidate {
 			// Same full ID already collected — the framework-entry / project
 			// -override case. Prefer the local instance so its local status
 			// (and any project supersession of a base entry) is what resolves.
-			if existing.owner.repoPrefix != "" && owner.repoPrefix == "" {
+			if existing.owner.repoID != "" && owner.repoID == "" {
 				byFullID[e.ID] = resolvedCandidate{entry: e, owner: owner}
 			}
 		}

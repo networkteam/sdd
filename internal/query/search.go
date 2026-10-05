@@ -67,7 +67,7 @@ type SearchQuery struct {
 	// graph (additive, repeatable at the CLI as --repo). AllRepos selects
 	// every connected repo. The orchestration layer resolves the selection
 	// into per-repo search members; these fields carry the caller's intent.
-	Repos    []string
+	Repos    []model.RepoID
 	AllRepos bool
 }
 
@@ -122,14 +122,14 @@ type SearchEntry struct {
 	Citations []Citation
 	// RepoID names the connected repo a cross-graph hit came from; empty
 	// for local hits. Presenters render remote IDs with this prefix.
-	RepoID string
+	RepoID model.RepoID
 }
 
 // DisplayID is the identity a presenter renders: repo-prefixed for a
 // cross-graph hit, bare for local ones.
 func (e SearchEntry) DisplayID() string {
 	if e.RepoID != "" {
-		return e.RepoID + ":" + e.Entry.ID
+		return model.CrossRepoID(e.RepoID, e.Entry.ID)
 	}
 	return e.Entry.ID
 }

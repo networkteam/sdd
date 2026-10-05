@@ -57,8 +57,8 @@ func (f *Finder) NewGraphSource(dir string) *GraphSource {
 // sync handler owns clone/pull); a present cache that fails to load is an
 // error, not a silent gap. A Finder without a Registry resolves nothing —
 // the same honest unresolved state.
-func (f *Finder) memberGraphLoader() func(repoID string) (*model.Graph, error) {
-	return func(repoID string) (*model.Graph, error) {
+func (f *Finder) memberGraphLoader() func(repoID model.RepoID) (*model.Graph, error) {
+	return func(repoID model.RepoID) (*model.Graph, error) {
 		if f.repos == nil {
 			return nil, nil
 		}

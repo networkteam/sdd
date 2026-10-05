@@ -25,7 +25,7 @@ unknown_key: kept-by-the-parser
 		t.Fatal(err)
 	}
 	want := sdd.ProjectConfig{
-		RepoID: "example.test/a", Dependencies: []string{"example.test/b", "example.test/c"},
+		RepoID: "example.test/a", Dependencies: []sdd.RepoID{"example.test/b", "example.test/c"},
 		DefaultBranch: "main", Language: "de", GraphDir: "graph",
 	}
 	if !reflect.DeepEqual(got, want) {

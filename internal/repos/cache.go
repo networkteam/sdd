@@ -34,7 +34,7 @@ func IsCloned(dir string) bool {
 // DeclaredRepoID reads the repo_id the cached repo declares in its committed
 // .sdd/config.yaml. Verification for `sdd repo add`: the connection is only
 // valid when the target declares the identity the caller registers it under.
-func DeclaredRepoID(dir string) (string, error) {
+func DeclaredRepoID(dir string) (model.RepoID, error) {
 	cfg, err := readCachedConfig(dir)
 	if err != nil {
 		return "", err

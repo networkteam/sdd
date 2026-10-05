@@ -25,6 +25,9 @@ type Principal struct {
 // ProjectID is a composition's stable project identity.
 type ProjectID = types.ProjectID
 
+// RepoID is a repository's canonical URL-shaped identity (types.RepoID).
+type RepoID = types.RepoID
+
 // ProjectRef is the only project identity exposed in project-scoped results.
 type ProjectRef struct {
 	ID          ProjectID
@@ -106,12 +109,12 @@ type AccessResolver interface {
 	ResolveProject(context.Context, Principal, ProjectID, Access) (*ProjectRuntime, error)
 	// ResolveDependency maps one dependency the project declares — a repo ID
 	// from its committed configuration — to the runtime of the project that
-	// carries it, or refuses. The declared string and the resolved project's
+	// carries it, or refuses. The declared repo ID and the resolved project's
 	// ID coincide only in the local composition. The application asks per
 	// declared dependency, on every view over the horizon and on every
 	// dependency-closure walk; a composition whose answer is costly caches it
 	// itself, since only it knows when a mapping goes stale.
-	ResolveDependency(context.Context, Principal, ProjectID, string) (*ProjectRuntime, error)
+	ResolveDependency(context.Context, Principal, ProjectID, RepoID) (*ProjectRuntime, error)
 	// AuthorizeSession answers whether the actor may continue the session.
 	// Membership in the session's home project is asked separately, so a
 	// shared session never admits anyone into a project they cannot read.

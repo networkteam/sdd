@@ -109,7 +109,7 @@ func TestDefaultLocationsRejectsRelativeStateHome(t *testing.T) {
 // initUpstream creates a local git repo that acts as the connected remote:
 // one committed graph entry plus a committed .sdd/config.yaml declaring
 // repo_id.
-func initUpstream(t *testing.T, repoID string) string {
+func initUpstream(t *testing.T, repoID model.RepoID) string {
 	t.Helper()
 	dir := t.TempDir()
 	run := func(args ...string) {
@@ -131,7 +131,7 @@ func initUpstream(t *testing.T, repoID string) string {
 	if err := os.WriteFile(filepath.Join(dir, ".sdd/graph/2026/06/01-120000-s-tac-abc.md"), []byte(entry), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := "graph_dir: .sdd/graph\nrepo_id: " + repoID + "\n"
+	cfg := "graph_dir: .sdd/graph\nrepo_id: " + string(repoID) + "\n"
 	if err := os.WriteFile(filepath.Join(dir, ".sdd/config.yaml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestCacheLifecycle(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	repoID := "example.com/team/other"
+	repoID := model.RepoID("example.com/team/other")
 	upstream := initUpstream(t, repoID)
 
 	loc := Locations{
@@ -152,7 +152,7 @@ func TestCacheLifecycle(t *testing.T) {
 		CacheRoot:  filepath.Join(t.TempDir(), "cache"),
 	}
 	mgr := NewManager(NewRegistry(loc), git.CLI{})
-	cacheDir := filepath.Join(loc.CacheRoot, filepath.FromSlash(repoID))
+	cacheDir := filepath.Join(loc.CacheRoot, filepath.FromSlash(string(repoID)))
 	repo := ConnectedRepo{RepoID: repoID, CloneURL: upstream}
 	ctx := context.Background()
 
@@ -285,7 +285,7 @@ func TestGlobalConfigToleratesAndReportsForeignKeys(t *testing.T) {
 
 func TestUnconnectedDependencies(t *testing.T) {
 	cfg := &GlobalConfig{Repos: []ConnectedRepo{{RepoID: "github.com/org/connected", CloneURL: "x"}}}
-	missing := cfg.UnconnectedDependencies([]string{"github.com/org/connected", "github.com/org/missing"})
+	missing := cfg.UnconnectedDependencies([]model.RepoID{"github.com/org/connected", "github.com/org/missing"})
 	if len(missing) != 1 || missing[0] != "github.com/org/missing" {
 		t.Errorf("UnconnectedDependencies = %v", missing)
 	}

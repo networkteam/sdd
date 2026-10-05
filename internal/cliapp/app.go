@@ -1614,7 +1614,7 @@ func initCmd() *cli.Command {
 				OnParticipantWritten: func(path, name string) {
 					fmt.Fprintf(cmd.Writer, "  participant: %s → %s\n", name, path)
 				},
-				OnRepoIDWritten: func(repoID string) {
+				OnRepoIDWritten: func(repoID model.RepoID) {
 					fmt.Fprintf(cmd.Writer, "  repo_id: %s\n", repoID)
 				},
 				OnSkillsInstalled: func(result command.SkillInstallResult) {

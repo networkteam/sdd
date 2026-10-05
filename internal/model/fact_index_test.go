@@ -332,7 +332,7 @@ func TestIndexedFactsUsesDiskOverrideAndExcludesDependencies(t *testing.T) {
 	disk := &Entry{ID: id, Type: TypeSignal, Layer: LayerTactical, Kind: KindFact}
 	local := NewGraph(MergeEmbedded([]*Entry{disk}, map[string]bool{id: true}, []*Entry{embedded, retained}))
 	remote := NewGraph([]*Entry{indexedFact(t, "20260719-110100-s-tac-rem", "Remote", "cli/view")})
-	NewMultiGraph(local, []string{"example.com/team/remote"}, func(string) (*Graph, error) { return remote, nil })
+	NewMultiGraph(local, []RepoID{"example.com/team/remote"}, func(RepoID) (*Graph, error) { return remote, nil })
 	if member, err := local.MemberGraph("example.com/team/remote"); err != nil || member == nil {
 		t.Fatalf("loading dependency: member=%v err=%v", member, err)
 	}

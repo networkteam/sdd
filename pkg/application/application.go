@@ -616,7 +616,7 @@ func (a *Application) snapshotWithDependencyPolicy(ctx context.Context, identity
 		graph *model.Graph
 		err   error
 	}
-	members := make(map[string]memberResult, len(runtime.options.Dependencies))
+	members := make(map[RepoID]memberResult, len(runtime.options.Dependencies))
 	for _, repoID := range runtime.options.Dependencies {
 		dependency, depErr := a.access.ResolveDependency(ctx, principal, runtime.options.Project.ID, repoID)
 		if depErr != nil || dependency == nil {
@@ -640,7 +640,7 @@ func (a *Application) snapshotWithDependencyPolicy(ctx context.Context, identity
 			return nil, readErr
 		}
 	}
-	model.NewMultiGraph(local, append([]string(nil), runtime.options.Dependencies...), func(repoID string) (*model.Graph, error) {
+	model.NewMultiGraph(local, append([]RepoID(nil), runtime.options.Dependencies...), func(repoID RepoID) (*model.Graph, error) {
 		member, ok := members[repoID]
 		if !ok {
 			return nil, dependencyUnavailable()
@@ -656,7 +656,7 @@ func (a *Application) snapshotWithDependencyPolicy(ctx context.Context, identity
 	return &clone, nil
 }
 
-func (a *Application) dependency(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime, repoID string) (*ProjectRuntime, error) {
+func (a *Application) dependency(ctx context.Context, identity RequestIdentity, runtime *ProjectRuntime, repoID RepoID) (*ProjectRuntime, error) {
 	if !slices.Contains(runtime.options.Dependencies, repoID) {
 		return nil, dependencyUnavailable()
 	}
@@ -671,12 +671,12 @@ func (a *Application) dependency(ctx context.Context, identity RequestIdentity, 
 	return dependency, nil
 }
 
-func (a *Application) selectedDependencies(named []string, all bool, declared []string) ([]string, error) {
+func (a *Application) selectedDependencies(named []RepoID, all bool, declared []RepoID) ([]RepoID, error) {
 	if all {
-		return append([]string(nil), declared...), nil
+		return append([]RepoID(nil), declared...), nil
 	}
-	seen := map[string]bool{}
-	selected := make([]string, 0, len(named))
+	seen := map[RepoID]bool{}
+	selected := make([]RepoID, 0, len(named))
 	for _, repoID := range named {
 		if !slices.Contains(declared, repoID) {
 			return nil, dependencyUnavailable()

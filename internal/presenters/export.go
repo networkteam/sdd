@@ -23,7 +23,7 @@ type exportJSON struct {
 }
 
 type exportRepoJSON struct {
-	RepoID      string            `json:"repo_id"`
+	RepoID      model.RepoID      `json:"repo_id"`
 	Local       bool              `json:"local"`
 	Unavailable bool              `json:"unavailable,omitempty"`
 	Revision    string            `json:"revision,omitempty"`

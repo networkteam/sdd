@@ -60,7 +60,7 @@ func viewCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			repoIDs, err := reg.SelectRepoIDs(cmd.StringSlice("repo"), cmd.Bool("all-repos"))
+			repoIDs, err := reg.SelectRepoIDs(repoIDArgs(cmd.StringSlice("repo")), cmd.Bool("all-repos"))
 			if err != nil {
 				return err
 			}

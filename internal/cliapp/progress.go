@@ -13,7 +13,7 @@ import (
 type embedProgress struct {
 	reporter  *cliout.Reporter
 	total     int
-	curRepo   string
+	curRepo   model.RepoID
 	chunks    int
 	batchNote string
 }
@@ -38,7 +38,7 @@ func (p *embedProgress) onPlanned(n int) {
 func (p *embedProgress) onBatchStart(ids []string, chunks int) {
 	note := embedNote(ids, chunks)
 	if p.curRepo != "" {
-		note = p.curRepo + " · " + note
+		note = string(p.curRepo) + " · " + note
 	}
 	p.batchNote = note
 	p.reporter.SetNote(fmt.Sprintf("%s · %d chunks published", note, p.chunks))
@@ -49,7 +49,7 @@ func (p *embedProgress) onEntryIndexed(_ string, chunks int) {
 	p.reporter.Add(1)
 	prefix := p.batchNote
 	if chunks == 0 {
-		prefix = p.curRepo
+		prefix = string(p.curRepo)
 		p.batchNote = ""
 	}
 	note := fmt.Sprintf("%d chunks published", p.chunks)
@@ -59,7 +59,7 @@ func (p *embedProgress) onEntryIndexed(_ string, chunks int) {
 	p.reporter.SetNote(note)
 }
 
-func (p *embedProgress) onRepoStart(id string) {
+func (p *embedProgress) onRepoStart(id model.RepoID) {
 	p.curRepo = id
 	p.batchNote = ""
 	p.reporter.SetNote("")

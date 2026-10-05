@@ -141,7 +141,7 @@ type InitCmd struct {
 	// OnRepoIDWritten fires when a derived repo_id is recorded in
 	// .sdd/config.yaml — on fresh init or as an upgrade upsert. Does not
 	// fire when the config already carries a value.
-	OnRepoIDWritten func(repoID string)
+	OnRepoIDWritten func(repoID model.RepoID)
 
 	// OnSkillsInstalled fires after the skill install pass completes,
 	// carrying a per-category summary suitable for presenter output.

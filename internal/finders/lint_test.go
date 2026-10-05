@@ -61,7 +61,7 @@ func TestLint_CrossRepoRefUndeclared(t *testing.T) {
 	undeclaredEntry := lintRefEntry(t, "20260101-120001-s-prc-bbb", undeclaredRepo+":20260101-100000-s-tac-yyy")
 
 	g := model.NewGraph([]*model.Entry{declaredEntry, undeclaredEntry})
-	f := finders.New(finders.Options{Config: &model.PerRepoConfig{Dependencies: []string{declaredRepo}}})
+	f := finders.New(finders.Options{Config: &model.PerRepoConfig{Dependencies: []model.RepoID{declaredRepo}}})
 
 	res, err := f.OnGraph(g).Lint(query.LintQuery{})
 	if err != nil {

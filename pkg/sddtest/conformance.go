@@ -23,7 +23,7 @@ type AccessResolverFixture struct {
 	// Participant is the name the principal must resolve to in Project.
 	Participant  string
 	Project      sdd.ProjectID
-	Dependency   string
+	Dependency   sdd.RepoID
 	ProjectCount int
 }
 

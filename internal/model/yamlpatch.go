@@ -69,11 +69,11 @@ func SetYAMLValue(existing []byte, path string, value any) ([]byte, error) {
 //
 // Flow style matches how FormatConfig renders the same field on a fresh init,
 // so a sequence upsert and a fresh write produce the same on-disk shape.
-func SetYAMLSequence(existing []byte, path string, values []string) ([]byte, error) {
+func SetYAMLSequence[S ~string](existing []byte, path string, values []S) ([]byte, error) {
 	return patchYAML(existing, path, func(target *yaml.Node) error {
 		items := make([]*yaml.Node, 0, len(values))
 		for _, v := range values {
-			items = append(items, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v})
+			items = append(items, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: string(v)})
 		}
 		replaceNodeValue(target, &yaml.Node{Kind: yaml.SequenceNode, Style: yaml.FlowStyle, Content: items})
 		return nil

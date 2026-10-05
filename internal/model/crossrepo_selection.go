@@ -1,28 +1,47 @@
 package model
 
-// DependencyClosure walks declared dependencies breadth-first from direct and
-// returns every reached repo ID once, in first-reached order, never root
-// itself. declared returns a reached repo's own declarations; a repo it cannot
-// resolve returns none, so it stays listed but nothing behind it is reached.
-func DependencyClosure(root string, direct []string, declared func(repoID string) ([]string, error)) ([]string, error) {
-	seen := map[string]bool{root: true}
-	var closure []string
-	queue := append([]string(nil), direct...)
-	for len(queue) > 0 {
-		repoID := queue[0]
-		queue = queue[1:]
-		if seen[repoID] {
-			continue
+import (
+	"context"
+	"iter"
+)
+
+// DependencyResolver answers one step of a declared-dependency walk: the
+// dependencies k declares, as the keys they resolve to. Each composition
+// resolves its own way and states its own rule for a dependency it cannot
+// resolve.
+type DependencyResolver[K comparable] interface {
+	Dependencies(ctx context.Context, k K) ([]K, error)
+}
+
+// DependencyClosure walks the declared dependencies of root transitively and
+// yields every key reached once, breadth-first, in first-reached order, never
+// root itself. A resolver error is yielded and ends the walk; breaking out of
+// the loop stops it.
+func DependencyClosure[K comparable](ctx context.Context, root K, r DependencyResolver[K]) iter.Seq2[K, error] {
+	return func(yield func(K, error) bool) {
+		seen := map[K]bool{root: true}
+		queue := []K{root}
+		for len(queue) > 0 {
+			k := queue[0]
+			queue = queue[1:]
+			deps, err := r.Dependencies(ctx, k)
+			if err != nil {
+				var zero K
+				yield(zero, err)
+				return
+			}
+			for _, dep := range deps {
+				if seen[dep] {
+					continue
+				}
+				seen[dep] = true
+				if !yield(dep, nil) {
+					return
+				}
+				queue = append(queue, dep)
+			}
 		}
-		seen[repoID] = true
-		closure = append(closure, repoID)
-		next, err := declared(repoID)
-		if err != nil {
-			return nil, err
-		}
-		queue = append(queue, next...)
 	}
-	return closure, nil
 }
 
 // CitedAcross selects the entries of other repos that the local graph cites:
@@ -31,19 +50,19 @@ func DependencyClosure(root string, direct []string, declared func(repoID string
 // bare ID within that entry's repo, a cross-repo ID into the repo it names.
 // Only repos in scope are entered, and embedded entries are never selected
 // (no repo owns them). The result maps repo ID to the selected entry IDs.
-func CitedAcross(local *Graph, scope []string, hops int) (map[string]map[string]bool, error) {
-	inScope := make(map[string]bool, len(scope))
+func CitedAcross(local *Graph, scope []RepoID, hops int) (map[RepoID]map[string]bool, error) {
+	inScope := make(map[RepoID]bool, len(scope))
 	for _, repoID := range scope {
 		inScope[repoID] = true
 	}
 	type step struct {
-		repoID string
+		repoID RepoID
 		entry  *Entry
 		depth  int
 	}
-	selected := map[string]map[string]bool{}
+	selected := map[RepoID]map[string]bool{}
 	var queue []step
-	add := func(repoID, id string, depth int) error {
+	add := func(repoID RepoID, id string, depth int) error {
 		if !inScope[repoID] || selected[repoID][id] {
 			return nil
 		}

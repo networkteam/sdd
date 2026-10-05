@@ -86,7 +86,7 @@ func (f *Finder) language() (string, error) {
 // declaredDependencies returns the repo's committed cross-repo dependency
 // declarations. Pre-flight's declared-dependency precondition reasons
 // against this list.
-func (f *Finder) declaredDependencies() ([]string, error) {
+func (f *Finder) declaredDependencies() ([]model.RepoID, error) {
 	if f.cfg == nil {
 		return nil, fmt.Errorf("declared dependencies unavailable: no per-repo config")
 	}
@@ -95,7 +95,7 @@ func (f *Finder) declaredDependencies() ([]string, error) {
 
 // localRepoID returns the repo's canonical identity from config; "" means the
 // repo declares none (local-only).
-func (f *Finder) localRepoID() (string, error) {
+func (f *Finder) localRepoID() (model.RepoID, error) {
 	if f.cfg == nil {
 		return "", fmt.Errorf("repo ID unavailable: no per-repo config")
 	}

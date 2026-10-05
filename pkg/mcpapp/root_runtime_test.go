@@ -35,7 +35,7 @@ func (rootAccess) AuthorizeSession(ctx context.Context, request sdd.SessionAcces
 	return sdd.OwnerOnly(ctx, request)
 }
 
-func (rootAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+func (rootAccess) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	return nil, &sdd.ApplicationError{Code: sdd.ErrorProjectUnavailable, Message: "dependency unavailable"}
 }
 

@@ -64,10 +64,10 @@ func newRepoTestHandler(t *testing.T, repoConfig string) (*Handler, string) {
 func TestRepoAdd_DeclaresDependencyForExistingConnection(t *testing.T) {
 	h, sddDir := newRepoTestHandler(t, "graph_dir: .sdd/graph\n# keep me\n")
 
-	var declared []string
+	var declared []model.RepoID
 	cmd := &command.RepoAddCmd{
 		CloneURL: "git@github.com:networkteam/other.git",
-		OnDeclared: func(repoID string, already bool) {
+		OnDeclared: func(repoID model.RepoID, already bool) {
 			if already {
 				t.Errorf("first declare must report alreadyDeclared=false")
 			}
@@ -126,7 +126,7 @@ func TestEnsureReposFresh_ReportsPhaseNotIndexing(t *testing.T) {
 	capture := func(t *testing.T, h *Handler) []model.Phase {
 		var phases []model.Phase
 		if _, err := h.EnsureReposFresh(context.Background(), command.EnsureReposFreshCmd{
-			RepoIDs: []string{repoID},
+			RepoIDs: []model.RepoID{repoID},
 			OnPhase: func(p model.Phase) { phases = append(phases, p) },
 		}); err != nil {
 			t.Fatalf("EnsureReposFresh: %v", err)
@@ -223,14 +223,14 @@ func TestBuildConnectedIndexes_FreshensAndFills(t *testing.T) {
 	h := New(Options{Reader: readFinderFor(t), Repos: repos.NewManager(reg, fg)})
 
 	emb := &fakeEmbedder{}
-	var startedRepos []string
+	var startedRepos []model.RepoID
 	planned, indexed := 0, 0
 	fill := &command.BuildConnectedIndexesCmd{
-		OnRepoStart:    func(id string) { startedRepos = append(startedRepos, id) },
+		OnRepoStart:    func(id model.RepoID) { startedRepos = append(startedRepos, id) },
 		OnPlanned:      func(n int) { planned += n },
 		OnEntryIndexed: func(_ string, _ int) { indexed++ },
 	}
-	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, indexEmbedder(emb), fill); err != nil {
+	if err := h.BuildConnectedIndexes(context.Background(), []model.RepoID{repoID}, indexEmbedder(emb), fill); err != nil {
 		t.Fatalf("BuildConnectedIndexes: %v", err)
 	}
 
@@ -298,13 +298,13 @@ func TestBuildConnectedIndexes_ForceRebuildsMembers(t *testing.T) {
 	emb := &fakeEmbedder{}
 
 	// First fill populates the member index + manifest.
-	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, indexEmbedder(emb), &command.BuildConnectedIndexesCmd{}); err != nil {
+	if err := h.BuildConnectedIndexes(context.Background(), []model.RepoID{repoID}, indexEmbedder(emb), &command.BuildConnectedIndexesCmd{}); err != nil {
 		t.Fatalf("initial lazy fill: %v", err)
 	}
 
 	// A second lazy fill over the up-to-date index plans nothing.
 	lazyPlanned := 0
-	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, indexEmbedder(emb),
+	if err := h.BuildConnectedIndexes(context.Background(), []model.RepoID{repoID}, indexEmbedder(emb),
 		&command.BuildConnectedIndexesCmd{OnPlanned: func(n int) { lazyPlanned += n }}); err != nil {
 		t.Fatalf("second lazy fill: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestBuildConnectedIndexes_ForceRebuildsMembers(t *testing.T) {
 
 	// A forced fill re-embeds every member entry despite the current manifest.
 	forcePlanned := 0
-	if err := h.BuildConnectedIndexes(context.Background(), []string{repoID}, indexEmbedder(emb),
+	if err := h.BuildConnectedIndexes(context.Background(), []model.RepoID{repoID}, indexEmbedder(emb),
 		&command.BuildConnectedIndexesCmd{Force: true, OnPlanned: func(n int) { forcePlanned += n }}); err != nil {
 		t.Fatalf("forced fill: %v", err)
 	}
@@ -376,10 +376,10 @@ func TestRepoRemove_CleanRemoval(t *testing.T) {
 		"graph_dir: .sdd/graph\ndependencies: ["+removeTargetRepoID+"]\n# keep me\n", committer)
 	writeEntry(t, graphDir, "20260202-100000-s-tac-bbb", "## B\nUnrelated entry.", "Unrelated.")
 
-	var removed []string
+	var removed []model.RepoID
 	err := h.RepoRemove(context.Background(), &command.RepoRemoveCmd{
 		RepoID:    removeTargetRepoID,
-		OnRemoved: func(id string) { removed = append(removed, id) },
+		OnRemoved: func(id model.RepoID) { removed = append(removed, id) },
 	})
 	if err != nil {
 		t.Fatalf("clean removal: %v", err)
@@ -457,7 +457,7 @@ func TestRepoRemove_ForceStrandsAndRemoves(t *testing.T) {
 	err := h.RepoRemove(context.Background(), &command.RepoRemoveCmd{
 		RepoID:     removeTargetRepoID,
 		Force:      true,
-		OnStranded: func(_ string, s []command.StrandedRef) { stranded = s },
+		OnStranded: func(_ model.RepoID, s []command.StrandedRef) { stranded = s },
 	})
 	if err != nil {
 		t.Fatalf("forced removal: %v", err)

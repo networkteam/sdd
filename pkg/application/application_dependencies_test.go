@@ -73,7 +73,7 @@ func (r *multiAccessResolver) AuthorizeSession(ctx context.Context, request sdd.
 	return sdd.OwnerOnly(ctx, request)
 }
 
-func (r *multiAccessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+func (r *multiAccessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	if r.deny {
 		return nil, &sdd.ApplicationError{Code: sdd.ErrorReadDenied, Message: "secret policy detail"}
 	}
@@ -119,7 +119,7 @@ func TestApplicationLoadsDependencyPartiallyWithUnreadableEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []string{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
+		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []sdd.RepoID{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
 		LLM: llm,
 	})
 	if err != nil {
@@ -161,7 +161,7 @@ func TestApplicationResolvesAuthorizedDependenciesWithoutLeakingDenials(t *testi
 		t.Fatal(err)
 	}
 	base, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
-		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []string{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
+		Project: sdd.ProjectRef{ID: "base"}, Dependencies: []sdd.RepoID{"example.org/dep"}, Graph: staticGraphStore{snapshot: baseSnapshot},
 		LLM: llm,
 	})
 	if err != nil {

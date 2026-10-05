@@ -11,7 +11,7 @@ import (
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
-func indexRuntime(t *testing.T, project sdd.ProjectID, index sdd.SearchIndexStore, embeddings *countingEmbeddings, deps ...string) *sdd.ProjectRuntime {
+func indexRuntime(t *testing.T, project sdd.ProjectID, index sdd.SearchIndexStore, embeddings *countingEmbeddings, deps ...sdd.RepoID) *sdd.ProjectRuntime {
 	t.Helper()
 	snapshot, err := sdd.BuildSnapshot(t.Context(), sdd.SnapshotData{
 		Project: project, Revision: "r1",

@@ -22,12 +22,12 @@ type MultiGraph struct {
 	// — the bounded scope for bare-ID resolution. Resolution never reaches a
 	// repo outside this set, matching the declared-dependency precondition
 	// that governs which repos a ref may point at.
-	deps []string
+	deps []RepoID
 
-	loader func(repoID string) (*Graph, error)
+	loader func(repoID RepoID) (*Graph, error)
 
 	mu      sync.Mutex
-	members map[string]*memberState
+	members map[RepoID]*memberState
 }
 
 type memberState struct {
@@ -40,8 +40,8 @@ type memberState struct {
 // bounded scope for bare-ID resolution. The local graph (and every lazily
 // loaded member) gets back-wired so traversal code holding any *Graph can
 // resolve across the boundary.
-func NewMultiGraph(local *Graph, deps []string, loader func(repoID string) (*Graph, error)) *MultiGraph {
-	m := &MultiGraph{Local: local, deps: deps, loader: loader, members: make(map[string]*memberState)}
+func NewMultiGraph(local *Graph, deps []RepoID, loader func(repoID RepoID) (*Graph, error)) *MultiGraph {
+	m := &MultiGraph{Local: local, deps: deps, loader: loader, members: make(map[RepoID]*memberState)}
 	local.multi = m
 	return m
 }
@@ -69,7 +69,7 @@ func (m *MultiGraph) dependencyGraphs() []*Graph {
 // use. nil with no error means the repo is not resolvable (not connected,
 // no cache) — the legitimate unresolved state; an error means a cache was
 // present but failed to load and is propagated to callers that can act.
-func (m *MultiGraph) Member(repoID string) (*Graph, error) {
+func (m *MultiGraph) Member(repoID RepoID) (*Graph, error) {
 	if m == nil || m.loader == nil {
 		return nil, nil
 	}
@@ -81,7 +81,7 @@ func (m *MultiGraph) Member(repoID string) (*Graph, error) {
 	g, err := m.loader(repoID)
 	if g != nil {
 		g.multi = m
-		g.repoPrefix = repoID + ":"
+		g.repoID = repoID
 	}
 	m.members[repoID] = &memberState{graph: g, err: err}
 	return g, err
@@ -91,7 +91,7 @@ func (m *MultiGraph) Member(repoID string) (*Graph, error) {
 // this graph's cross-graph assembly: nil without error when the repo is
 // not resolvable (not connected, no cache, or no assembly at all), an
 // error when a present cache failed to load.
-func (g *Graph) MemberGraph(repoID string) (*Graph, error) {
+func (g *Graph) MemberGraph(repoID RepoID) (*Graph, error) {
 	return g.multi.Member(repoID)
 }
 

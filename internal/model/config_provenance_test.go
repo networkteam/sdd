@@ -99,7 +99,7 @@ func TestEffectiveConfigValues_NonSecretMapRendersItsValues(t *testing.T) {
 func TestEffectiveConfigValues_SlicesRender(t *testing.T) {
 	project := &PerRepoConfig{
 		SupportedAgents: []AgentTarget{"claude", "codex"},
-		Dependencies:    []string{"github.com/org/dep"},
+		Dependencies:    []RepoID{"github.com/org/dep"},
 	}
 	values := EffectiveConfigValues(BaseConfig{}, project, nil)
 	if v := findValue(t, values, "supported_agents"); v.Value != "claude, codex" {

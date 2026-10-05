@@ -135,14 +135,14 @@ func (f *Finder) repoIndexLint(result *query.LintResult) {
 		if err != nil || !repos.IsCloned(cacheDir) {
 			continue
 		}
-		manifest, err := index.LoadManifest(index.StoreDir(f.repos.CacheRoot(), r.RepoID, fingerprint))
+		manifest, err := index.LoadManifest(index.StoreDir(f.repos.CacheRoot(), index.RepoKey(r.RepoID, cacheDir), fingerprint))
 		if err != nil || len(manifest.Entries) == 0 {
 			continue
 		}
 		if drift := manifest.MismatchCount(fingerprint); drift > 0 {
 			result.Findings = append(result.Findings, query.LintFinding{
 				Category: "index", Code: "repo-fingerprint-drift", Severity: query.LintAdvisory,
-				EntryID: r.RepoID,
+				EntryID: string(r.RepoID),
 				Message: fmt.Sprintf("%d of %d cached entries indexed under a different fingerprint than the global embedder — the next cross-graph search re-embeds them",
 					drift, len(manifest.Entries)),
 			})
@@ -164,7 +164,7 @@ func (f *Finder) validateCrossRepoDeps(graph *model.Graph) error {
 	if err != nil {
 		return err
 	}
-	declared := make(map[string]bool, len(deps))
+	declared := make(map[model.RepoID]bool, len(deps))
 	for _, dep := range deps {
 		declared[dep] = true
 	}
@@ -172,7 +172,7 @@ func (f *Finder) validateCrossRepoDeps(graph *model.Graph) error {
 		if entry.Embedded {
 			continue
 		}
-		seen := map[string]bool{}
+		seen := map[model.RepoID]bool{}
 		for _, r := range entry.Refs {
 			repoID, _, ok := model.SplitCrossRepoID(r.ID)
 			if !ok || declared[repoID] || seen[repoID] {
@@ -181,7 +181,7 @@ func (f *Finder) validateCrossRepoDeps(graph *model.Graph) error {
 			seen[repoID] = true
 			entry.Warnings = append(entry.Warnings, model.Warning{
 				Field:   "refs",
-				Value:   repoID,
+				Value:   string(repoID),
 				Message: fmt.Sprintf("cross-repo ref into %q, which is not a declared dependency in .sdd/config.yaml — declare it with `sdd repo add`, or the ref is stranded", repoID),
 			})
 		}

@@ -270,7 +270,7 @@ func (*accessResolver) AuthorizeSession(ctx context.Context, request sdd.Session
 	return sdd.OwnerOnly(ctx, request)
 }
 
-func (*accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, string) (*sdd.ProjectRuntime, error) {
+func (*accessResolver) ResolveDependency(context.Context, sdd.Principal, sdd.ProjectID, sdd.RepoID) (*sdd.ProjectRuntime, error) {
 	return nil, nil
 }
 

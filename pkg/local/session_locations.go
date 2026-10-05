@@ -28,7 +28,7 @@ type StoreLocation struct {
 // then the identity-less machine-global store earlier versions keyed by stable
 // root hash alone, then the in-tree directory used before the store went
 // machine-global.
-func SessionLocations(stateRoot, sddDir, repoID, stableRoot string) ([]StoreLocation, error) {
+func SessionLocations(stateRoot, sddDir string, repoID app.RepoID, stableRoot string) ([]StoreLocation, error) {
 	if !filepath.IsAbs(stateRoot) {
 		return nil, fmt.Errorf("sdd: XDG state root must be absolute: %q", stateRoot)
 	}

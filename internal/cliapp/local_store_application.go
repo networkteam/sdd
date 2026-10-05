@@ -66,7 +66,7 @@ func buildLocalStoreApplication(ctx context.Context, cmd *cli.Command) (*sdd.App
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err
 	}
-	access := &localRuntimeAccess{project: project, participant: cfg.Participant, runtime: runtime, dependencies: map[string]*sdd.ProjectRuntime{}}
+	access := &localRuntimeAccess{project: project, participant: cfg.Participant, runtime: runtime, dependencies: map[sdd.RepoID]*sdd.ProjectRuntime{}}
 	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: access, Sessions: sessions, StagedBlobs: blobs})
 	if err != nil {
 		return nil, "", sdd.RequestIdentity{}, err

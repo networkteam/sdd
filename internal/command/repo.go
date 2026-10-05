@@ -19,13 +19,13 @@ type RepoAddCmd struct {
 
 	// OnAdded fires after the connection is registered, carrying the
 	// verified repo identity and the cache location.
-	OnAdded func(repoID, cacheDir string)
+	OnAdded func(repoID model.RepoID, cacheDir string)
 
 	// OnDeclared fires when the dependency declaration is ensured in the
 	// current repo's committed config; alreadyDeclared reports whether it
 	// was present before. Not fired outside an sdd repo (global-only
 	// registration is legitimate — resolution without a dependent graph).
-	OnDeclared func(repoID string, alreadyDeclared bool)
+	OnDeclared func(repoID model.RepoID, alreadyDeclared bool)
 
 	// OnPhase reports the active stage (connecting → cloning) so the footer
 	// shows real progress rather than a bare eternal "connecting" spinner.
@@ -39,7 +39,7 @@ type RepoAddCmd struct {
 // cross-repo read shows a phase-true footer; it is never fired for a
 // fresh-cache no-op.
 type EnsureReposFreshCmd struct {
-	RepoIDs []string
+	RepoIDs []model.RepoID
 
 	// OnPhase reports the freshening stage. Optional.
 	OnPhase func(phase model.Phase)
@@ -62,7 +62,7 @@ func (c *RepoAddCmd) Validate() error {
 // The per-user global connection and its on-disk cache are left untouched;
 // machine-level teardown is a separate, future command surface.
 type RepoRemoveCmd struct {
-	RepoID string
+	RepoID model.RepoID
 
 	// Force drops the dependency even when local entries still reference the
 	// target, stranding those refs. Required to proceed past the ref-safety
@@ -71,11 +71,11 @@ type RepoRemoveCmd struct {
 
 	// OnRemoved fires after the dependency is dropped from the committed
 	// config and the change is committed.
-	OnRemoved func(repoID string)
+	OnRemoved func(repoID model.RepoID)
 
 	// OnStranded fires when Force drops a still-referenced dependency,
 	// carrying the refs the removal stranded so the override stays loud.
-	OnStranded func(repoID string, stranded []StrandedRef)
+	OnStranded func(repoID model.RepoID, stranded []StrandedRef)
 }
 
 // StrandedRef names a local entry whose cross-repo reference into a removed
@@ -100,8 +100,8 @@ func (c *RepoRemoveCmd) Validate() error {
 // RepoSyncCmd force-pulls connected repo caches: the named repos, or every
 // connected repo when RepoIDs is empty. Missing caches clone lazily.
 type RepoSyncCmd struct {
-	RepoIDs []string
+	RepoIDs []model.RepoID
 
 	// OnSynced fires per repo after its cache is fresh.
-	OnSynced func(repoID string)
+	OnSynced func(repoID model.RepoID)
 }

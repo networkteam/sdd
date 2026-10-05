@@ -82,7 +82,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 	// Derive the canonical repo identity from the remote (ssh and https
 	// forms normalize equal). No remote or an underivable URL leaves the
 	// repo local-only — a legitimate state, not an error.
-	var derivedRepoID string
+	var derivedRepoID model.RepoID
 	if cmd.RemoteURL != "" {
 		if id, err := model.DeriveRepoID(cmd.RemoteURL); err == nil {
 			derivedRepoID = id
@@ -174,7 +174,7 @@ func (h *Handler) Init(ctx context.Context, cmd *command.InitCmd) error {
 				return fmt.Errorf("parsing %s: %w", configPath, err)
 			}
 			if recorded.RepoID == "" {
-				updated, err := model.SetYAMLField(existing, "repo_id", derivedRepoID)
+				updated, err := model.SetYAMLField(existing, "repo_id", string(derivedRepoID))
 				if err != nil {
 					return fmt.Errorf("updating %s: %w", configPath, err)
 				}
@@ -986,7 +986,7 @@ func (h *Handler) migrateLegacyIndexes(cmd *command.InitCmd, sddDir, configPath 
 
 	legacyLocal := filepath.Join(sddDir, "index")
 	if _, err := os.Stat(legacyLocal); err == nil {
-		repoID := ""
+		var repoID model.RepoID
 		if data, err := os.ReadFile(configPath); err == nil {
 			if cfgFile, err := model.ParseConfig(data); err == nil {
 				repoID = cfgFile.RepoID
@@ -1019,7 +1019,7 @@ func (h *Handler) migrateLegacyIndexes(cmd *command.InitCmd, sddDir, configPath 
 		if _, err := os.Stat(legacy); err != nil {
 			continue
 		}
-		target, moved, err := index.MigrateDir(legacy, cacheRoot, r.RepoID)
+		target, moved, err := index.MigrateDir(legacy, cacheRoot, index.RepoKey(r.RepoID, cacheDir))
 		if err != nil {
 			return fmt.Errorf("migrating cache index for %s: %w", r.RepoID, err)
 		}
