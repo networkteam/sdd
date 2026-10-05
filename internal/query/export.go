@@ -51,8 +51,11 @@ const ExportAttachmentTextLimit = 16 * 1024
 // ExportResult is the structured output of an ExportQuery: the local graph
 // first, then each dependency repo. Embedded carries the base entries
 // compiled into the binary once, outside every repo: they are identical in
-// each graph, so any repo's ID for one resolves there. Their derived
-// attributes are the local graph's.
+// each graph, so any repo's ID for one resolves there unless that repo has
+// its own entry with the ID. They are collected from every exported graph,
+// so a base entry the local graph overrides stays listed for a dependency
+// that references the original; each is derived in the first exported graph
+// carrying it, the local graph first.
 type ExportResult struct {
 	GeneratedAt time.Time
 	Repos       []ExportRepo
@@ -82,8 +85,7 @@ type ExportSelection struct {
 }
 
 // ExportEntry pairs an entry with the attributes the engine derives for it in
-// its owning graph. FullID is set for entries of a dependency repo. LandedAt
-// is zero when git history does not carry the entry file.
+// its owning graph. FullID is set for entries of a dependency repo.
 type ExportEntry struct {
 	Entry        *model.Entry
 	FullID       string
@@ -93,7 +95,6 @@ type ExportEntry struct {
 	Topics       []model.TopicPath
 	Heat         float64
 	InDegree     int
-	LandedAt     time.Time
 	Attachments  []ExportAttachment
 }
 

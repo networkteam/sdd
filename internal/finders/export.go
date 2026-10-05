@@ -21,9 +21,6 @@ type GitHistory interface {
 	// HeadRevision returns the commit hash HEAD points at, "" before the
 	// first commit.
 	HeadRevision(ctx context.Context, dir string) (string, error)
-	// FileArrivals maps each file under dir (slash-separated, relative to
-	// dir) to the committer time of the first-parent commit that added it.
-	FileArrivals(ctx context.Context, dir string) (map[string]time.Time, error)
 }
 
 // attachmentSniffBytes is how much of a non-text attachment is read to
@@ -62,11 +59,8 @@ func (gf *GraphFinder) Export(ctx context.Context, q query.ExportQuery) (*query.
 	}
 	local.Local = true
 	result := &query.ExportResult{GeneratedAt: q.Now, Repos: []query.ExportRepo{local}}
-	for _, e := range gf.graph.Entries {
-		if e.Embedded {
-			result.Embedded = append(result.Embedded, x.entry(gf.graph, e, nil))
-		}
-	}
+	embedded := map[string]bool{}
+	x.addEmbedded(result, embedded, gf.graph)
 	if q.Dependencies == query.ExportDependenciesNone {
 		return result, nil
 	}
@@ -99,15 +93,28 @@ func (gf *GraphFinder) Export(ctx context.Context, q query.ExportQuery) (*query.
 		}
 		repo.Selection = &query.ExportSelection{Mode: q.Dependencies, Hops: q.Hops, TotalEntries: ownEntries(member)}
 		result.Repos = append(result.Repos, repo)
+		x.addEmbedded(result, embedded, member)
 	}
 	return result, nil
 }
 
 // exporter holds what every exported entry is derived against.
 type exporter struct {
-	decay    model.DecayFunc
-	now      time.Time
-	arrivals map[string]time.Time
+	decay model.DecayFunc
+	now   time.Time
+}
+
+// addEmbedded appends the base entries g carries that are not listed yet,
+// derived in g. Collecting them from every exported graph keeps a base entry
+// the local graph overrides: a dependency that does not override it still
+// references the original.
+func (x exporter) addEmbedded(result *query.ExportResult, listed map[string]bool, g *model.Graph) {
+	for _, e := range g.Entries {
+		if e.Embedded && !listed[e.ID] {
+			listed[e.ID] = true
+			result.Embedded = append(result.Embedded, x.entry(g, e, nil))
+		}
+	}
 }
 
 // exportRepo exports the held graph's own entries (embedded base entries are
@@ -128,9 +135,6 @@ func (gf *GraphFinder) exportRepo(ctx context.Context, x exporter, repoID string
 
 	if h, dir := gf.finder.gitHistory, g.GraphDir(); h != nil && dir != "" && h.InWorkTree(ctx, dir) {
 		if repo.Revision, err = h.HeadRevision(ctx, dir); err != nil {
-			return query.ExportRepo{}, err
-		}
-		if x.arrivals, err = h.FileArrivals(ctx, dir); err != nil {
 			return query.ExportRepo{}, err
 		}
 	}
@@ -162,9 +166,6 @@ func (x exporter) entry(g *model.Graph, e *model.Entry, attachments []query.Expo
 	}
 	if key, ok := g.DisplayID(e.ID); ok && key != e.ID {
 		entry.FullID = key
-	}
-	if rel, err := model.IDToRelPath(e.ID); err == nil {
-		entry.LandedAt = x.arrivals[filepath.ToSlash(rel)]
 	}
 	return entry
 }

@@ -45,7 +45,6 @@ type exportEntryJSON struct {
 	Participants     []string               `json:"participants,omitempty"`
 	Topics           []string               `json:"topics,omitempty"`
 	Time             string                 `json:"time"`
-	LandedAt         string                 `json:"landed_at,omitempty"`
 	Status           model.StatusKind       `json:"status,omitempty"`
 	StatusBy         string                 `json:"status_by,omitempty"`
 	ClosedBy         []string               `json:"closed_by,omitempty"`
@@ -188,9 +187,6 @@ func exportEntryJSONFrom(x query.ExportEntry) exportEntryJSON {
 	}
 	if p, err := model.ParseID(e.ID); err == nil {
 		ej.ShortID = p.TypeCode + "-" + p.LayerCode + "-" + p.Suffix
-	}
-	if !x.LandedAt.IsZero() {
-		ej.LandedAt = x.LandedAt.Format(time.RFC3339)
 	}
 	for _, t := range x.Topics {
 		ej.Topics = append(ej.Topics, t.String())

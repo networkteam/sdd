@@ -19,7 +19,7 @@ import (
 func exportCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "export",
-		Usage: "EXPERIMENTAL: export the graph and its declared dependencies with derived status, heat and git arrival times as one JSON document (unstable shape)",
+		Usage: "EXPERIMENTAL: export the graph and its declared dependencies with derived status and heat as one JSON document (unstable shape)",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "format",
@@ -123,7 +123,9 @@ func dependencyClosure(ctx context.Context, errWriter io.Writer, cfg *model.PerR
 }
 
 // writeFileAtomic renders into a temp file beside path and renames it over
-// path, so a reader never sees a partial document.
+// path, so a reader never sees a partial document. The file keeps the temp
+// file's owner-only mode: the document carries entry bodies and attachment
+// text.
 func writeFileAtomic(path string, render func(io.Writer) error) (err error) {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
@@ -139,9 +141,6 @@ func writeFileAtomic(path string, render func(io.Writer) error) (err error) {
 		return err
 	}
 	if err = tmp.Close(); err != nil {
-		return err
-	}
-	if err = os.Chmod(tmp.Name(), 0o644); err != nil {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
