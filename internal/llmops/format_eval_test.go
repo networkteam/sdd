@@ -122,10 +122,13 @@ type responseRow struct {
 	Model        string    `json:"model"`
 	Variant      string    `json:"variant,omitempty"`
 	PromptSHA256 string    `json:"prompt_sha256,omitempty"`
-	Raw          string    `json:"raw"`
-	Valid        bool      `json:"valid"`
-	Error        string    `json:"error,omitempty"`
-	ErrorClass   string    `json:"error_class,omitempty"`
+	// ResponseSchema reports the structure mode: native schema, or JSON asked
+	// for in the prompt.
+	ResponseSchema bool   `json:"response_schema"`
+	Raw            string `json:"raw"`
+	Valid          bool   `json:"valid"`
+	Error          string `json:"error,omitempty"`
+	ErrorClass     string `json:"error_class,omitempty"`
 }
 
 var (
@@ -179,7 +182,7 @@ func runFormatEval(t *testing.T, s formatSpecimen, operation string, once func(*
 		row := responseRow{
 			Time: time.Now().UTC(), Specimen: s.ID, Operation: operation, Run: i,
 			Provider: runner.lastIdentity.Provider, Model: runner.lastIdentity.Model, Variant: runner.lastIdentity.Variant,
-			PromptSHA256: runner.lastPromptSHA256, Raw: runner.lastText, Valid: err == nil,
+			PromptSHA256: runner.lastPromptSHA256, ResponseSchema: runner.lastSchema, Raw: runner.lastText, Valid: err == nil,
 		}
 		if err != nil {
 			failed++

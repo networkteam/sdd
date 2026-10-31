@@ -47,10 +47,12 @@ type capturingRunner struct {
 	lastErr          error
 	lastIdentity     llm.Identity
 	lastPromptSHA256 string
+	lastSchema       bool
 }
 
 func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (llm.Result, error) {
 	r.lastPromptSHA256 = promptSHA256(req.SystemPrompt, req.UserPrompt)
+	r.lastSchema = len(req.ResponseSchema) > 0
 	res, err := r.inner.Run(ctx, req)
 	r.lastErr = err
 	r.lastIdentity = res.Identity

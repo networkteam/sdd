@@ -482,9 +482,6 @@ var (
 func parsedPreflightTemplates() (*template.Template, error) {
 	preflightTmplOnce.Do(func() {
 		preflightTmpl, preflightTmplErr = template.ParseFS(preflightTemplates, "preflight_templates/*.tmpl")
-		if preflightTmplErr == nil {
-			preflightTmpl, preflightTmplErr = preflightTmpl.ParseFS(sharedPromptTemplates, "shared_templates/*.tmpl")
-		}
 	})
 	return preflightTmpl, preflightTmplErr
 }
@@ -541,9 +538,10 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (llm.Request, e
 	}
 
 	return llm.Request{
-		Purpose:      llm.PurposePreflight,
-		SystemPrompt: strings.TrimSpace(sysB.String()),
-		UserPrompt:   strings.TrimSpace(userB.String()),
+		Purpose:        llm.PurposePreflight,
+		SystemPrompt:   strings.TrimSpace(sysB.String()),
+		UserPrompt:     strings.TrimSpace(userB.String()),
+		ResponseSchema: preflightSchema,
 	}, nil
 }
 
