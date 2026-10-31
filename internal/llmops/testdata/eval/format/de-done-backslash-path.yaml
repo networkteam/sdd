@@ -1,0 +1,14 @@
+id: de-done-backslash-path
+origin: hostile-character panel over the GitHub #21 draft
+class: backslash path
+language: de
+operations: [writing-guide, preflight]
+draft:
+  type: signal
+  kind: done
+  layer: tactical
+  content: |-
+    Die nutzersichtbaren Partner-Code-Texte sind umformuliert und über MR !42 nach `main` gemergt: Kein Button spricht mehr von „Code einlösen“ — die Wording-Direktive ist umgesetzt, und der Einstieg in die Bezahlseite verspricht keine Gutschein-Einlösung mehr.
+
+    - Die neuen Texte liegen unter C:\Projekte\app\locales\de\partner-code.json; die alte Datei C:\Projekte\app\locales\de\voucher.json ist gelöscht.
+    - Die Schreibweise ist auf „Partner-Code“ mit Bindestrich vereinheitlicht.

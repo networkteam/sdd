@@ -138,6 +138,25 @@ func TestWritingGuideEval_StrandedDraftYieldsStranding(t *testing.T) {
 	})
 }
 
+// TestWritingGuideEval_Format runs the format example set (format_eval_test.go)
+// through the writing guide. GitHub #21's case is the specimen
+// de-done-quotes-german.
+func TestWritingGuideEval_Format(t *testing.T) {
+	for _, s := range loadFormatSpecimens(t, "writing-guide") {
+		t.Run(s.ID, func(t *testing.T) {
+			t.Parallel()
+			draft := s.Draft.entry(t)
+			runFormatEval(t, s, "writing-guide", func(t *testing.T) (*capturingRunner, error) {
+				runner := evalRunner(t)
+				ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+				defer cancel()
+				_, err := llmops.WritingGuide(ctx, runner, draft, nil, evalReferenceFacts(t, draft.Kind))
+				return runner, err
+			})
+		})
+	}
+}
+
 // TestWritingGuideEval_ConflatedDraftYieldsConflation pins the split test:
 // two commitments with independent lifecycles fused into one body.
 func TestWritingGuideEval_ConflatedDraftYieldsConflation(t *testing.T) {

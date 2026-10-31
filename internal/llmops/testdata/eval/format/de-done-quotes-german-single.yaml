@@ -1,0 +1,14 @@
+id: de-done-quotes-german-single
+origin: hostile-character panel over the GitHub #21 draft
+class: German single quotes ‚…‘
+language: de
+operations: [writing-guide, preflight]
+draft:
+  type: signal
+  kind: done
+  layer: tactical
+  content: |-
+    Die nutzersichtbaren Partner-Code-Texte sind umformuliert und über MR !42 nach `main` gemergt: Kein Button spricht mehr von ‚Code einlösen‘ — die Wording-Direktive ist umgesetzt, und der Einstieg in die Bezahlseite verspricht keine Gutschein-Einlösung mehr.
+
+    - Auf Wunsch aus dem Review wurden die begleitenden Fließtexte angeglichen: In `EmptyState.tsx` heißt es jetzt ‚… oder nutze einen Partner-Code …‘ statt ‚löse … ein‘, und die Fehlermeldung spricht von ‚Verbindungslink‘ statt ‚Einladungslink‘.
+    - Die Schreibweise ist auf ‚Partner-Code‘ mit Bindestrich vereinheitlicht.

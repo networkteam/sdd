@@ -1,0 +1,22 @@
+id: en-directive-ref-desc-excerpt
+origin: the pre-flight eval case whose cited excerpt broke the JSON, 20260606-125155-s-tac-sk1
+class: ref desc and body excerpts cited in the observation
+language: ""
+operations: [preflight]
+graph:
+  - id: 20260408-120000-d-prc-iom
+    type: decision
+    kind: contract
+    layer: process
+    content: |-
+      Documents in the graph are never modified after creation. Updates land as new entries that supersede or close the prior one. This immutability is the precondition for the graph as durable record.
+draft:
+  type: decision
+  kind: directive
+  layer: process
+  refs:
+    - id: 20260408-120000-d-prc-iom
+      kind: grounded-in
+      desc: extends the immutability contract
+  content: |-
+    This directive retires the immutability contract d-prc-iom. We will allow in-place edits to entry bodies when the change is purely editorial (typo, link repair) and recorded in a `revision_history` field on the entry. The original immutability framing was correct at the time but proved too rigid for low-stakes edits that don't change semantic content.

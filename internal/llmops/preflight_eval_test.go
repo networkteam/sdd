@@ -19,6 +19,7 @@ package llmops_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -38,14 +39,24 @@ import (
 // capturingRunner wraps a real llm.Runner and records the last raw response.
 // llm.Preflight returns only the parsed result, so the wrapper preserves the
 // raw model output for failure logging while the eval still runs the real
-// orchestrator end to end.
+// orchestrator end to end. The format evals also record what served the call,
+// the prompt revision and a transport error.
 type capturingRunner struct {
-	inner    llm.Runner
-	lastText string
+	inner            llm.Runner
+	lastText         string
+	lastErr          error
+	lastIdentity     llm.Identity
+	lastPromptSHA256 string
 }
 
 func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (llm.Result, error) {
+	r.lastPromptSHA256 = promptSHA256(req.SystemPrompt, req.UserPrompt)
 	res, err := r.inner.Run(ctx, req)
+	r.lastErr = err
+	r.lastIdentity = res.Identity
+	if attributed, ok := errors.AsType[*llm.Error](err); ok {
+		r.lastIdentity = attributed.Identity
+	}
 	if res.Text != "" {
 		r.lastText = res.Text
 	}
@@ -201,6 +212,25 @@ func evalGraphWithBase(t *testing.T, graph *model.Graph) *model.Graph {
 		onDisk[e.ID] = true
 	}
 	return model.NewGraph(model.MergeEmbedded(graph.Entries, onDisk, base))
+}
+
+// TestPreflightEval_Format runs the format example set (format_eval_test.go)
+// through pre-flight, each specimen under its configured language.
+func TestPreflightEval_Format(t *testing.T) {
+	for _, s := range loadFormatSpecimens(t, "preflight") {
+		t.Run(s.ID, func(t *testing.T) {
+			t.Parallel()
+			graph := evalGraphWithBase(t, s.graph(t))
+			draft := s.Draft.entry(t)
+			runFormatEval(t, s, "preflight", func(t *testing.T) (*capturingRunner, error) {
+				runner := evalRunner(t)
+				ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+				defer cancel()
+				_, err := llmops.Preflight(ctx, runner, draft, graph, s.Language)
+				return runner, err
+			})
+		})
+	}
 }
 
 // --- N-run pass-rate support (plan d-tac-tph, AC 2) ---
