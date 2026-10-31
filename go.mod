@@ -92,8 +92,4 @@ require (
 // source and honor replace; only `go install pkg@version` (which sdd does not
 // use) would break. Remove this directive once the change lands upstream and
 // bump the require above to the released teilomillet/gollm version.
-//
-// TEMPORARY (20261031-141038-d-tac-p8l): the local fork checkout until its
-// generate-with-usage commits are pushed and pinned here; was
-// github.com/networkteam/gollm v0.0.0-20260919121334-aa9e2d1faebc.
-replace github.com/teilomillet/gollm => /Users/hlubek/Dev/Go/packages/gollm
+replace github.com/teilomillet/gollm => github.com/networkteam/gollm v0.0.0-20261031224729-25ba06ded2e6
