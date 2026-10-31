@@ -1,0 +1,85 @@
+name: format evals
+
+# Live format evals of pre-flight and the writing guide through Opper
+# (20261031-141038-d-tac-p8l). The job holds OPPER_API_KEY, so it runs only on
+# manual dispatch or when a pull request from this repository gets the `eval`
+# label: never on push, never for a fork.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Runs per specimen and operation
+        default: "3"
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: format-evals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format-evals:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'eval' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Opper's OpenAI-compatible route takes the full chat completions path.
+          - name: openai-route-gpt
+            provider: openai
+            model: openai/gpt-5-mini
+            endpoint: https://api.opper.ai/v3/compat/chat/completions
+          - name: openai-route-claude
+            provider: openai
+            model: anthropic/claude-sonnet-4-6
+            endpoint: https://api.opper.ai/v3/compat/chat/completions
+          - name: anthropic-route-claude
+            provider: anthropic
+            model: anthropic/claude-sonnet-4-6
+            endpoint: https://api.opper.ai/v3/compat
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Write the eval config
+        env:
+          OPPER_API_KEY: ${{ secrets.OPPER_API_KEY }}
+          PROVIDER: ${{ matrix.provider }}
+          ENDPOINT: ${{ matrix.endpoint }}
+        run: |
+          test -n "$OPPER_API_KEY" || { echo "OPPER_API_KEY is not set"; exit 1; }
+          cat > "$RUNNER_TEMP/eval-config.yaml" <<EOF
+          llm:
+            endpoint: $ENDPOINT
+            timeout: 4m
+            api_keys:
+              $PROVIDER: "$OPPER_API_KEY"
+          EOF
+      - name: Run the format evals
+        env:
+          SDD_EVAL_CONFIG: ${{ runner.temp }}/eval-config.yaml
+          SDD_EVAL_PROVIDER: ${{ matrix.provider }}
+          SDD_EVAL_MODEL: ${{ matrix.model }}
+          SDD_EVAL_RUNS: ${{ inputs.runs || '3' }}
+          SDD_EVAL_RESPONSES_DIR: ${{ github.workspace }}/eval-out
+          SDD_EVAL_STATS_DIR: ${{ github.workspace }}/eval-out
+        run: |
+          mkdir -p eval-out
+          go test -tags=eval -run 'Eval_Format' -parallel 4 -timeout 80m -v ./internal/llmops/ 2>&1 | tee eval-out/eval.log
+        shell: bash -o pipefail {0}
+      - name: Keep the raw responses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: format-evals-${{ matrix.name }}
+          path: eval-out/
+          if-no-files-found: warn
