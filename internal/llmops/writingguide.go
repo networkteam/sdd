@@ -198,12 +198,9 @@ func formatDraftForWritingGuide(e *model.Entry, closureTargets []model.ClosureTa
 	return b.String()
 }
 
-// parseWritingGuideResult parses the guide's JSON response. The LLM is asked
-// to respond with:
-//
-//	{"findings": [{"reasoning": "...", "axis": "...", "quote": "...", "repair": "...", "severity": "substantive|minor"}]}
-//
-// Empty findings array means the draft passed clean. Tolerates prose around
+// parseWritingGuideResult parses the guide's JSON response, shaped by
+// response_schemas/writing_guide.json. Empty findings array means the draft
+// passed clean. Tolerates prose around
 // the JSON object (shared extractJSONObject); malformed JSON, values outside
 // the closed axis/repair/severity sets, and empty required fields are errors,
 // so infrastructure failures stay distinct from findings.

@@ -545,12 +545,9 @@ func renderPreflightPrompt(ct checkType, pctx *preflightContext) (llm.Request, e
 	}, nil
 }
 
-// parsePreflightResult parses the validator's JSON response into a
-// structured result. The LLM is asked to respond with:
-//
-//	{"findings": [{"severity": "high|medium|low", "category": "...", "observation": "..."}]}
-//
-// Empty findings array means "no findings". The parser tolerates prose
+// parsePreflightResult parses the validator's JSON response, shaped by
+// response_schemas/preflight.json, into a structured result. Empty findings
+// array means "no findings". The parser tolerates prose
 // surrounding the JSON object (LLM preambles, code fences) by scanning for
 // a single valid JSON object. Malformed JSON, missing keys, unknown severity
 // values — all return errors so infrastructure failures stay distinct from
