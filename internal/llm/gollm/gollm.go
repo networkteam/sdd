@@ -231,6 +231,7 @@ func usageFromResponse(u *upstream.Usage) llm.Usage {
 		OutputTokens:      out,
 		CacheReadTokens:   u.CacheReadInputTokens,
 		CacheCreateTokens: u.CacheCreationInputTokens,
+		CostUSD:           u.CostUSD,
 	}
 }
 

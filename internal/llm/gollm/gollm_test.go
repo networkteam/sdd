@@ -99,6 +99,12 @@ func TestUsageFromResponse(t *testing.T) {
 	if u2.InputTokens != 100 || u2.OutputTokens != 20 {
 		t.Errorf("openai fallback wrong: %+v", u2)
 	}
+
+	// A cost the provider reports (Opper) passes through as reported.
+	u3 := usageFromResponse(&upstream.Usage{PromptTokens: 18, CompletionTokens: 21, CostUSD: 1.25e-05})
+	if u3.CostUSD != 1.25e-05 {
+		t.Errorf("reported cost not mapped: %+v", u3)
+	}
 }
 
 func TestCanonicalVariant(t *testing.T) {
