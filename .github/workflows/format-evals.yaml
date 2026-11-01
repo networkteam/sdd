@@ -1,9 +1,10 @@
 name: format evals
 
-# Live format evals of pre-flight and the writing guide through Opper
-# (20261031-141038-d-tac-p8l). The job holds OPPER_API_KEY, so it runs only on
-# manual dispatch or when a pull request from this repository gets the `eval`
-# label: never on push, never for a fork.
+# Live format evals of pre-flight and the writing guide through Opper, one path
+# per model at its production setting, reporting validity and cost
+# (20261031-141038-d-tac-p8l, 20261101-010604-d-tac-769). The job holds
+# OPPER_API_KEY, so it runs only on manual dispatch or when a pull request from
+# this repository gets the `eval` label: never on push, never for a fork.
 on:
   workflow_dispatch:
     inputs:
@@ -33,17 +34,22 @@ jobs:
       matrix:
         include:
           # Opper's OpenAI-compatible route takes the full chat completions path.
-          - name: openai-route-gpt
+          # GLM is pinned to a route with structured output; the pooled id also
+          # reaches providers that list none.
+          - name: glm-5.3-flash
             provider: openai
-            model: openai/gpt-5-mini
+            model: greenpt/glm-5.3-flash
+            params: reasoning_effort=low
             endpoint: https://api.opper.ai/v3/compat/chat/completions
-          - name: openai-route-claude
+          - name: gpt-5.6-luna
             provider: openai
-            model: anthropic/claude-sonnet-4-6
+            model: openai/gpt-5.6-luna
+            params: ""
             endpoint: https://api.opper.ai/v3/compat/chat/completions
-          - name: anthropic-route-claude
+          - name: claude-haiku-5-5
             provider: anthropic
-            model: anthropic/claude-sonnet-4-6
+            model: anthropic/claude-haiku-5-5
+            params: ""
             endpoint: https://api.opper.ai/v3/compat
     steps:
       - uses: actions/checkout@v5
@@ -69,6 +75,7 @@ jobs:
           SDD_EVAL_CONFIG: ${{ runner.temp }}/eval-config.yaml
           SDD_EVAL_PROVIDER: ${{ matrix.provider }}
           SDD_EVAL_MODEL: ${{ matrix.model }}
+          SDD_EVAL_PARAMS: ${{ matrix.params }}
           SDD_EVAL_RUNS: ${{ inputs.runs || '3' }}
           SDD_EVAL_RESPONSES_DIR: ${{ github.workspace }}/eval-out
           SDD_EVAL_STATS_DIR: ${{ github.workspace }}/eval-out
@@ -76,6 +83,9 @@ jobs:
           mkdir -p eval-out
           go test -tags=eval -run 'Eval_Format' -parallel 4 -timeout 80m -v ./internal/llmops/ 2>&1 | tee eval-out/eval.log
         shell: bash -o pipefail {0}
+      - name: Report validity and cost
+        if: always()
+        run: test -f eval-out/format-summary.md && cat eval-out/format-summary.md >> "$GITHUB_STEP_SUMMARY" || echo "no format summary written"
       - name: Keep the raw responses
         if: always()
         uses: actions/upload-artifact@v4
