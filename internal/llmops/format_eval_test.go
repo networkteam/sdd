@@ -129,14 +129,31 @@ type responseRow struct {
 	Valid          bool   `json:"valid"`
 	Error          string `json:"error,omitempty"`
 	ErrorClass     string `json:"error_class,omitempty"`
+	InputTokens    int    `json:"input_tokens"`
+	OutputTokens   int    `json:"output_tokens"`
+	// CostUSD is the cost the provider reported for the call; absent when it
+	// reported none (20261101-010604-d-tac-769).
+	CostUSD float64 `json:"cost_usd,omitempty"`
 }
 
 var (
 	responsesOnce sync.Once
 	responsesMu   sync.Mutex
 	responsesFile *os.File
+	responsesDir  string
 	responsesErr  error
+	summary       = map[summaryKey]*summaryRow{}
 )
+
+// summaryKey is one evaluated combination: what served the call, at which
+// setting.
+type summaryKey struct{ provider, model, variant string }
+
+type summaryRow struct {
+	runs, valid, costed int
+	inTokens, outTokens int
+	costUSD             float64
+}
 
 func recordResponse(t *testing.T, row responseRow) {
 	t.Helper()
@@ -153,6 +170,7 @@ func recordResponse(t *testing.T, row responseRow) {
 		path := filepath.Join(dir, "responses.jsonl")
 		responsesFile, responsesErr = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 		if responsesErr == nil {
+			responsesDir = dir
 			fmt.Printf("eval responses: %s\n", path)
 		}
 	})
@@ -167,6 +185,68 @@ func recordResponse(t *testing.T, row responseRow) {
 	defer responsesMu.Unlock()
 	if _, err := responsesFile.Write(append(line, '\n')); err != nil {
 		t.Fatalf("writing response row: %v", err)
+	}
+	key := summaryKey{row.Provider, row.Model, row.Variant}
+	s := summary[key]
+	if s == nil {
+		s = &summaryRow{}
+		summary[key] = s
+	}
+	s.runs++
+	if row.Valid {
+		s.valid++
+	}
+	if row.CostUSD > 0 {
+		s.costed++
+		s.costUSD += row.CostUSD
+	}
+	s.inTokens += row.InputTokens
+	s.outTokens += row.OutputTokens
+}
+
+// printFormatSummary reports validity and cost per evaluated combination, on
+// stdout and as format-summary.md beside the responses (the workflow's job
+// summary). Cost reads "not reported" when no call of a combination carried
+// one; a partial sum is marked as such.
+func printFormatSummary() {
+	responsesMu.Lock()
+	defer responsesMu.Unlock()
+	if len(summary) == 0 {
+		return
+	}
+	keys := make([]summaryKey, 0, len(summary))
+	for k := range summary {
+		keys = append(keys, k)
+	}
+	slices.SortFunc(keys, func(a, b summaryKey) int {
+		return strings.Compare(a.provider+a.model+a.variant, b.provider+b.model+b.variant)
+	})
+	var b strings.Builder
+	b.WriteString("| Provider | Model | Setting | Valid | Tokens in / out | Cost (USD) | Cost per run |\n")
+	b.WriteString("|---|---|---|---|---|---|---|\n")
+	for _, k := range keys {
+		s := summary[k]
+		cost, perRun := "not reported", "–"
+		if s.costed > 0 {
+			cost = fmt.Sprintf("%.4f", s.costUSD)
+			perRun = fmt.Sprintf("%.5f", s.costUSD/float64(s.costed))
+			if s.costed < s.runs {
+				cost += fmt.Sprintf(" (%d of %d runs)", s.costed, s.runs)
+			}
+		}
+		setting := k.variant
+		if setting == "" {
+			setting = "defaults"
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %d / %d | %d / %d | %s | %s |\n",
+			k.provider, k.model, setting, s.valid, s.runs, s.inTokens, s.outTokens, cost, perRun)
+	}
+	fmt.Printf("\n=== format evals — this run ===\n%s", b.String())
+	if responsesDir != "" {
+		path := filepath.Join(responsesDir, "format-summary.md")
+		if err := os.WriteFile(path, []byte("## Format evals\n\n"+b.String()), 0o644); err != nil {
+			fmt.Printf("writing %s: %v\n", path, err)
+		}
 	}
 }
 
@@ -183,6 +263,7 @@ func runFormatEval(t *testing.T, s formatSpecimen, operation string, once func(*
 			Time: time.Now().UTC(), Specimen: s.ID, Operation: operation, Run: i,
 			Provider: runner.lastIdentity.Provider, Model: runner.lastIdentity.Model, Variant: runner.lastIdentity.Variant,
 			PromptSHA256: runner.lastPromptSHA256, ResponseSchema: runner.lastSchema, Raw: runner.lastText, Valid: err == nil,
+			InputTokens: runner.lastUsage.InputTokens, OutputTokens: runner.lastUsage.OutputTokens, CostUSD: runner.lastUsage.CostUSD,
 		}
 		if err != nil {
 			failed++

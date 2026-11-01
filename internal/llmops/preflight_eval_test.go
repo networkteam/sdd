@@ -46,6 +46,7 @@ type capturingRunner struct {
 	lastText         string
 	lastErr          error
 	lastIdentity     llm.Identity
+	lastUsage        llm.Usage
 	lastPromptSHA256 string
 	lastSchema       bool
 }
@@ -56,6 +57,7 @@ func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (llm.Result,
 	res, err := r.inner.Run(ctx, req)
 	r.lastErr = err
 	r.lastIdentity = res.Identity
+	r.lastUsage = res.Usage
 	if attributed, ok := errors.AsType[*llm.Error](err); ok {
 		r.lastIdentity = attributed.Identity
 	}
