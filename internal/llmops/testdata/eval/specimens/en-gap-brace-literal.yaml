@@ -1,0 +1,13 @@
+id: en-gap-brace-literal
+origin: GitHub #6, 20260906-231136-s-tac-ynt; the path and the regex were added
+class: brace literals, a backslash path and a regex in prose
+language: ""
+operation: preflight
+expect:
+  no_blocking: true
+draft:
+  type: signal
+  kind: gap
+  layer: operational
+  content: |-
+    The config loader ignores Options{Zebra: true} when it is passed after Options{Child: Child{Enabled: true}}, so the second literal silently wins and the zebra mode never activates. The same happens when both come from C:\sdd\config\zebra.yaml, whose keys the loader matches with ^options\.(zebra|child)$. Expected is that both literals apply.

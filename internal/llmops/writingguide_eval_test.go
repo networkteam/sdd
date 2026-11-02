@@ -138,6 +138,20 @@ func TestWritingGuideEval_StrandedDraftYieldsStranding(t *testing.T) {
 	})
 }
 
+// TestWritingGuideEval_Specimens runs the writing-guide specimens
+// (specimen_eval_test.go). GitHub #21's case is de-done-quotes-german.
+func TestWritingGuideEval_Specimens(t *testing.T) {
+	for _, s := range loadSpecimens(t, "writing-guide") {
+		t.Run(s.ID, func(t *testing.T) {
+			t.Parallel()
+			draft := s.Draft.entry(t)
+			runGuideEvalPassRate(t, draft, s.Expect.tier(), func(r *llmops.WritingGuideResult) error {
+				return s.Expect.checkGuide(draft.Content, r)
+			})
+		})
+	}
+}
+
 // TestWritingGuideEval_ConflatedDraftYieldsConflation pins the split test:
 // two commitments with independent lifecycles fused into one body.
 func TestWritingGuideEval_ConflatedDraftYieldsConflation(t *testing.T) {

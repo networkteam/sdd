@@ -364,6 +364,26 @@ func TestCapture_WritingGuideFindingsServeReviewThenProceed(t *testing.T) {
 	proctest.RequireStep(t, serve, "playback")
 }
 
+// A guide quote locates its passage and need not match it
+// (20261005-170145-d-tac-gch); the serve tells the drafting agent so, and
+// renders a quote with characters the draft does not have as it came.
+func TestCapture_WritingGuideQuoteLocatesThePassage(t *testing.T) {
+	world, session := newCaptureWorld(t, "core-guide-quote")
+	world.LLM.GuideFindings = []proctest.GuideFinding{{
+		Reasoning: "the passage names a button label without saying where it appears",
+		Axis:      "stranding", Quote: `von "Code einlösen"`, Repair: "write-in", Severity: "minor",
+	}}
+
+	serve := session.Start(t, "capture", nil)
+	serve = session.Report(t, serve.Instance, captureDraft())
+	proctest.RequireStep(t, serve, "guideReview")
+	for _, want := range []string{`von "Code einlösen"`, "locate the passage from it instead of matching it"} {
+		if !strings.Contains(serve.Instructions, want) {
+			t.Errorf("guideReview unit missing %q:\n%s", want, serve.Instructions)
+		}
+	}
+}
+
 func TestCapture_WritingGuideRunsOncePerCapture(t *testing.T) {
 	world, session := newCaptureWorld(t, "core-guide-once")
 	world.LLM.GuideFindings = []proctest.GuideFinding{{

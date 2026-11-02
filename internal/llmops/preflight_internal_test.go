@@ -727,21 +727,20 @@ func Test_renderPreflightPrompt_AllCheckTypes(t *testing.T) {
 			if !strings.Contains(result.Combined(), "Test content") {
 				t.Errorf("renderPreflightPrompt(%s) missing proposed entry content", ct)
 			}
-			// Verdict partial must be embedded — the JSON output format and
+			// Verdict partial must be embedded — the finding fields and
 			// severity semantics are the single source of truth for all checks.
-			if !strings.Contains(result.Combined(), `"findings"`) {
-				t.Errorf("renderPreflightPrompt(%s) missing JSON schema with findings key", ct)
-			}
-			if !strings.Contains(result.Combined(), `"severity"`) {
-				t.Errorf("renderPreflightPrompt(%s) missing severity field in schema", ct)
+			if !strings.Contains(result.SystemPrompt, "## Findings") {
+				t.Errorf("renderPreflightPrompt(%s) missing the findings section", ct)
 			}
 			// Category and severity are conclusions, not opening bids: the
 			// schema must ask for the observation (reasoning) first, so a
 			// finding cannot commit a verdict its own prose then retracts —
 			// and category-first proved to get skipped by the model entirely.
-			obsIdx := strings.Index(result.Combined(), `"observation"`)
-			catIdx := strings.Index(result.Combined(), `"category"`)
-			sevIdx := strings.Index(result.Combined(), `"severity"`)
+			// Strict decoding generates in schema order.
+			schema := string(result.ResponseSchema)
+			obsIdx := strings.Index(schema, `"observation"`)
+			catIdx := strings.Index(schema, `"category"`)
+			sevIdx := strings.Index(schema, `"severity"`)
 			if obsIdx < 0 || catIdx < 0 || sevIdx < 0 || obsIdx > catIdx || catIdx > sevIdx {
 				t.Errorf("renderPreflightPrompt(%s) schema must order observation < category < severity (obs %d, cat %d, sev %d)", ct, obsIdx, catIdx, sevIdx)
 			}
@@ -988,9 +987,9 @@ func Test_renderPreflightPrompt_StructuralChecksKeepLightSystem(t *testing.T) {
 					t.Errorf("%s system block should stay light but contains %q", ct, heavy)
 				}
 			}
-			// It must still carry the verdict format, which every check needs.
-			if !strings.Contains(req.SystemPrompt, `"findings"`) {
-				t.Errorf("%s system block should still carry the verdict output format", ct)
+			// It must still carry the verdict section, which every check needs.
+			if !strings.Contains(req.SystemPrompt, "## Findings") {
+				t.Errorf("%s system block should still carry the verdict section", ct)
 			}
 		})
 	}
@@ -1011,26 +1010,6 @@ func Test_refKindVocabulary_GraphBacked(t *testing.T) {
 	}
 	if !strings.Contains(vocab, "### Connecting entries") || !strings.Contains(vocab, "vocabulary body") {
 		t.Errorf("vocabulary not rendered from the graph fact with demoted headings:\n%s", vocab)
-	}
-}
-
-func Test_renderPreflightPrompt_JSONStringRulesShared(t *testing.T) {
-	// Regression for 20260827-224853-s-tac-giv: the output format teaches
-	// standard JSON escaping, never quote avoidance, on every system template.
-	pctx := &preflightContext{ProposedEntry: "ID: test\nType: signal\n\nproposed"}
-	for _, ct := range []checkType{checkSignalCapture, checkAnnotationCapture, checkFocusCapture} {
-		t.Run(ct.String(), func(t *testing.T) {
-			req, err := renderPreflightPrompt(ct, pctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(req.SystemPrompt, "**JSON strings.**") || !strings.Contains(req.SystemPrompt, "write a literal `\"` as `\\\"`") {
-				t.Errorf("%s system block missing the shared JSON escaping rule:\n%s", ct, req.SystemPrompt)
-			}
-			if strings.Contains(req.SystemPrompt, "never a literal") {
-				t.Errorf("%s system block still teaches quote avoidance", ct)
-			}
-		})
 	}
 }
 

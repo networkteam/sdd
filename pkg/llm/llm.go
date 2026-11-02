@@ -10,7 +10,10 @@
 // because implementations may route.
 package llm
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Purpose names what a call is for: a routing key for implementations and an
 // observability dimension, the same value for both so they cannot drift. The
@@ -25,13 +28,19 @@ const (
 )
 
 // Request carries everything an implementation may route on: ctx (who) and
-// Purpose (what for), plus the two-part prompt.
+// Purpose (what for), plus the two-part prompt and the shape of the answer.
 type Request struct {
 	Purpose Purpose
 	// SystemPrompt is the stable prefix, cacheable by providers that can.
 	SystemPrompt string
 	// UserPrompt is the per-call variable part.
 	UserPrompt string
+	// ResponseSchema is the JSON Schema Result.Text must conform to; nil asks
+	// for free text. An implementation enforces it through the provider's
+	// native structured output, never by asking for JSON in the prompt
+	// (20261004-134853-d-cpt-sw8). The bytes go to the provider as given:
+	// constrained decoding generates properties in schema order.
+	ResponseSchema json.RawMessage
 }
 
 // Combined returns SystemPrompt followed by UserPrompt separated by a blank

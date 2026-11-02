@@ -1,0 +1,113 @@
+name: evals
+
+# Live evals of pre-flight, the writing guide and summarize through Opper, one
+# path per model at its production setting, reporting each case's result and
+# the cost (20261101-010604-d-tac-769, 20261102-101250-d-tac-s98). The job
+# holds OPPER_API_KEY, so it runs only on manual dispatch or when a pull
+# request from this repository gets the `eval` label: never on push, never for
+# a fork.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Runs per pass-rate case (empty keeps each case's own count)
+        default: ""
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evals:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'eval' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Opper's OpenAI-compatible route takes the full chat completions path.
+          # GLM is pinned to a route with structured output; the pooled id also
+          # reaches providers that list none.
+          - name: glm-5.3-flash
+            provider: openai
+            model: greenpt/glm-5.3-flash
+            params: reasoning_effort=low
+            endpoint: https://api.opper.ai/v3/compat/chat/completions
+          - name: gpt-5.6-luna
+            provider: openai
+            model: openai/gpt-5.6-luna
+            params: ""
+            endpoint: https://api.opper.ai/v3/compat/chat/completions
+          - name: claude-haiku-5-5
+            provider: anthropic
+            model: anthropic/claude-haiku-5-5
+            params: ""
+            endpoint: https://api.opper.ai/v3/compat
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Write the eval config
+        env:
+          OPPER_API_KEY: ${{ secrets.OPPER_API_KEY }}
+          ENDPOINT: ${{ matrix.endpoint }}
+        run: |
+          test -n "$OPPER_API_KEY" || { echo "OPPER_API_KEY is not set"; exit 1; }
+          cat > "$RUNNER_TEMP/eval-config.yaml" <<EOF
+          llm:
+            endpoint: $ENDPOINT
+            timeout: 4m
+            api_keys:
+              openai: "$OPPER_API_KEY"
+              anthropic: "$OPPER_API_KEY"
+          EOF
+      - name: Run the evals
+        env:
+          SDD_EVAL_CONFIG: ${{ runner.temp }}/eval-config.yaml
+          SDD_EVAL_PROVIDER: ${{ matrix.provider }}
+          SDD_EVAL_MODEL: ${{ matrix.model }}
+          SDD_EVAL_PARAMS: ${{ matrix.params }}
+          SDD_EVAL_RUNS: ${{ inputs.runs }}
+          # One judge for every candidate, so all are scored alike.
+          SDD_EVAL_JUDGE_PROVIDER: openai
+          SDD_EVAL_JUDGE_MODEL: greenpt/glm-5.3-flash
+          SDD_EVAL_JUDGE_PARAMS: reasoning_effort=high
+          SDD_EVAL_JUDGE_ENDPOINT: https://api.opper.ai/v3/compat/chat/completions
+          SDD_EVAL_RESPONSES_DIR: ${{ github.workspace }}/eval-out
+          SDD_EVAL_STATS_DIR: ${{ github.workspace }}/eval-out
+        # The sweeps assert nothing, so they stay out.
+        run: |
+          mkdir -p eval-out
+          go test -tags=eval -json -run '^(TestPreflightEval|TestWritingGuideEval|TestSummarizeEval|TestSummarizeJudgeCalibration)' -parallel 4 -timeout 80m ./internal/llmops/ \
+            | tee eval-out/test.jsonl | jq -rj 'select(.Action == "output") | .Output' | tee eval-out/eval.log
+        shell: bash -o pipefail {0}
+      - name: Report results and cost
+        if: always()
+        run: |
+          test -f eval-out/test.jsonl || { echo "no test results written"; exit 0; }
+          {
+            echo "## Cases"
+            echo
+            echo "| Test | Result | Seconds |"
+            echo "|---|---|---|"
+            jq -rs '[.[] | select(.Test != null and (.Action == "pass" or .Action == "fail" or .Action == "skip"))] | sort_by(.Test)[] | "| \(.Test) | \(.Action) | \(.Elapsed) |"' eval-out/test.jsonl
+            echo
+            if test -f eval-out/cost-summary.md; then cat eval-out/cost-summary.md; else echo "no cost summary written"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the raw responses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evals-${{ matrix.name }}
+          path: eval-out/
+          if-no-files-found: warn

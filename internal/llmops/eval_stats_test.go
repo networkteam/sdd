@@ -85,6 +85,7 @@ func (m multiSink) RecordCall(ctx context.Context, stat pkgllm.CallStat) {
 func TestMain(m *testing.M) {
 	code := m.Run()
 	printEvalUsageSummary()
+	printCostSummary()
 	os.Exit(code)
 }
 

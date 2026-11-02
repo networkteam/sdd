@@ -12,6 +12,7 @@ import (
 	"time"
 
 	upstream "github.com/teilomillet/gollm"
+	upstreamllm "github.com/teilomillet/gollm/llm"
 
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/pkg/llm"
@@ -87,8 +88,13 @@ func NewRunner(cfg model.LLMConfig) (*Runner, error) {
 		}
 	}
 
-	if cfg.Provider == "openai" && cfg.Endpoint != "" {
-		opts = append(opts, upstream.SetOpenAIEndpoint(cfg.Endpoint))
+	if cfg.Endpoint != "" {
+		switch cfg.Provider {
+		case "openai":
+			opts = append(opts, upstream.SetOpenAIEndpoint(cfg.Endpoint))
+		case "anthropic":
+			opts = append(opts, upstream.SetAnthropicEndpoint(cfg.Endpoint))
+		}
 	}
 
 	// Enable Anthropic prompt caching — sends the anthropic-beta header so
@@ -169,8 +175,9 @@ func (r *Runner) identity() llm.Identity {
 // Run sends the request to the underlying gollm client. When caching is
 // enabled (Anthropic), the SystemPrompt is tagged ephemeral so the server
 // caches the prefix. Other providers ignore the cache hint but still see
-// the split system/user message pair. Failures carry the identity through the
-// typed llm.Error so they measure like successes.
+// the split system/user message pair. A ResponseSchema goes to the provider's
+// native structured output. Failures carry the identity through the typed
+// llm.Error so they measure like successes.
 func (r *Runner) Run(ctx context.Context, req llm.Request) (llm.Result, error) {
 	var opts []upstream.PromptOption
 	if req.SystemPrompt != "" {
@@ -183,7 +190,12 @@ func (r *Runner) Run(ctx context.Context, req llm.Request) (llm.Result, error) {
 
 	prompt := upstream.NewPrompt(req.UserPrompt, opts...)
 
-	resp, err := r.client.GenerateWithUsage(ctx, prompt)
+	var genOpts []upstreamllm.GenerateOption
+	if len(req.ResponseSchema) > 0 {
+		genOpts = append(genOpts, upstream.WithResponseSchema(req.ResponseSchema))
+	}
+
+	resp, err := r.client.GenerateWithUsage(ctx, prompt, genOpts...)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			err = fmt.Errorf("gollm %s: timed out", r.provider)
@@ -219,6 +231,7 @@ func usageFromResponse(u *upstream.Usage) llm.Usage {
 		OutputTokens:      out,
 		CacheReadTokens:   u.CacheReadInputTokens,
 		CacheCreateTokens: u.CacheCreationInputTokens,
+		CostUSD:           u.CostUSD,
 	}
 }
 

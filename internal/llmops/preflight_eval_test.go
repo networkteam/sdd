@@ -19,6 +19,7 @@ package llmops_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -35,11 +36,14 @@ import (
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
 )
 
-// capturingRunner wraps a real llm.Runner and records the last raw response.
+// capturingRunner wraps a real llm.Runner and keeps the last raw response.
 // llm.Preflight returns only the parsed result, so the wrapper preserves the
 // raw model output for failure logging while the eval still runs the real
-// orchestrator end to end.
+// orchestrator end to end. Every call is also recorded raw with its cost
+// (specimen_eval_test.go) under the name of the test that built the runner,
+// so a case with subtests builds one per subtest.
 type capturingRunner struct {
+	t        *testing.T
 	inner    llm.Runner
 	lastText string
 }
@@ -49,6 +53,20 @@ func (r *capturingRunner) Run(ctx context.Context, req llm.Request) (llm.Result,
 	if res.Text != "" {
 		r.lastText = res.Text
 	}
+	identity := res.Identity
+	if attributed, ok := errors.AsType[*llm.Error](err); ok {
+		identity = attributed.Identity
+	}
+	row := responseRow{
+		Time: time.Now().UTC(), Test: r.t.Name(), Purpose: string(req.Purpose),
+		Provider: identity.Provider, Model: identity.Model, Variant: identity.Variant,
+		PromptSHA256: promptSHA256(req.SystemPrompt, req.UserPrompt), ResponseSchema: len(req.ResponseSchema) > 0,
+		Raw: res.Text, InputTokens: res.Usage.InputTokens, OutputTokens: res.Usage.OutputTokens, CostUSD: res.Usage.CostUSD,
+	}
+	if err != nil {
+		row.Error = err.Error()
+	}
+	recordResponse(r.t, row)
 	return res, err
 }
 
@@ -61,7 +79,7 @@ func evalRunner(t *testing.T) *capturingRunner {
 	if err != nil {
 		t.Fatalf("building eval runner: %v", err)
 	}
-	return &capturingRunner{inner: pkgllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})}
+	return &capturingRunner{t: t, inner: pkgllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})}
 }
 
 // evalConfig resolves the candidate configuration for this run. SDD_EVAL_CONFIG
@@ -174,6 +192,13 @@ func runEval(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llmops.P
 // than killing the whole measurement (s-prc-vvd's run 5 was exactly that).
 func runEvalOnce(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llmops.PreflightResult, string, error) {
 	t.Helper()
+	// English default — the language-drift rubric only fires for non-empty locales.
+	return runEvalOnceIn(t, graph, proposed, "")
+}
+
+// runEvalOnceIn runs pre-flight under the configured graph language.
+func runEvalOnceIn(t *testing.T, graph *model.Graph, proposed *model.Entry, language string) (*llmops.PreflightResult, string, error) {
+	t.Helper()
 	runner := evalRunner(t)
 
 	// 240s: the claude-cli transport slows down late in a long sequential
@@ -182,8 +207,7 @@ func runEvalOnce(t *testing.T, graph *model.Graph, proposed *model.Entry) (*llmo
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
 
-	// English default — the language-drift rubric only fires for non-empty locales.
-	result, err := llmops.Preflight(ctx, runner, proposed, evalGraphWithBase(t, graph), "")
+	result, err := llmops.Preflight(ctx, runner, proposed, evalGraphWithBase(t, graph), language)
 	return result, runner.lastText, err
 }
 
@@ -201,6 +225,20 @@ func evalGraphWithBase(t *testing.T, graph *model.Graph) *model.Graph {
 		onDisk[e.ID] = true
 	}
 	return model.NewGraph(model.MergeEmbedded(graph.Entries, onDisk, base))
+}
+
+// TestPreflightEval_Specimens runs the pre-flight specimens
+// (specimen_eval_test.go), each under its configured language.
+func TestPreflightEval_Specimens(t *testing.T) {
+	for _, s := range loadSpecimens(t, "preflight") {
+		t.Run(s.ID, func(t *testing.T) {
+			t.Parallel()
+			draft := s.Draft.entry(t)
+			runEvalPassRateIn(t, s.graph(t), draft, s.Language, s.Expect.tier(), func(r *llmops.PreflightResult) error {
+				return s.Expect.checkPreflight(draft.Content, r)
+			})
+		})
+	}
 }
 
 // --- N-run pass-rate support (plan d-tac-tph, AC 2) ---
@@ -241,10 +279,16 @@ func (p passRate) withRunsOverride() passRate {
 // failed runs (logged), not aborts.
 func runEvalPassRate(t *testing.T, graph *model.Graph, proposed *model.Entry, rate passRate, check func(*llmops.PreflightResult) error) {
 	t.Helper()
+	runEvalPassRateIn(t, graph, proposed, "", rate, check)
+}
+
+// runEvalPassRateIn is runEvalPassRate under the configured graph language.
+func runEvalPassRateIn(t *testing.T, graph *model.Graph, proposed *model.Entry, language string, rate passRate, check func(*llmops.PreflightResult) error) {
+	t.Helper()
 	rate = rate.withRunsOverride()
 	passes := 0
 	for i := 1; i <= rate.Runs; i++ {
-		result, raw, err := runEvalOnce(t, graph, proposed)
+		result, raw, err := runEvalOnceIn(t, graph, proposed, language)
 		if err != nil {
 			t.Logf("run %d/%d FAIL (infrastructure): %v\nRaw output:\n%s", i, rate.Runs, err, raw)
 			continue

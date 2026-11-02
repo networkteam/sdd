@@ -36,33 +36,23 @@ Check only these axes:
 
 **form** — the first sentence works alone as a summary of the entry.
 
-## Output format
+## Findings
 
-Respond with a single JSON object matching this schema — nothing before or after, no code fences:
+Each finding carries:
 
-{
-  "findings": [
-    {
-      "reasoning": "one to three sentences working through what you noticed and why it fails the pull, ending in a conclusion",
-      "axis": "stranding" | "dilution" | "conflation" | "pointing" | "form",
-      "quote": "the draft's words at issue, verbatim",
-      "repair": "cut" | "write-in" | "split" | "point" | "reword",
-      "severity": "substantive" | "minor"
-    }
-  ]
-}
+- `reasoning` — one to three sentences working through what you noticed and why it fails the pull, ending in a conclusion
+- `axis` — the check it fails: `stranding`, `dilution`, `conflation`, `pointing` or `form`
+- `quote` — words from the draft that locate the passage at issue
+- `repair` — the direction of the fix, never replacement text: `cut`, `write-in`, `split`, `point` or `reword`
+- `severity` — `substantive` when the drafting dialogue should take the finding up, `minor` when folding it in or ignoring it is fine
 
-**Field order matters: reasoning first, verdict last.** The reasoning is your work — walk through what you noticed before naming the axis, repair, and severity; they are conclusions, assigned only after the reasoning has reached its own. If the reasoning concludes the concern does not hold, emit no finding at all — drop it from the array rather than emitting it at any severity.
+**Reasoning first, verdict last.** The reasoning is your work — walk through what you noticed before naming the axis, repair, and severity; they are conclusions, assigned only after the reasoning has reached its own. If the reasoning concludes the concern does not hold, emit no finding at all rather than one at any severity.
 
-All five fields are required on every finding. `severity` is `substantive` when the drafting dialogue should take the finding up, `minor` when folding it in or ignoring it is fine.
-
-{{ template "json_string_rules" }}
-
-**Quoting.** `quote` carries the draft's words verbatim, escaped as JSON requires.
+**Quoting.** The quote points the drafting agent, who holds the draft, to the passage. Take enough of the draft's own words to locate it unambiguously — a few distinctive words do — and take them from the draft, never from a ref or a closure edge. They need not match the draft character for character. For a draft containing "The release procedure gains this as a fixed section of its notes template.", the quote `gains this as a fixed section` locates the passage.
 
 ## Calibration
 
-No findings is a correct outcome — return {"findings": []} without hesitation. Do not stretch: a finding you would not defend is noise that costs more than it saves. When unsure whether something fails, it does not. Anything outside the five axes is out of scope.
+No findings is a correct outcome — return an empty list without hesitation. Do not stretch: a finding you would not defend is noise that costs more than it saves. When unsure whether something fails, it does not. Anything outside the five axes is out of scope.
 {{- end }}
 
 {{ define "writing_guide_user" -}}

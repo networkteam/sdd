@@ -243,8 +243,9 @@ type LLMConfig struct {
 	// Concurrency bounds the worker pool for batch operations. Zero means
 	// "use DefaultLLMConcurrency".
 	Concurrency int `yaml:"concurrency,omitempty"`
-	// Endpoint overrides the OpenAI-compatible base URL for the openai
-	// provider. Empty defaults to the OpenAI public endpoint. Useful for a
+	// Endpoint overrides the base URL of the openai provider (OpenAI chat
+	// completions protocol) or the anthropic provider (Anthropic Messages
+	// API). Empty defaults to the vendor's public endpoint. Useful for a
 	// gateway or a self-hosted service that implements the same protocol.
 	Endpoint string `yaml:"endpoint,omitempty"`
 	// OllamaEndpoint overrides the default Ollama URL for the gollm adapter.

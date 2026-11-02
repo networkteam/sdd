@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "observation": {"type": "string"},
+          "category": {"type": "string"},
+          "severity": {"type": "string", "enum": ["high", "medium", "low"]}
+        },
+        "required": ["observation", "category", "severity"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["findings"],
+  "additionalProperties": false
+}

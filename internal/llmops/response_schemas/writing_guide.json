@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "reasoning": {"type": "string"},
+          "axis": {"type": "string", "enum": ["stranding", "dilution", "conflation", "pointing", "form"]},
+          "quote": {"type": "string"},
+          "repair": {"type": "string", "enum": ["cut", "write-in", "split", "point", "reword"]},
+          "severity": {"type": "string", "enum": ["substantive", "minor"]}
+        },
+        "required": ["reasoning", "axis", "quote", "repair", "severity"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["findings"],
+  "additionalProperties": false
+}

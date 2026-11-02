@@ -1,0 +1,17 @@
+id: de-done-quotes-german
+origin: GitHub #20 and #21, anonymized; the error-message line is a planted stranding
+class: German typographic quotes „…“
+operation: writing-guide
+expect:
+  axis: stranding
+  passage: Die Fehlermeldung nutzt jetzt die zweite Variante aus dem Call, nicht mehr „Einladungslink“.
+draft:
+  type: signal
+  kind: done
+  layer: tactical
+  content: |-
+    Die nutzersichtbaren Partner-Code-Texte sind umformuliert und über MR !42 nach `main` gemergt: Kein Button spricht mehr von „Code einlösen“ — die Wording-Direktive ist umgesetzt, und der Einstieg in die Bezahlseite verspricht keine Gutschein-Einlösung mehr.
+
+    - Auf Wunsch aus dem Review wurden die begleitenden Fließtexte angeglichen: In `EmptyState.tsx` heißt es jetzt „… oder nutze einen Partner-Code …“ statt „löse … ein“.
+    - Die Fehlermeldung nutzt jetzt die zweite Variante aus dem Call, nicht mehr „Einladungslink“.
+    - Die Schreibweise ist auf „Partner-Code“ mit Bindestrich vereinheitlicht.
