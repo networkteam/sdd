@@ -2,7 +2,10 @@ id: en-directive-ref-desc-excerpt
 origin: the pre-flight eval case whose cited excerpt broke the JSON, 20260606-125155-s-tac-sk1
 class: ref desc and body excerpts cited in the observation
 language: ""
-operations: [preflight]
+operation: preflight
+expect:
+  severity: high
+  passage: This directive retires the immutability contract d-prc-iom.
 graph:
   - id: 20260408-120000-d-prc-iom
     type: decision

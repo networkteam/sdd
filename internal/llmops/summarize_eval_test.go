@@ -136,18 +136,21 @@ type judgeVerdict struct {
 // candidate env knobs, so every candidate is measured with the same yardstick.
 // Default judge: Ollama Cloud's glm-5.3-flash:cloud at high effort (flat-rate,
 // no per-token cost); override via SDD_EVAL_JUDGE_PROVIDER /
-// SDD_EVAL_JUDGE_MODEL / SDD_EVAL_JUDGE_PARAMS.
+// SDD_EVAL_JUDGE_MODEL / SDD_EVAL_JUDGE_PARAMS / SDD_EVAL_JUDGE_ENDPOINT, the
+// last because a candidate on another route of the same gateway needs another
+// endpoint.
 func judgeRunner(t *testing.T) llm.Runner {
 	t.Helper()
 	cfg := evalBaseConfig(t)
 	cfg.Provider = getenvOr("SDD_EVAL_JUDGE_PROVIDER", "ollama")
 	cfg.Model = getenvOr("SDD_EVAL_JUDGE_MODEL", "glm-5.3-flash:cloud")
 	cfg.Params = parseEvalParams(t, getenvOr("SDD_EVAL_JUDGE_PARAMS", "think=high"))
+	cfg.Endpoint = getenvOr("SDD_EVAL_JUDGE_ENDPOINT", cfg.Endpoint)
 	runner, err := factory.New(cfg)
 	if err != nil {
 		t.Fatalf("building judge runner: %v", err)
 	}
-	return pkgllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})
+	return &capturingRunner{t: t, inner: pkgllm.Observed(runner, multiSink{evalFileSink(t), tLogSink{t}})}
 }
 
 // judgeSummary asks the judge to verify one summary against the exact source

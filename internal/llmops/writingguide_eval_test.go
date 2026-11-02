@@ -138,20 +138,15 @@ func TestWritingGuideEval_StrandedDraftYieldsStranding(t *testing.T) {
 	})
 }
 
-// TestWritingGuideEval_Format runs the format example set (format_eval_test.go)
-// through the writing guide. GitHub #21's case is the specimen
-// de-done-quotes-german.
-func TestWritingGuideEval_Format(t *testing.T) {
-	for _, s := range loadFormatSpecimens(t, "writing-guide") {
+// TestWritingGuideEval_Specimens runs the writing-guide specimens
+// (specimen_eval_test.go). GitHub #21's case is de-done-quotes-german.
+func TestWritingGuideEval_Specimens(t *testing.T) {
+	for _, s := range loadSpecimens(t, "writing-guide") {
 		t.Run(s.ID, func(t *testing.T) {
 			t.Parallel()
 			draft := s.Draft.entry(t)
-			runFormatEval(t, s, "writing-guide", func(t *testing.T) (*capturingRunner, error) {
-				runner := evalRunner(t)
-				ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
-				defer cancel()
-				_, err := llmops.WritingGuide(ctx, runner, draft, nil, evalReferenceFacts(t, draft.Kind))
-				return runner, err
+			runGuideEvalPassRate(t, draft, s.Expect.tier(), func(r *llmops.WritingGuideResult) error {
+				return s.Expect.checkGuide(draft.Content, r)
 			})
 		})
 	}
