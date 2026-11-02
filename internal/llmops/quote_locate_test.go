@@ -70,10 +70,11 @@ func quoteLocatesIn(text, quote, passage string) bool {
 	}
 }
 
-var excerptPattern = regexp.MustCompile("“([^”]+)”|„([^“”]+)[“”]|\"([^\"]+)\"|«([^»]+)»|‚([^‘’]+)[‘’]|‘([^’]+)’|`([^`]+)`")
+var excerptPattern = regexp.MustCompile("“([^”]+)”|„([^“”]+)[“”]|\"([^\"]+)\"|«([^»]+)»|‚([^‘’]+)[‘’]|‘([^’]+)’|`([^`]+)`|(?:^|[^\\pL\\pN])'([^']+)'(?:$|[^\\pL\\pN])")
 
 // citedExcerpts returns the excerpts an observation sets off in quotes or
-// backticks.
+// backticks. A straight single quote counts only next to a non-letter, so an
+// apostrophe does not open an excerpt.
 func citedExcerpts(observation string) []string {
 	var out []string
 	for _, m := range excerptPattern.FindAllStringSubmatch(observation, -1) {
@@ -117,9 +118,26 @@ func TestQuoteLocatesIn(t *testing.T) {
 }
 
 func TestCitedExcerpts(t *testing.T) {
-	got := citedExcerpts("The ref `grounded-in` says “extends the contract” while the body says \"retires the immutability contract\"; „Partner-Code“ and «Link» stay.")
-	want := []string{"grounded-in", "extends the contract", "retires the immutability contract", "Partner-Code", "Link"}
-	if !slices.Equal(got, want) {
-		t.Errorf("citedExcerpts = %q, want %q", got, want)
+	tests := []struct {
+		name, observation string
+		want              []string
+	}{
+		{
+			"typographic, double quotes and backticks",
+			"The ref `grounded-in` says “extends the contract” while the body says \"retires the immutability contract\"; „Partner-Code“ and «Link» stay.",
+			[]string{"grounded-in", "extends the contract", "retires the immutability contract", "Partner-Code", "Link"},
+		},
+		{
+			"single quotes beside apostrophes",
+			"The draft's body states 'This directive retires the contract', but the desc doesn't: 'extends it'.",
+			[]string{"This directive retires the contract", "extends it"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := citedExcerpts(tt.observation); !slices.Equal(got, tt.want) {
+				t.Errorf("citedExcerpts = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
