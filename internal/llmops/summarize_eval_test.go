@@ -246,7 +246,6 @@ func checkSummaryMechanics(entryID, summary string) []string {
 // and expects fail verdicts — a judge that rubber-stamps these would make every
 // candidate measure capable. Judge-only calls; no candidate involved.
 func TestSummarizeJudgeCalibration(t *testing.T) {
-	judge := judgeRunner(t)
 	tc := summarizeCases()[0]
 	graph := model.NewGraph(append([]*model.Entry{tc.entry}, tc.related...))
 	req, err := llmops.RenderSummaryPrompt(tc.entry, graph, "")
@@ -274,6 +273,7 @@ func TestSummarizeJudgeCalibration(t *testing.T) {
 
 	for _, bad := range badSummaries {
 		t.Run(bad.name, func(t *testing.T) {
+			judge := judgeRunner(t)
 			verdict, err := judgeSummary(t, judge, req.UserPrompt, bad.summary, tc.wantRelationships)
 			if err != nil {
 				t.Fatalf("judge unavailable: %v", err)
@@ -287,11 +287,9 @@ func TestSummarizeJudgeCalibration(t *testing.T) {
 }
 
 func TestSummarizeEval(t *testing.T) {
-	candidate := evalRunner(t)
-	judge := judgeRunner(t)
-
 	for _, tc := range summarizeCases() {
 		t.Run(tc.name, func(t *testing.T) {
+			candidate, judge := evalRunner(t), judgeRunner(t)
 			graph := model.NewGraph(append([]*model.Entry{tc.entry}, tc.related...))
 
 			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)

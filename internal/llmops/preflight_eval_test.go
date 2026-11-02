@@ -40,7 +40,8 @@ import (
 // llm.Preflight returns only the parsed result, so the wrapper preserves the
 // raw model output for failure logging while the eval still runs the real
 // orchestrator end to end. Every call is also recorded raw with its cost
-// (specimen_eval_test.go).
+// (specimen_eval_test.go) under the name of the test that built the runner,
+// so a case with subtests builds one per subtest.
 type capturingRunner struct {
 	t        *testing.T
 	inner    llm.Runner
