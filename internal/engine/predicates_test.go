@@ -166,6 +166,14 @@ func TestParticipantsCanonical(t *testing.T) {
 		t.Error("alias must fail the canonical check")
 	}
 
+	// A name no actor declares yet passes: the actor may follow.
+	if _, err := store.WriteState(map[string]any{"participants": []any{"Christopher", "Benno"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !evalPredicate(t, "participantsCanonical", ctx) {
+		t.Error("a name no actor declares yet should pass")
+	}
+
 	// Grace mode: a graph with no active actors skips the check.
 	graceCtx := &Context{Store: store, Graph: fixtureGraph(t)}
 	if !evalPredicate(t, "participantsCanonical", graceCtx) {

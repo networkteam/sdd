@@ -281,11 +281,12 @@ func registerBuiltinPredicates(r *Registry) {
 	mustRegisterPredicate(r, Predicate{
 		Doc: FuncDoc{
 			Name:  "participantsCanonical",
-			Doc:   "All participants resolve to active actor canonicals (grace mode: passes when the graph has no active actors).",
+			Doc:   "No participant is an alias of an active actor. A name no actor declares yet passes: the actor may follow the first attribution.",
 			Reads: []string{"participants"},
 		},
 		Fn:          participantsCanonical,
-		FailMessage: "a participant is not an active actor canonical — resolve aliases to canonicals before capture",
+		FailMessage: "a participant is an alias of a recorded actor — report that actor's canonical",
+		FailDetail:  participantAliasDetail,
 	})
 
 	mustRegisterPredicate(r, Predicate{
@@ -590,24 +591,33 @@ func participantsCanonical(ctx *Context) (bool, error) {
 	if ctx.Graph == nil {
 		return false, fmt.Errorf("participantsCanonical needs a graph")
 	}
-	active := ctx.Graph.ActiveActorHeads()
-	if len(active) == 0 {
-		return true, nil // grace mode: no active actors yet
-	}
-	canonicals := make(map[string]bool, len(active))
-	for _, a := range active {
-		canonicals[a.Canonical] = true
-	}
 	v, ok := ctx.Store.Get("participants")
 	if !ok {
 		return true, nil
 	}
 	for _, p := range asStrings(v) {
-		if !canonicals[p] {
+		if _, alias := ctx.Graph.AliasCanonical(p); alias {
 			return false, nil
 		}
 	}
 	return true, nil
+}
+
+func participantAliasDetail(ctx *Context) string {
+	if ctx.Graph == nil {
+		return ""
+	}
+	v, _ := ctx.Store.Get("participants")
+	var parts []string
+	for _, p := range asStrings(v) {
+		if canonical, alias := ctx.Graph.AliasCanonical(p); alias {
+			parts = append(parts, fmt.Sprintf("%q is an alias of actor %q", p, canonical))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "participants name aliases, not canonicals: " + strings.Join(parts, "; ") + " — report the canonical"
 }
 
 func roleActorResolves(ctx *Context) (bool, error) {

@@ -470,6 +470,21 @@ func (a *Application) Procedures(ctx context.Context, identity RequestIdentity, 
 	return ProcedureListResult{Project: runtime.options.Project, Procedures: renderProcedureList(snapshot.graph)}, nil
 }
 
+func renderParticipantNames(local string, graph *model.Graph) string {
+	var lines []string
+	if local != "" {
+		lines = append(lines, "Local participant: "+local)
+	}
+	for _, actor := range graph.ActiveActorHeads() {
+		line := "- " + actor.Canonical
+		if len(actor.Aliases) > 0 {
+			line += " (aliases: " + strings.Join(actor.Aliases, ", ") + ")"
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func renderProcedureList(graph *model.Graph) string {
 	var lines []string
 	for _, chain := range graph.ProcedureChains() {

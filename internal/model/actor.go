@@ -1,6 +1,9 @@
 package model
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // ActorChain represents a supersession chain of kind: actor signals — one
 // participant identity across its revisions.
@@ -54,6 +57,29 @@ func (g *Graph) ActiveActorHeads() []*Entry {
 		active = append(active, chain.Head)
 	}
 	return active
+}
+
+// AliasCanonical returns the canonical of the active actor declaring name as
+// an alias. A name that is itself an active canonical, or that no active
+// actor declares, reports false.
+func (g *Graph) AliasCanonical(name string) (string, bool) {
+	if name == "" {
+		return "", false
+	}
+	active := g.ActiveActorHeads()
+	for _, a := range active {
+		if a.Canonical == name {
+			return "", false
+		}
+	}
+	for _, a := range active {
+		for _, alias := range a.Aliases {
+			if strings.TrimSpace(alias) == name {
+				return a.Canonical, true
+			}
+		}
+	}
+	return "", false
 }
 
 // ChainForCanonical returns the actor-identity chain that has ever held the

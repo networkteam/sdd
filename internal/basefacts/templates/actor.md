@@ -18,7 +18,7 @@ summary: >-
 
 # Declaring a participant — the actor kind
 
-An actor records who a participant is: a person, a team, a model family — any identity the graph attributes work to. It is a signal — an identity declared, not something committed to — and declaration is the point: participants are declared, never inferred, and a name with no actor entry behind it is not a participant the graph recognizes. Its reader arrives asking three things — who is this, what name does the graph know them by, and which other names resolve to them — and a good actor is the shortest record that answers all three.
+An actor records who a participant is: a person, a team, a model family — any identity the graph attributes work to. It is a signal — an identity declared, not something committed to — and declaration is the point: participants are declared, never inferred. An entry may name a participant before any actor declares them, and the actor captured later takes that name as its canonical; until then the name attributes work without saying who is behind it. Its reader arrives asking three things — who is this, what name does the graph know them by, and which other names resolve to them — and a good actor is the shortest record that answers all three.
 
 **The canonical is the name already in use.** The canonical is the stable name this participant is known by across the graph — the form they would recognize as theirs, matched to the name work is already attributed under, not a more formal variant invented for the record: where a village choir's record already says "Marta", the canonical is "Marta", not the full name from her papers. And before drafting at all, resolve the identities already active and their aliases — a known participant is reused, not reconfirmed.
 

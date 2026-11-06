@@ -16,13 +16,11 @@ import (
 //
 // Current checks (see plan d-cpt-d34):
 //
-//   - participant-coverage (AC 6): every name in Participants must match
-//     the canonical of an active actor signal. Self-transitioning grace —
-//     skipped when the graph has zero active actor signals.
+//   - participant-coverage: no name in Participants is an alias of an
+//     active actor; a name no actor declares yet passes.
 //   - focus-actor-drift: on a kind: focus decision, every focus-level actor
 //     and every per-involvement actor override must match an active actor
-//     canonical — participant coverage applied to the focus actor fields,
-//     sharing the same canonical set and grace mode.
+//     canonical. Skipped when the graph has zero active actor signals.
 //   - actor-canonical-reused (AC 5): for a new kind: actor signal, the
 //     canonical must not appear in any actor-identity chain the new entry
 //     does not extend.
@@ -328,27 +326,19 @@ func capturableRefKindList() string {
 	return strings.Join(parts, ", ")
 }
 
-// participantCoverageFindings enforces AC 6: every name listed in the
-// proposed entry's Participants must match the canonical of an active
-// actor signal. Grace mode (no active actors yet) skips the check so
-// fresh graphs aren't blocked before the first actor is captured.
+// participantCoverageFindings flags a participant named by an alias of an
+// active actor.
 func participantCoverageFindings(entry *model.Entry, graph *model.Graph) []query.Finding {
-	canonicals, active := activeActorCanonicals(graph)
-	if !active {
-		return nil // grace mode
-	}
 	var findings []query.Finding
 	for _, p := range entry.Participants {
-		if p == "" {
-			continue
-		}
-		if _, ok := canonicals[p]; ok {
+		canonical, alias := graph.AliasCanonical(p)
+		if !alias {
 			continue
 		}
 		findings = append(findings, query.Finding{
 			Severity:    query.SeverityHigh,
 			Category:    "participant-drift",
-			Observation: fmt.Sprintf("participant %q does not match any active actor canonical", p),
+			Observation: fmt.Sprintf("participant %q is an alias of actor %q; use the canonical", p, canonical),
 		})
 	}
 	return findings
@@ -371,10 +361,10 @@ func activeActorCanonicals(graph *model.Graph) (map[string]struct{}, bool) {
 	return canonicals, true
 }
 
-// focusActorCoverageFindings applies participant coverage to the actor fields
-// of a kind: focus decision: every focus-level actor and every per-involvement
-// actor override must match an active actor canonical. Shares the canonical set
-// and grace mode with participantCoverageFindings; non-focus entries pass.
+// focusActorCoverageFindings checks the actor fields of a kind: focus
+// decision: every focus-level actor and every per-involvement actor override
+// must match an active actor canonical (grace mode: no active actors). Non-focus
+// entries pass.
 func focusActorCoverageFindings(entry *model.Entry, graph *model.Graph) []query.Finding {
 	if !entry.IsFocus() {
 		return nil

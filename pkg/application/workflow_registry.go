@@ -78,6 +78,20 @@ func (w *WorkflowSession) registerWorkflowQueries(registry *engine.Registry) err
 		return err
 	}
 	if err := registry.RegisterQuery(engine.Query{
+		Doc:       engine.FuncDoc{Name: "participantNames", Doc: "The names a capture's participants are chosen from: the local participant, then each active actor's canonical with its aliases, one actor per line."},
+		ServeSafe: true,
+		Bound:     engine.QueryBound{Part: serveview.PartLineList, Cap: serveview.Default().Cap(serveview.PartLineList)},
+		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {
+			info, err := w.readInfo()
+			if err != nil {
+				return nil, err
+			}
+			return renderParticipantNames(info.Participant, ctx.Graph), nil
+		},
+	}); err != nil {
+		return err
+	}
+	if err := registry.RegisterQuery(engine.Query{
 		Doc:       engine.FuncDoc{Name: "factIndex", Doc: "Active indexed facts from the current project graph, ordered for session discovery."},
 		ServeSafe: true,
 		Fn: func(ctx *engine.Context, _ map[string]any) (any, error) {

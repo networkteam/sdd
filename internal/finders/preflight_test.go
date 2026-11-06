@@ -185,7 +185,8 @@ func TestMechanical_ParticipantCoverage_ActiveActorMatches(t *testing.T) {
 	}
 }
 
-func TestMechanical_ParticipantCoverage_UnknownCanonicalBlocks(t *testing.T) {
+func TestMechanical_ParticipantCoverage_UndeclaredNamePasses(t *testing.T) {
+	// A participant may be named before any actor declares them.
 	actor := actorEntry("Christopher", nil)
 	graph := model.NewGraph([]*model.Entry{actor})
 
@@ -193,18 +194,12 @@ func TestMechanical_ParticipantCoverage_UnknownCanonicalBlocks(t *testing.T) {
 		Type:         model.TypeSignal,
 		Layer:        model.LayerConceptual,
 		Content:      "new observation",
-		Participants: []string{"Claude"},
+		Participants: []string{"Christopher", "Benno"},
 	}
 
 	got := mechanicalPreflight(proposed, graph, nil, nil)
-	if len(got) != 1 {
-		t.Fatalf("expected 1 finding for unknown canonical, got %d", len(got))
-	}
-	if got[0].Severity != query.SeverityHigh {
-		t.Errorf("severity = %q, want high", got[0].Severity)
-	}
-	if got[0].Category != "participant-drift" {
-		t.Errorf("category = %q, want participant-drift", got[0].Category)
+	if len(got) != 0 {
+		t.Fatalf("expected no findings for a name no actor declares yet, got %+v", got)
 	}
 }
 
@@ -241,14 +236,14 @@ func TestMechanical_ParticipantCoverage_AliasDoesNotMatch(t *testing.T) {
 	}
 
 	got := mechanicalPreflight(proposed, graph, nil, nil)
-	found := false
-	for _, f := range got {
-		if f.Category == "participant-drift" {
-			found = true
-		}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 finding for an alias in participants, got %+v", got)
 	}
-	if !found {
-		t.Error("expected participant-drift finding for alias used in participants")
+	if got[0].Severity != query.SeverityHigh || got[0].Category != "participant-drift" {
+		t.Errorf("finding = %+v, want high participant-drift", got[0])
+	}
+	if !strings.Contains(got[0].Observation, `"Christopher"`) {
+		t.Errorf("observation should name the canonical, got %q", got[0].Observation)
 	}
 }
 
