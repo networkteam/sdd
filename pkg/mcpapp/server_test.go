@@ -261,6 +261,7 @@ func writeFixtureGraph(t *testing.T) string {
 
 type testEnv struct {
 	srv         *mcpserver.Server
+	opts        mcpserver.Options
 	graphDir    string
 	sessionsDir string
 	sessions    sdd.SessionStore
@@ -414,7 +415,7 @@ func newTestServerConfig(t *testing.T, findings []query.Finding, graphDir, sessi
 			t.Errorf("shutting down MCP server: %v", err)
 		}
 	})
-	return testEnv{srv: srv, graphDir: graphDir, sessionsDir: sessionsDir, sessions: opts.Application.Sessions, targets: targets}
+	return testEnv{srv: srv, opts: opts.MCP, graphDir: graphDir, sessionsDir: sessionsDir, sessions: opts.Application.Sessions, targets: targets}
 }
 
 // connect uses an in-memory connection unless the caller supplies a transport.
