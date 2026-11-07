@@ -2,11 +2,13 @@ import starlight from "@astrojs/starlight";
 import starlightLlmTools from "@wave-rf/starlight-llm-tools";
 import { defineConfig } from "astro/config";
 import starlightThemeNova from "starlight-theme-nova";
+import annotations from "./integrations/annotations/index.mjs";
 
 export default defineConfig({
   site: "https://networkteam.github.io",
   base: "/sdd",
   integrations: [
+    annotations(),
     starlight({
       title: "SDD",
       description:

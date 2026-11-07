@@ -4,6 +4,7 @@
 /website/node_modules
 /website/.astro
 /website/dist
+/website/.annotations.json*
 .env
 .claude/worktrees/
 .sdd/tmp/

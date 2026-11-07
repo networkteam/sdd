@@ -53,3 +53,29 @@ To check for drift, diff the facts since the cards last changed, `git log -p <ca
 ## LLM tools compatibility
 
 `@wave-rf/starlight-llm-tools` 0.3.1 omits Astro's `base` path from absolute links in its generated Markdown and LLM manifests and from the Copy Markdown fetch URL. The package's `postbuild` step runs `scripts/finalize-build.mjs` to correct and verify those generated links. Remove the compatibility rewrite once the plugin handles non-root deployments itself.
+
+## Reviewing pages with annotations
+
+`astro dev` adds a review layer to every page for commenting on passages. The production build contains none of it. Comments are stored in `website/.annotations.json`, which git ignores.
+
+Start the dev server with `devbox run docs:dev` and open a page.
+
+- **Add.** Select text in the page content and click **Comment**. Save with the button or Cmd/Ctrl+Enter.
+- **Find.** Commented passages are highlighted. Click a highlight, or the **Comments** button at the bottom right, to open the list. **This page** lists the current page's comments; **All pages** lists every page's, with a link to each page.
+- **Edit, resolve, delete.** Each comment in the list has a button for each. Resolved comments stay hidden until you check **Show resolved**. Uncheck **Highlights** to read the page without them.
+- **Orphaned comments.** A comment stores its quote, the text just before and after it, and the nearest heading. On load the page searches for the quote again. When the quote is gone, the list marks the comment orphaned and keeps its original quote, and the **Comments** button shows a red dot. Click **Re-attach**, select the new passage and click **Attach here**, or delete the comment.
+
+Agents read and update comments without a browser:
+
+```sh
+node website/scripts/annotations.mjs list                    # open comments
+node website/scripts/annotations.mjs list --all --json       # resolved ones too, as JSON
+node website/scripts/annotations.mjs list --page getting-started
+node website/scripts/annotations.mjs resolve <id>
+node website/scripts/annotations.mjs reopen <id>
+node website/scripts/annotations.mjs delete <id>
+```
+
+`list` prints each comment's id, status, anchor state, page with its source file, nearest heading, quote and comment. It checks anchors against the page as the running dev server renders it, found through `website/.astro/dev.json` or given with `--server <url>`. Without a running dev server the anchor state is `unchecked`. Resolve a comment once it is addressed rather than deleting it, so the reviewer sees it marked resolved.
+
+The code is in `integrations/annotations/` and `scripts/annotations.mjs`.
