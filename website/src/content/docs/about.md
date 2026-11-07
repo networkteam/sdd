@@ -3,7 +3,7 @@ title: About these docs
 description: How the SDD documentation site is built and made available to people and agents.
 ---
 
-The SDD documentation site is under construction. Its learning path and content structure are being designed separately from the site scaffold.
+The SDD documentation site is under construction. It covers getting started, the entry kinds and the vision so far.
 
 ## Agent-friendly access
 

@@ -32,6 +32,7 @@ The `sdd` binary lives at `./bin/sdd` (gitignored — rebuild locally with `devb
 - `sdd view` — smoke-test the binary against the graph at `.sdd/graph/`
 - `goreleaser check` — validate `.goreleaser.yaml`
 - `devbox run gen-installer` — regenerate the curl installer (`install.sh`) from `.config/binstaller.yml`. Run this whenever `.goreleaser.yaml` changes its platform or asset surface, then commit the updated `install.sh`. Install binstaller separately (`go install github.com/binary-install/binstaller/cmd/binst@latest`) — it isn't in devbox's nixpkgs.
+- `node website/scripts/annotations.mjs list` prints the review comments the user left on docs pages in the docs dev server. After addressing one, mark it with `node website/scripts/annotations.mjs resolve <id>`. See "Reviewing pages with annotations" in [website/README.md](website/README.md).
 
 ## Architecture
 
