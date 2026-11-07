@@ -9,7 +9,7 @@ By the end of this page your project has an SDD graph, founded in a first dialog
 
 - **A git repository with a branch checked out.** For a new project, `git init` is enough. sdd commits everything it records, so git needs your `user.name` and `user.email`.
 - **Claude Code or Codex.**
-- **An LLM for the checks.** sdd runs a few short model calls whenever it records an entry. With Claude Code there is nothing to set up: sdd uses your logged-in `claude` command. With Codex only, configure a provider first, as described under [LLM provider](https://github.com/networkteam/sdd#llm-provider-summaries--pre-flight) in the README.
+- **An API key for a model provider**, such as Anthropic, OpenAI or the Opper gateway, or a local [Ollama](https://ollama.com). Step 2 shows where it goes.
 
 ## 1. Install sdd
 
@@ -33,7 +33,58 @@ sdd --version
 
 Your agent starts sdd as the plain command `sdd serve`, so a binary outside your `PATH` will not be found.
 
-## 2. Set up the project
+## 2. Connect a language model and search
+
+sdd uses a language model whenever it records an entry: to check the draft's wording, to check it against the graph, and to write its one-line summary. An embedding model makes the graph searchable by meaning, not only by keyword. Set both once for your user, and they apply to every project. `sdd config set` writes to `~/.config/sdd/config.yaml`; add `--local` to set a value for the current project on this machine only.
+
+### Language model
+
+For example, with the Anthropic API:
+
+```bash
+sdd config set llm.provider anthropic
+sdd config set llm.model claude-sonnet-4-6
+sdd config set llm.api_keys.anthropic <your-api-key>
+```
+
+For hosted open-weight models, or one key for many models, use an AI gateway such as [Opper](https://opper.ai) through its OpenAI-compatible route:
+
+```bash
+sdd config set llm.provider openai
+sdd config set llm.endpoint https://api.opper.ai/v3/compat/chat/completions
+sdd config set llm.model greenpt/glm-5.3-flash
+sdd config set llm.api_keys.openai <your-opper-key>
+```
+
+The other providers are `openai` for OpenAI itself, and `ollama` for models running on your machine. The README's [LLM provider](https://github.com/networkteam/sdd#llm-provider-summaries--pre-flight) section has a configuration for each.
+
+Every check asks the model for a fixed response format, so the provider and model must support structured output. With one that does not, such as Ollama Cloud, the checks fail.
+
+Without a provider, sdd falls back to `claude-cli`, which runs every check through your local Claude Code installation. It needs no key, but it is slow, and checks can time out.
+
+### Embedding model
+
+For example, with OpenAI:
+
+```bash
+sdd config set embedding.provider openai
+sdd config set embedding.model text-embedding-3-small
+sdd config set embedding.api_keys.openai <your-api-key>
+```
+
+If your language model already uses an OpenAI key, the embedding model uses it too, and you can skip the last line. For embeddings on your machine with Ollama, see [Embedding provider](https://github.com/networkteam/sdd#embedding-provider-vector-search) in the README.
+
+Without an embedding model, search by keyword still works. When you join a project that already has entries, run `sdd index` once to make them searchable by meaning; new entries are added as they are recorded.
+
+### Check the result
+
+```bash
+sdd config
+```
+
+This lists every effective setting and where it comes from. The `sdd` server reads the configuration when it starts, so restart your agent after a change.
+
+## 3. Set up the project
 
 Run `sdd init` in the project root:
 
@@ -67,7 +118,7 @@ If you chose **user** instead of project for the skill, sdd does not register th
 The graph is empty so far. The skill is only a pointer: it tells your agent to open a session with the `sdd` server. The working process itself, how a capture or a check-in runs step by step, ships inside the sdd binary and is served to the agent as the session goes on.
 :::
 
-## 3. Open a session
+## 4. Open a session
 
 Start your agent in the project directory. If Claude Code asks whether to enable the project's `sdd` server, approve it. Then type:
 
@@ -76,7 +127,7 @@ Start your agent in the project directory. If Claude Code asks whether to enable
 
 The agent opens a session. The server gives it an orientation: the working principles, the project's direction, what is in focus, who takes part, and what changed recently. On a new project most of that is empty. From here on, you talk; you don't need to know any commands.
 
-## 4. Found the graph with bootstrap
+## 5. Found the graph with bootstrap
 
 On an empty graph the agent suggests bootstrap, the dialogue that founds the graph. You can also ask for it: "Let's bootstrap this project."
 
@@ -96,7 +147,7 @@ A sparse bootstrap is fine. One participant and one entry that frames the projec
 These first entries are what every later session starts from. When the agent opens a session, it reads the project's direction and participants from the graph, so you do not explain the project again.
 :::
 
-## 5. Record your first observation
+## 6. Record your first observation
 
 Tell the agent something you noticed, in plain words, for example that a step in your setup fails and what you expected instead. The agent recognizes an observation and starts a capture:
 
