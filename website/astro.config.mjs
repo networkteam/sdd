@@ -16,6 +16,13 @@ export default defineConfig({
         { slug: "getting-started" },
         { slug: "working-modes" },
         {
+          label: "Guides",
+          items: [
+            { slug: "guides/connected-repositories" },
+            { slug: "guides/browsing-the-graph" },
+          ],
+        },
+        {
           label: "Reference",
           items: [
             { slug: "reference/entry-kinds" },
