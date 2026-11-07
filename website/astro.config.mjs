@@ -14,9 +14,13 @@ export default defineConfig({
       plugins: [starlightThemeNova(), starlightLlmTools()],
       sidebar: [
         { slug: "getting-started" },
+        { slug: "working-modes" },
         {
           label: "Reference",
-          items: [{ slug: "reference/entry-kinds" }],
+          items: [
+            { slug: "reference/entry-kinds" },
+            { slug: "reference/configuration" },
+          ],
         },
         {
           label: "Vision",

@@ -56,7 +56,7 @@ sdd config set llm.model greenpt/glm-5.3-flash
 sdd config set llm.api_keys.openai <your-opper-key>
 ```
 
-The other providers are `openai` for OpenAI itself, and `ollama` for models running on your machine. The README's [LLM provider](https://github.com/networkteam/sdd#llm-provider-summaries--pre-flight) section has a configuration for each.
+The other providers are `openai` for OpenAI itself, and `ollama` for models running on your machine. [Language model providers](/sdd/reference/configuration/#language-model-providers) has a configuration for each.
 
 Every check asks the model for a fixed response format, so the provider and model must support structured output. With one that does not, such as Ollama Cloud, the checks fail.
 
@@ -72,7 +72,7 @@ sdd config set embedding.model text-embedding-3-small
 sdd config set embedding.api_keys.openai <your-api-key>
 ```
 
-If your language model already uses an OpenAI key, the embedding model uses it too, and you can skip the last line. For embeddings on your machine with Ollama, see [Embedding provider](https://github.com/networkteam/sdd#embedding-provider-vector-search) in the README.
+The embedding model needs its own key setting, even when the language model uses the same OpenAI key. For embeddings on your machine with Ollama, see [Embedding providers](/sdd/reference/configuration/#embedding-providers).
 
 Without an embedding model, search by keyword still works. When you join a project that already has entries, run `sdd index` once to make them searchable by meaning; new entries are added as they are recorded.
 
@@ -173,13 +173,11 @@ One loop drives the graph. A signal, something noticed, meets dialogue and becom
 
 ## Next steps
 
-Ask your agent in plain words; it starts the right move:
+Ask your agent in plain words; it recommends the right move:
 
 - "Where do we stand?" gives a check-in: what is in focus, what changed, what is open.
 - Naming an entry, or "let's work on this", digs into it and offers the next steps.
 - Agreed work runs as an implementation, which ends with a done entry citing the commits.
 - Finished work can be evaluated, and the graph can be groomed of entries that are resolved but still open.
 
-Search by keyword works out of the box. Search by meaning needs an embedding provider, described under [Embedding provider](https://github.com/networkteam/sdd#embedding-provider-vector-search) in the README.
-
-To look up what an entry kind is for, see [Entry kinds](/sdd/reference/entry-kinds/). For where SDD is heading, see the [Vision](/sdd/vision/landscape/).
+[Working modes](/sdd/working-modes/) describes each move. To look up what an entry kind is for, see [Entry kinds](/sdd/reference/entry-kinds/); for every setting, see [Configuration](/sdd/reference/configuration/). For where SDD is heading, see the [Vision](/sdd/vision/landscape/).
