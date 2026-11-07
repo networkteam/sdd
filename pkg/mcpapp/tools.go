@@ -358,8 +358,8 @@ type RegistryResult struct {
 	Functions []RegistryFuncResult `json:"functions"`
 }
 
-func (s *Server) registerTools() {
-	mcp.AddTool(s.mcp, &mcp.Tool{
+func (s *toolSet) register(srv *mcp.Server) {
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "start_session",
 		Description: "Open a fresh dialogue session — one of the two doors, and the only tool that takes a " +
 			"project. Auto-starts the session shell (user-dialogue by default) and returns its opening " +
@@ -371,7 +371,7 @@ func (s *Server) registerTools() {
 			"dialogue under a new handle; to re-serve an existing one, present its handle to resume_session.",
 	}, toolBoundary(s.startSession))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "start_procedure",
 		Description: "Start a procedure instance (a playbook move such as capture) in the session named by " +
 			"session (required). Returns the current step's instructions, the report schema to answer " +
@@ -379,7 +379,7 @@ func (s *Server) registerTools() {
 			"writes happen inside procedure transitions, never through a direct tool.",
 	}, toolBoundary(s.startProcedure))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "next",
 		Description: "Advance a procedure instance in the session named by session (required): send state " +
 			"fields per the served report_schema, or answer a pending chooser with {chooser, choice, " +
@@ -391,7 +391,7 @@ func (s *Server) registerTools() {
 			"dialogue lands.",
 	}, toolBoundary(s.next))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "abandon",
 		Description: "Abandon a running move instance (instance, plus session naming the session it belongs " +
 			"to), or tear down a session directly by handle (session alone) — one call, no resume, no " +
@@ -400,7 +400,7 @@ func (s *Server) registerTools() {
 			"session shell concludes through its own junction, never through abandon.",
 	}, toolBoundary(s.abandon))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "park",
 		Description: "Park a running move back to the session junction (session required): state and step " +
 			"position keep, the move lists as an open thread (at junctions and on conclude), and next " +
@@ -408,7 +408,7 @@ func (s *Server) registerTools() {
 			"graph-visible thread instead of living in conversation memory as an agent promise.",
 	}, toolBoundary(s.park))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "resume_session",
 		Description: "The second door, and the compaction escape: re-serve the current position of the " +
 			"session whose handle you present — its framing plus every running move at its current step, " +
@@ -419,14 +419,14 @@ func (s *Server) registerTools() {
 			"another conversation's context. A lost handle is the user's to recover, not yours to guess.",
 	}, toolBoundary(s.resumeSession))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "bind_branch",
 		Description: "Declare or clear the attached session's durable branch binding. Pass exactly one of " +
 			"branch or clear:true. Setting validates the live registered checkout before changing the " +
 			"session; clearing needs no branch capability.",
 	}, toolBoundary(s.bindBranch))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "stage_attachment",
 		Description: "Stage a file into the session scratch (session required) and get back a handle to pass " +
 			"in a report's attachments field, or amend what is already staged: with patches, the file named " +
@@ -434,46 +434,46 @@ func (s *Server) registerTools() {
 			"Never a graph write — the write gate materializes staged files with the entry.",
 	}, toolBoundary(s.stageAttachment))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "search",
 		Description: "Search graph entries: terms (text/regex), query (semantic phrase), or both (hybrid). " +
 			"A free read within the session named by session (required): no move needed, never blocked " +
 			"by procedure state; it runs in that session's project and branch.",
 	}, toolBoundary(s.search))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "view",
 		Description: "Run an sdd view layout pipeline over the graph — overview sections, topic counts, " +
 			"ranked lists. A free read within the session named by session (required).",
 	}, toolBoundary(s.view))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "show",
 		Description: "Read entries in full with their upstream and downstream reference chains, within the " +
 			"session named by session (required). Use whenever the dialogue touches a specific entry — " +
 			"summaries are pointers, not facts.",
 	}, toolBoundary(s.show))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name: "read_attachment",
 		Description: "Read an attachment's content, paged, within the session named by session (required): " +
 			"an entry's by ID and filename, or a file staged in the session (before any entry carries it) " +
 			"by handle. Never derive storage paths.",
 	}, toolBoundary(s.readAttachment))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "info",
 		Description: "Session framing header for the session named by session (required): project, local participant, configured language, and available search modes.",
 	}, toolBoundary(s.info))
 
-	mcp.AddTool(s.mcp, &mcp.Tool{
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "registry",
 		Description: "Engine function contracts (predicates, queries, commands) — what procedure spec authors consult. Carries the session handle like every other tool.",
 	}, toolBoundary(s.registryDocs))
 }
 
 // attachedSession returns the named session locked and replayed from its ledger.
-func (s *Server) attachedSession(ctx context.Context, req *mcp.CallToolRequest, session string) (*shellSession, error) {
+func (s *toolSet) attachedSession(ctx context.Context, req *mcp.CallToolRequest, session string) (*shellSession, error) {
 	id := sdd.SessionID(strings.TrimSpace(session))
 	if id == "" {
 		return nil, noHandleError()
@@ -538,7 +538,7 @@ func noHandleError() error {
 
 // startSession opens a fresh dialogue: a new durable session under a new
 // handle, every call. Nothing is derived from the connection.
-func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, args StartSessionArgs) (*mcp.CallToolResult, ServeResult, error) {
+func (s *toolSet) startSession(ctx context.Context, req *mcp.CallToolRequest, args StartSessionArgs) (*mcp.CallToolResult, ServeResult, error) {
 	identity := s.requestIdentity(req)
 	// The door is the one tool that takes a project. Left empty, the
 	// application infers a sole accessible project or reports the ambiguity,
@@ -566,7 +566,7 @@ func (s *Server) startSession(ctx context.Context, req *mcp.CallToolRequest, arg
 // serveProjects is start_session's answer when the principal reaches several
 // projects and named none: no session opens, the projects are listed and the
 // caller picks one.
-func (s *Server) serveProjects(ctx context.Context, identity sdd.RequestIdentity) (ServeResult, error) {
+func (s *toolSet) serveProjects(ctx context.Context, identity sdd.RequestIdentity) (ServeResult, error) {
 	list, err := s.app.Projects(ctx, identity)
 	if err != nil {
 		return ServeResult{}, err
@@ -587,7 +587,7 @@ func (s *Server) serveProjects(ctx context.Context, identity sdd.RequestIdentity
 	return result, nil
 }
 
-func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, args StartProcedureArgs) (*mcp.CallToolResult, ServeResult, error) {
+func (s *toolSet) startProcedure(ctx context.Context, req *mcp.CallToolRequest, args StartProcedureArgs) (*mcp.CallToolResult, ServeResult, error) {
 	if strings.TrimSpace(args.Canonical) == "" {
 		return nil, ServeResult{}, toolError("canonical is required")
 	}
@@ -608,7 +608,7 @@ func (s *Server) startProcedure(ctx context.Context, req *mcp.CallToolRequest, a
 	return nil, result, err
 }
 
-func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextArgs) (*mcp.CallToolResult, ServeResult, error) {
+func (s *toolSet) next(ctx context.Context, req *mcp.CallToolRequest, args NextArgs) (*mcp.CallToolResult, ServeResult, error) {
 	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, ServeResult{}, err
@@ -631,7 +631,7 @@ func (s *Server) next(ctx context.Context, req *mcp.CallToolRequest, args NextAr
 	return nil, result, err
 }
 
-func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
+func (s *toolSet) abandon(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
 	if args.Instance == "" {
 		if args.Session == "" {
 			return nil, AbandonResult{}, toolError("pass instance (a move to abandon, with its session) or session alone (tear down a session by handle)")
@@ -668,7 +668,7 @@ func (s *Server) abandon(ctx context.Context, req *mcp.CallToolRequest, args Aba
 // on the shell, with the move now listed among the open threads
 // (d-tac-dbk). Seeded drafts ride the normal dispatch path; park adds no
 // side channel.
-func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkArgs) (*mcp.CallToolResult, ParkResult, error) {
+func (s *toolSet) park(ctx context.Context, req *mcp.CallToolRequest, args ParkArgs) (*mcp.CallToolResult, ParkResult, error) {
 	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, ParkResult{}, err
@@ -700,7 +700,7 @@ func (s *Server) park(ctx context.Context, req *mcp.CallToolRequest, args ParkAr
 // call (d-tac-dbk). The response names the label and every discarded thread —
 // nothing vanishes silently. Holding the handle is the authorization
 // (d-cpt-aen); a session this server holds replayed leaves the cache with it.
-func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
+func (s *toolSet) abandonSession(ctx context.Context, req *mcp.CallToolRequest, args AbandonArgs) (*mcp.CallToolResult, AbandonResult, error) {
 	identity := s.requestIdentity(req)
 	id := sdd.SessionID(strings.TrimSpace(args.Session))
 	if id == "" {
@@ -732,7 +732,7 @@ func (s *Server) abandonSession(ctx context.Context, req *mcp.CallToolRequest, a
 // caller presents — the reorientation. Presenting the handle declares the
 // caller needs re-serving, so the ledger-derived served-once memory resets
 // there and the complete position serves in full (d-cpt-aen).
-func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, args ResumeSessionArgs) (*mcp.CallToolResult, ResumeSessionResult, error) {
+func (s *toolSet) resumeSession(ctx context.Context, req *mcp.CallToolRequest, args ResumeSessionArgs) (*mcp.CallToolResult, ResumeSessionResult, error) {
 	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, ResumeSessionResult{}, err
@@ -750,7 +750,7 @@ func (s *Server) resumeSession(ctx context.Context, req *mcp.CallToolRequest, ar
 	return nil, mapped, err
 }
 
-func (s *Server) bindBranch(ctx context.Context, req *mcp.CallToolRequest, args BindBranchArgs) (*mcp.CallToolResult, BindBranchResult, error) {
+func (s *toolSet) bindBranch(ctx context.Context, req *mcp.CallToolRequest, args BindBranchArgs) (*mcp.CallToolResult, BindBranchResult, error) {
 	if args.Branch != strings.TrimSpace(args.Branch) {
 		return nil, BindBranchResult{}, toolError("branch must not have leading or trailing whitespace")
 	}
@@ -777,7 +777,7 @@ func (s *Server) bindBranch(ctx context.Context, req *mcp.CallToolRequest, args 
 // or rebind, auto-starting the default shell when none is running — a
 // resumed pre-shell session gains a base to land on (d-tac-bfc).
 
-func (s *Server) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, args StageAttachmentArgs) (*mcp.CallToolResult, StageAttachmentResult, error) {
+func (s *toolSet) stageAttachment(ctx context.Context, req *mcp.CallToolRequest, args StageAttachmentArgs) (*mcp.CallToolResult, StageAttachmentResult, error) {
 	if err := validAttachmentName(args.Name); err != nil {
 		return nil, StageAttachmentResult{}, toolError("name: %v", err)
 	}
@@ -833,7 +833,7 @@ func validAttachmentName(name string) error {
 // readScope is what a free read takes from its session: the project it runs
 // in — the home project with the session's branch binding, or a project the
 // caller names that the session may work in (d-tac-1z6, d-cpt-yjc).
-func (s *Server) readScope(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, project string) (sdd.ProjectID, string, bool, error) {
+func (s *toolSet) readScope(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, project string) (sdd.ProjectID, string, bool, error) {
 	return ss.root.ReadScope(ctx, s.requestIdentity(req), sdd.ProjectID(strings.TrimSpace(project)))
 }
 
@@ -852,11 +852,11 @@ func viewHint(ss *shellSession) string {
 		" for the full filter/rank/macro vocabulary and the quoting rules"
 }
 
-func (s *Server) logRootRead(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, tool string, full, summary []string) error {
+func (s *toolSet) logRootRead(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, tool string, full, summary []string) error {
 	return ss.root.LogRead(ctx, s.requestIdentity(req), tool, full, summary)
 }
 
-func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
+func (s *toolSet) search(ctx context.Context, req *mcp.CallToolRequest, args SearchArgs) (*mcp.CallToolResult, SearchResult, error) {
 	if len(args.Terms) == 0 && args.Query == "" {
 		return nil, SearchResult{}, toolError("pass terms (text mode), query (vector mode), or both (hybrid)")
 	}
@@ -899,7 +899,7 @@ func (s *Server) search(ctx context.Context, req *mcp.CallToolRequest, args Sear
 
 }
 
-func (s *Server) view(ctx context.Context, req *mcp.CallToolRequest, args ViewArgs) (*mcp.CallToolResult, ViewResult, error) {
+func (s *toolSet) view(ctx context.Context, req *mcp.CallToolRequest, args ViewArgs) (*mcp.CallToolResult, ViewResult, error) {
 	if strings.TrimSpace(args.Layout) == "" {
 		return nil, ViewResult{}, toolError("layout is required")
 	}
@@ -1059,7 +1059,7 @@ func capValue(s string) string {
 	return fmt.Sprintf("%s\n\n[collected value truncated at %d of %d bytes — persisted in full, compressed here]", bounded.Text, bounded.Cut.KeptBytes, bounded.Cut.TotalBytes)
 }
 
-func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {
+func (s *toolSet) show(ctx context.Context, req *mcp.CallToolRequest, args ShowArgs) (*mcp.CallToolResult, ShowResult, error) {
 	if len(args.IDs) == 0 {
 		return nil, ShowResult{}, toolError("ids is required")
 	}
@@ -1093,7 +1093,7 @@ func (s *Server) show(ctx context.Context, req *mcp.CallToolRequest, args ShowAr
 
 }
 
-func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, args ReadAttachmentArgs) (*mcp.CallToolResult, ReadAttachmentResult, error) {
+func (s *toolSet) readAttachment(ctx context.Context, req *mcp.CallToolRequest, args ReadAttachmentArgs) (*mcp.CallToolResult, ReadAttachmentResult, error) {
 	maxBytes := args.MaxBytes
 	if maxBytes == 0 {
 		maxBytes = 65536
@@ -1143,7 +1143,7 @@ func (s *Server) readAttachment(ctx context.Context, req *mcp.CallToolRequest, a
 
 }
 
-func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, args InfoArgs) (*mcp.CallToolResult, InfoResult, error) {
+func (s *toolSet) info(ctx context.Context, req *mcp.CallToolRequest, args InfoArgs) (*mcp.CallToolResult, InfoResult, error) {
 	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, InfoResult{}, err
@@ -1164,7 +1164,7 @@ func (s *Server) info(ctx context.Context, req *mcp.CallToolRequest, args InfoAr
 
 }
 
-func (s *Server) registryDocs(ctx context.Context, req *mcp.CallToolRequest, args RegistryArgs) (*mcp.CallToolResult, RegistryResult, error) {
+func (s *toolSet) registryDocs(ctx context.Context, req *mcp.CallToolRequest, args RegistryArgs) (*mcp.CallToolResult, RegistryResult, error) {
 	ss, err := s.attachedSession(ctx, req, args.Session)
 	if err != nil {
 		return nil, RegistryResult{}, err
@@ -1226,7 +1226,7 @@ func composeFraming(ss *shellSession, blocks []string) string {
 // and vocabulary dedup live only in toRootServeResult: a base mapping drops
 // those fields, and recording bytes never delivered would stub them for a
 // later serve that does deliver.
-func (s *Server) serveResultBody(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
+func (s *toolSet) serveResultBody(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res := ServeResult{
 		Session: string(serve.Session), Project: string(serve.Project),
 		Branch: serve.Branch, Instance: serve.Instance, Procedure: serve.Procedure, Status: serve.Status,
@@ -1289,7 +1289,7 @@ func reportSchemaStub(serve *sdd.WorkflowServe) map[string]any {
 // toRootServeResult converts an engine serve into the tool response and records
 // what it served in full into the session ledger. The shell's open-work block
 // lists this dialogue's own threads only; other dialogues never appear.
-func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
+func (s *toolSet) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (ServeResult, error) {
 	res, err := s.serveResultBody(ctx, req, ss, serve)
 	if err != nil {
 		return ServeResult{}, err
@@ -1323,7 +1323,7 @@ func (s *Server) toRootServeResult(ctx context.Context, req *mcp.CallToolRequest
 
 // toBaseServeResult maps a serve onto the base_junction landing, which
 // carries no schema or vocabulary — so neither is recorded as served here.
-func (s *Server) toBaseServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (*BaseServe, error) {
+func (s *toolSet) toBaseServeResult(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, serve *sdd.WorkflowServe) (*BaseServe, error) {
 	body, err := s.serveResultBody(ctx, req, ss, serve)
 	if err != nil {
 		return nil, err
@@ -1342,7 +1342,7 @@ func rootBaseServe(result ServeResult) *BaseServe {
 	}
 }
 
-func (s *Server) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, source sdd.WorkflowResumeResult) (ResumeSessionResult, error) {
+func (s *toolSet) mapRootResume(ctx context.Context, req *mcp.CallToolRequest, ss *shellSession, source sdd.WorkflowResumeResult) (ResumeSessionResult, error) {
 	result := ResumeSessionResult{
 		Session: string(source.Session), Project: string(ss.root.Project()),
 		Participant: source.Participant, Label: source.Label, Branch: source.Branch,

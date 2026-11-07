@@ -7,7 +7,9 @@ package mcpapp
 // short and front-loads what matters. Tier one is the session shell's opening
 // serve (the user-dialogue base procedure); tier two is the per-step units.
 
-const serverInstructions = `This server hosts an SDD (Signal-Dialogue-Decision) graph: an append-only
+// Instructions is SDD's server instructions text. A host that registers SDD's
+// tools with [Register] includes it in its own server instructions.
+const Instructions = `This server hosts an SDD (Signal-Dialogue-Decision) graph: an append-only
 record of project observations (signals) and commitments (decisions) grown
 through dialogue between the user and their agents.
 
