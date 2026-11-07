@@ -18,6 +18,7 @@ export default defineConfig({
         {
           label: "Guides",
           items: [
+            { slug: "guides/working-with-coding-agents" },
             { slug: "guides/connected-repositories" },
             { slug: "guides/browsing-the-graph" },
           ],

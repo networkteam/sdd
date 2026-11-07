@@ -98,6 +98,7 @@ Open Claude Code or Codex in the project and type `/sdd` (Codex: `$sdd`). On a n
 - [Working modes](https://networkteam.github.io/sdd/working-modes/): the moves your agent offers and when to use each
 - [Entry kinds](https://networkteam.github.io/sdd/reference/entry-kinds/): what each kind of entry is for
 - [Configuration](https://networkteam.github.io/sdd/reference/configuration/): every setting, model and embedding providers
+- [Working with coding agents](https://networkteam.github.io/sdd/guides/working-with-coding-agents/): do's and don'ts for sessions in Claude Code and Codex
 - [Connected repositories](https://networkteam.github.io/sdd/guides/connected-repositories/): work across several graphs
 - [Browsing the graph](https://networkteam.github.io/sdd/guides/browsing-the-graph/): read the graph yourself from the terminal
 - [Vision](https://networkteam.github.io/sdd/vision/landscape/): where SDD stands and where it is heading
