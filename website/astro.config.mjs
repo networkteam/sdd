@@ -13,6 +13,7 @@ export default defineConfig({
         "Signal, Dialogue, Decision — grow a durable decision graph through dialogue.",
       plugins: [starlightThemeNova(), starlightLlmTools()],
       sidebar: [
+        { slug: "what-is-sdd" },
         { slug: "getting-started" },
         { slug: "working-modes" },
         {
