@@ -53,14 +53,14 @@ Engage itself writes nothing. The move you pick may.
 
 ## Implementation
 
-Use it when agreed work is ready to build: a [plan](/sdd/reference/entry-kinds/#plan), a [directive](/sdd/reference/entry-kinds/#directive) or an [activity](/sdd/reference/entry-kinds/#activity). "Let's implement the export plan."
+Use it when work is ready to build, usually a [plan](/sdd/reference/entry-kinds/#plan), a [directive](/sdd/reference/entry-kinds/#directive) or an [activity](/sdd/reference/entry-kinds/#activity). A [gap](/sdd/reference/entry-kinds/#gap) you want fixed or another entry works too. "Let's implement the export plan."
 
 - The agent reads what the work must deliver, including later decisions that add to it, and says whether enough is decided to start. If a decision is missing, you capture it first.
-- You choose how to run it: on the main branch, on a separate branch, in a separate git worktree, or as a quick change too small to track. Except for a quick change, the plan is marked as in progress.
+- You choose how to run it: on the main branch, on a separate branch, in a separate git worktree, or as a quick change too small to track. Except for a quick change, the entry is marked as in progress.
 - The agent builds in slices and checks in between them. A choice no decision covers stops the work until you settle it together, and what you settle is captured.
 - At the end it commits, records a done entry, and shows which criteria are met. You give the go-ahead to land it, and it offers an evaluation.
 
-It leaves a [done](/sdd/reference/entry-kinds/#done) entry citing the commits, plus any decisions captured along the way. A done that covers every criterion closes the plan; a partial one says what remains.
+It leaves a [done](/sdd/reference/entry-kinds/#done) entry citing the commits, plus any decisions captured along the way. A done that covers everything closes the entry it implements; a partial one says what remains.
 
 ## Evaluate
 
