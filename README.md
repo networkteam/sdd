@@ -34,7 +34,7 @@ SDD lets each party do what they're good at. Agents work with information and ru
 
 ## What's here today
 
-- An append-only graph of signals and decisions, with seven signal kinds and eight decision kinds
+- An append-only graph of signals and decisions, with seven kinds each
 - First-class participants: actors and the roles they play on the project
 - Topics that cluster entries across kinds and layers
 - Focus decisions that commit the project's attention to a set of entries for a period

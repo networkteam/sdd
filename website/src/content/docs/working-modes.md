@@ -46,7 +46,7 @@ Use it to work on one specific entry: "Let's look at the onboarding plan", or an
 - If you describe the entry, the agent searches and lets you pick from the candidates.
 - It reads the entry and the entries around it in full.
 - It gives you a brief shaped by the entry and your goal. For a plan you want to build, that is a table of its acceptance criteria: done, partly done or open. For an observation, it is what happened since and what it needs.
-- It proposes next moves. Some act on the entry, such as implementing, replacing or closing it. Others check other work against it, for example against a [contract](/sdd/reference/entry-kinds/#contract).
+- It proposes next moves. Some act on the entry, such as implementing, replacing or closing it. Others check other work against it, for example against an [aspiration](/sdd/reference/entry-kinds/#aspiration).
 - You pick one, and it runs as its own move.
 
 Engage itself writes nothing. The move you pick may.

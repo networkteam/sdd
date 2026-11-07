@@ -44,7 +44,9 @@ The facts live in `internal/basefacts/templates/` and render with `sdd show <id>
 | Role | `20260818-110100-s-prc-rol` | `role.md` |
 | Procedure | `20260813-170000-s-prc-prd` | `procedure.md` |
 
-Contract has no kind fact; its card follows the type overview's note that the kind takes no new entries.
+Contract is retired and takes no new entries, so the page has no card for it.
+
+Each card is a `KindCard` in `entry-kinds.mdx`: the description is its body, "Choose it over" its `choose` prop, and "How it ends" and the example its `ends` and `example` slots. The type and question come from `src/components/kinds/kinds.ts`, which also feeds the overview tiles.
 
 Leave out what only the drafting agent needs: how to word or ground the body, where figures and evidence go, topic and layer craft, and the facts' Mechanics sections. Where a fact and the code disagree, the card states what the code allows, and the disagreement is raised against the fact.
 
