@@ -3,7 +3,9 @@ title: What is SDD?
 description: The problem SDD solves, how it works, what it gives you, and who it is for today.
 ---
 
-SDD is agent-native memory for your project's decisions and the why behind them. Your agents get exactly the project context they need: what was noticed, discussed and decided. New knowledge is captured in dialogue with the people who create it, as the work happens.
+**SDD is a new way of working for people and AI agents on a project.** Agents have changed the speed of work: code and other output arrive faster than ever, and the decisions and shared understanding behind them have to keep pace. In SDD, people make the decisions and understand and shape the why behind them, with agents helping at every step. We believe that lets people and agents do better and more autonomous work.
+
+Knowledge builds up while you work. As you work with your agents through SDD, what anyone notices becomes a signal, dialogue turns signals into decisions, and the work follows. Dialogue between people, in a meeting or a chat, can be distilled into the graph the same way. Everything confirmed lands in a knowledge graph that acts as agent-native memory for the whole project, so every person and every agent starts from what was decided and why.
 
 ## The problem
 
@@ -18,9 +20,7 @@ SDD stands for Signal, Dialogue, Decision. It keeps a project's reasoning in a g
 - A **signal** records something noticed, such as a problem, a fact, an open question or finished work.
 - A **decision** records something committed to, such as a direction, a plan or a standing rule.
 
-Each entry states its reasoning and links to the entries it builds on. Entries are plain text files in your project's git repository, readable without SDD, and sdd commits each one.
-
-The graph grows in a loop. A signal meets dialogue between you and your agent and becomes a decision. When the work is done, a done entry closes the decision, and what the work turned up feeds the next signals.
+Each entry states its reasoning and links to the entries it builds on. Entries are plain text files in your project's git repository, readable without SDD, and sdd commits each one. When the work a decision asked for is done, a done entry records it and closes the decision.
 
 You take part by talking. The agent reads what the graph holds on the subject before it answers, drafts an entry when something is worth keeping, and plays it back to you. Nothing reaches the graph until you confirm it.
 
