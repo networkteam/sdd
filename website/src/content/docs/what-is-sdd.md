@@ -11,7 +11,7 @@ Knowledge builds up while you work. As you work with your agents through SDD, wh
 
 A session with an AI agent produces reasoning: what you noticed, which options you weighed, what you decided and why. When the session ends, that reasoning is gone. The next session, yours or a colleague's, starts from the project files and whatever you remember to tell the agent. Decisions made in meetings and chat fare no better. They get argued again, and every newcomer rebuilds the picture by asking around.
 
-Tools that try to keep this reasoning fail in one of two ways. Some record everything and leave a searchable pile of what was said, with no way to tell what was decided. Others spread the project's state across documents, plans, roadmaps and tickets that repeat each other and drift apart.
+In our experience, tools that try to keep this reasoning fall short in one of two ways. Some record everything and leave a searchable pile of what was said, with no way to tell what was decided. Others spread the project's state across documents, plans, roadmaps and tickets that repeat each other and drift apart.
 
 ## How SDD works
 
@@ -34,14 +34,14 @@ You take part by talking. The agent reads what the graph holds on the subject be
 
 ## Who it is for today
 
-SDD runs inside coding agents, currently Claude Code and Codex, on a project kept in git. It is for developers and teams who work with those agents, alone or together. SDD's open source core, the `sdd` program and its server, is on [GitHub](https://github.com/networkteam/sdd) under the MIT license.
+SDD runs inside coding agents, currently Claude Code and Codex, on a project kept in git. It is for developers and teams who work with those agents, alone or together. Typically you work with an agent such as Claude Code that uses SDD and the graph to augment your own work. SDD's open source core, the `sdd` program and its server, is on [GitHub](https://github.com/networkteam/sdd) under the MIT license.
 
-The aim reaches further. Product owners, designers and domain experts should take part directly, through chat, voice or a hosted version that needs no setup. Agents should work on their own within the decisions and guidelines the graph holds, while people review what comes back. These are directions, not shipped features. The [Vision](/sdd/vision/landscape/) marks what works today and what is still being built.
+The aim reaches further. Product owners, designers and domain experts should take part directly, through chat, voice or a hosted version that needs no setup. And the more of a project's decisions and guidelines the graph holds, the more freedom you have to let agents work on their own where you choose to: some things can simply be done and looked after, instead of being discussed in theory first. Throughout, the point is better decisions, made by being better informed. Parts of this are directions, not shipped features. The [Vision](/sdd/vision/landscape/) marks what works today and what is still being built.
 
 ## What SDD is not
 
-- **Not a recorder.** The graph holds reasoning, not a recording. SDD does not store the dialogue, only the entries you confirm.
-- **Not a ticket system or a set of documents to maintain.** There are no assignment queues, status workflows or boards. The graph itself answers what is open, who is on it and what waits next.
+- **Not a recorder.** The graph holds the project's shared current understanding, not a recording of how it was reached. An entry can carry the dialogue behind it, such as a transcript, as an attachment, but what the graph says is what you confirmed.
+- **Not a ticket system or a set of documents to maintain by hand.** Nobody keeps status fields, queues or boards up to date. Overviews are derived from the graph: today the agent's briefings and `sdd view` layouts, later boards and similar views. The raw graph quickly grows too large for people to work through directly, so agents read much more of it and align with you on what matters right now.
 - **Not an agent writing your record on its own.** The agent reads, drafts and runs the steps. Today you confirm every entry, and only you can override a pre-flight finding.
 
 ## Next steps
