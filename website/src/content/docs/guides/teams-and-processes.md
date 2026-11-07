@@ -19,7 +19,7 @@ Each person works in their own sessions with their own agent. The graph is what 
 
 ## Who takes part
 
-Developers, and more and more people in product, UX and project lead roles. They run the same kind of agent session but start from a different question. Not "How can I implement that?" but "This is the customer need. What do we have? How could we do it? What are the approaches?"
+Developers, and more and more people in product, UX and project lead roles. They run the same kind of agent session but start from a different question. Not "How can I implement that?" but "This is the customer need. Why does the customer need it? What do we have? How could we do it? What are the approaches?" Ask why again of each answer until you understand the background well. That understanding helps the team align later.
 
 That gives them direct access to the technical background, so they can shape requirements without involving a developer at every point. What they work out goes back into the graph as observations, questions and directives.
 
