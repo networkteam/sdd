@@ -13,11 +13,16 @@ export default defineConfig({
         "Signal, Dialogue, Decision — grow a durable decision graph through dialogue.",
       plugins: [starlightThemeNova(), starlightLlmTools()],
       sidebar: [
-        { slug: "about" },
+        { slug: "getting-started" },
+        {
+          label: "Reference",
+          items: [{ slug: "reference/entry-kinds" }],
+        },
         {
           label: "Vision",
           items: [{ slug: "vision/landscape" }, { slug: "vision/scenes" }],
         },
+        { slug: "about" },
       ],
       social: [
         {
