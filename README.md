@@ -4,7 +4,7 @@
 
 **SDD is a new way of working for people and AI agents on a project.** Agents have changed the speed of work: code and other output arrive faster than ever, and the decisions and shared understanding behind them have to keep pace. In SDD, people make the decisions and understand and shape the why behind them, with agents helping at every step. We believe that lets people and agents do better and more autonomous work.
 
-Knowledge builds up while you work: what anyone notices becomes a signal, and dialogue turns signals into decisions, between you and your agents or among people. Everything confirmed lands in a knowledge graph of signals and decisions that acts as agent-native memory for the whole project. At any moment, anyone, human or agent, can see what's in flight, which decisions are active and what's still open. Built for developers and teams shipping with AI agents.
+Knowledge builds up while you work: what anyone notices becomes a signal, and dialogue turns signals into decisions, between you and your agents or among people. Everything confirmed lands in a graph of signals and decisions that acts as agent-native memory for the whole project, and the procedures your agent follows live in the same graph, so it shapes how the work runs too. At any moment, anyone, human or agent, can see what's in flight, which decisions are active and what's still open. Built for developers and teams shipping with AI agents.
 
 This repository is the open source core of SDD: the `sdd` binary, its MCP server and the Go packages to embed it.
 

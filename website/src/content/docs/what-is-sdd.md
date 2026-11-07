@@ -5,7 +5,7 @@ description: The problem SDD solves, how it works, what it gives you, and who it
 
 **SDD is a new way of working for people and AI agents on a project.** Agents have changed the speed of work: code and other output arrive faster than ever, and the decisions and shared understanding behind them have to keep pace. In SDD, people make the decisions and understand and shape the why behind them, with agents helping at every step. We believe that lets people and agents do better and more autonomous work.
 
-Knowledge builds up while you work. As you work with your agents through SDD, what anyone notices becomes a signal, dialogue turns signals into decisions, and the work follows. Dialogue between people, in a meeting or a chat, can be distilled into the graph the same way. Everything confirmed lands in a knowledge graph that acts as agent-native memory for the whole project, so every person and every agent starts from what was decided and why.
+Knowledge builds up while you work. As you work with your agents through SDD, what anyone notices becomes a signal, dialogue turns signals into decisions, and the work follows. Dialogue between people, in a meeting or a chat, can be distilled into the graph the same way. Everything confirmed lands in a graph that acts as agent-native memory for the whole project, so every person and every agent starts from what was decided and why. The graph also shapes the work: the procedures your agent follows are entries in it, so a project adapts how it works the same way it records what it decided. It is information and process at once.
 
 ## The problem
 
