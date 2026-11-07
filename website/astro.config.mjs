@@ -25,7 +25,6 @@ export default defineConfig({
             { slug: "guides/teams-and-processes" },
             { slug: "guides/connected-repositories" },
             { slug: "guides/browsing-the-graph" },
-            { slug: "guides/teams-and-processes" },
           ],
         },
         {
