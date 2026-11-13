@@ -12,7 +12,7 @@ import (
 	sdd "github.com/networkteam/sdd/pkg/application"
 )
 
-// Options configures a workflow MCP server.
+// Options configures SDD's workflow tools.
 type Options struct {
 	// Application is the protocol-neutral SDD runtime. The server pins no
 	// project: start_session selects one inside the dialogue, a sole
@@ -30,13 +30,14 @@ type Options struct {
 	// (stdio transport). Local clients get absolute paths in read results
 	// (read_attachment) so they can read files directly instead of paging.
 	LocalClient bool
-	Version     string
+	// Version is the SDD version the info tool reports, and the server
+	// implementation version under New.
+	Version string
 }
 
-// Server wires the MCP protocol surface to the engine and the SDD read and
-// write layers.
-type Server struct {
-	mcp            *mcp.Server
+// toolSet carries what SDD's tool handlers need, independent of the server
+// they are registered on.
+type toolSet struct {
 	app            *sdd.Application
 	searchSyncMode sdd.SearchSyncMode
 	localIdentity  sdd.RequestIdentity
@@ -46,6 +47,50 @@ type Server struct {
 	// about a dialogue: nothing is keyed to a connection, and no connection
 	// event acts on a session (d-cpt-aen).
 	sessions *sessionCache
+}
+
+func newToolSet(opts Options) (*toolSet, error) {
+	if !opts.SearchSyncMode.Valid() {
+		return nil, errors.New("mcpapp: SearchSyncMode is required: none, local, or all")
+	}
+	if opts.Application == nil {
+		return nil, errors.New("mcpapp: Application is required")
+	}
+	return &toolSet{
+		app:            opts.Application,
+		searchSyncMode: opts.SearchSyncMode,
+		localIdentity:  opts.LocalIdentity,
+		local:          opts.LocalClient,
+		version:        opts.Version,
+		sessions:       newSessionCache(),
+	}, nil
+}
+
+// Register adds SDD's workflow tools to a server the host constructs, beside
+// any tools of the host's own (d-tac-d3f). The host owns that server: its
+// implementation name and version, its instructions, composed around
+// [Instructions], its transport and handler, its authentication, and its
+// lifecycle. SDD's tools derive nothing from the connection, so any transport
+// serves them.
+//
+// The MCP SDK replaces a tool registered under an existing name without error:
+// a host tool must not reuse one of SDD's tool names.
+func Register(server *mcp.Server, opts Options) error {
+	if server == nil {
+		return errors.New("mcpapp: server is required")
+	}
+	tools, err := newToolSet(opts)
+	if err != nil {
+		return err
+	}
+	tools.register(server)
+	return nil
+}
+
+// Server is an MCP server carrying SDD's tools alone, for compositions that
+// add no tools of their own. It owns the transport and the lifecycle.
+type Server struct {
+	mcp *mcp.Server
 
 	lifecycleMu sync.Mutex
 	closing     bool
@@ -55,30 +100,22 @@ type Server struct {
 // graceful shutdown began.
 var ErrServerClosing = errors.New("mcpapp: server is shutting down")
 
-// New constructs the server and registers the workflow tool surface.
+// New constructs a server named sdd and registers SDD's tools on it.
 func New(opts Options) (*Server, error) {
-	if !opts.SearchSyncMode.Valid() {
-		return nil, errors.New("mcpapp: SearchSyncMode is required: none, local, or all")
-	}
-	if opts.Application == nil {
-		return nil, errors.New("mcpapp: Application is required")
+	tools, err := newToolSet(opts)
+	if err != nil {
+		return nil, err
 	}
 	s := &Server{
-		app:            opts.Application,
-		searchSyncMode: opts.SearchSyncMode,
-		localIdentity:  opts.LocalIdentity,
-		local:          opts.LocalClient,
-		version:        opts.Version,
-		sessions:       newSessionCache(),
+		mcp: mcp.NewServer(&mcp.Implementation{
+			Name:    "sdd",
+			Version: opts.Version,
+		}, &mcp.ServerOptions{
+			Instructions: Instructions,
+		}),
 	}
-	s.mcp = mcp.NewServer(&mcp.Implementation{
-		Name:    "sdd",
-		Version: opts.Version,
-	}, &mcp.ServerOptions{
-		Instructions: serverInstructions,
-	})
 	s.mcp.AddReceivingMiddleware(s.refuseWhileClosing)
-	s.registerTools()
+	tools.register(s.mcp)
 	return s, nil
 }
 

@@ -37,7 +37,7 @@ func publicIdentityFromRequest(req *mcp.CallToolRequest) sdd.RequestIdentity {
 	return sdd.RequestIdentity{Subject: identity.Subject, Scopes: identity.Scopes, Attributes: identity.Attributes}
 }
 
-func (s *Server) requestIdentity(req *mcp.CallToolRequest) sdd.RequestIdentity {
+func (s *toolSet) requestIdentity(req *mcp.CallToolRequest) sdd.RequestIdentity {
 	identity := publicIdentityFromRequest(req)
 	if identity.Subject == "" && s.localIdentity.Subject != "" {
 		return s.localIdentity

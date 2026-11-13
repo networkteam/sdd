@@ -1,8 +1,10 @@
 // Package mcpapp adapts the protocol-neutral SDD application to MCP.
 //
-// New registers the shared tool surface over an application.Application. Handler
-// exposes stateless Streamable HTTP so an embedding composition can
-// place its own authentication middleware in front. Authentication middleware
+// Register adds the shared tool surface over an application.Application to an
+// MCP server the host constructs, beside tools of the host's own. New builds a
+// server carrying SDD's tools alone; its Handler exposes stateless Streamable
+// HTTP so an embedding composition can place its own authentication middleware
+// in front. Authentication middleware
 // must populate the MCP SDK's TokenInfo on every request; mcpapp translates
 // that current request identity into application.RequestIdentity and never treats the
 // session's initialization identity as authorization proof.
