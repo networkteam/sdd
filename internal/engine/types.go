@@ -43,6 +43,8 @@ const (
 	TypeInvolvement       BaseType = "involvement"
 	TypeInvolvementWhen   BaseType = "involvement-when"
 	TypeSearchReplace     BaseType = "search-replace"
+	// TypeTitle is an entry title, stored in model.ParseTitle's form.
+	TypeTitle BaseType = "title"
 	// TypeProse validates exactly like text; the distinct declaration tells
 	// serve-side rendering to treat changes as content diffs rather than
 	// whole-value re-serves (20260826-120330-d-tac-8f8).
@@ -55,7 +57,7 @@ var baseTypeOrder = []BaseType{
 	TypeText, TypeBool, TypeEntryID, TypeRef, TypeLabel, TypeParticipant,
 	TypeEntryKind, TypeLayer, TypeConfidence, TypeIntent, TypeAttachmentHandle,
 	TypeProcedureSpec, TypeFactIndex, TypePreflightFindings, TypeGuideFindings,
-	TypeInvolvement, TypeInvolvementWhen, TypeSearchReplace, TypeProse,
+	TypeInvolvement, TypeInvolvementWhen, TypeSearchReplace, TypeProse, TypeTitle,
 }
 
 var baseTypes = func() map[BaseType]bool {
@@ -95,6 +97,7 @@ var baseTypeDesc = map[BaseType]string{
 	TypeInvolvement:       "a focus involvement: target entry, optional actors, optional time range",
 	TypeInvolvementWhen:   "a from/to date range",
 	TypeSearchReplace:     "one exact edit: old text that must match exactly once in the target, and the new text replacing it",
+	TypeTitle:             "an entry title naming the subject on one-line listings: one line, normalized on arrival",
 	TypeProse:             "long-form prose — like text, but serves render changes as content diffs instead of re-serving the whole value",
 }
 
@@ -172,6 +175,17 @@ func validateBaseValue(base BaseType, v any) (any, error) {
 			return nil, fmt.Errorf("expected text (string)")
 		}
 		return s, nil
+
+	case TypeTitle:
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("expected title (string)")
+		}
+		// Empty is a title left out, as an omitted optional field is.
+		if s == "" {
+			return s, nil
+		}
+		return model.ParseTitle(s)
 
 	case TypeBool:
 		b, ok := v.(bool)

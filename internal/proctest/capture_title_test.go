@@ -71,8 +71,8 @@ func TestCapture_DriftedWithoutACorrectionIsRefused(t *testing.T) {
 	}
 }
 
-// An unusable corrected title is refused before the write, so the capture
-// takes the next correction.
+// An unusable corrected title is refused before anything is stored, so the
+// next correction may leave the title out.
 func TestCapture_UnusableCorrectedTitleIsRefused(t *testing.T) {
 	cases := []struct {
 		name, title, want string
@@ -98,8 +98,12 @@ func TestCapture_UnusableCorrectedTitleIsRefused(t *testing.T) {
 			if got := proctest.LoadEntry(t, world.GraphDir, entryID).Title; got != "Generated title" {
 				t.Errorf("a refused title should leave the stored one, got %q", got)
 			}
-			serve = session.Answer(t, instance, "verifySummary", "drifted", map[string]any{"correctedTitle": "Corrected title"}, "")
+			serve = session.Answer(t, instance, "verifySummary", "drifted", map[string]any{"correctedSummary": "The corrected summary."}, "")
 			proctest.RequireStatus(t, serve, "completed")
+			entry := proctest.LoadEntry(t, world.GraphDir, entryID)
+			if entry.Title != "Generated title" || entry.Summary != "The corrected summary." {
+				t.Errorf("the summary-only correction should replace the summary alone, got title %q summary %q", entry.Title, entry.Summary)
+			}
 		})
 	}
 }
