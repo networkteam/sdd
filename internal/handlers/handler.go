@@ -63,6 +63,16 @@ type Mover interface {
 	Move(src, dst string) error
 }
 
+// ChangeReader reads the working tree against HEAD, so files a failed commit
+// left on disk can be found and committed.
+type ChangeReader interface {
+	// ModifiedFiles lists tracked files under dir whose working copy differs
+	// from HEAD, as absolute paths.
+	ModifiedFiles(ctx context.Context, dir string) ([]string, error)
+	// HeadContent returns the file at path as HEAD records it.
+	HeadContent(ctx context.Context, path string) ([]byte, error)
+}
+
 // Puller is the git surface for `sdd sync --pull`: a merge-only pull that
 // never rewrites the shared graph's history. Injected so tests can fake the
 // working-tree state and the pull without shelling out to git.
@@ -89,6 +99,7 @@ type Handler struct {
 	brancher  Brancher
 	mover     Mover
 	puller    Puller
+	changes   ChangeReader
 	repos     *repos.Manager
 	stderr    io.Writer
 	now       func() time.Time
@@ -105,6 +116,9 @@ type Options struct {
 	Brancher  Brancher
 	Mover     Mover
 	Puller    Puller
+	// Changes finds the entry files a failed commit left on disk; nil
+	// leaves them uncommitted.
+	Changes ChangeReader
 	// Repos owns the connected-repos side effects (clone, pull, config
 	// writes). Nil means no connected-repos support — repo commands fail
 	// loud, and cross-repo cache freshening is skipped.
@@ -134,6 +148,7 @@ func New(opts Options) *Handler {
 		brancher:  opts.Brancher,
 		mover:     opts.Mover,
 		puller:    opts.Puller,
+		changes:   opts.Changes,
 		repos:     opts.Repos,
 		stderr:    opts.Stderr,
 		now:       opts.Now,

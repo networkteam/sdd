@@ -22,6 +22,9 @@ type SummarizeCmd struct {
 	// ExplicitTitle, when non-nil, is written as the entry's title directly,
 	// under the same single-entry rule as ExplicitText and combinable with it.
 	ExplicitTitle *string
+	// OnPlanned is called once, before any generation, with the number of
+	// entries the run will fill.
+	OnPlanned func(n int)
 	// OnSummarized is called for each entry that gets a new summary.
 	OnSummarized func(id, summary string)
 	// OnTitled is called for each entry that gets a new title while keeping
@@ -30,4 +33,12 @@ type SummarizeCmd struct {
 	// OnSkipped is called for each --all entry skipped because it already has
 	// a summary and a title.
 	OnSkipped func(id string)
+}
+
+// CommitStrandedTitlesCmd captures intent to commit entry files that hold a
+// title on disk but not at HEAD.
+type CommitStrandedTitlesCmd struct {
+	// OnCommitted fires after the stranded files were committed, carrying
+	// their count.
+	OnCommitted func(count int)
 }

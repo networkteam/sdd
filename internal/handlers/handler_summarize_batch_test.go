@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -228,5 +229,55 @@ func TestSummarize_NamedEntry_RegeneratesUnconditionally(t *testing.T) {
 	}
 	if text := readEntryFile(t, graphDir, summarizedEntry); !strings.Contains(text, "summary: GENERATED") || !strings.Contains(text, "title: "+storedTitle) {
 		t.Errorf("named entry should regenerate summary and title:\n%s", text)
+	}
+}
+
+// failingTitleRunner answers the paired call and fails the title-only call,
+// so one entry of a batch fails while another succeeds.
+type failingTitleRunner struct{ stubRunner }
+
+func (r *failingTitleRunner) Run(ctx context.Context, request llm.Request) (llm.Result, error) {
+	if request.Purpose == llm.PurposeTitle {
+		return llm.Result{}, errors.New("title route unavailable")
+	}
+	return r.stubRunner.Run(ctx, request)
+}
+
+func TestSummarize_All_CommitsWhatItWroteBeforeAFailure(t *testing.T) {
+	graphDir := t.TempDir()
+	writeSummarizePair(t, graphDir)
+
+	committer := &pathRecordingCommitter{}
+	h := handlers.New(handlers.Options{
+		GraphDir:  graphDir,
+		Reader:    &graphReader{},
+		Committer: committer,
+		LLMRunner: &failingTitleRunner{stubRunner{text: "GENERATED"}},
+	})
+	err := h.Summarize(context.Background(), &command.SummarizeCmd{})
+	if err == nil || !strings.Contains(err.Error(), "title route unavailable") {
+		t.Fatalf("a failed entry should fail the run, got %v", err)
+	}
+	if !strings.Contains(readEntryFile(t, graphDir, emptyEntry), "summary: GENERATED") {
+		t.Fatal("the entry that succeeded should be written")
+	}
+	emptyRel, _ := model.IDToRelPath(emptyEntry)
+	if len(committer.paths) != 1 || committer.paths[0] != filepath.Join(graphDir, emptyRel) {
+		t.Errorf("what the run wrote should be committed despite the failure, got %v", committer.paths)
+	}
+}
+
+func TestSummarize_All_PlansWhatItFills(t *testing.T) {
+	graphDir := t.TempDir()
+	writeSummarizePair(t, graphDir)
+	writeTitledEntry(t, graphDir)
+	h := handlers.New(handlers.Options{GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{}, LLMRunner: &stubRunner{text: "GENERATED", numbered: true}})
+
+	planned := -1
+	if err := h.Summarize(context.Background(), &command.SummarizeCmd{OnPlanned: func(n int) { planned = n }}); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if planned != 2 {
+		t.Errorf("the plan should count only the entries the run fills, got %d", planned)
 	}
 }

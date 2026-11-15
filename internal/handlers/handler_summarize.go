@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,6 +110,9 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 		}
 		planned = append(planned, entry)
 	}
+	if cmd.OnPlanned != nil {
+		cmd.OnPlanned(len(planned))
+	}
 
 	var finder *finders.SearchFinder
 	if len(planned) > 0 {
@@ -195,22 +199,20 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		return err
-	}
-
-	// Commit all changes in one batch.
+	// A failed entry still commits what the others wrote in one batch: a
+	// rerun skips entries already filled, so an uncommitted file would never
+	// be committed.
+	runErr := g.Wait()
 	if h.committer != nil && len(commitPaths) > 0 {
 		msg := fmt.Sprintf("sdd: summarize %d entries", len(commitPaths))
 		if len(cmd.EntryIDs) == 1 {
 			msg = fmt.Sprintf("sdd: summarize %s", cmd.EntryIDs[0])
 		}
 		if err := h.committer.Commit(msg, commitPaths...); err != nil {
-			return fmt.Errorf("git commit: %w", err)
+			return errors.Join(runErr, fmt.Errorf("git commit: %w", err))
 		}
 	}
-
-	return nil
+	return runErr
 }
 
 // summarizeExplicit writes a user-supplied summary, title or both on a single
