@@ -2,10 +2,7 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 
 	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/index"
@@ -27,24 +24,6 @@ type TitleSearchFunc func(ctx context.Context) (embed.Embedder, *index.Index, er
 
 func (f TitleSearchFunc) OpenTitleSearch(ctx context.Context) (embed.Embedder, *index.Index, error) {
 	return f(ctx)
-}
-
-// SearchIndexDir opens the search index stored in the directory it names.
-type SearchIndexDir string
-
-func (d SearchIndexDir) OpenSearchIndex(context.Context) (*index.Index, error) {
-	_, err := os.Stat(string(d))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading the search index: %w", err)
-	}
-	store, err := index.Open(string(d))
-	if err != nil {
-		return nil, fmt.Errorf("opening the search index: %w", err)
-	}
-	return store, nil
 }
 
 // openTitleSearch opens the vector search a title call's similar titles come

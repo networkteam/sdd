@@ -99,6 +99,23 @@ type Index struct {
 	dirty bool
 }
 
+// OpenBuilt opens the index under indexDir, or returns nil without creating
+// one where none is built.
+func OpenBuilt(indexDir string) (*Index, error) {
+	_, err := os.Stat(indexDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the search index: %w", err)
+	}
+	store, err := Open(indexDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening the search index: %w", err)
+	}
+	return store, nil
+}
+
 // Open opens or creates the persistent index under indexDir. The chromem
 // store lives in indexDir/chromem; the manifest sidecar at
 // indexDir/manifest.json (managed by callers via LoadManifest/Save).

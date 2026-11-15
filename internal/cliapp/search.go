@@ -188,7 +188,7 @@ func withTitleSearch(cmd *cli.Command, opts handlers.Options) handlers.Options {
 		if err != nil {
 			return nil, nil, err
 		}
-		store, err := handlers.SearchIndexDir(dir).OpenSearchIndex(ctx)
+		store, err := index.OpenBuilt(dir)
 		if err != nil || store == nil {
 			return nil, nil, err
 		}

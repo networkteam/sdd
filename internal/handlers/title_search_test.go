@@ -372,17 +372,6 @@ func TestNewEntry_SimilarSearchFailureWritesTheEntryAndFails(t *testing.T) {
 	}
 }
 
-func TestSearchIndexDir_OpensNoIndexWhereNoneIsBuilt(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "index")
-	store, err := handlers.SearchIndexDir(dir).OpenSearchIndex(context.Background())
-	if err != nil || store != nil {
-		t.Fatalf("a missing index should open as none, got %v, %v", store, err)
-	}
-	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("opening a missing index should not create it, got %v", err)
-	}
-}
-
 // One worker's embedding call waits until another worker has written its
 // entry; the write needs the graph's write lock, so the embedding call must
 // not hold the graph lock.

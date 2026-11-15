@@ -104,7 +104,7 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 	regenerate := !isAll || cmd.Force
 	var planned []*model.Entry
 	for _, entry := range entries {
-		if !regenerate && entry.Summary != "" && entry.Title != "" {
+		if !regenerate && !entry.Unfilled() {
 			if cmd.OnSkipped != nil {
 				cmd.OnSkipped(entry.ID)
 			}
