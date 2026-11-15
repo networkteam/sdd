@@ -7,10 +7,9 @@ import "github.com/networkteam/sdd/internal/model"
 type SummarizeCmd struct {
 	// EntryIDs lists specific entries to summarize. Empty means --all.
 	EntryIDs []string
-	// Force, on an --all run, regenerates every entry rather than filling
-	// only what is missing: an entry without a summary gets both, an entry
-	// with a summary but no title gets a title and keeps its summary. Named
-	// entries always regenerate both, so Force has no effect on them.
+	// Force, on an --all run, regenerates the Only fields of every entry
+	// rather than filling only what is missing. Named entries always
+	// regenerate them, so Force has no effect on them.
 	Force bool
 	// Only limits the fields the run writes; the zero value writes both. A
 	// field outside it keeps what the entry stores, on named entries, --all

@@ -451,6 +451,39 @@ func TestSummarize_All_CommitsWhatItWroteBeforeAFailure(t *testing.T) {
 	}
 }
 
+// cancellingRunner answers its first call, then cancels the run as Ctrl-C does.
+type cancellingRunner struct {
+	stubRunner
+	cancel context.CancelFunc
+}
+
+func (r *cancellingRunner) Run(ctx context.Context, request llm.Request) (llm.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return llm.Result{}, err
+	}
+	defer r.cancel()
+	return r.stubRunner.Run(ctx, request)
+}
+
+func TestSummarize_All_CommitsWhatItWroteWhenCancelled(t *testing.T) {
+	graphDir := t.TempDir()
+	writeSummarizePair(t, graphDir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	committer := &pathRecordingCommitter{}
+	h := handlers.New(handlers.Options{
+		GraphDir: graphDir, Reader: &graphReader{}, Committer: committer,
+		LLMRunner: &cancellingRunner{stubRunner: stubRunner{text: "GENERATED"}, cancel: cancel},
+	})
+	err := h.Summarize(ctx, &command.SummarizeCmd{Concurrency: 1})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the cancelled run should fail with the cancellation, got %v", err)
+	}
+	if len(committer.paths) != 1 {
+		t.Errorf("the entry written before the cancellation should be committed, got %v", committer.paths)
+	}
+}
+
 func TestSummarize_All_PlansWhatItFills(t *testing.T) {
 	graphDir := t.TempDir()
 	writeSummarizePair(t, graphDir)
