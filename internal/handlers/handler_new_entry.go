@@ -24,14 +24,6 @@ import (
 // Returns only errors. On dry-run success, returns nil without invoking
 // the callback (no entry was created).
 func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retErr error) {
-	if err := cmd.Validate(); err != nil {
-		return fmt.Errorf("invalid command: %w", err)
-	}
-	title := model.NormalizeTitle(cmd.Title)
-	if err := model.CheckTitle(title); err != nil {
-		return fmt.Errorf("--title: %w", err)
-	}
-
 	stdinAtt := cmd.StdinAttachment()
 	stdinSaved := false
 
@@ -58,6 +50,17 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	// this safe to compose with explicit calls later in the flow.
 	if cmd.DryRun {
 		defer reportSavedStdin("dry-run")
+	}
+
+	if err := cmd.Validate(); err != nil {
+		return fmt.Errorf("invalid command: %w", err)
+	}
+	title := model.NormalizeTitle(cmd.Title)
+	if title == "" && cmd.Title != "" {
+		return fmt.Errorf("--title value is empty after trimming whitespace, quotes and trailing punctuation")
+	}
+	if err := model.CheckTitle(title); err != nil {
+		return fmt.Errorf("--title: %w", err)
 	}
 
 	// Build the entry in-memory.

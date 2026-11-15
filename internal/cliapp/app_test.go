@@ -1,6 +1,7 @@
 package cliapp_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -116,6 +117,21 @@ func TestCLIWriteHandlerUsesErrorStream(t *testing.T) {
 	assertContainsOutput(t, "stderr", result.stderr, "warning: pre-flight validation skipped")
 	if result.stdout != "" {
 		t.Errorf("dry run emitted a result: %s", result.stdout)
+	}
+}
+
+func TestNewRefusesABlankTitle(t *testing.T) {
+	for _, title := range []string{"", "   "} {
+		t.Run(fmt.Sprintf("%q", title), func(t *testing.T) {
+			f := newFillFixture(t)
+			result := f.run(t, "new", "--confidence", "high", "--skip-preflight", "--summary", "A supplied summary.", "--title", title, "s", "tac", "A signal with a blank title.")
+			if result.err == nil || !strings.Contains(result.err.Error(), "--title value is empty") {
+				t.Fatalf("a blank --title should be refused, got %v\n%s", result.err, result.stderr)
+			}
+			if result.stdout != "" {
+				t.Errorf("no entry should be written, got %s", result.stdout)
+			}
+		})
 	}
 }
 

@@ -187,27 +187,70 @@ func TestNewEntry_SummaryFailure_IsLoudAndDurable(t *testing.T) {
 	}
 }
 
-func TestNewEntry_MultiLineTitleIsRefused(t *testing.T) {
-	tmp := t.TempDir()
-	sddDir := filepath.Join(tmp, ".sdd")
-	if err := os.MkdirAll(sddDir, 0755); err != nil {
-		t.Fatal(err)
+func TestNewEntry_UnusableTitleIsRefused(t *testing.T) {
+	cases := []struct {
+		name, title, want string
+	}{
+		{name: "two lines", title: "Supplied\ntitle", want: "more than one line"},
+		{name: "nothing left once normalized", title: " … ", want: "--title value is empty"},
 	}
-	h := handlers.New(handlers.Options{
-		GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: &recordingCommitter{},
-		LLMRunner: &trippingRunner{t: t}, Stderr: &bytes.Buffer{},
-	})
-	var id string
-	err := h.NewEntry(context.Background(), &command.NewEntryCmd{
-		Type: model.TypeSignal, Layer: model.LayerTactical, Description: "a title on two lines",
-		Summary: "A supplied summary.", Title: "Supplied\ntitle", SkipPreflight: true,
-		OnNewEntry: func(newID, _ string) { id = newID },
-	})
-	if err == nil || !strings.Contains(err.Error(), "more than one line") {
-		t.Fatalf("a title spanning two lines should be refused, got %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			h := handlers.New(handlers.Options{
+				GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: &recordingCommitter{},
+				LLMRunner: &trippingRunner{t: t}, Stderr: &bytes.Buffer{},
+			})
+			var id string
+			err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerTactical, Description: "an unusable title",
+				Summary: "A supplied summary.", Title: tc.title, SkipPreflight: true,
+				OnNewEntry: func(newID, _ string) { id = newID },
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("an unusable title should be refused, got %v", err)
+			}
+			if id != "" {
+				t.Errorf("no entry should be written, got %s", id)
+			}
+		})
 	}
-	if id != "" {
-		t.Errorf("no entry should be written, got %s", id)
+}
+
+// A dry run keeps piped stdin even when the command is refused before any
+// graph work.
+func TestNewEntry_DryRun_SavesStdinOnAnEarlyRefusal(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  command.NewEntryCmd
+	}{
+		{name: "invalid command", cmd: command.NewEntryCmd{Type: model.TypeSignal}},
+		{name: "unusable title", cmd: command.NewEntryCmd{Type: model.TypeSignal, Layer: model.LayerTactical, Title: "Supplied\ntitle"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			stderr := &bytes.Buffer{}
+			h := handlers.New(handlers.Options{GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Stderr: stderr})
+			cmd := tc.cmd
+			cmd.Description = "a refused dry run"
+			cmd.Attachments = []command.Attachment{{Source: "-", Target: "plan.md", Data: []byte("piped plan")}}
+			cmd.SkipPreflight, cmd.DryRun = true, true
+			if err := h.NewEntry(context.Background(), &cmd); err == nil {
+				t.Fatal("the command should be refused")
+			}
+			if !strings.Contains(stderr.String(), "stdin attachment saved (dry-run)") {
+				t.Errorf("the piped attachment should be saved for the retry:\n%s", stderr.String())
+			}
+		})
 	}
 }
 
@@ -954,20 +997,18 @@ func TestNewEntry_NormalizesTheSuppliedTitle(t *testing.T) {
 		name      string
 		title     string
 		wantTitle string
-		wantCalls int
 	}{
 		{name: "quotes and trailing punctuation removed", title: `"Supplied" title.`, wantTitle: "Supplied title"},
 		{name: "a question mark kept", title: "Should the daemon go?", wantTitle: "Should the daemon go?"},
 		{name: "a leading code span kept", title: "`sdd` info JSON output", wantTitle: "`sdd` info JSON output"},
 		{name: "a long title stored whole", title: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance", wantTitle: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance"},
-		{name: "nothing left is generated", title: " … ", wantTitle: storedTitle, wantCalls: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &stubRunner{text: "GENERATED"}
 			entry := newTitledEntry(t, runner, "A supplied summary.", tc.title)
-			if runner.callCount() != tc.wantCalls {
-				t.Errorf("a usable supplied title should cost no call, an emptied one a title call, got %d calls", runner.callCount())
+			if runner.callCount() != 0 {
+				t.Errorf("a usable supplied title should cost no call, got %d calls", runner.callCount())
 			}
 			if entry.Title != tc.wantTitle {
 				t.Errorf("the stored title should be the normalized one, got %q", entry.Title)
