@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -53,6 +55,17 @@ func NormalizeTitle(title string) string {
 		return title
 	}
 	return string(unicode.ToTitle(first)) + title[size:]
+}
+
+// ErrMultiLineTitle refuses a title no one-line listing can show.
+var ErrMultiLineTitle = errors.New("the title spans more than one line")
+
+// CheckTitle refuses a title every writer must refuse before storing it.
+func CheckTitle(title string) error {
+	if strings.ContainsAny(title, "\r\n") {
+		return fmt.Errorf("%w: %q", ErrMultiLineTitle, title)
+	}
+	return nil
 }
 
 // SimilarTitleCount is how many titles of the entries nearest an entry's body

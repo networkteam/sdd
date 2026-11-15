@@ -27,6 +27,10 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("invalid command: %w", err)
 	}
+	title := model.NormalizeTitle(cmd.Title)
+	if err := model.CheckTitle(title); err != nil {
+		return fmt.Errorf("--title: %w", err)
+	}
 
 	stdinAtt := cmd.StdinAttachment()
 	stdinSaved := false
@@ -135,7 +139,6 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 
 	var described *llmops.DescriptionResult
 	var describeErr error
-	title := model.NormalizeTitle(cmd.Title)
 
 	// A caller-supplied summary is taken verbatim; only a missing title still
 	// costs a call.

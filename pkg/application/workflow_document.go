@@ -34,9 +34,12 @@ func (w *WorkflowSession) prepareWorkflowReplaceSummary(ctx *engine.Context) (ma
 		return nil, fmt.Errorf("replaceSummary: entryId is not set")
 	}
 	_, hasSummary := workflowStoreString(ctx.Store, "correctedSummary")
-	_, hasTitle := workflowStoreString(ctx.Store, "correctedTitle")
+	title, hasTitle := workflowStoreString(ctx.Store, "correctedTitle")
 	if !hasSummary && !hasTitle {
 		return nil, fmt.Errorf("replaceSummary: neither correctedSummary nor correctedTitle is set")
+	}
+	if err := model.CheckTitle(model.NormalizeTitle(title)); err != nil {
+		return nil, fmt.Errorf("replaceSummary: correctedTitle: %w", err)
 	}
 	target, fromBinding := w.effectiveTargetFor(w.instanceProject(ctx.Instance), ctx.Store)
 	if err := w.authorizeTarget(target.Project, AccessWrite); err != nil {

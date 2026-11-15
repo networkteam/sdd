@@ -187,6 +187,30 @@ func TestNewEntry_SummaryFailure_IsLoudAndDurable(t *testing.T) {
 	}
 }
 
+func TestNewEntry_MultiLineTitleIsRefused(t *testing.T) {
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	h := handlers.New(handlers.Options{
+		GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: &recordingCommitter{},
+		LLMRunner: &trippingRunner{t: t}, Stderr: &bytes.Buffer{},
+	})
+	var id string
+	err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+		Type: model.TypeSignal, Layer: model.LayerTactical, Description: "a title on two lines",
+		Summary: "A supplied summary.", Title: "Supplied\ntitle", SkipPreflight: true,
+		OnNewEntry: func(newID, _ string) { id = newID },
+	})
+	if err == nil || !strings.Contains(err.Error(), "more than one line") {
+		t.Fatalf("a title spanning two lines should be refused, got %v", err)
+	}
+	if id != "" {
+		t.Errorf("no entry should be written, got %s", id)
+	}
+}
+
 // The failure's hint fills what is missing and keeps what the caller supplied.
 func TestNewEntry_SummaryFailureHint_KeepsTheSuppliedField(t *testing.T) {
 	cases := []struct {

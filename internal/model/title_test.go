@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -79,6 +80,25 @@ func TestNormalizeTitle(t *testing.T) {
 		t.Run(tc.in, func(t *testing.T) {
 			if got := model.NormalizeTitle(tc.in); got != tc.want {
 				t.Errorf("double quotes and trailing punctuation but a question mark should go and a first letter outside a code span become a capital, got %q", got)
+			}
+		})
+	}
+}
+
+func TestCheckTitle(t *testing.T) {
+	cases := []struct {
+		title   string
+		refused bool
+	}{
+		{title: "Daemon project removal"},
+		{title: "Daemon\nremoval", refused: true},
+		{title: "Daemon\r\nremoval", refused: true},
+		{title: "Daemon\rremoval", refused: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.title, func(t *testing.T) {
+			if err := model.CheckTitle(tc.title); errors.Is(err, model.ErrMultiLineTitle) != tc.refused {
+				t.Errorf("only a title spanning more than one line should be refused, got %v", err)
 			}
 		})
 	}

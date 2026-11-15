@@ -201,8 +201,8 @@ func cleanTitle(raw string) (string, error) {
 	if title == "" {
 		return "", fmt.Errorf("answer carries an empty title")
 	}
-	if strings.ContainsAny(title, "\r\n") {
-		return "", fmt.Errorf("title %q spans more than one line", title)
+	if err := model.CheckTitle(title); err != nil {
+		return "", fmt.Errorf("answer: %w", err)
 	}
 	return title, nil
 }

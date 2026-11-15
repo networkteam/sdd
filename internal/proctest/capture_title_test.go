@@ -71,6 +71,24 @@ func TestCapture_DriftedWithoutACorrectionIsRefused(t *testing.T) {
 	}
 }
 
+func TestCapture_MultiLineCorrectedTitleIsRefused(t *testing.T) {
+	world, session := newCaptureWorld(t, "title-multi-line")
+	before := entryIDsOnDisk(t, world.GraphDir)
+	serve := session.Start(t, "capture", nil)
+	instance := serve.Instance
+	session.Report(t, instance, captureDraft())
+	session.Answer(t, instance, "playback", "confirm", nil, "publish the observation")
+	entryID := writtenEntryID(t, world.GraphDir, before)
+
+	corrections := map[string]any{"correctedTitle": "Corrected\ntitle"}
+	if _, err := session.AnswerErr(t, instance, "verifySummary", "drifted", corrections, ""); err == nil || !strings.Contains(err.Error(), "more than one line") {
+		t.Fatalf("a title spanning two lines should be refused, got %v", err)
+	}
+	if got := proctest.LoadEntry(t, world.GraphDir, entryID).Title; got != "Generated title" {
+		t.Errorf("a refused title should leave the stored one, got %q", got)
+	}
+}
+
 // capturedEntry runs a capture to its summary check and returns the written
 // entry's ID.
 func capturedEntry(t *testing.T, connID string) (*proctest.World, *proctest.Session, string) {
@@ -142,6 +160,10 @@ func TestApplication_TitleCorrectionIsNormalized(t *testing.T) {
 	var appErr *sdd.ApplicationError
 	if !errors.As(err, &appErr) || appErr.Code != sdd.ErrorInvalidArgument {
 		t.Fatalf("a title of nothing but quotes and punctuation should be refused, got %v", err)
+	}
+	err = replace(92, "Corrected\ndaemon title")
+	if !errors.As(err, &appErr) || appErr.Code != sdd.ErrorInvalidArgument || !strings.Contains(appErr.Message, "more than one line") {
+		t.Fatalf("a title spanning two lines should be refused, got %v", err)
 	}
 	if got := proctest.LoadEntry(t, world.GraphDir, entryID).Title; got != "Corrected daemon title" {
 		t.Errorf("a refused title should leave the stored one, got %q", got)
