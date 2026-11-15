@@ -289,5 +289,13 @@ func (h *Handler) summarizeExplicit(graph *model.Graph, idArg string, cmd *comma
 // command that commits them: a rerun skips filled entries, so no later run
 // commits them.
 func commitFailure(err error, msg string, paths []string) error {
-	return fmt.Errorf("git commit: %w; the written entry files stay uncommitted, commit them with: git commit -m %q -- %s", err, msg, strings.Join(paths, " "))
+	quoted := make([]string, len(paths))
+	for i, p := range paths {
+		quoted[i] = shellQuote(p)
+	}
+	return fmt.Errorf("git commit: %w; the written entry files stay uncommitted, commit them with: git commit -m %s -- %s", err, shellQuote(msg), strings.Join(quoted, " "))
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

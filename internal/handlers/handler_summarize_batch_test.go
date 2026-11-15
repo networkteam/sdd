@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -154,46 +156,58 @@ func TestSummarize_All_FillsWhatIsMissing(t *testing.T) {
 	}
 }
 
+// commitArgs runs the commit command a failure names through the shell, with
+// printf standing in for git, and returns the arguments git would receive.
+func commitArgs(t *testing.T, err error) []string {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "git commit: signing timed out") {
+		t.Fatalf("the failed commit should surface, got %v", err)
+	}
+	_, line, ok := strings.Cut(err.Error(), "commit them with: git ")
+	if !ok {
+		t.Fatalf("the error should name the command that commits the written files, got %v", err)
+	}
+	out, runErr := exec.Command("sh", "-c", `printf '%s\n' `+line).Output()
+	if runErr != nil {
+		t.Fatalf("the named command should parse in a shell: %v", runErr)
+	}
+	return strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+}
+
+func entryPath(t *testing.T, graphDir, id string) string {
+	t.Helper()
+	rel, err := model.IDToRelPath(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(graphDir, rel)
+}
+
 func TestSummarize_CommitFailureNamesTheUncommittedFiles(t *testing.T) {
-	graphDir := t.TempDir()
+	graphDir := filepath.Join(t.TempDir(), "the team's graph")
 	writeSummarizePair(t, graphDir)
 	h := handlers.New(handlers.Options{
 		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{err: errors.New("signing timed out")},
 		LLMRunner: &stubRunner{text: "GENERATED", numbered: true},
 	})
-	err := h.Summarize(context.Background(), &command.SummarizeCmd{})
-	if err == nil || !strings.Contains(err.Error(), "git commit: signing timed out") {
-		t.Fatalf("the failed commit should surface, got %v", err)
-	}
-	if !strings.Contains(err.Error(), `commit them with: git commit -m "sdd: summarize 2 entries" -- `) {
-		t.Errorf("the error should name the command that commits the written files, got %v", err)
-	}
-	for _, id := range []string{summarizedEntry, emptyEntry} {
-		rel, relErr := model.IDToRelPath(id)
-		if relErr != nil {
-			t.Fatal(relErr)
-		}
-		if !strings.Contains(err.Error(), filepath.Join(graphDir, rel)) {
-			t.Errorf("the error should name each uncommitted file, got %v", err)
-		}
+	args := commitArgs(t, h.Summarize(context.Background(), &command.SummarizeCmd{}))
+	want := []string{"commit", "-m", "sdd: summarize 2 entries", "--", entryPath(t, graphDir, summarizedEntry), entryPath(t, graphDir, emptyEntry)}
+	if !slices.Equal(args, want) {
+		t.Errorf("the named command should commit exactly the written files, got %q", args)
 	}
 }
 
 func TestSummarize_ExplicitCommitFailureNamesTheUncommittedFile(t *testing.T) {
-	graphDir := t.TempDir()
+	graphDir := filepath.Join(t.TempDir(), "the team's graph")
 	writeTitledEntry(t, graphDir)
 	h := handlers.New(handlers.Options{
 		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{err: errors.New("signing timed out")},
 	})
 	title := "Hand title"
-	err := h.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{titledEntry}, ExplicitTitle: &title})
-	rel, relErr := model.IDToRelPath(titledEntry)
-	if relErr != nil {
-		t.Fatal(relErr)
-	}
-	want := `commit them with: git commit -m "sdd: summarize ` + titledEntry + ` (manual)" -- ` + filepath.Join(graphDir, rel)
-	if err == nil || !strings.Contains(err.Error(), "git commit: signing timed out") || !strings.Contains(err.Error(), want) {
-		t.Errorf("the failed commit should surface naming the file and the command that commits it, got %v", err)
+	args := commitArgs(t, h.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{titledEntry}, ExplicitTitle: &title}))
+	want := []string{"commit", "-m", "sdd: summarize " + titledEntry + " (manual)", "--", entryPath(t, graphDir, titledEntry)}
+	if !slices.Equal(args, want) {
+		t.Errorf("the named command should commit exactly the written file, got %q", args)
 	}
 }
 
