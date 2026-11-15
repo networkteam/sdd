@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/networkteam/sdd/internal/command"
+	"github.com/networkteam/sdd/internal/finders"
 	"github.com/networkteam/sdd/internal/llmops"
 	"github.com/networkteam/sdd/internal/model"
 )
@@ -109,14 +110,30 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 		planned = append(planned, entry)
 	}
 
+	var finder *finders.SearchFinder
+	if len(planned) > 0 {
+		finder, err = h.openTitleSearch(ctx, graph)
+		if err != nil {
+			return err
+		}
+	}
+
 	for _, entry := range planned {
 		g.Go(func() error {
-			// Render under read lock — other workers may be writing their own
-			// entries' summaries and titles concurrently, and those feed
-			// neighbor prose into this prompt.
+			// Search and render under read lock — other workers may be
+			// writing their own entries' summaries and titles concurrently,
+			// and those feed this prompt and the search's candidates.
 			graphMu.RLock()
-			description, renderErr := llmops.NewDescription(entry, graph, h.language, regenerate, nil)
+			titles, searchErr := similarTitles(ctx, finder, entry)
+			var description *llmops.Description
+			var renderErr error
+			if searchErr == nil {
+				description, renderErr = llmops.NewDescription(entry, graph, h.language, regenerate, titles)
+			}
 			graphMu.RUnlock()
+			if searchErr != nil {
+				return searchErr
+			}
 			if renderErr != nil {
 				return fmt.Errorf("rendering summary for %s: %w", entry.ID, renderErr)
 			}

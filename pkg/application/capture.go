@@ -152,7 +152,11 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		if draft.SkipPreflight {
 			entry.Preflight = "skipped"
 		}
-		described, err := llmops.Describe(ctx, effective.options.LLM, entry, snapshot.graph, effective.options.Language, false, nil)
+		titles, err := effective.similarTitles(ctx, snapshot, runtime.options.Graph, entry)
+		if err != nil {
+			return result, fmt.Errorf("generating summary: %w", err)
+		}
+		described, err := llmops.Describe(ctx, effective.options.LLM, entry, snapshot.graph, effective.options.Language, false, titles)
 		if err != nil {
 			return result, fmt.Errorf("generating summary: %w", err)
 		}

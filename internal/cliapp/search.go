@@ -176,6 +176,22 @@ func newEmbedder(cfg model.EmbeddingConfig) (handlers.IndexEmbedder, error) {
 	return handlers.IndexEmbedder{Embedder: embed.Batched(embed.Observed(emb, statsSink()), size), BatchSize: size}, nil
 }
 
+// withTitleSearch gives the handler's title calls the configured embedder over
+// the repo's search index; without an embedding provider opts stay as given.
+func withTitleSearch(cmd *cli.Command, opts handlers.Options) (handlers.Options, error) {
+	emb, err := buildEmbedder(cmd)
+	if err != nil || emb.Embedder == nil {
+		return opts, err
+	}
+	dir, err := resolveIndexStore(emb)
+	if err != nil {
+		return opts, err
+	}
+	opts.Embedder = emb.Embedder
+	opts.SearchIndex = handlers.SearchIndexDir(dir)
+	return opts, nil
+}
+
 func indexCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "index",

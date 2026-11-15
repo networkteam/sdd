@@ -144,7 +144,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		supplied.Summary = cmd.Summary
 		supplied.Title = title
 		g.Go(func() error {
-			result, err := llmops.Describe(gctx, h.llmRunner, &supplied, graph, h.language, false, nil)
+			result, err := h.describeNew(gctx, &supplied, graph)
 			if err != nil {
 				slogutils.FromContext(gctx).Warn("summary generation failed", "err", err)
 				return nil // non-fatal: entry is valid without a summary or title
@@ -258,4 +258,19 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		}
 	}
 	return nil
+}
+
+// describeNew writes the new entry's description, its title kept apart from
+// those of the entries nearest its body. A failed search fails the
+// description as a failed call does.
+func (h *Handler) describeNew(ctx context.Context, entry *model.Entry, graph *model.Graph) (llmops.DescriptionResult, error) {
+	finder, err := h.openTitleSearch(ctx, graph)
+	if err != nil {
+		return llmops.DescriptionResult{}, err
+	}
+	titles, err := similarTitles(ctx, finder, entry)
+	if err != nil {
+		return llmops.DescriptionResult{}, err
+	}
+	return llmops.Describe(ctx, h.llmRunner, entry, graph, h.language, false, titles)
 }

@@ -340,17 +340,18 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 	return out, nil
 }
 
-// candidates applies the graph filter and the IncludeSuperseded gate.
+// candidates applies the graph filter, the Titled and Exclude gates and the
+// IncludeSuperseded gate.
 // Superseded entries are excluded by default — they pollute clusters with
 // historical near-duplicates per the design.md rationale.
 func (f *SearchFinder) candidates(q query.SearchQuery) []*model.Entry {
 	filtered := f.graph.Filter(q.Filter)
-	if q.IncludeSuperseded {
-		return filtered
-	}
 	out := make([]*model.Entry, 0, len(filtered))
 	for _, e := range filtered {
-		if f.graph.DerivedStatus(e).Kind == model.StatusSupersededBy {
+		if !q.Admits(e) {
+			continue
+		}
+		if !q.IncludeSuperseded && f.graph.DerivedStatus(e).Kind == model.StatusSupersededBy {
 			continue
 		}
 		out = append(out, e)
