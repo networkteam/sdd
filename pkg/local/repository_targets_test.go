@@ -50,6 +50,9 @@ func TestRepositoryTargetPublishesCaptureThroughOneCommit(t *testing.T) {
 	if !strings.Contains(message, "SDD-Mutation: "+draft.Publication.String()) || strings.Contains(message, string(binding.SessionID)) {
 		t.Fatalf("publication commit = %q; want the opaque publication ID without the session handle", message)
 	}
+	if subject := repo.git("log", "-1", "--format=%s"); subject != "sdd: signal tactical Rendered title 1" {
+		t.Errorf("a capture committed on retry should name the published title, got %q", subject)
+	}
 	relPath, err := model.IDToRelPath(entryID)
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +70,26 @@ func TestRepositoryTargetPublishesCaptureThroughOneCommit(t *testing.T) {
 	}
 	if summaries != 2 {
 		t.Fatalf("summaries = %d; want one per attempt without a publication, none once it exists", summaries)
+	}
+}
+
+func TestRepositoryTargetCommitNamesTheCapture(t *testing.T) {
+	repo := newGitRepository(t)
+	repo.write(".sdd/config.yaml", "repo_id: example\ngraph_dir: .sdd/graph\ndefault_branch: main\n")
+	repo.write("global-config.yaml", "")
+	application, identity, binding := repo.captureApplication(t, pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
+		return pkgllm.Result{Text: `{"title": "Capture commit subjects", "summary": "Rendered summary."}`}, nil
+	}))
+	draft := sdd.EntryDraft{
+		Kind: "directive", Layer: "process", Confidence: "high", Intent: "pending",
+		Body:    "Every capture commit names its entry.",
+		EntryID: "20260914-020001-d-prc-cap", Publication: sdd.PublicationKey{Session: binding.SessionID, Sequence: 1, Discriminator: "new-entry"},
+	}
+	if _, err := application.CreateEntry(t.Context(), identity, "example", binding, draft); err != nil {
+		t.Fatal(err)
+	}
+	if subject := repo.git("log", "-1", "--format=%s"); subject != "sdd: decision process Capture commit subjects" {
+		t.Errorf("the capture commit should name type, layer and title of the entry, got %q", subject)
 	}
 }
 

@@ -260,7 +260,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	// Commit. A failure is surfaced, not swallowed — the entry stays on disk but
 	// the error propagates (durable but loud). See d-tac-zhp.
 	if h.committer != nil {
-		msg := fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72))
+		msg := entry.CaptureCommitMessage()
 		if err := h.committer.Commit(msg, commitPaths...); err != nil {
 			return errors.Join(model.IncompleteWrite(fmt.Errorf("git commit: %w", err)), summaryFailure(entry, describeErr))
 		}

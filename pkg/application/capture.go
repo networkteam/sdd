@@ -175,7 +175,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 			ID:          draft.Publication.String(),
 			Changes:     []DocumentChange{{LogicalPath: logicalPath, Document: &document, CanonicalBytes: canonical}},
 			Attachments: attachments,
-			Message:     fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72)),
+			Message:     entry.CaptureCommitMessage(),
 		}
 		acquired, err = runtime.acquire(ctx, draft.Target)
 		if err != nil {
@@ -231,7 +231,15 @@ func entryPublicationBatch(key PublicationKey, publication EntryPublication) (Mu
 	if err != nil {
 		return MutationBatch{}, err
 	}
-	batch := MutationBatch{ID: key.String(), Message: "sdd: capture " + id, Changes: []DocumentChange{{LogicalPath: publication.Document.LogicalPath, Document: &publication.Document}}}
+	parts, err := model.ParseID(id)
+	if err != nil {
+		return MutationBatch{}, err
+	}
+	// Built from the published document, so a publication replayed after a
+	// failed commit is committed under the same subject as a fresh one.
+	captured := model.Entry{Type: model.TypeFromAbbrev[parts.TypeCode], Layer: model.LayerFromAbbrev[parts.LayerCode], Content: publication.Document.Body}
+	captured.Title, _ = publication.Document.Frontmatter["title"].(string)
+	batch := MutationBatch{ID: key.String(), Message: captured.CaptureCommitMessage(), Changes: []DocumentChange{{LogicalPath: publication.Document.LogicalPath, Document: &publication.Document}}}
 	for _, name := range publication.Document.Attachments {
 		batch.Attachments = append(batch.Attachments, AttachmentMaterialization{SourceName: name, LogicalPath: path.Join(attachmentDir, name)})
 	}

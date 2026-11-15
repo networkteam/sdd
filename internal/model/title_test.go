@@ -52,6 +52,24 @@ func TestListingTitle(t *testing.T) {
 	}
 }
 
+func TestCaptureCommitMessage(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry model.Entry
+		want  string
+	}{
+		{name: "the title names a titled entry", entry: model.Entry{Type: model.TypeSignal, Layer: model.LayerTactical, Title: "Daemon project removal", Content: "The daemon project goes."}, want: "sdd: signal tactical Daemon project removal"},
+		{name: "an untitled entry falls back to its opening content", entry: model.Entry{Type: model.TypeSignal, Layer: model.LayerTactical, Content: "The daemon project goes."}, want: "sdd: signal tactical The daemon project goes."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.entry.CaptureCommitMessage(); got != tc.want {
+				t.Errorf("the capture commit should name the entry, got %q", got)
+			}
+		})
+	}
+}
+
 func TestNormalizeTitle(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{in: "daemon project removal", want: "Daemon project removal"},
