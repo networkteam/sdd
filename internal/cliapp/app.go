@@ -1121,6 +1121,10 @@ func summarizeCmd() *cli.Command {
 			if len(ids) == 0 && !cmd.Bool("all") {
 				return fmt.Errorf("usage: sdd summarize <id>... or sdd summarize --all")
 			}
+			// Checked again in the handler; here it comes before stdin is read.
+			if cmd.IsSet("only") && (cmd.IsSet("text") || cmd.IsSet("title")) {
+				return fmt.Errorf("--only cannot be combined with --text or --title")
+			}
 
 			var explicitText *string
 			if cmd.IsSet("text") {

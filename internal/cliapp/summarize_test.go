@@ -1,6 +1,8 @@
 package cliapp_test
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -117,6 +119,27 @@ func TestSummarizeOnlyRefusals(t *testing.T) {
 				t.Errorf("the --only value should be refused naming why, got %v", result.err)
 			}
 		})
+	}
+}
+
+// readRecorder records whether the command read it.
+type readRecorder struct{ read bool }
+
+func (r *readRecorder) Read([]byte) (int, error) {
+	r.read = true
+	return 0, io.EOF
+}
+
+func TestSummarizeOnlyIsRefusedBeforeStdinIsRead(t *testing.T) {
+	f := newAppFixture(t)
+	stdin := &readRecorder{}
+	var stdout, stderr bytes.Buffer
+	err := f.command(stdin, &stdout, &stderr).Run(t.Context(), []string{"sdd", "summarize", "--only", "title", "--text", "-", appEntryID})
+	if err == nil || !strings.Contains(err.Error(), "--only cannot be combined with --text or --title") {
+		t.Fatalf("the conflict should be refused, got %v", err)
+	}
+	if stdin.read {
+		t.Error("the refusal should come before stdin is read")
 	}
 }
 
