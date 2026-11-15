@@ -152,7 +152,7 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		if draft.SkipPreflight {
 			entry.Preflight = "skipped"
 		}
-		titles, err := effective.similarTitles(ctx, snapshot, runtime.options.Graph, entry)
+		titles, err := effective.similarTitles(ctx, snapshot, readRuntime.options.Graph, entry)
 		if err != nil {
 			return result, fmt.Errorf("generating summary: %w", err)
 		}

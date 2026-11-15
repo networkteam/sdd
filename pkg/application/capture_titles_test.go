@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/chunking"
 	"github.com/networkteam/sdd/internal/model"
 	sdd "github.com/networkteam/sdd/pkg/application"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
@@ -131,6 +132,91 @@ func TestCreateEntryShowsTheTitlesOfTheFiveNearestTitledEntries(t *testing.T) {
 	}
 	if got := loadEntryByID(t, f.graphDir, created.EntryID).Title; got != "Fresh title" {
 		t.Errorf("the generated title should be stored, got %q", got)
+	}
+}
+
+// versionedHit answers every nearest-neighbour query with one hit of entryID
+// at version hash.
+type versionedHit struct {
+	sdd.SearchIndexStore
+	entryID, hash string
+}
+
+func (h versionedHit) Nearest(context.Context, []sdd.IndexNamespace, []float32, int) ([]sdd.ScoredChunkHit, error) {
+	return []sdd.ScoredChunkHit{{EntryID: h.entryID, ChunkID: h.entryID + "#0", EntryHash: h.hash, Score: 1}}, nil
+}
+
+// A capture on a branch reads the attachments of a similar entry from the
+// branch it writes to: the entry's version hash covers them.
+func TestCreateEntryOnABranchHashesSimilarEntriesFromTheBranch(t *testing.T) {
+	const neighbourID = "20260201-100001-s-tac-nb1"
+	branchDir := t.TempDir()
+	neighbour := &model.Entry{ID: neighbourID, Type: model.TypeSignal, Layer: model.LayerTactical, Kind: model.KindGap, Title: "Branch neighbour", Summary: "A neighbour.", Content: "A neighbour."}
+	rel, err := model.IDToRelPath(neighbourID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := model.FormatFrontmatter(neighbour) + "\n" + neighbour.Content + "\n"
+	attachmentRel := strings.TrimSuffix(filepath.ToSlash(rel), ".md") + "/notes.md"
+	for name, content := range map[string]string{filepath.ToSlash(rel): text, attachmentRel: "Notes on the branch."} {
+		path := filepath.Join(branchDir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parsed, err := model.ParseEntry(neighbourID+".md", text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.Attachments = []string{attachmentRel}
+	hash, err := chunking.EntryStateHash(t.Context(), parsed, chunking.DiskAttachmentReader{GraphDir: branchDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	baseGraph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	branchGraph, err := localadapter.NewFilesystemGraphStore(localadapter.FilesystemGraphStoreOptions{Project: "example", GraphDir: branchDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := localadapter.NewFilesystemSessionStoreAt(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := localadapter.NewFilesystemStagedBlobStoreAt(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	prompts := &summaryPrompts{}
+	branch := sdd.MutationTarget{Project: "example", Branch: "feature"}
+	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
+		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: baseGraph,
+		Targets: sdd.FixedTargetAcquirer{Target: branch, Graph: branchGraph},
+		LLM:     prompts.runner(), Embedder: embedderFor(&texts, nil),
+		SearchIndex: versionedHit{SearchIndexStore: localadapter.NewMemorySearchIndexStore(), entryID: neighbourID, hash: hash},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application, err := sdd.NewApplication(sdd.ApplicationOptions{Access: &runtimeAccessResolver{runtime: runtime}, Sessions: sessions, StagedBlobs: blobs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := sdd.RequestIdentity{Subject: "christopher"}
+	binding := openBinding(t, sessions, identity.Subject, "branch-titles")
+	draft := identifiedCaptureDraft(binding, 1, sdd.EntryDraft{Kind: "gap", Layer: "tactical", Confidence: "high", Body: capturedBody, Target: branch})
+	if _, err := application.CreateEntry(t.Context(), identity, "example", binding, draft); err != nil {
+		t.Fatalf("CreateEntry: %v", err)
+	}
+	if len(prompts.prompts) != 1 || !slices.Equal(similarTitlesIn(prompts.prompts[0]), []string{"Branch neighbour"}) {
+		t.Errorf("the summary call should list the branch's similar entry, got %q", prompts.prompts)
 	}
 }
 
