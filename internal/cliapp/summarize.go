@@ -3,6 +3,7 @@ package cliapp
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/urfave/cli/v3"
 
@@ -39,7 +40,8 @@ func fillMissing(ctx context.Context, cmd *cli.Command, handler *handlers.Handle
 }
 
 // newFillProgress reroutes a fill's per-entry callbacks onto a footer
-// reporter: on a terminal the bar replaces the line per entry.
+// reporter: on a terminal the bar replaces the line per entry. Summarize
+// workers fire the callbacks concurrently; the reporter takes one producer.
 func newFillProgress(fill *command.SummarizeCmd) *cliout.Reporter {
 	reporter := cliout.NewReporter()
 	reporter.SetUnit("entries")
@@ -47,7 +49,10 @@ func newFillProgress(fill *command.SummarizeCmd) *cliout.Reporter {
 		reporter.SetPhase(model.PhaseSummarizing)
 		reporter.SetTotal(n)
 	}
+	var mu sync.Mutex
 	advance := func(id, _ string) {
+		mu.Lock()
+		defer mu.Unlock()
 		reporter.Add(1)
 		reporter.SetNote(id)
 	}
