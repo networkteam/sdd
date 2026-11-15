@@ -1190,12 +1190,17 @@ func summarizeCmd() *cli.Command {
 				}),
 				LLMRunner: runner,
 				Committer: git.CLI{},
+				Changes:   git.CLI{},
 				Language:  configLanguage(cfg),
 			})
 			if err != nil {
 				return err
 			}
-			return handlers.New(opts).Summarize(ctx, sumCmd)
+			handler := handlers.New(opts)
+			if len(ids) > 0 {
+				return handler.Summarize(ctx, sumCmd)
+			}
+			return fillMissing(ctx, cmd, handler, sumCmd)
 		}),
 	}
 }

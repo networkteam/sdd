@@ -108,3 +108,18 @@ func TestRepeatedTitle(t *testing.T) {
 		})
 	}
 }
+
+func TestTitleBackfill(t *testing.T) {
+	entries := []*model.Entry{
+		{Summary: "S."},
+		{Summary: "S.", Title: "Has both"},
+		{},
+		{Title: "Title without summary"},
+		{Embedded: true, Summary: "S."},
+		{Embedded: true},
+	}
+	withSummary, titleOnly := model.TitleBackfill(entries)
+	if withSummary != 2 || titleOnly != 1 {
+		t.Errorf("every entry lacking a summary owes a paired call and only the summarized untitled one a title call, got %d paired, %d title-only", withSummary, titleOnly)
+	}
+}

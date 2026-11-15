@@ -203,10 +203,10 @@ func (m model) View() tea.View {
 	b.WriteString(m.spinner.View())
 	b.WriteByte(' ')
 	b.WriteString(cliout.StyleLabel.Render(m.phaseLabel()))
-	// The determinate bar belongs to the indexing phase: freshening a cache
+	// The determinate bar belongs to a counted phase: freshening a cache
 	// (connecting/syncing) shows the spinner alone, never a stale local-build
 	// bar left over from a prior phase.
-	if m.hasProg && m.lastProg.Phase == sddmodel.PhaseIndexing && m.lastProg.Total > 0 {
+	if m.hasProg && m.lastProg.Phase.Counted() && m.lastProg.Total > 0 {
 		b.WriteString("  ")
 		b.WriteString(m.progress.View())
 		if c := cliout.RenderCount(m.lastProg); c != "" {

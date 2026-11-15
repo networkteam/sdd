@@ -166,3 +166,25 @@ func TestModel_FirstPaintGateHoldsThenFlushes(t *testing.T) {
 		t.Errorf("post-gate lines should pass through, not be held; held=%d", len(m.held))
 	}
 }
+
+func TestModel_SummarizingShowsTheBar(t *testing.T) {
+	cases := []struct {
+		phase   sddmodel.Phase
+		wantBar bool
+	}{
+		{phase: sddmodel.PhaseSummarizing, wantBar: true},
+		{phase: sddmodel.PhaseSyncing, wantBar: false},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.phase), func(t *testing.T) {
+			m := newTestModel(View{InitialPhase: tc.phase, Progress: cliout.NewReporter()}, nil)
+			nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			m = nm.(model)
+			nm, _ = m.Update(progressMsg(cliout.Progress{Phase: tc.phase, Done: 3, Total: 10, Unit: "entries"}))
+			m = nm.(model)
+			if got := strings.Contains(m.View().Content, "3/10 entries"); got != tc.wantBar {
+				t.Errorf("a counted phase should show the bar with its count and an uncounted one none, got %q", m.View().Content)
+			}
+		})
+	}
+}
