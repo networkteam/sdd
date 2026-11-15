@@ -13,20 +13,11 @@ import (
 	"github.com/networkteam/sdd/internal/model"
 )
 
-// fillMissing runs `sdd summarize --all`: it first commits the titles an
-// earlier run wrote but failed to commit, states what the fill costs in model
-// calls, and runs it with a progress bar on a terminal and a line per entry
-// otherwise.
+// fillMissing runs `sdd summarize --all`: it states what the fill costs in
+// model calls and runs it with a progress bar on a terminal and a line per
+// entry otherwise.
 func fillMissing(ctx context.Context, cmd *cli.Command, handler *handlers.Handler, sumCmd *command.SummarizeCmd) error {
 	out := cmd.ErrWriter
-	err := handler.CommitStrandedTitles(ctx, &command.CommitStrandedTitlesCmd{
-		OnCommitted: func(count int) {
-			fmt.Fprintf(out, "committed %d entries an earlier run titled but did not commit\n", count)
-		},
-	})
-	if err != nil {
-		return err
-	}
 	if !sumCmd.Force {
 		graph, err := loadGraph(cmd)
 		if err != nil {
@@ -39,7 +30,7 @@ func fillMissing(ctx context.Context, cmd *cli.Command, handler *handlers.Handle
 		return handler.Summarize(ctx, sumCmd)
 	}
 	progress := newFillProgress(sumCmd)
-	_, err = clitui.Interactive(ctx, transientViewPolicy(),
+	_, err := clitui.Interactive(ctx, transientViewPolicy(),
 		clitui.View{Reader: cmd.Reader, Writer: out, InitialPhase: model.PhaseSummarizing, Progress: progress},
 		func(ctx context.Context) (struct{}, error) {
 			return struct{}{}, handler.Summarize(ctx, sumCmd)

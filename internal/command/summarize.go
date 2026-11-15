@@ -34,11 +34,3 @@ type SummarizeCmd struct {
 	// a summary and a title.
 	OnSkipped func(id string)
 }
-
-// CommitStrandedTitlesCmd captures intent to commit entry files that hold a
-// title on disk but not at HEAD.
-type CommitStrandedTitlesCmd struct {
-	// OnCommitted fires after the stranded files were committed, carrying
-	// their count.
-	OnCommitted func(count int)
-}

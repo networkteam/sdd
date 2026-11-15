@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -215,8 +216,9 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 		if len(cmd.EntryIDs) == 1 {
 			msg = fmt.Sprintf("sdd: summarize %s", cmd.EntryIDs[0])
 		}
+		slices.Sort(commitPaths)
 		if err := h.committer.Commit(msg, commitPaths...); err != nil {
-			return errors.Join(runErr, fmt.Errorf("git commit: %w", err))
+			return errors.Join(runErr, commitFailure(err, msg, commitPaths))
 		}
 	}
 	return runErr
@@ -270,7 +272,7 @@ func (h *Handler) summarizeExplicit(graph *model.Graph, idArg string, cmd *comma
 	if h.committer != nil {
 		msg := fmt.Sprintf("sdd: summarize %s (manual)", entry.ID)
 		if err := h.committer.Commit(msg, filePath); err != nil {
-			return fmt.Errorf("git commit: %w", err)
+			return commitFailure(err, msg, []string{filePath})
 		}
 	}
 
@@ -281,4 +283,11 @@ func (h *Handler) summarizeExplicit(graph *model.Graph, idArg string, cmd *comma
 		cmd.OnTitled(entry.ID, entry.Title)
 	}
 	return nil
+}
+
+// commitFailure names the entry files a failed commit left on disk and the
+// command that commits them: a rerun skips filled entries, so no later run
+// commits them.
+func commitFailure(err error, msg string, paths []string) error {
+	return fmt.Errorf("git commit: %w; the written entry files stay uncommitted, commit them with: git commit -m %q -- %s", err, msg, strings.Join(paths, " "))
 }

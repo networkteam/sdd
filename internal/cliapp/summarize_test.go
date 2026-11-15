@@ -100,25 +100,6 @@ func TestSummarizeCostLineCountsAStoredTitle(t *testing.T) {
 	}
 }
 
-func TestSummarizeAllCommitsTitlesAFailedCommitLeftBehind(t *testing.T) {
-	f := newFillFixture(t)
-	f.write(t, appEntryRel, strings.Replace(f.read(t, appEntryRel), "summary:", "title: Stranded title\nsummary:", 1))
-
-	result := f.run(t, "summarize", "--all")
-	if result.err != nil {
-		t.Fatalf("summarize --all: %v\n%s", result.err, result.stderr)
-	}
-	if !strings.Contains(result.stderr, "committed 1 entries an earlier run titled but did not commit") || !strings.Contains(result.stderr, "-> 0 model calls") {
-		t.Errorf("the stranded title should be committed before the cost is counted:\n%s", result.stderr)
-	}
-	if status := runGit(t, f.root, "status", "--porcelain", "--", "decisions"); status != "" {
-		t.Errorf("no graph file should stay uncommitted:\n%s", status)
-	}
-	if entry := f.read(t, appEntryRel); !strings.Contains(entry, "title: Stranded title") {
-		t.Errorf("the stranded title should be kept as written:\n%s", entry)
-	}
-}
-
 func TestSummarizeTitleNeedsOneEntry(t *testing.T) {
 	f := newAppFixture(t)
 	cases := []struct {

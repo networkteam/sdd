@@ -1187,7 +1187,6 @@ func summarizeCmd() *cli.Command {
 				}),
 				LLMRunner: runner,
 				Committer: git.CLI{},
-				Changes:   git.CLI{},
 				Language:  configLanguage(cfg),
 			})
 			handler := handlers.New(opts)

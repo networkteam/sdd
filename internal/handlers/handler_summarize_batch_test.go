@@ -154,6 +154,49 @@ func TestSummarize_All_FillsWhatIsMissing(t *testing.T) {
 	}
 }
 
+func TestSummarize_CommitFailureNamesTheUncommittedFiles(t *testing.T) {
+	graphDir := t.TempDir()
+	writeSummarizePair(t, graphDir)
+	h := handlers.New(handlers.Options{
+		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{err: errors.New("signing timed out")},
+		LLMRunner: &stubRunner{text: "GENERATED", numbered: true},
+	})
+	err := h.Summarize(context.Background(), &command.SummarizeCmd{})
+	if err == nil || !strings.Contains(err.Error(), "git commit: signing timed out") {
+		t.Fatalf("the failed commit should surface, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `commit them with: git commit -m "sdd: summarize 2 entries" -- `) {
+		t.Errorf("the error should name the command that commits the written files, got %v", err)
+	}
+	for _, id := range []string{summarizedEntry, emptyEntry} {
+		rel, relErr := model.IDToRelPath(id)
+		if relErr != nil {
+			t.Fatal(relErr)
+		}
+		if !strings.Contains(err.Error(), filepath.Join(graphDir, rel)) {
+			t.Errorf("the error should name each uncommitted file, got %v", err)
+		}
+	}
+}
+
+func TestSummarize_ExplicitCommitFailureNamesTheUncommittedFile(t *testing.T) {
+	graphDir := t.TempDir()
+	writeTitledEntry(t, graphDir)
+	h := handlers.New(handlers.Options{
+		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{err: errors.New("signing timed out")},
+	})
+	title := "Hand title"
+	err := h.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{titledEntry}, ExplicitTitle: &title})
+	rel, relErr := model.IDToRelPath(titledEntry)
+	if relErr != nil {
+		t.Fatal(relErr)
+	}
+	want := `commit them with: git commit -m "sdd: summarize ` + titledEntry + ` (manual)" -- ` + filepath.Join(graphDir, rel)
+	if err == nil || !strings.Contains(err.Error(), "git commit: signing timed out") || !strings.Contains(err.Error(), want) {
+		t.Errorf("the failed commit should surface naming the file and the command that commits it, got %v", err)
+	}
+}
+
 func TestSummarize_All_KeepsAStoredTitle(t *testing.T) {
 	graphDir := t.TempDir()
 	writeEntryFile(t, graphDir, emptyEntry, "---\ntype: signal\nlayer: process\nkind: gap\ntitle: Hand title\n---\n\nNeeds a summary.\n")
@@ -257,6 +300,13 @@ func TestSummarize_NamedEntry_RegeneratesUnconditionally(t *testing.T) {
 
 // failingTitleRunner answers the paired call and fails the title-only call,
 // so one entry of a batch fails while another succeeds.
+type pathRecordingCommitter struct{ paths []string }
+
+func (c *pathRecordingCommitter) Commit(_ string, paths ...string) error {
+	c.paths = append(c.paths, paths...)
+	return nil
+}
+
 type failingTitleRunner struct{ stubRunner }
 
 func (r *failingTitleRunner) Run(ctx context.Context, request llm.Request) (llm.Result, error) {
