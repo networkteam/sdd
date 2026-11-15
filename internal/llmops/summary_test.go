@@ -461,3 +461,17 @@ func TestDescribeKeepsATitleNoOtherEntryHolds(t *testing.T) {
 		})
 	}
 }
+
+// A summary drifts when it carries a claim the entry never made, often one
+// lent from a related entry; the prompt holds every claim to the entry.
+func TestPairedDescriptionClaimsOnlyWhatTheEntrySays(t *testing.T) {
+	entry, graph := titledFixture()
+	description, err := llmops.NewDescription(unsummarizedCopy(entry), graph, "", false, nil)
+	if err != nil {
+		t.Fatalf("NewDescription: %v", err)
+	}
+	want := "Claim only what the entry itself states: add no cause, consequence, actor or example it does not name, and never lend it a related entry's claims."
+	if !strings.Contains(description.Request.SystemPrompt, want) {
+		t.Errorf("the prompt should hold every summary claim to the entry:\n%s", description.Request.SystemPrompt)
+	}
+}
