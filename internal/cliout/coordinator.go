@@ -8,10 +8,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/networkteam/slogutils"
+
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // ErrUserCancelled is the sentinel a coordinator returns when the user
@@ -19,6 +22,25 @@ import (
 // handler maps it to a calm "cancelled." message and exit 130 — no raw
 // "context canceled" string ever reaches the user.
 var ErrUserCancelled = errors.New("cancelled by user")
+
+// Uncommitted returns the parts of err that wrap model.ErrUncommittedWrite,
+// nil when none does.
+func Uncommitted(err error) error {
+	if !errors.Is(err, model.ErrUncommittedWrite) {
+		return nil
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok || slices.Contains(joined.Unwrap(), model.ErrUncommittedWrite) {
+		return err
+	}
+	var parts []error
+	for _, part := range joined.Unwrap() {
+		if kept := Uncommitted(part); kept != nil {
+			parts = append(parts, kept)
+		}
+	}
+	return errors.Join(parts...)
+}
 
 // armDebounce delays program start after arming; work finishing inside it stays plain.
 const armDebounce = 70 * time.Millisecond
@@ -198,6 +220,9 @@ func (c *Coordinator) Run(ctx context.Context, work func(context.Context) error)
 	// (an exec-based dependency SIGKILLed mid-run reports "signal: killed").
 	switch {
 	case err != nil && (errors.Is(err, context.Canceled) || workCtx.Err() != nil):
+		if uncommitted := Uncommitted(err); uncommitted != nil {
+			return errors.Join(ErrUserCancelled, uncommitted)
+		}
 		return ErrUserCancelled
 	case err != nil:
 		return err

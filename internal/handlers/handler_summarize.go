@@ -310,7 +310,7 @@ func commitFailure(err error, msg string, paths []string) error {
 	for i, p := range paths {
 		quoted[i] = shellQuote(p)
 	}
-	return fmt.Errorf("git commit: %w; the written entry files stay uncommitted, commit them with: git commit -m %s -- %s", err, shellQuote(msg), strings.Join(quoted, " "))
+	return fmt.Errorf("git commit: %w; %w, commit them with: git commit -m %s -- %s", err, model.ErrUncommittedWrite, shellQuote(msg), strings.Join(quoted, " "))
 }
 
 func shellQuote(s string) string {

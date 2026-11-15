@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/cliout"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/model"
@@ -162,6 +163,9 @@ func commitArgs(t *testing.T, err error) []string {
 	t.Helper()
 	if err == nil || !strings.Contains(err.Error(), "git commit: signing timed out") {
 		t.Fatalf("the failed commit should surface, got %v", err)
+	}
+	if !errors.Is(err, model.ErrUncommittedWrite) {
+		t.Errorf("the failure should mark the written files as uncommitted, so a cancellation keeps it, got %v", err)
 	}
 	_, line, ok := strings.Cut(err.Error(), "commit them with: git ")
 	if !ok {
@@ -481,6 +485,24 @@ func TestSummarize_All_CommitsWhatItWroteWhenCancelled(t *testing.T) {
 	}
 	if len(committer.paths) != 1 {
 		t.Errorf("the entry written before the cancellation should be committed, got %v", committer.paths)
+	}
+}
+
+func TestSummarize_All_CancelledRunKeepsAFailedCommit(t *testing.T) {
+	graphDir := t.TempDir()
+	writeSummarizePair(t, graphDir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := handlers.New(handlers.Options{
+		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{err: errors.New("signing timed out")},
+		LLMRunner: &cancellingRunner{stubRunner: stubRunner{text: "GENERATED"}, cancel: cancel},
+	})
+	err := h.Summarize(ctx, &command.SummarizeCmd{Concurrency: 1})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the cancelled run should fail with the cancellation, got %v", err)
+	}
+	if kept := cliout.Uncommitted(err); kept == nil || !strings.Contains(kept.Error(), "git commit: signing timed out") {
+		t.Errorf("the failed commit should outlast the cancellation, got %v", kept)
 	}
 }
 
