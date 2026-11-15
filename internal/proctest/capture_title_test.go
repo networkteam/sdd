@@ -149,7 +149,7 @@ func TestApplication_TitleCorrectionIsNormalized(t *testing.T) {
 		})
 		return err
 	}
-	if err := replace(90, `  “corrected” "daemon" title!  `); err != nil {
+	if err := replace(90, `  corrected “daemon” "title"!  `); err != nil {
 		t.Fatalf("ReplaceSummary: %v", err)
 	}
 	entry := proctest.LoadEntry(t, world.GraphDir, entryID)

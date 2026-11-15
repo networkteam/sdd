@@ -36,8 +36,10 @@ const titleQuotes = "\"“”„«»"
 // punctuation but a question mark trimmed from the end, and the first letter
 // capitalized, since listings show titles in a column and a mix of cases reads
 // as noise there. A title opening with a code span keeps its casing, a
-// backtick having no capital.
+// backtick having no capital, as does one opening with a quoted word: a code
+// term quoted rather than set as a code span.
 func NormalizeTitle(title string) string {
+	keepCase := opensWithQuotedWord(title)
 	title = strings.Map(func(r rune) rune {
 		if strings.ContainsRune(titleQuotes, r) {
 			return -1
@@ -51,10 +53,23 @@ func NormalizeTitle(title string) string {
 		return unicode.IsSpace(r) || strings.ContainsRune(titleTrailers, r)
 	})
 	first, size := utf8.DecodeRuneInString(title)
-	if size == 0 {
+	if size == 0 || keepCase {
 		return title
 	}
 	return string(unicode.ToTitle(first)) + title[size:]
+}
+
+// opensWithQuotedWord reports whether title opens with a single quoted word.
+func opensWithQuotedWord(title string) bool {
+	isQuote := func(r rune) bool { return strings.ContainsRune(titleQuotes, r) }
+	title = strings.TrimSpace(title)
+	first, size := utf8.DecodeRuneInString(title)
+	if size == 0 || !isQuote(first) {
+		return false
+	}
+	rest := title[size:]
+	end := strings.IndexFunc(rest, isQuote)
+	return end > 0 && !strings.ContainsFunc(rest[:end], unicode.IsSpace)
 }
 
 // ErrMultiLineTitle refuses a title no one-line listing can show.
