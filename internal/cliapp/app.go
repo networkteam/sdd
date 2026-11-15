@@ -808,9 +808,10 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			// The handler reads an empty Title as none given.
-			if cmd.IsSet("title") && cmd.String("title") == "" {
-				return fmt.Errorf("--title value is empty")
+			var title *string
+			if cmd.IsSet("title") {
+				value := cmd.String("title")
+				title = &value
 			}
 			ncmd := &command.NewEntryCmd{
 				Type:             typ,
@@ -836,7 +837,7 @@ func newCmd() *cli.Command {
 				Attachments:      atts,
 				SkipPreflight:    cmd.Bool("skip-preflight"),
 				Summary:          strings.TrimSpace(cmd.String("summary")),
-				Title:            cmd.String("title"),
+				Title:            title,
 				DryRun:           cmd.Bool("dry-run"),
 				PreflightModel:   cmd.String("preflight-model"),
 				OnNewEntry: func(id, summary string) {

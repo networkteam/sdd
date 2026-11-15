@@ -193,6 +193,7 @@ func TestNewEntry_UnusableTitleIsRefused(t *testing.T) {
 	}{
 		{name: "two lines", title: "Supplied\ntitle", want: "more than one line"},
 		{name: "nothing left once normalized", title: " … ", want: "--title value is empty"},
+		{name: "empty", title: "", want: "--title value is empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -208,7 +209,7 @@ func TestNewEntry_UnusableTitleIsRefused(t *testing.T) {
 			var id string
 			err := h.NewEntry(context.Background(), &command.NewEntryCmd{
 				Type: model.TypeSignal, Layer: model.LayerTactical, Description: "an unusable title",
-				Summary: "A supplied summary.", Title: tc.title, SkipPreflight: true,
+				Summary: "A supplied summary.", Title: new(tc.title), SkipPreflight: true,
 				OnNewEntry: func(newID, _ string) { id = newID },
 			})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -229,7 +230,7 @@ func TestNewEntry_DryRun_SavesStdinOnAnEarlyRefusal(t *testing.T) {
 		cmd  command.NewEntryCmd
 	}{
 		{name: "invalid command", cmd: command.NewEntryCmd{Type: model.TypeSignal}},
-		{name: "unusable title", cmd: command.NewEntryCmd{Type: model.TypeSignal, Layer: model.LayerTactical, Title: "Supplied\ntitle"}},
+		{name: "unusable title", cmd: command.NewEntryCmd{Type: model.TypeSignal, Layer: model.LayerTactical, Title: new("Supplied\ntitle")}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -279,7 +280,7 @@ func TestNewEntry_SummaryFailureHint_KeepsTheSuppliedField(t *testing.T) {
 			var id string
 			err := h.NewEntry(context.Background(), &command.NewEntryCmd{
 				Type: model.TypeSignal, Layer: model.LayerTactical, Description: "the hint keeps what was supplied",
-				Summary: tc.summary, Title: tc.title, SkipPreflight: true,
+				Summary: tc.summary, Title: optionalTitle(tc.title), SkipPreflight: true,
 				OnNewEntry: func(newID, _ string) { id = newID },
 			})
 			want := "entry " + id + " is written without a generated " + tc.missing + " (run sdd summarize " + id + tc.flag + " to fill it): summarizing: "
@@ -898,7 +899,7 @@ func TestNewEntry_ExplicitSummary_SkipsLLM(t *testing.T) {
 		Layer:         model.LayerTactical,
 		Description:   "exercising the explicit summary path",
 		Summary:       custom,
-		Title:         "custom title",
+		Title:         new("custom title"),
 		SkipPreflight: true,
 		OnNewEntry: func(id, summary string) {
 			reportedID = id
@@ -931,6 +932,14 @@ func TestNewEntry_ExplicitSummary_SkipsLLM(t *testing.T) {
 	}
 }
 
+// optionalTitle is a supplied --title, nil when empty.
+func optionalTitle(title string) *string {
+	if title == "" {
+		return nil
+	}
+	return &title
+}
+
 // newTitledEntry runs NewEntry with the given summary and title against
 // runner and returns the written entry.
 func newTitledEntry(t *testing.T, runner llm.Runner, summary, title string) *model.Entry {
@@ -947,7 +956,7 @@ func newTitledEntry(t *testing.T, runner llm.Runner, summary, title string) *mod
 	var id string
 	err := h.NewEntry(context.Background(), &command.NewEntryCmd{
 		Type: model.TypeSignal, Layer: model.LayerTactical, Description: "exercising title generation",
-		Summary: summary, Title: title, SkipPreflight: true,
+		Summary: summary, Title: optionalTitle(title), SkipPreflight: true,
 		OnNewEntry: func(newID, _ string) { id = newID },
 	})
 	if err != nil {

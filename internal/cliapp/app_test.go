@@ -1,6 +1,7 @@
 package cliapp_test
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -132,6 +133,19 @@ func TestNewRefusesABlankTitle(t *testing.T) {
 				t.Errorf("no entry should be written, got %s", result.stdout)
 			}
 		})
+	}
+}
+
+func TestNewDryRunKeepsPipedStdinOnAnEmptyTitle(t *testing.T) {
+	f := newFillFixture(t)
+	var stdout, stderr bytes.Buffer
+	command := f.command(strings.NewReader("piped notes"), &stdout, &stderr)
+	err := command.Run(t.Context(), []string{"sdd", "new", "--confidence", "high", "--skip-preflight", "--dry-run", "--attach", "-:notes.md", "--title", "", "s", "tac", "A dry run with an empty title."})
+	if err == nil || !strings.Contains(err.Error(), "--title value is empty") {
+		t.Fatalf("an empty --title should be refused, got %v", err)
+	}
+	if !strings.Contains(stderr.String(), "stdin attachment saved (dry-run)") {
+		t.Errorf("the piped attachment should be saved for the retry:\n%s", stderr.String())
 	}
 }
 

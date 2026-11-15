@@ -55,12 +55,15 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	if err := cmd.Validate(); err != nil {
 		return fmt.Errorf("invalid command: %w", err)
 	}
-	title := model.NormalizeTitle(cmd.Title)
-	if title == "" && cmd.Title != "" {
-		return fmt.Errorf("--title value is empty after trimming whitespace, quotes and trailing punctuation")
-	}
-	if err := model.CheckTitle(title); err != nil {
-		return fmt.Errorf("--title: %w", err)
+	var title string
+	if cmd.Title != nil {
+		title = model.NormalizeTitle(*cmd.Title)
+		if title == "" {
+			return fmt.Errorf("--title value is empty after trimming whitespace, quotes and trailing punctuation")
+		}
+		if err := model.CheckTitle(title); err != nil {
+			return fmt.Errorf("--title: %w", err)
+		}
 	}
 
 	// Build the entry in-memory.
