@@ -475,3 +475,17 @@ func TestPairedDescriptionClaimsOnlyWhatTheEntrySays(t *testing.T) {
 		t.Errorf("the prompt should hold every summary claim to the entry:\n%s", description.Request.SystemPrompt)
 	}
 }
+
+// Listings already show an entry's type, layer and confidence, so a summary
+// opening on a label like "Signal:" or restating them spends words on nothing.
+func TestPairedDescriptionLeavesOutWhatListingsShow(t *testing.T) {
+	entry, graph := titledFixture()
+	description, err := llmops.NewDescription(unsummarizedCopy(entry), graph, "", false, nil)
+	if err != nil {
+		t.Fatalf("NewDescription: %v", err)
+	}
+	want := "Leave out what listings already show: no label such as `Signal:` opening a sentence, no sentence restating the entry's layer or confidence."
+	if !strings.Contains(description.Request.SystemPrompt, want) {
+		t.Errorf("the prompt should keep labels and listed metadata out of the summary:\n%s", description.Request.SystemPrompt)
+	}
+}
