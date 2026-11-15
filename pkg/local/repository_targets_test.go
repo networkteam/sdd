@@ -25,7 +25,7 @@ func TestRepositoryTargetPublishesCaptureThroughOneCommit(t *testing.T) {
 	summaries := 0
 	application, identity, binding := repo.captureApplication(t, pkgllm.RunnerFunc(func(context.Context, pkgllm.Request) (pkgllm.Result, error) {
 		summaries++
-		return pkgllm.Result{Text: fmt.Sprintf("Rendered summary %d.", summaries)}, nil
+		return pkgllm.Result{Text: fmt.Sprintf(`{"title": "Rendered title %d", "summary": "Rendered summary %d."}`, summaries, summaries)}, nil
 	}))
 	const entryID = "20260914-020000-s-tac-cap"
 	draft := sdd.EntryDraft{

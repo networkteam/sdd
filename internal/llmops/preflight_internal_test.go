@@ -553,11 +553,11 @@ func Test_derivedStatusForPrompt(t *testing.T) {
 	}
 }
 
-// Test_RenderSummaryPrompt_OmitsDerivedStatus guards AC 5: status threading is
+// Test_NewDescription_OmitsDerivedStatus guards AC 5: status threading is
 // pre-flight only. The summary prompt must NOT carry derived-status lines, so
 // adding the status to the pre-flight context never drifts summary-prompt
 // hashes (which would force graph-wide re-summarization).
-func Test_RenderSummaryPrompt_OmitsDerivedStatus(t *testing.T) {
+func Test_NewDescription_OmitsDerivedStatus(t *testing.T) {
 	sig := entry("20260410-120000-s-cpt-aaa", withContent("first signal"))
 	dec := &model.Entry{
 		ID:      "20260410-130000-d-tac-bbb",
@@ -569,10 +569,11 @@ func Test_RenderSummaryPrompt_OmitsDerivedStatus(t *testing.T) {
 	}
 	graph := model.NewGraph([]*model.Entry{sig, dec})
 
-	req, err := RenderSummaryPrompt(dec, graph, "")
+	description, err := NewDescription(dec, graph, "", false, nil)
 	if err != nil {
-		t.Fatalf("RenderSummaryPrompt: %v", err)
+		t.Fatalf("NewDescription: %v", err)
 	}
+	req := description.Request
 	if strings.Contains(req.Combined(), "Derived status:") {
 		t.Errorf("summary prompt must not include derived status (pre-flight only)\n%s", req.Combined())
 	}
@@ -608,7 +609,7 @@ func Test_renderPreflightPrompt_CarriesSettledRubric(t *testing.T) {
 	}
 }
 
-func Test_RenderSummaryPrompt_OmitsIntent(t *testing.T) {
+func Test_NewDescription_OmitsIntent(t *testing.T) {
 	// Intent is a pre-flight-only addition; the summary prompt must not carry
 	// it — summary generation has no use for the directive's lifecycle posture.
 	dec := &model.Entry{
@@ -616,10 +617,11 @@ func Test_RenderSummaryPrompt_OmitsIntent(t *testing.T) {
 		Kind: model.KindDirective, Intent: model.IntentSettled, Content: "decision content",
 	}
 	graph := model.NewGraph([]*model.Entry{dec})
-	req, err := RenderSummaryPrompt(dec, graph, "")
+	description, err := NewDescription(dec, graph, "", false, nil)
 	if err != nil {
-		t.Fatalf("RenderSummaryPrompt: %v", err)
+		t.Fatalf("NewDescription: %v", err)
 	}
+	req := description.Request
 	if strings.Contains(req.Combined(), "Intent: settled") {
 		t.Errorf("summary prompt must not include intent (pre-flight only)\n%s", req.Combined())
 	}

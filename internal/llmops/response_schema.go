@@ -7,10 +7,11 @@ import (
 	"fmt"
 )
 
-// The response schemas pre-flight and the writing guide declare on their
-// requests (20261004-134853-d-cpt-sw8). Kept as JSON files, not Go values:
-// strict decoding generates properties in schema order, which puts each
-// finding's reasoning before its verdict, and a Go map would sort the keys.
+// The response schemas pre-flight, the writing guide, the summary and the
+// title call declare on their requests (20261004-134853-d-cpt-sw8). Kept as
+// JSON files, not Go values: strict decoding generates properties in schema
+// order, which puts each finding's reasoning before its verdict, and a Go map
+// would sort the keys.
 //
 //go:embed response_schemas/*.json
 var responseSchemas embed.FS
@@ -18,6 +19,8 @@ var responseSchemas embed.FS
 var (
 	preflightSchema    = mustSchema("preflight.json")
 	writingGuideSchema = mustSchema("writing_guide.json")
+	summarySchema      = mustSchema("summary.json")
+	titleSchema        = mustSchema("title.json")
 )
 
 // mustSchema loads an embedded response schema, compacted with its property

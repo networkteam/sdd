@@ -54,3 +54,19 @@ func NormalizeTitle(title string) string {
 	}
 	return string(unicode.ToTitle(first)) + title[size:]
 }
+
+// SimilarTitleCount is how many titles of the entries nearest an entry's body
+// a title call is shown, so the title it writes stands apart from them.
+const SimilarTitleCount = 5
+
+// RepeatedTitle returns the title of an entry other than id that title
+// repeats, compared trimmed and case-insensitively.
+func RepeatedTitle(entries []*Entry, title, id string) (string, bool) {
+	title = strings.TrimSpace(title)
+	for _, e := range entries {
+		if e.ID != id && e.Title != "" && strings.EqualFold(strings.TrimSpace(e.Title), title) {
+			return e.Title, true
+		}
+	}
+	return "", false
+}

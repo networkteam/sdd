@@ -152,11 +152,11 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		if draft.SkipPreflight {
 			entry.Preflight = "skipped"
 		}
-		summary, err := llmops.Summarize(ctx, effective.options.LLM, entry, snapshot.graph, effective.options.Language)
+		described, err := llmops.Describe(ctx, effective.options.LLM, entry, snapshot.graph, effective.options.Language, false, nil)
 		if err != nil {
 			return result, fmt.Errorf("generating summary: %w", err)
 		}
-		entry.Summary = summary.Summary
+		entry.Summary, entry.Title = described.Summary, described.Title
 		logicalPath, err := model.IDToRelPath(draft.EntryID)
 		if err != nil {
 			return result, err

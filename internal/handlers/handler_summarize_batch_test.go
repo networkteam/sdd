@@ -2,6 +2,8 @@ package handlers_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,19 +16,52 @@ import (
 	"github.com/networkteam/sdd/pkg/llm"
 )
 
-// stubRunner returns a fixed summary for every call and counts invocations. It
-// stands in for the LLM so the batch summarize tests stay deterministic.
+// stubRunner answers the summary call with a fixed title and summary and the
+// title-only call with the title, counting invocations per purpose. It stands
+// in for the LLM so the batch summarize tests stay deterministic.
 type stubRunner struct {
-	mu    sync.Mutex
-	text  string
-	calls int
+	mu   sync.Mutex
+	text string
+	// numbered appends the call's number to the title, so a batch's titles
+	// repeat none another call wrote.
+	numbered bool
+	calls    int
+	byUse    map[llm.Purpose]int
 }
 
-func (r *stubRunner) Run(_ context.Context, _ llm.Request) (llm.Result, error) {
+// stubTitle is the stub runner's lowercase answer; files carry it capitalized.
+const (
+	stubTitle   = "generated title"
+	storedTitle = "Generated title"
+)
+
+func (r *stubRunner) Run(_ context.Context, request llm.Request) (llm.Result, error) {
 	r.mu.Lock()
 	r.calls++
+	if r.byUse == nil {
+		r.byUse = map[llm.Purpose]int{}
+	}
+	r.byUse[request.Purpose]++
+	title := stubTitle
+	if r.numbered {
+		title = fmt.Sprintf("%s %d", stubTitle, r.calls)
+	}
 	r.mu.Unlock()
-	return llm.Result{Text: r.text, Identity: llm.Identity{Provider: "test", Model: "test-model"}}, nil
+	answer := map[string]string{"title": title, "summary": r.text}
+	if request.Purpose == llm.PurposeTitle {
+		answer = map[string]string{"title": title}
+	}
+	data, err := json.Marshal(answer)
+	if err != nil {
+		return llm.Result{}, err
+	}
+	return llm.Result{Text: string(data), Identity: llm.Identity{Provider: "test", Model: "test-model"}}, nil
+}
+
+func (r *stubRunner) purposeCount(purpose llm.Purpose) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.byUse[purpose]
 }
 
 func (r *stubRunner) callCount() int {
@@ -49,8 +84,9 @@ func readEntryFile(t *testing.T, graphDir, id string) string {
 }
 
 const (
-	summarizedEntry = "20260101-120000-s-prc-aaa" // ships with a summary
-	emptyEntry      = "20260101-120001-s-prc-bbb" // has none
+	summarizedEntry = "20260101-120000-s-prc-aaa" // ships with a summary, no title
+	emptyEntry      = "20260101-120001-s-prc-bbb" // has neither
+	titledEntry     = "20260101-120002-s-prc-ccc" // has both
 )
 
 func writeSummarizePair(t *testing.T, graphDir string) {
@@ -59,14 +95,21 @@ func writeSummarizePair(t *testing.T, graphDir string) {
 	writeEntryFile(t, graphDir, emptyEntry, "---\ntype: signal\nlayer: process\nkind: gap\n---\n\nNeeds a summary.\n")
 }
 
-// TestSummarize_All_FillsOnlyEmpty covers the --all fill-empty semantics
-// (d-cpt-4qi): entries that already have a summary are skipped, only empty ones
-// are generated.
-func TestSummarize_All_FillsOnlyEmpty(t *testing.T) {
+func writeTitledEntry(t *testing.T, graphDir string) {
+	t.Helper()
+	writeEntryFile(t, graphDir, titledEntry, "---\ntype: signal\nlayer: process\nkind: gap\ntitle: Kept title\nsummary: Kept summary.\n---\n\nHas both already.\n")
+}
+
+// TestSummarize_All_FillsWhatIsMissing covers the --all fill semantics
+// (d-cpt-4qi): an entry with neither gets summary and title from one call, an
+// entry with a summary gets a title-only call that leaves the summary as
+// stored, and an entry with both is skipped.
+func TestSummarize_All_FillsWhatIsMissing(t *testing.T) {
 	graphDir := t.TempDir()
 	writeSummarizePair(t, graphDir)
+	writeTitledEntry(t, graphDir)
 
-	runner := &stubRunner{text: "GENERATED"}
+	runner := &stubRunner{text: "GENERATED", numbered: true}
 	h := handlers.New(handlers.Options{
 		GraphDir:  graphDir,
 		Reader:    &graphReader{},
@@ -74,30 +117,39 @@ func TestSummarize_All_FillsOnlyEmpty(t *testing.T) {
 		LLMRunner: runner,
 	})
 
-	var summarized, skipped []string
+	var summarized, titled, skipped []string
 	scmd := &command.SummarizeCmd{
 		OnSummarized: func(id, _ string) { summarized = append(summarized, id) },
+		OnTitled:     func(id, _ string) { titled = append(titled, id) },
 		OnSkipped:    func(id string) { skipped = append(skipped, id) },
 	}
 	if err := h.Summarize(context.Background(), scmd); err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
 
-	if runner.callCount() != 1 {
-		t.Errorf("runner calls = %d, want 1", runner.callCount())
+	if runner.purposeCount(llm.PurposeSummarize) != 1 || runner.purposeCount(llm.PurposeTitle) != 1 {
+		t.Errorf("one paired and one title-only call expected, got %v", runner.byUse)
 	}
 	if len(summarized) != 1 || summarized[0] != emptyEntry {
-		t.Errorf("summarized = %v, want [%s]", summarized, emptyEntry)
+		t.Errorf("only the entry without a summary should be summarized, got %v", summarized)
 	}
-	if len(skipped) != 1 || skipped[0] != summarizedEntry {
-		t.Errorf("skipped = %v, want [%s]", skipped, summarizedEntry)
+	if len(titled) != 1 || titled[0] != summarizedEntry {
+		t.Errorf("only the entry with a summary and no title should be titled, got %v", titled)
+	}
+	if len(skipped) != 1 || skipped[0] != titledEntry {
+		t.Errorf("only the entry with both should be skipped, got %v", skipped)
 	}
 
-	if withText := readEntryFile(t, graphDir, summarizedEntry); !strings.Contains(withText, "Existing summary.") || strings.Contains(withText, "GENERATED") {
-		t.Errorf("existing entry should be untouched:\n%s", withText)
+	withSummary := readEntryFile(t, graphDir, summarizedEntry)
+	if !strings.Contains(withSummary, "summary: Existing summary.") || !strings.Contains(withSummary, "title: "+storedTitle) {
+		t.Errorf("a stored summary should survive while the title is added:\n%s", withSummary)
 	}
-	if emptyText := readEntryFile(t, graphDir, emptyEntry); !strings.Contains(emptyText, "summary: GENERATED") {
-		t.Errorf("empty entry should be summarized:\n%s", emptyText)
+	empty := readEntryFile(t, graphDir, emptyEntry)
+	if !strings.Contains(empty, "summary: GENERATED") || !strings.Contains(empty, "title: "+storedTitle) {
+		t.Errorf("an entry without a summary should gain summary and title:\n%s", empty)
+	}
+	if kept := readEntryFile(t, graphDir, titledEntry); !strings.Contains(kept, "title: Kept title") || !strings.Contains(kept, "summary: Kept summary.") {
+		t.Errorf("an entry with both should be untouched:\n%s", kept)
 	}
 }
 
@@ -107,7 +159,7 @@ func TestSummarize_AllForce_RegeneratesAll(t *testing.T) {
 	graphDir := t.TempDir()
 	writeSummarizePair(t, graphDir)
 
-	runner := &stubRunner{text: "GENERATED"}
+	runner := &stubRunner{text: "GENERATED", numbered: true}
 	h := handlers.New(handlers.Options{
 		GraphDir:  graphDir,
 		Reader:    &graphReader{},
@@ -130,9 +182,12 @@ func TestSummarize_AllForce_RegeneratesAll(t *testing.T) {
 	if len(skipped) != 0 {
 		t.Errorf("skipped = %v, want none with --force", skipped)
 	}
+	if runner.purposeCount(llm.PurposeTitle) != 0 {
+		t.Errorf("--force should regenerate both fields in paired calls, got %v", runner.byUse)
+	}
 	for _, id := range []string{summarizedEntry, emptyEntry} {
-		if text := readEntryFile(t, graphDir, id); !strings.Contains(text, "summary: GENERATED") {
-			t.Errorf("%s should be regenerated:\n%s", id, text)
+		if text := readEntryFile(t, graphDir, id); !strings.Contains(text, "summary: GENERATED") || !strings.Contains(text, "title: "+storedTitle) {
+			t.Errorf("%s should regenerate summary and title:\n%s", id, text)
 		}
 	}
 }
@@ -171,7 +226,7 @@ func TestSummarize_NamedEntry_RegeneratesUnconditionally(t *testing.T) {
 	if len(skipped) != 0 {
 		t.Errorf("skipped = %v, want none for a named entry", skipped)
 	}
-	if text := readEntryFile(t, graphDir, summarizedEntry); !strings.Contains(text, "summary: GENERATED") {
-		t.Errorf("named entry should be regenerated:\n%s", text)
+	if text := readEntryFile(t, graphDir, summarizedEntry); !strings.Contains(text, "summary: GENERATED") || !strings.Contains(text, "title: "+storedTitle) {
+		t.Errorf("named entry should regenerate summary and title:\n%s", text)
 	}
 }

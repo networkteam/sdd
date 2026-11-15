@@ -677,19 +677,19 @@ func assertKindAndNoKindSpecificFields(t *testing.T, e *model.Entry, want model.
 }
 
 // trippingRunner fails the test if the handler makes any LLM call. Used to
-// prove a caller-supplied summary skips generation entirely rather than
-// racing it.
+// prove a caller-supplied summary and title skip generation entirely rather
+// than racing it.
 type trippingRunner struct {
 	t *testing.T
 }
 
 func (r *trippingRunner) Run(_ context.Context, _ llm.Request) (llm.Result, error) {
-	r.t.Error("LLM runner invoked despite a caller-supplied summary")
+	r.t.Error("LLM runner invoked despite a caller-supplied summary and title")
 	return llm.Result{}, errors.New("must not be called")
 }
 
-// TestNewEntry_ExplicitSummary_SkipsLLM: a caller-supplied Summary stores
-// verbatim in the written entry and the LLM runner is never consulted.
+// TestNewEntry_ExplicitSummary_SkipsLLM: a caller-supplied Summary and Title
+// store in the written entry and the LLM runner is never consulted.
 func TestNewEntry_ExplicitSummary_SkipsLLM(t *testing.T) {
 	tmp := t.TempDir()
 	sddDir := filepath.Join(tmp, ".sdd")
@@ -714,6 +714,7 @@ func TestNewEntry_ExplicitSummary_SkipsLLM(t *testing.T) {
 		Layer:         model.LayerTactical,
 		Description:   "exercising the explicit summary path",
 		Summary:       custom,
+		Title:         "custom title",
 		SkipPreflight: true,
 		OnNewEntry: func(id, summary string) {
 			reportedID = id
@@ -743,5 +744,97 @@ func TestNewEntry_ExplicitSummary_SkipsLLM(t *testing.T) {
 	}
 	if entry.Summary != custom {
 		t.Errorf("stored summary = %q, want %q", entry.Summary, custom)
+	}
+}
+
+// newTitledEntry runs NewEntry with the given summary and title against
+// runner and returns the written entry.
+func newTitledEntry(t *testing.T, runner llm.Runner, summary, title string) *model.Entry {
+	t.Helper()
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	h := handlers.New(handlers.Options{
+		GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: &recordingCommitter{},
+		LLMRunner: runner, Stderr: &bytes.Buffer{},
+	})
+	var id string
+	err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+		Type: model.TypeSignal, Layer: model.LayerTactical, Description: "exercising title generation",
+		Summary: summary, Title: title, SkipPreflight: true,
+		OnNewEntry: func(newID, _ string) { id = newID },
+	})
+	if err != nil {
+		t.Fatalf("NewEntry: %v", err)
+	}
+	relPath, err := model.IDToRelPath(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, relPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := model.ParseEntry(id+".md", string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entry
+}
+
+func TestNewEntry_GeneratedTitle(t *testing.T) {
+	cases := []struct {
+		name         string
+		summary      string
+		title        string
+		wantPurpose  llm.Purpose
+		wantTitle    string
+		wantSummary  string
+		otherPurpose llm.Purpose
+	}{
+		{name: "a supplied summary costs only a title call", summary: "A supplied summary.", wantPurpose: llm.PurposeTitle, wantTitle: storedTitle, wantSummary: "A supplied summary.", otherPurpose: llm.PurposeSummarize},
+		{name: "a generated summary brings its title", wantPurpose: llm.PurposeSummarize, wantTitle: storedTitle, wantSummary: "GENERATED", otherPurpose: llm.PurposeTitle},
+		{name: "a supplied title beside a generated summary is kept", title: "Supplied title", wantPurpose: llm.PurposeSummarize, wantTitle: "Supplied title", wantSummary: "GENERATED", otherPurpose: llm.PurposeTitle},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &stubRunner{text: "GENERATED"}
+			entry := newTitledEntry(t, runner, tc.summary, tc.title)
+			if runner.purposeCount(tc.wantPurpose) != 1 || runner.purposeCount(tc.otherPurpose) != 0 {
+				t.Errorf("one call of the expected purpose should run, got %v", runner.byUse)
+			}
+			if entry.Title != tc.wantTitle || entry.Summary != tc.wantSummary {
+				t.Errorf("the entry should carry the expected title beside the expected summary, got title %q summary %q", entry.Title, entry.Summary)
+			}
+		})
+	}
+}
+
+func TestNewEntry_NormalizesTheSuppliedTitle(t *testing.T) {
+	cases := []struct {
+		name      string
+		title     string
+		wantTitle string
+		wantCalls int
+	}{
+		{name: "quotes and trailing punctuation removed", title: `"Supplied" title.`, wantTitle: "Supplied title"},
+		{name: "a question mark kept", title: "Should the daemon go?", wantTitle: "Should the daemon go?"},
+		{name: "a leading code span kept", title: "`sdd` info JSON output", wantTitle: "`sdd` info JSON output"},
+		{name: "a long title stored whole", title: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance", wantTitle: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance"},
+		{name: "nothing left is generated", title: " … ", wantTitle: storedTitle, wantCalls: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &stubRunner{text: "GENERATED"}
+			entry := newTitledEntry(t, runner, "A supplied summary.", tc.title)
+			if runner.callCount() != tc.wantCalls {
+				t.Errorf("a usable supplied title should cost no call, an emptied one a title call, got %d calls", runner.callCount())
+			}
+			if entry.Title != tc.wantTitle {
+				t.Errorf("the stored title should be the normalized one, got %q", entry.Title)
+			}
+		})
 	}
 }

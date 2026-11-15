@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "title": {"type": "string", "description": "the entry's title, written to the title rule the instructions state"},
+    "summary": {"type": "string"}
+  },
+  "required": ["title", "summary"],
+  "additionalProperties": false
+}

@@ -97,6 +97,12 @@ type NewEntryCmd struct {
 	// "generate via the configured runner".
 	Summary string
 
+	// Title supplies the entry's stored title, in model.NormalizeTitle's
+	// form, skipping its generation. Empty, or empty once normalized, means
+	// the title comes from the same LLM call as the summary — or, with a
+	// supplied Summary, from a title-only call.
+	Title string
+
 	// OnNewEntry is invoked with the new entry's ID and the LLM-generated
 	// summary on successful creation. Summary is empty when the LLM call
 	// failed or was skipped (dry-run path returns before invoking). Not

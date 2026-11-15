@@ -46,7 +46,7 @@ func newWriteFixture(t *testing.T, options ...writeFixtureOptions) *writeFixture
 		if request.Purpose == pkgllm.PurposePreflight {
 			return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
 		}
-		return pkgllm.Result{Text: "A captured entry for the project record.", Identity: identity}, nil
+		return pkgllm.Result{Text: `{"title": "Test title", "summary": "A captured entry for the project record."}`, Identity: identity}, nil
 	}))
 	var finalizers []sdd.MutationFinalizer
 	var graph sdd.GraphStore = baseGraph

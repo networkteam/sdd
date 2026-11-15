@@ -9,6 +9,7 @@ import (
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
+	"github.com/networkteam/sdd/internal/model"
 )
 
 // messageRecordingCommitter captures commit messages so summarize tests can
@@ -138,5 +139,85 @@ func TestSummarize_ExplicitText_RejectsEmptyEntryIDs(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for empty EntryIDs with --text, got nil")
+	}
+}
+
+func TestSummarize_ExplicitTitle(t *testing.T) {
+	const id = "20260427-120300-s-prc-tt1"
+	text := "  Hand-written summary.  "
+	cases := []struct {
+		name        string
+		title       string
+		text        *string
+		wantTitle   string
+		wantSummary string
+	}{
+		{name: "title alone keeps the stored summary", title: "  hand-written title.  ", wantTitle: "Hand-written title", wantSummary: "summary: Stored summary."},
+		{name: "title beside text writes both", title: "  hand-written title.  ", text: &text, wantTitle: "Hand-written title", wantSummary: "summary: Hand-written summary."},
+		{name: "a leading code span keeps its casing", title: "`sdd` info JSON output", wantTitle: "`sdd` info JSON output", wantSummary: "summary: Stored summary."},
+		{name: "a question mark is kept", title: "Should the daemon go?", wantTitle: "Should the daemon go?", wantSummary: "summary: Stored summary."},
+		{name: "a long title is stored whole", title: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance", wantTitle: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance", wantSummary: "summary: Stored summary."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			graphDir := t.TempDir()
+			writeEntryFile(t, graphDir, id, "---\ntype: signal\nlayer: process\nkind: gap\nsummary: Stored summary.\n---\n\nBody.\n")
+			h := handlers.New(handlers.Options{GraphDir: graphDir, Reader: &graphReader{}, Committer: &messageRecordingCommitter{}})
+
+			title := tc.title
+			var titled string
+			err := h.Summarize(context.Background(), &command.SummarizeCmd{
+				EntryIDs: []string{id}, ExplicitText: tc.text, ExplicitTitle: &title,
+				OnTitled: func(_, title string) { titled = title },
+			})
+			if err != nil {
+				t.Fatalf("Summarize: %v", err)
+			}
+			if titled != tc.wantTitle {
+				t.Errorf("the title should be reported normalized, got %q", titled)
+			}
+			written := readEntryFile(t, graphDir, id)
+			entry, err := model.ParseEntry(id+".md", written)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.Title != tc.wantTitle || !strings.Contains(written, tc.wantSummary) {
+				t.Errorf("the written entry should carry the supplied title and the expected summary:\n%s", written)
+			}
+		})
+	}
+}
+
+func TestSummarize_ExplicitTitleRefusesAnUnusableTitle(t *testing.T) {
+	const id = "20260427-120301-s-prc-tt2"
+	for name, title := range map[string]string{"multi-line": "first line\nsecond line", "blank": "   ", "punctuation only": " … "} {
+		t.Run(name, func(t *testing.T) {
+			graphDir := t.TempDir()
+			writeEntryFile(t, graphDir, id, "---\ntype: signal\nlayer: process\nkind: gap\n---\n\nBody.\n")
+			h := handlers.New(handlers.Options{GraphDir: graphDir, Reader: &graphReader{}})
+
+			err := h.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{id}, ExplicitTitle: &title})
+			if err == nil || !strings.Contains(err.Error(), "--title") {
+				t.Fatalf("an unusable title should be refused naming the flag, got %v", err)
+			}
+			if written := readEntryFile(t, graphDir, id); strings.Contains(written, "title:") {
+				t.Errorf("a refused title should not be written:\n%s", written)
+			}
+		})
+	}
+}
+
+func TestSummarize_ExplicitTitleNeedsOneEntry(t *testing.T) {
+	graphDir := t.TempDir()
+	writeSummarizePair(t, graphDir)
+	h := handlers.New(handlers.Options{GraphDir: graphDir, Reader: &graphReader{}})
+	title := "A title"
+	for name, ids := range map[string][]string{"--all": nil, "two entries": {summarizedEntry, emptyEntry}} {
+		t.Run(name, func(t *testing.T) {
+			err := h.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: ids, ExplicitTitle: &title})
+			if err == nil || !strings.Contains(err.Error(), "exactly one entry ID") {
+				t.Errorf("--title should need exactly one entry, got %v", err)
+			}
+		})
 	}
 }

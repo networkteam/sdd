@@ -83,3 +83,28 @@ func TestNormalizeTitle(t *testing.T) {
 		})
 	}
 }
+
+func TestRepeatedTitle(t *testing.T) {
+	entries := []*model.Entry{
+		{ID: "20260101-100000-s-tac-aaa", Title: "Daemon shutdown order"},
+		{ID: "20260101-100001-s-tac-bbb"},
+	}
+	cases := []struct {
+		name  string
+		title string
+		id    string
+		want  string
+	}{
+		{name: "another entry's title, in other case and spacing", title: " daemon SHUTDOWN order ", id: "20260101-100002-s-tac-ccc", want: "Daemon shutdown order"},
+		{name: "the entry's own title", title: "Daemon shutdown order", id: "20260101-100000-s-tac-aaa"},
+		{name: "a title no entry holds", title: "Daemon stop sequence", id: "20260101-100002-s-tac-ccc"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := model.RepeatedTitle(entries, tc.title, tc.id)
+			if got != tc.want || ok != (tc.want != "") {
+				t.Errorf("only another entry's title should count as repeated, got %q, %v", got, ok)
+			}
+		})
+	}
+}
