@@ -64,7 +64,7 @@ func TestSummarizeCostLine(t *testing.T) {
 			if result.err != nil {
 				t.Fatalf("sdd summarize: %v\n%s", result.err, result.stderr)
 			}
-			costLine := "Filling: 1 entries get a title beside their stored summary, 0 entries get a summary and a title -> 1 model calls."
+			costLine := "Filling: 1 entries get a title beside their stored summary, 0 entries get a summary beside their stored title, 0 entries get a summary and a title -> 1 model calls."
 			if strings.Contains(result.stderr, costLine) != tc.wantCostLine {
 				t.Errorf("only a fill should state its cost before it runs:\n%s", result.stderr)
 			}
@@ -79,6 +79,24 @@ func TestSummarizeCostLine(t *testing.T) {
 				t.Errorf("the filled entry should be committed:\n%s", status)
 			}
 		})
+	}
+}
+
+func TestSummarizeCostLineCountsAStoredTitle(t *testing.T) {
+	f := newFillFixture(t)
+	f.write(t, appEntryRel, strings.Replace(f.read(t, appEntryRel), "summary: "+appSummary, "title: Hand title", 1))
+	runGit(t, f.root, "commit", "-q", "-am", "titled by hand")
+
+	result := f.run(t, "summarize", "--all")
+	if result.err != nil {
+		t.Fatalf("summarize --all: %v\n%s", result.err, result.stderr)
+	}
+	costLine := "Filling: 0 entries get a title beside their stored summary, 1 entries get a summary beside their stored title, 0 entries get a summary and a title -> 1 model calls."
+	if !strings.Contains(result.stderr, costLine) {
+		t.Errorf("the cost line should count a titled entry as getting its summary alone:\n%s", result.stderr)
+	}
+	if entry := f.read(t, appEntryRel); !strings.Contains(entry, "title: Hand title") || !strings.Contains(entry, "summary: A generated summary.") {
+		t.Errorf("the fill should add the summary beside the stored title:\n%s", entry)
 	}
 }
 

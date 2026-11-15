@@ -154,6 +154,29 @@ func TestSummarize_All_FillsWhatIsMissing(t *testing.T) {
 	}
 }
 
+func TestSummarize_All_KeepsAStoredTitle(t *testing.T) {
+	graphDir := t.TempDir()
+	writeEntryFile(t, graphDir, emptyEntry, "---\ntype: signal\nlayer: process\nkind: gap\ntitle: Hand title\n---\n\nNeeds a summary.\n")
+
+	runner := &stubRunner{text: "GENERATED"}
+	h := handlers.New(handlers.Options{GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{}, LLMRunner: runner})
+	var summarized []string
+	scmd := &command.SummarizeCmd{OnSummarized: func(id, _ string) { summarized = append(summarized, id) }}
+	if err := h.Summarize(context.Background(), scmd); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+
+	if runner.purposeCount(llm.PurposeSummarize) != 1 || runner.callCount() != 1 {
+		t.Errorf("one paired call should write the missing summary, got %v", runner.byUse)
+	}
+	if len(summarized) != 1 || summarized[0] != emptyEntry {
+		t.Errorf("the entry should be reported summarized, got %v", summarized)
+	}
+	if text := readEntryFile(t, graphDir, emptyEntry); !strings.Contains(text, "title: Hand title") || !strings.Contains(text, "summary: GENERATED") {
+		t.Errorf("the fill should add the summary and keep the stored title:\n%s", text)
+	}
+}
+
 // TestSummarize_AllForce_RegeneratesAll covers `--all --force`: every
 // non-embedded entry is regenerated regardless of an existing summary.
 func TestSummarize_AllForce_RegeneratesAll(t *testing.T) {

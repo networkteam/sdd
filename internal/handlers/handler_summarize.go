@@ -27,8 +27,9 @@ import (
 // reads and writes; the LLM call itself runs without the lock.
 //
 // One call writes an entry's summary and title together. An --all run that
-// finds a summary without a title asks for the title alone, so a summary
-// corrected by hand survives the fill.
+// finds a summary without a title asks for the title alone, and one that finds
+// a title without a summary keeps the title, so what was set by hand survives
+// the fill.
 //
 // When cmd.ExplicitText or cmd.ExplicitTitle is set, the LLM is bypassed
 // entirely: the supplied text is written on a single named entry.
@@ -165,7 +166,9 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			// Apply the answer under write lock, then format and write file
 			// under read lock so FormatFrontmatter sees a consistent entry.
 			graphMu.Lock()
-			entry.Title = result.Title
+			if regenerate || entry.Title == "" {
+				entry.Title = result.Title
+			}
 			if !titleOnly {
 				entry.Summary = result.Summary
 			}

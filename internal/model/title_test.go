@@ -118,8 +118,8 @@ func TestTitleBackfill(t *testing.T) {
 		{Embedded: true, Summary: "S."},
 		{Embedded: true},
 	}
-	withSummary, titleOnly := model.TitleBackfill(entries)
-	if withSummary != 2 || titleOnly != 1 {
-		t.Errorf("every entry lacking a summary owes a paired call and only the summarized untitled one a title call, got %d paired, %d title-only", withSummary, titleOnly)
+	summaryAndTitle, summaryOnly, titleOnly := model.TitleBackfill(entries)
+	if summaryAndTitle != 1 || summaryOnly != 1 || titleOnly != 1 {
+		t.Errorf("every entry lacking a summary owes a paired call that keeps a stored title, and only the summarized untitled one a title call, got %d paired, %d summary-only, %d title-only", summaryAndTitle, summaryOnly, titleOnly)
 	}
 }

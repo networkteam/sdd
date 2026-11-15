@@ -32,8 +32,8 @@ func fillMissing(ctx context.Context, cmd *cli.Command, handler *handlers.Handle
 		if err != nil {
 			return err
 		}
-		withSummary, titleOnly := model.TitleBackfill(graph.Entries)
-		fmt.Fprintf(out, "Filling: %d entries get a title beside their stored summary, %d entries get a summary and a title -> %d model calls.\n", titleOnly, withSummary, titleOnly+withSummary)
+		summaryAndTitle, summaryOnly, titleOnly := model.TitleBackfill(graph.Entries)
+		fmt.Fprintf(out, "Filling: %d entries get a title beside their stored summary, %d entries get a summary beside their stored title, %d entries get a summary and a title -> %d model calls.\n", titleOnly, summaryOnly, summaryAndTitle, titleOnly+summaryOnly+summaryAndTitle)
 	}
 	if !cliout.IsInteractive(out) {
 		return handler.Summarize(ctx, sumCmd)

@@ -72,18 +72,20 @@ func RepeatedTitle(entries []*Entry, title, id string) (string, bool) {
 }
 
 // TitleBackfill counts the model calls `sdd summarize --all` makes: an entry
-// lacking a summary gets summary and title from one call, whether or not it
-// holds a title; an entry holding a summary but no title gets a title-only
-// call. Embedded entries have no file to write and are not counted.
-func TitleBackfill(entries []*Entry) (withSummary, titleOnly int) {
+// lacking a summary gets one paired call, which writes its title too unless it
+// holds one; an entry holding a summary but no title gets a title-only call.
+// Embedded entries have no file to write and are not counted.
+func TitleBackfill(entries []*Entry) (summaryAndTitle, summaryOnly, titleOnly int) {
 	for _, e := range entries {
 		switch {
 		case e.Embedded:
+		case e.Summary == "" && e.Title == "":
+			summaryAndTitle++
 		case e.Summary == "":
-			withSummary++
+			summaryOnly++
 		case e.Title == "":
 			titleOnly++
 		}
 	}
-	return withSummary, titleOnly
+	return summaryAndTitle, summaryOnly, titleOnly
 }
