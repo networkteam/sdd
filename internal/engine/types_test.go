@@ -117,7 +117,7 @@ func TestValidateValueTitle(t *testing.T) {
 		want    string
 		wantErr string
 	}{
-		{name: "normalized", value: `“daemon removal”.`, want: "Daemon removal"},
+		{name: "stored as given, normalized at the write", value: `“daemon removal”.`, want: `“daemon removal”.`},
 		{name: "empty is left unset", value: "", want: ""},
 		{name: "punctuation only", value: "...", wantErr: "empty"},
 		{name: "quotes only", value: `""`, wantErr: "empty"},
@@ -134,7 +134,7 @@ func TestValidateValueTitle(t *testing.T) {
 				return
 			}
 			if err != nil || got != tt.want {
-				t.Errorf("a title should be stored normalized, got %v, %v", got, err)
+				t.Errorf("a usable title should be stored as given, got %v, %v", got, err)
 			}
 		})
 	}

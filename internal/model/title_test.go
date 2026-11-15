@@ -74,8 +74,9 @@ func TestNormalizeTitle(t *testing.T) {
 		{in: `"daemon removal"`, want: "Daemon removal"},
 		{in: `"daemon removal" plan`, want: "Daemon removal plan"},
 		{in: `"daemon removal plan`, want: "Daemon removal plan"},
-		{in: `"sdd" output`, want: "sdd output"},
-		{in: "„go.mod“ replace directive", want: "go.mod replace directive"},
+		{in: `"sdd" output`, want: "`sdd` output"},
+		{in: "„go.mod“ replace directive", want: "`go.mod` replace directive"},
+		{in: `"sdd" info JSON output`, want: "`sdd` info JSON output"},
 		{in: "The team's daemon’s exit", want: "The team's daemon’s exit"},
 		{in: "Self-hosted runners", want: "Self-hosted runners"},
 		{in: "...", want: ""},
@@ -83,8 +84,13 @@ func TestNormalizeTitle(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			if got := model.NormalizeTitle(tc.in); got != tc.want {
-				t.Errorf("double quotes and trailing punctuation but a question mark should go and a first letter outside a code span become a capital, got %q", got)
+			got := model.NormalizeTitle(tc.in)
+			if got != tc.want {
+				t.Errorf("double quotes and trailing punctuation but a question mark should go, a quoted leading word become a code span and a first letter outside a code span a capital, got %q", got)
+			}
+			// Every writer may normalize a title already normalized.
+			if again := model.NormalizeTitle(got); again != got {
+				t.Errorf("normalizing a normalized title should change nothing, got %q", again)
 			}
 		})
 	}

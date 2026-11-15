@@ -97,7 +97,7 @@ var baseTypeDesc = map[BaseType]string{
 	TypeInvolvement:       "a focus involvement: target entry, optional actors, optional time range",
 	TypeInvolvementWhen:   "a from/to date range",
 	TypeSearchReplace:     "one exact edit: old text that must match exactly once in the target, and the new text replacing it",
-	TypeTitle:             "an entry title naming the subject on one-line listings: one line, normalized on arrival",
+	TypeTitle:             "an entry title naming the subject on one-line listings: one line, normalized when it is written",
 	TypeProse:             "long-form prose — like text, but serves render changes as content diffs instead of re-serving the whole value",
 }
 
@@ -181,11 +181,15 @@ func validateBaseValue(base BaseType, v any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("expected title (string)")
 		}
-		// Empty is a title left out, as an omitted optional field is.
+		// Empty is a title left out, as an omitted optional field is. The
+		// write normalizes; the store keeps the value as given.
 		if s == "" {
 			return s, nil
 		}
-		return model.ParseTitle(s)
+		if _, err := model.ParseTitle(s); err != nil {
+			return nil, err
+		}
+		return s, nil
 
 	case TypeBool:
 		b, ok := v.(bool)

@@ -20,6 +20,7 @@ func TestCapture_TitleIsWrittenShownAndCorrectable(t *testing.T) {
 		wantSummary string
 	}{
 		{name: "title alone", corrections: map[string]any{"correctedTitle": "corrected title."}, wantTitle: "Corrected title", wantSummary: "A generated summary."},
+		{name: "quoted lowercase opener", corrections: map[string]any{"correctedTitle": `"sdd" info JSON output`}, wantTitle: "`sdd` info JSON output", wantSummary: "A generated summary."},
 		{name: "summary alone", corrections: map[string]any{"correctedSummary": "The corrected summary."}, wantTitle: "Generated title", wantSummary: "The corrected summary."},
 		{name: "both", corrections: map[string]any{"correctedTitle": "corrected title", "correctedSummary": "The corrected summary."}, wantTitle: "Corrected title", wantSummary: "The corrected summary."},
 	}
