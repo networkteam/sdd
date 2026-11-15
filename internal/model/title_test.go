@@ -80,6 +80,8 @@ func TestNormalizeTitle(t *testing.T) {
 		{in: "The team's daemon’s exit", want: "The team's daemon’s exit"},
 		{in: "Self-hosted runners", want: "Self-hosted runners"},
 		{in: "...", want: ""},
+		{in: "„…“", want: ""},
+		{in: `"-" removal`, want: "- removal"},
 		{in: "", want: ""},
 	}
 	for _, tc := range cases {

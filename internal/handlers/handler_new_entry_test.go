@@ -1062,7 +1062,7 @@ func TestNewEntry_NormalizesTheSuppliedTitle(t *testing.T) {
 		title     string
 		wantTitle string
 	}{
-		{name: "quotes and trailing punctuation removed", title: `"Supplied" title.`, wantTitle: "Supplied title"},
+		{name: "quotes and trailing punctuation removed", title: `Supplied "title".`, wantTitle: "Supplied title"},
 		{name: "a question mark kept", title: "Should the daemon go?", wantTitle: "Should the daemon go?"},
 		{name: "a leading code span kept", title: "`sdd` info JSON output", wantTitle: "`sdd` info JSON output"},
 		{name: "a long title stored whole", title: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance", wantTitle: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance"},

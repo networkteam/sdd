@@ -60,8 +60,8 @@ func NormalizeTitle(title string) string {
 	return string(unicode.ToTitle(first)) + title[size:]
 }
 
-// quotedOpenerAsCodeSpan sets a single quoted word opening title as a code
-// span; any other title is returned as it is.
+// quotedOpenerAsCodeSpan sets a single quoted word holding a letter or digit
+// that opens title as a code span; any other title is returned as it is.
 func quotedOpenerAsCodeSpan(title string) string {
 	isQuote := func(r rune) bool { return strings.ContainsRune(titleQuotes, r) }
 	first, size := utf8.DecodeRuneInString(title)
@@ -70,11 +70,12 @@ func quotedOpenerAsCodeSpan(title string) string {
 	}
 	rest := title[size:]
 	end := strings.IndexFunc(rest, isQuote)
-	if end <= 0 || strings.ContainsFunc(rest[:end], unicode.IsSpace) {
+	word := rest[:max(end, 0)]
+	if strings.ContainsFunc(word, unicode.IsSpace) || !strings.ContainsFunc(word, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) {
 		return title
 	}
 	_, closing := utf8.DecodeRuneInString(rest[end:])
-	return "`" + rest[:end] + "`" + rest[end+closing:]
+	return "`" + word + "`" + rest[end+closing:]
 }
 
 // ErrMultiLineTitle refuses a title no one-line listing can show.
