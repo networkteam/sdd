@@ -164,7 +164,7 @@ func commitArgs(t *testing.T, err error) []string {
 	if err == nil || !strings.Contains(err.Error(), "git commit: signing timed out") {
 		t.Fatalf("the failed commit should surface, got %v", err)
 	}
-	if !errors.Is(err, model.ErrUncommittedWrite) {
+	if !errors.Is(err, model.ErrIncompleteWrite) {
 		t.Errorf("the failure should mark the written files as uncommitted, so a cancellation keeps it, got %v", err)
 	}
 	_, line, ok := strings.Cut(err.Error(), "commit them with: git ")
@@ -501,7 +501,7 @@ func TestSummarize_All_CancelledRunKeepsAFailedCommit(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("the cancelled run should fail with the cancellation, got %v", err)
 	}
-	if kept := cliout.Uncommitted(err); kept == nil || !strings.Contains(kept.Error(), "git commit: signing timed out") {
+	if kept := cliout.Incomplete(err); kept == nil || !strings.Contains(kept.Error(), "git commit: signing timed out") {
 		t.Errorf("the failed commit should outlast the cancellation, got %v", kept)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/cliout"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/model"
@@ -250,6 +251,56 @@ func TestNewEntry_DryRun_SavesStdinOnAnEarlyRefusal(t *testing.T) {
 			}
 			if !strings.Contains(stderr.String(), "stdin attachment saved (dry-run)") {
 				t.Errorf("the piped attachment should be saved for the retry:\n%s", stderr.String())
+			}
+		})
+	}
+}
+
+// cancellingSummaryRunner cancels the run during the summary call, as Ctrl-C
+// does, and fails the call with the cancellation.
+type cancellingSummaryRunner struct{ cancel context.CancelFunc }
+
+func (r cancellingSummaryRunner) Run(ctx context.Context, _ llm.Request) (llm.Result, error) {
+	r.cancel()
+	<-ctx.Done()
+	return llm.Result{}, ctx.Err()
+}
+
+// A cancellation after the entry is written keeps what the caller must still
+// do: the hint that fills the description and any failed commit.
+func TestNewEntry_CancelledSummaryKeepsTheHint(t *testing.T) {
+	cases := []struct {
+		name      string
+		commitErr error
+		want      []string
+	}{
+		{name: "commit succeeds", want: []string{"is written without a generated summary or title (run sdd summarize "}},
+		{name: "commit fails", commitErr: errors.New("signing timed out"), want: []string{"is written without a generated summary or title", "git commit: signing timed out"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			h := handlers.New(handlers.Options{
+				GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: &recordingCommitter{err: tc.commitErr},
+				LLMRunner: cancellingSummaryRunner{cancel: cancel}, Stderr: &bytes.Buffer{},
+			})
+			err := h.NewEntry(ctx, &command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerTactical, Description: "cancelled during the summary call", SkipPreflight: true,
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("the run should fail with the cancellation, got %v", err)
+			}
+			kept := cliout.Incomplete(err)
+			for _, want := range tc.want {
+				if kept == nil || !strings.Contains(kept.Error(), want) {
+					t.Errorf("the cancellation should keep what is left to do, got %v", kept)
+				}
 			}
 		})
 	}

@@ -30,8 +30,8 @@ func main() {
 		logger := slog.New(slogutils.NewCLIHandler(os.Stderr, nil))
 		if errors.Is(err, cliout.ErrUserCancelled) || errors.Is(err, context.Canceled) {
 			fmt.Fprintln(os.Stderr, "cancelled.")
-			if uncommitted := cliout.Uncommitted(err); uncommitted != nil {
-				logger.Error(uncommitted.Error())
+			if incomplete := cliout.Incomplete(err); incomplete != nil {
+				logger.Error(incomplete.Error())
 				os.Exit(1)
 			}
 			os.Exit(130)

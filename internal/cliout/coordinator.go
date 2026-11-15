@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"slices"
 	"sync"
 	"time"
 
@@ -23,19 +22,19 @@ import (
 // "context canceled" string ever reaches the user.
 var ErrUserCancelled = errors.New("cancelled by user")
 
-// Uncommitted returns the parts of err that wrap model.ErrUncommittedWrite,
-// nil when none does.
-func Uncommitted(err error) error {
-	if !errors.Is(err, model.ErrUncommittedWrite) {
+// Incomplete returns the parts of err that wrap model.ErrIncompleteWrite, nil
+// when none does.
+func Incomplete(err error) error {
+	if !errors.Is(err, model.ErrIncompleteWrite) {
 		return nil
 	}
 	joined, ok := err.(interface{ Unwrap() []error })
-	if !ok || slices.Contains(joined.Unwrap(), model.ErrUncommittedWrite) {
+	if !ok {
 		return err
 	}
 	var parts []error
 	for _, part := range joined.Unwrap() {
-		if kept := Uncommitted(part); kept != nil {
+		if kept := Incomplete(part); kept != nil {
 			parts = append(parts, kept)
 		}
 	}
@@ -220,8 +219,8 @@ func (c *Coordinator) Run(ctx context.Context, work func(context.Context) error)
 	// (an exec-based dependency SIGKILLed mid-run reports "signal: killed").
 	switch {
 	case err != nil && (errors.Is(err, context.Canceled) || workCtx.Err() != nil):
-		if uncommitted := Uncommitted(err); uncommitted != nil {
-			return errors.Join(ErrUserCancelled, uncommitted)
+		if incomplete := Incomplete(err); incomplete != nil {
+			return errors.Join(ErrUserCancelled, incomplete)
 		}
 		return ErrUserCancelled
 	case err != nil:
