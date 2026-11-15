@@ -77,6 +77,8 @@ func TestNormalizeTitle(t *testing.T) {
 		{in: `"sdd" output`, want: "`sdd` output"},
 		{in: "„go.mod“ replace directive", want: "`go.mod` replace directive"},
 		{in: `"sdd" info JSON output`, want: "`sdd` info JSON output"},
+		{in: "\"a`b\" c", want: "A`b c"},
+		{in: "\"`sdd`\" x", want: "`sdd` x"},
 		{in: "The team's daemon’s exit", want: "The team's daemon’s exit"},
 		{in: "Self-hosted runners", want: "Self-hosted runners"},
 		{in: "...", want: ""},
@@ -128,6 +130,9 @@ func TestCheckTitle(t *testing.T) {
 		{title: "Daemon\nremoval", refused: true},
 		{title: "Daemon\r\nremoval", refused: true},
 		{title: "Daemon\rremoval", refused: true},
+		{title: "Daemon\u2028removal", refused: true},
+		{title: "Daemon\u2029removal", refused: true},
+		{title: "Daemon\u0085removal", refused: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.title, func(t *testing.T) {

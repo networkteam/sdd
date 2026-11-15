@@ -60,8 +60,9 @@ func NormalizeTitle(title string) string {
 	return string(unicode.ToTitle(first)) + title[size:]
 }
 
-// quotedOpenerAsCodeSpan sets a single quoted word holding a letter or digit
-// that opens title as a code span; any other title is returned as it is.
+// quotedOpenerAsCodeSpan sets a single quoted word that opens title and holds
+// a letter or digit but no backtick as a code span; any other title is
+// returned as it is.
 func quotedOpenerAsCodeSpan(title string) string {
 	isQuote := func(r rune) bool { return strings.ContainsRune(titleQuotes, r) }
 	first, size := utf8.DecodeRuneInString(title)
@@ -71,7 +72,7 @@ func quotedOpenerAsCodeSpan(title string) string {
 	rest := title[size:]
 	end := strings.IndexFunc(rest, isQuote)
 	word := rest[:max(end, 0)]
-	if strings.ContainsFunc(word, unicode.IsSpace) || !strings.ContainsFunc(word, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) {
+	if strings.ContainsFunc(word, unicode.IsSpace) || strings.Contains(word, "`") || !strings.ContainsFunc(word, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) {
 		return title
 	}
 	_, closing := utf8.DecodeRuneInString(rest[end:])
@@ -86,7 +87,7 @@ var ErrEmptyTitle = errors.New("the title is empty once whitespace, quotes and t
 
 // CheckTitle refuses a title every writer must refuse before storing it.
 func CheckTitle(title string) error {
-	if strings.ContainsAny(title, "\r\n") {
+	if strings.ContainsAny(title, "\r\n\u0085\u2028\u2029") {
 		return fmt.Errorf("%w: %q", ErrMultiLineTitle, title)
 	}
 	return nil

@@ -43,7 +43,7 @@ const (
 	TypeInvolvement       BaseType = "involvement"
 	TypeInvolvementWhen   BaseType = "involvement-when"
 	TypeSearchReplace     BaseType = "search-replace"
-	// TypeTitle is an entry title, stored in model.ParseTitle's form.
+	// TypeTitle is an entry title, checked with model.ParseTitle, stored as given.
 	TypeTitle BaseType = "title"
 	// TypeProse validates exactly like text; the distinct declaration tells
 	// serve-side rendering to treat changes as content diffs rather than
