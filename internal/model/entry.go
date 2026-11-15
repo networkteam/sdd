@@ -295,6 +295,7 @@ type Entry struct {
 	Involvement []Involvement
 	Preflight   string    // "skipped" or "error" annotation from pre-flight validation
 	Attachments []string  // filenames: discovered from the co-located attachment directory on read, declared from staged handles at the write gate
+	Title       string    // optional headline naming the entry's subject, generated with the summary
 	Summary     string    // LLM-generated summary: this entry + direct relationships
 	Warnings    []Warning // validation issues found during graph construction
 	// Embedded marks a base entry compiled into the sdd binary (base
@@ -447,6 +448,7 @@ type frontmatter struct {
 	Framing      yaml.Node         `yaml:"framing,omitempty"`
 	ServeBudget  int               `yaml:"serveBudget,omitempty"`
 	Preflight    string            `yaml:"preflight,omitempty"`
+	Title        string            `yaml:"title,omitempty"`
 	Summary      string            `yaml:"summary,omitempty"`
 }
 
@@ -533,6 +535,7 @@ func ParseEntry(filename, content string) (*Entry, error) {
 		FocusActors:  fm.FocusActors,
 		FocusWhen:    fm.FocusWhen,
 		Preflight:    fm.Preflight,
+		Title:        fm.Title,
 		Summary:      fm.Summary,
 		Content:      strings.TrimSpace(body),
 		Time:         idParts.Time,
@@ -764,6 +767,7 @@ func FormatFrontmatter(e *Entry) string {
 		FocusActors:  e.FocusActors,
 		FocusWhen:    e.FocusWhen,
 		Preflight:    e.Preflight,
+		Title:        e.Title,
 		Summary:      e.Summary,
 	}
 

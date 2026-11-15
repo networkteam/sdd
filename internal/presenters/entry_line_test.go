@@ -191,3 +191,27 @@ func TestEntryLineWithScore_Zero(t *testing.T) {
 		t.Errorf("EntryLineWithScore zero mismatch:\n  got:  %q\n  want: %q", got, want)
 	}
 }
+
+func TestEntryLineBrief_NamesATitledEntryByItsTitle(t *testing.T) {
+	cases := []struct {
+		name  string
+		title string
+		want  string
+	}{
+		{name: "titled", title: "Graph commit placement", want: "  20260410-100000-s-tac-aaa tactical gap signal Graph commit placement\n"},
+		{name: "untitled", want: "  20260410-100000-s-tac-aaa tactical gap signal This gap observes that graph commits follow the graph's repository.\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := entry("20260410-100000-s-tac-aaa", withSummary("This gap observes that graph commits follow the graph's repository. It names the cause."))
+			e.Title = tc.title
+			g := model.NewGraph([]*model.Entry{e})
+
+			var buf bytes.Buffer
+			presenters.EntryLineBrief(&buf, e, g)
+			if got := buf.String(); got != tc.want {
+				t.Errorf("a brief line should name the entry by its title, an untitled one by its first summary sentence, got %q", got)
+			}
+		})
+	}
+}
