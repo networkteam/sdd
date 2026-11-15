@@ -1,7 +1,7 @@
 {{ define "title_rules" -}}
 {{ .TitleRule }} Name the subject, never the entry's role in the graph: no framing words such as decision, directive, plan, signal, gap, entry or commits, no entry IDs, no trailing punctuation but a question mark. Write it in the graph's configured authoring language: {{ if .ConfiguredLanguage }}`{{ .ConfiguredLanguage }}`{{ else }}English (no language configured){{ end }}, with that language's capitalization after the first letter.
 
-Related entries below carry their titles. Reuse a related entry's title only when this entry is about exactly the same subject; when its subject differs, the title names what differs, in subject words.
+Related entries below carry their titles. Never reuse a related entry's title: the title names what this entry adds or changes, in subject words.
 {{- end }}
 
 {{ define "title_system" -}}

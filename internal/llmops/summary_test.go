@@ -155,6 +155,24 @@ func TestDescriptionsStateTheTitleRule(t *testing.T) {
 	}
 }
 
+// A title repeating any other entry's title is re-run (Retitle), so neither
+// prompt may allow reusing a related entry's title.
+func TestDescriptionsForbidReusingARelatedTitle(t *testing.T) {
+	entry, graph := titledFixture()
+	for name, candidate := range map[string]*model.Entry{"title": untitledCopy(entry), "summary": unsummarizedCopy(entry)} {
+		t.Run(name, func(t *testing.T) {
+			description, err := llmops.NewDescription(candidate, graph, "", false, nil)
+			if err != nil {
+				t.Fatalf("NewDescription: %v", err)
+			}
+			prompt := description.Request.SystemPrompt
+			if !strings.Contains(prompt, "Never reuse a related entry's title") || strings.Contains(prompt, "Reuse a related entry's title only") {
+				t.Errorf("the prompt should forbid reusing a related entry's title:\n%s", prompt)
+			}
+		})
+	}
+}
+
 // readSchema reads a response schema file as it ships in the binary.
 func readSchema(t *testing.T, name string) map[string]any {
 	t.Helper()
