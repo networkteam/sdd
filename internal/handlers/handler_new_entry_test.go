@@ -118,6 +118,74 @@ func TestNewEntry_CommitFailure_IsLoudAndDurable(t *testing.T) {
 	}
 }
 
+// failingRunner fails every LLM call, as an unreachable provider does.
+type failingRunner struct{}
+
+func (failingRunner) Run(_ context.Context, _ llm.Request) (llm.Result, error) {
+	return llm.Result{}, errors.New("provider unreachable")
+}
+
+// A failed summary generation surfaces like a failed commit: the entry is
+// written and committed without a summary, and the error names it.
+func TestNewEntry_SummaryFailure_IsLoudAndDurable(t *testing.T) {
+	cases := []struct {
+		name      string
+		commitErr error
+	}{
+		{name: "commit succeeds"},
+		{name: "commit fails", commitErr: errors.New("signing timed out")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+
+			committer := &recordingCommitter{err: tc.commitErr}
+			var reportedID string
+
+			h := handlers.New(handlers.Options{
+				GraphDir:  tmp,
+				SDDDir:    sddDir,
+				Reader:    &fakeReader{},
+				Committer: committer,
+				LLMRunner: failingRunner{},
+				Stderr:    &bytes.Buffer{},
+			})
+
+			err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+				Type:          model.TypeSignal,
+				Layer:         model.LayerTactical,
+				Description:   "summary fails loud",
+				SkipPreflight: true,
+				OnNewEntry:    func(id, _ string) { reportedID = id },
+			})
+			if reportedID == "" {
+				t.Fatal("OnNewEntry should fire so the durable entry is still reported")
+			}
+			if err == nil {
+				t.Fatal("the summary failure should propagate")
+			}
+			want := "entry " + reportedID + " is written without a generated summary or title (run sdd summarize " + reportedID + "): summarizing: "
+			if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "provider unreachable") {
+				t.Errorf("the error should name the entry, the summarize call and the cause, got %v", err)
+			}
+			if tc.commitErr != nil && !strings.Contains(err.Error(), "git commit: signing timed out") {
+				t.Errorf("a failed commit should be joined with the summary failure, got %v", err)
+			}
+			if committer.calls != 1 {
+				t.Errorf("the written entry should still be committed, got %d commits", committer.calls)
+			}
+			entry := readWrittenEntry(t, tmp, reportedID)
+			if entry.Summary != "" || entry.Title != "" {
+				t.Errorf("the entry should be written without a summary or title, got title %q summary %q", entry.Title, entry.Summary)
+			}
+		})
+	}
+}
+
 // TestNewEntry_DryRun_SavesStdinOnValidationFailure is the regression test for
 // d-prc-31v / d-tac-q5p: dry-run + validation failure must still save stdin.
 // The bug was that the reportSavedStdin call was placed after graph validation,

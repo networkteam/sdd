@@ -2,13 +2,12 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/sync/errgroup"
-
-	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/llmops"
@@ -135,6 +134,7 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	}
 
 	var described *llmops.DescriptionResult
+	var describeErr error
 	title := model.NormalizeTitle(cmd.Title)
 
 	// A caller-supplied summary is taken verbatim; only a missing title still
@@ -146,8 +146,10 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		g.Go(func() error {
 			result, err := h.describeNew(gctx, &supplied, graph)
 			if err != nil {
-				slogutils.FromContext(gctx).Warn("summary generation failed", "err", err)
-				return nil // non-fatal: entry is valid without a summary or title
+				// Not a group error: the entry is still written, then the
+				// failure surfaces like a failed commit.
+				describeErr = err
+				return nil
 			}
 			described = &result
 			return nil
@@ -254,10 +256,19 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	if h.committer != nil {
 		msg := fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72))
 		if err := h.committer.Commit(msg, commitPaths...); err != nil {
-			return fmt.Errorf("git commit: %w", err)
+			return errors.Join(fmt.Errorf("git commit: %w", err), summaryFailure(id, describeErr))
 		}
 	}
-	return nil
+	return summaryFailure(id, describeErr)
+}
+
+// summaryFailure names the written entry whose summary or title generation
+// failed, so the caller can fill it in later; nil when generation succeeded.
+func summaryFailure(id string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("entry %s is written without a generated summary or title (run sdd summarize %s): summarizing: %w", id, id, err)
 }
 
 // describeNew writes the new entry's description, its title kept apart from

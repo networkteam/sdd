@@ -293,6 +293,17 @@ func TestSummarize_LeavesTheLinkedEntriesOutOfTheSimilarTitles(t *testing.T) {
 
 func newDescribedEntry(t *testing.T, embedder *queryEmbedder, runner llm.Runner) *model.Entry {
 	t.Helper()
+	graphDir, id, err := newEntryBesideNeighbours(t, embedder, runner)
+	if err != nil {
+		t.Fatalf("NewEntry: %v", err)
+	}
+	return readWrittenEntry(t, graphDir, id)
+}
+
+// newEntryBesideNeighbours captures an entry against the ranked index and
+// returns the graph directory and the entry's ID, empty when none is written.
+func newEntryBesideNeighbours(t *testing.T, embedder *queryEmbedder, runner llm.Runner) (string, string, error) {
+	t.Helper()
 	tmp := t.TempDir()
 	sddDir := filepath.Join(tmp, ".sdd")
 	if err := os.MkdirAll(sddDir, 0755); err != nil {
@@ -308,10 +319,7 @@ func newDescribedEntry(t *testing.T, embedder *queryEmbedder, runner llm.Runner)
 		Type: model.TypeSignal, Layer: model.LayerTactical, Kind: model.KindGap, Description: describedBody,
 		SkipPreflight: true, OnNewEntry: func(newID, _ string) { id = newID },
 	})
-	if err != nil {
-		t.Fatalf("NewEntry: %v", err)
-	}
-	return readWrittenEntry(t, tmp, id)
+	return tmp, id, err
 }
 
 func readWrittenEntry(t *testing.T, graphDir, id string) *model.Entry {
@@ -341,12 +349,19 @@ func TestNewEntry_ShowsTheTitlesOfTheFiveNearestTitledEntries(t *testing.T) {
 	}
 }
 
-func TestNewEntry_SimilarSearchFailureFailsTheDescriptionOnly(t *testing.T) {
+func TestNewEntry_SimilarSearchFailureWritesTheEntryAndFails(t *testing.T) {
 	runner := &promptRunner{titles: []string{"Fresh title"}}
-	entry := newDescribedEntry(t, &queryEmbedder{err: errors.New("embedding provider down")}, runner)
+	graphDir, id, err := newEntryBesideNeighbours(t, &queryEmbedder{err: errors.New("embedding provider down")}, runner)
+	if id == "" {
+		t.Fatalf("the entry should still be written, got %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "entry "+id+" is written without") || !strings.Contains(err.Error(), "embedding provider down") {
+		t.Errorf("the command should fail naming the entry and the search failure, got %v", err)
+	}
 	if len(runner.requests) != 0 {
 		t.Errorf("no description call should run without its similar titles, got %d", len(runner.requests))
 	}
+	entry := readWrittenEntry(t, graphDir, id)
 	if entry.Title != "" || entry.Summary != "" {
 		t.Errorf("the entry should be written undescribed, as after a failed summary call, got title %q summary %q", entry.Title, entry.Summary)
 	}
