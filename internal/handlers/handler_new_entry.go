@@ -57,11 +57,8 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	}
 	var title string
 	if cmd.Title != nil {
-		title = model.NormalizeTitle(*cmd.Title)
-		if title == "" {
-			return fmt.Errorf("--title value is empty after trimming whitespace, quotes and trailing punctuation")
-		}
-		if err := model.CheckTitle(title); err != nil {
+		var err error
+		if title, err = model.ParseTitle(*cmd.Title); err != nil {
 			return fmt.Errorf("--title: %w", err)
 		}
 	}

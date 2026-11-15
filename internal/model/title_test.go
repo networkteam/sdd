@@ -90,6 +90,27 @@ func TestNormalizeTitle(t *testing.T) {
 	}
 }
 
+func TestParseTitle(t *testing.T) {
+	cases := []struct {
+		given, want string
+		wantErr     error
+	}{
+		{given: ` “daemon removal”. `, want: "Daemon removal"},
+		{given: "...", wantErr: model.ErrEmptyTitle},
+		{given: "  ", wantErr: model.ErrEmptyTitle},
+		{given: `""`, wantErr: model.ErrEmptyTitle},
+		{given: "Daemon\nremoval", wantErr: model.ErrMultiLineTitle},
+	}
+	for _, tc := range cases {
+		t.Run(tc.given, func(t *testing.T) {
+			got, err := model.ParseTitle(tc.given)
+			if got != tc.want || !errors.Is(err, tc.wantErr) {
+				t.Errorf("a given title should be stored normalized or refused, got %q, %v", got, err)
+			}
+		})
+	}
+}
+
 func TestCheckTitle(t *testing.T) {
 	cases := []struct {
 		title   string

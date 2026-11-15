@@ -126,7 +126,7 @@ func TestNewRefusesABlankTitle(t *testing.T) {
 		t.Run(fmt.Sprintf("%q", title), func(t *testing.T) {
 			f := newFillFixture(t)
 			result := f.run(t, "new", "--confidence", "high", "--skip-preflight", "--summary", "A supplied summary.", "--title", title, "s", "tac", "A signal with a blank title.")
-			if result.err == nil || !strings.Contains(result.err.Error(), "--title value is empty") {
+			if result.err == nil || !strings.Contains(result.err.Error(), "--title: the title is empty") {
 				t.Fatalf("a blank --title should be refused, got %v\n%s", result.err, result.stderr)
 			}
 			if result.stdout != "" {
@@ -141,7 +141,7 @@ func TestNewDryRunKeepsPipedStdinOnAnEmptyTitle(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	command := f.command(strings.NewReader("piped notes"), &stdout, &stderr)
 	err := command.Run(t.Context(), []string{"sdd", "new", "--confidence", "high", "--skip-preflight", "--dry-run", "--attach", "-:notes.md", "--title", "", "s", "tac", "A dry run with an empty title."})
-	if err == nil || !strings.Contains(err.Error(), "--title value is empty") {
+	if err == nil || !strings.Contains(err.Error(), "--title: the title is empty") {
 		t.Fatalf("an empty --title should be refused, got %v", err)
 	}
 	if !strings.Contains(stderr.String(), "stdin attachment saved (dry-run)") {

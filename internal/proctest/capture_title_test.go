@@ -71,21 +71,36 @@ func TestCapture_DriftedWithoutACorrectionIsRefused(t *testing.T) {
 	}
 }
 
-func TestCapture_MultiLineCorrectedTitleIsRefused(t *testing.T) {
-	world, session := newCaptureWorld(t, "title-multi-line")
-	before := entryIDsOnDisk(t, world.GraphDir)
-	serve := session.Start(t, "capture", nil)
-	instance := serve.Instance
-	session.Report(t, instance, captureDraft())
-	session.Answer(t, instance, "playback", "confirm", nil, "publish the observation")
-	entryID := writtenEntryID(t, world.GraphDir, before)
-
-	corrections := map[string]any{"correctedTitle": "Corrected\ntitle"}
-	if _, err := session.AnswerErr(t, instance, "verifySummary", "drifted", corrections, ""); err == nil || !strings.Contains(err.Error(), "more than one line") {
-		t.Fatalf("a title spanning two lines should be refused, got %v", err)
+// An unusable corrected title is refused before the write, so the capture
+// takes the next correction.
+func TestCapture_UnusableCorrectedTitleIsRefused(t *testing.T) {
+	cases := []struct {
+		name, title, want string
+	}{
+		{name: "two lines", title: "Corrected\ntitle", want: "more than one line"},
+		{name: "punctuation only", title: "...", want: "empty"},
+		{name: "blank", title: "  ", want: "empty"},
+		{name: "quotes only", title: `""`, want: "empty"},
 	}
-	if got := proctest.LoadEntry(t, world.GraphDir, entryID).Title; got != "Generated title" {
-		t.Errorf("a refused title should leave the stored one, got %q", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			world, session := newCaptureWorld(t, "title-unusable-"+strings.ReplaceAll(tc.name, " ", "-"))
+			before := entryIDsOnDisk(t, world.GraphDir)
+			serve := session.Start(t, "capture", nil)
+			instance := serve.Instance
+			session.Report(t, instance, captureDraft())
+			session.Answer(t, instance, "playback", "confirm", nil, "publish the observation")
+			entryID := writtenEntryID(t, world.GraphDir, before)
+
+			if _, err := session.AnswerErr(t, instance, "verifySummary", "drifted", map[string]any{"correctedTitle": tc.title}, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("an unusable title should be refused, got %v", err)
+			}
+			if got := proctest.LoadEntry(t, world.GraphDir, entryID).Title; got != "Generated title" {
+				t.Errorf("a refused title should leave the stored one, got %q", got)
+			}
+			serve = session.Answer(t, instance, "verifySummary", "drifted", map[string]any{"correctedTitle": "Corrected title"}, "")
+			proctest.RequireStatus(t, serve, "completed")
+		})
 	}
 }
 

@@ -268,11 +268,8 @@ func (h *Handler) summarizeExplicit(graph *model.Graph, idArg string, cmd *comma
 		entry.Summary = summary
 	}
 	if cmd.ExplicitTitle != nil {
-		title := model.NormalizeTitle(*cmd.ExplicitTitle)
-		if title == "" {
-			return fmt.Errorf("--title value is empty after trimming whitespace, quotes and trailing punctuation")
-		}
-		if err := model.CheckTitle(title); err != nil {
+		title, err := model.ParseTitle(*cmd.ExplicitTitle)
+		if err != nil {
 			return fmt.Errorf("--title: %w", err)
 		}
 		entry.Title = title

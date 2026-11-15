@@ -254,9 +254,9 @@ func TestParseSummaryResponse(t *testing.T) {
 		{name: "trailing period dropped from the title", output: `{"title": "daemon project removal.", "summary": "S."}`, wantTitle: "Daemon project removal", wantSummary: "S."},
 		{name: "a question mark kept", output: `{"title": "should the daemon go?", "summary": "S."}`, wantTitle: "Should the daemon go?", wantSummary: "S."},
 		{name: "quotation marks removed", output: `{"title": "the \"daemon\" removal", "summary": "S."}`, wantTitle: "The daemon removal", wantSummary: "S."},
-		{name: "only punctuation", output: `{"title": " … ", "summary": "S."}`, wantErr: "empty title"},
+		{name: "only punctuation", output: `{"title": " … ", "summary": "S."}`, wantErr: "title is empty"},
 		{name: "plain prose", output: "The daemon project is removed.", wantErr: "no JSON object"},
-		{name: "empty title", output: `{"title": " ", "summary": "S."}`, wantErr: "empty title"},
+		{name: "empty title", output: `{"title": " ", "summary": "S."}`, wantErr: "title is empty"},
 		{name: "multi-line title", output: `{"title": "daemon\nremoval", "summary": "S."}`, wantErr: "more than one line"},
 		{name: "empty summary", output: `{"title": "daemon project removal", "summary": ""}`, wantErr: "empty summary"},
 	}

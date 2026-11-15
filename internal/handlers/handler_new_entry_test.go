@@ -192,8 +192,8 @@ func TestNewEntry_UnusableTitleIsRefused(t *testing.T) {
 		name, title, want string
 	}{
 		{name: "two lines", title: "Supplied\ntitle", want: "more than one line"},
-		{name: "nothing left once normalized", title: " … ", want: "--title value is empty"},
-		{name: "empty", title: "", want: "--title value is empty"},
+		{name: "nothing left once normalized", title: " … ", want: "--title: the title is empty"},
+		{name: "empty", title: "", want: "--title: the title is empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

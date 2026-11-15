@@ -75,12 +75,28 @@ func opensWithQuotedWord(title string) bool {
 // ErrMultiLineTitle refuses a title no one-line listing can show.
 var ErrMultiLineTitle = errors.New("the title spans more than one line")
 
+// ErrEmptyTitle refuses a given title NormalizeTitle leaves nothing of.
+var ErrEmptyTitle = errors.New("the title is empty once whitespace, quotes and trailing punctuation are removed")
+
 // CheckTitle refuses a title every writer must refuse before storing it.
 func CheckTitle(title string) error {
 	if strings.ContainsAny(title, "\r\n") {
 		return fmt.Errorf("%w: %q", ErrMultiLineTitle, title)
 	}
 	return nil
+}
+
+// ParseTitle is the stored form of a title a caller gives: normalized, and
+// refused when empty or spanning more than one line.
+func ParseTitle(given string) (string, error) {
+	title := NormalizeTitle(given)
+	if title == "" {
+		return "", ErrEmptyTitle
+	}
+	if err := CheckTitle(title); err != nil {
+		return "", err
+	}
+	return title, nil
 }
 
 // SimilarTitleCount is how many titles of the entries nearest an entry's body

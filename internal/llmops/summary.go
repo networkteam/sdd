@@ -197,11 +197,8 @@ func parseTitleResponse(output string) (string, error) {
 }
 
 func cleanTitle(raw string) (string, error) {
-	title := model.NormalizeTitle(raw)
-	if title == "" {
-		return "", fmt.Errorf("answer carries an empty title")
-	}
-	if err := model.CheckTitle(title); err != nil {
+	title, err := model.ParseTitle(raw)
+	if err != nil {
 		return "", fmt.Errorf("answer: %w", err)
 	}
 	return title, nil

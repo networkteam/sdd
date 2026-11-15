@@ -38,8 +38,10 @@ func (w *WorkflowSession) prepareWorkflowReplaceSummary(ctx *engine.Context) (ma
 	if !hasSummary && !hasTitle {
 		return nil, fmt.Errorf("replaceSummary: neither correctedSummary nor correctedTitle is set")
 	}
-	if err := model.CheckTitle(model.NormalizeTitle(title)); err != nil {
-		return nil, fmt.Errorf("replaceSummary: correctedTitle: %w", err)
+	if hasTitle {
+		if _, err := model.ParseTitle(title); err != nil {
+			return nil, fmt.Errorf("replaceSummary: correctedTitle: %w", err)
+		}
 	}
 	target, fromBinding := w.effectiveTargetFor(w.instanceProject(ctx.Instance), ctx.Store)
 	if err := w.authorizeTarget(target.Project, AccessWrite); err != nil {

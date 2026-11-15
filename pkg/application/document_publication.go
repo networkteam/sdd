@@ -171,12 +171,12 @@ func (a *Application) ReplaceSummary(ctx context.Context, identity RequestIdenti
 		return DocumentPublication{}, err
 	}
 	canonical := current.Content
-	title := model.NormalizeTitle(replacement.Title)
-	if title == "" && replacement.Title != "" {
-		return DocumentPublication{}, &ApplicationError{Code: ErrorInvalidArgument, Message: "the title is empty once its quotes and trailing punctuation are removed"}
-	}
-	if err := model.CheckTitle(title); err != nil {
-		return DocumentPublication{}, &ApplicationError{Code: ErrorInvalidArgument, Message: err.Error()}
+	var title string
+	if replacement.Title != "" {
+		title, err = model.ParseTitle(replacement.Title)
+		if err != nil {
+			return DocumentPublication{}, &ApplicationError{Code: ErrorInvalidArgument, Message: err.Error()}
+		}
 	}
 	summaryReplaced := replacement.Summary == "" || entry.Summary == replacement.Summary
 	titleReplaced := title == "" || entry.Title == title
