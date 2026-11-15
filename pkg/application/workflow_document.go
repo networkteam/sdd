@@ -33,8 +33,10 @@ func (w *WorkflowSession) prepareWorkflowReplaceSummary(ctx *engine.Context) (ma
 	if !ok {
 		return nil, fmt.Errorf("replaceSummary: entryId is not set")
 	}
-	if _, ok := workflowStoreString(ctx.Store, "correctedSummary"); !ok {
-		return nil, fmt.Errorf("replaceSummary: correctedSummary is not set")
+	_, hasSummary := workflowStoreString(ctx.Store, "correctedSummary")
+	_, hasTitle := workflowStoreString(ctx.Store, "correctedTitle")
+	if !hasSummary && !hasTitle {
+		return nil, fmt.Errorf("replaceSummary: neither correctedSummary nor correctedTitle is set")
 	}
 	target, fromBinding := w.effectiveTargetFor(w.instanceProject(ctx.Instance), ctx.Store)
 	if err := w.authorizeTarget(target.Project, AccessWrite); err != nil {
@@ -55,14 +57,12 @@ func (w *WorkflowSession) prepareWorkflowReplaceSummary(ctx *engine.Context) (ma
 }
 
 func (w *WorkflowSession) runWorkflowReplaceSummary(ctx *engine.Context) error {
-	text, ok := workflowStoreString(ctx.Store, "correctedSummary")
-	if !ok {
-		return fmt.Errorf("replaceSummary: correctedSummary is not set")
-	}
+	summary, _ := workflowStoreString(ctx.Store, "correctedSummary")
+	title, _ := workflowStoreString(ctx.Store, "correctedTitle")
 	intent := ctx.Intent
 	_, err := w.app.ReplaceSummary(w.ctx, w.identity, w.instanceProject(ctx.Instance), w.binding, SummaryReplacement{
 		Target: intentTarget(intent), Publication: w.documentPublicationKey(intent, intent.Values["entryId"]),
-		EntryID: intent.Values["entryId"], ExpectedBlob: intent.Values["expectedBlob"], Summary: text,
+		EntryID: intent.Values["entryId"], ExpectedBlob: intent.Values["expectedBlob"], Summary: summary, Title: title,
 	})
 	return err
 }

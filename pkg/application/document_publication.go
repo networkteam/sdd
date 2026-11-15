@@ -129,13 +129,15 @@ func (a *Application) PublishDocument(ctx context.Context, identity RequestIdent
 }
 
 // SummaryReplacement is the recorded input of a summary correction: the entry,
-// the bytes it was read as (the write's precondition) and the new summary.
+// the bytes it was read as (the write's precondition) and the new summary,
+// title or both — an empty one leaves its field as stored.
 type SummaryReplacement struct {
 	Target       MutationTarget
 	Publication  PublicationKey
 	EntryID      string
 	ExpectedBlob string
 	Summary      string
+	Title        string
 }
 
 // ReplaceSummary writes the corrected summary onto the entry's current
@@ -169,11 +171,22 @@ func (a *Application) ReplaceSummary(ctx context.Context, identity RequestIdenti
 		return DocumentPublication{}, err
 	}
 	canonical := current.Content
+	title := model.NormalizeTitle(replacement.Title)
+	if title == "" && replacement.Title != "" {
+		return DocumentPublication{}, &ApplicationError{Code: ErrorInvalidArgument, Message: "the title is empty once its quotes and trailing punctuation are removed"}
+	}
+	summaryReplaced := replacement.Summary == "" || entry.Summary == replacement.Summary
+	titleReplaced := title == "" || entry.Title == title
 	if replacement.ExpectedBlob == "" || GitBlobID(current.Content) == replacement.ExpectedBlob {
-		entry.Summary = replacement.Summary
+		if replacement.Summary != "" {
+			entry.Summary = replacement.Summary
+		}
+		if title != "" {
+			entry.Title = title
+		}
 		canonical = []byte(model.FormatFrontmatter(entry) + "\n" + entry.Content + "\n")
-	} else if entry.Summary != replacement.Summary {
-		return DocumentPublication{}, summaryConflict(replacement.EntryID, entry.Summary)
+	} else if !summaryReplaced || !titleReplaced {
+		return DocumentPublication{}, summaryConflict(replacement.EntryID, entry.Summary, entry.Title)
 	}
 	// Otherwise an earlier attempt wrote the replacement and its completion did
 	// not finish: publishing the same bytes is recognized, not repeated.
@@ -184,9 +197,9 @@ func (a *Application) ReplaceSummary(ctx context.Context, identity RequestIdenti
 }
 
 // summaryConflict is the answer to a replacement whose document moved: the
-// current summary and what a deliberate next attempt needs.
-func summaryConflict(entryID, current string) error {
-	return &ApplicationError{Code: ErrorGraphConflict, Message: fmt.Sprintf("the summary of %s changed since it was read and was not replaced; its current summary is %q. Read the entry again before correcting it.", entryID, strings.TrimSpace(current))}
+// current summary and title and what a deliberate next attempt needs.
+func summaryConflict(entryID, currentSummary, currentTitle string) error {
+	return &ApplicationError{Code: ErrorGraphConflict, Message: fmt.Sprintf("the summary of %s changed since it was read and was not replaced; its current title is %q and its current summary is %q. Read the entry again before correcting it.", entryID, currentTitle, strings.TrimSpace(currentSummary))}
 }
 
 // WIPMarkerWrite is the recorded input of a WIP marker creation.
