@@ -11,7 +11,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
@@ -378,5 +380,61 @@ func TestSearchIndexDir_OpensNoIndexWhereNoneIsBuilt(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("opening a missing index should not create it, got %v", err)
+	}
+}
+
+// One worker's embedding call waits until another worker has written its
+// entry; the write needs the graph's write lock, so the embedding call must
+// not hold the graph lock.
+func TestSummarize_EmbedsOutsideTheGraphLock(t *testing.T) {
+	const (
+		slowID, slowBody = "20260301-100000-s-tac-slw", "The slow entry waits on its embedding."
+		fastID, fastBody = "20260301-100001-s-tac-fst", "The fast entry is written meanwhile."
+	)
+	graphDir := t.TempDir()
+	writeEntryFile(t, graphDir, slowID, "---\ntype: signal\nlayer: tactical\nkind: gap\n---\n\n"+slowBody+"\n")
+	writeEntryFile(t, graphDir, fastID, "---\ntype: signal\nlayer: tactical\nkind: gap\n---\n\n"+fastBody+"\n")
+
+	slowEmbedding, fastWritten := make(chan struct{}), make(chan struct{})
+	var closeSlowEmbedding sync.Once
+	var slowEmbeds atomic.Int32
+	embedder := embed.EmbedderFunc{Space: "fake/v1/4", Run: func(ctx context.Context, req embed.Request) (embed.Result, error) {
+		if req.Texts[0] == slowBody {
+			slowEmbeds.Add(1)
+			closeSlowEmbedding.Do(func() { close(slowEmbedding) })
+			select {
+			case <-fastWritten:
+			case <-time.After(2 * time.Second):
+				return embed.Result{}, errors.New("the other worker's write waited on this embedding call")
+			}
+		}
+		return embed.Result{Vectors: [][]float32{{1, 0, 0, 0}}}, nil
+	}}
+	runner := llm.RunnerFunc(func(ctx context.Context, request llm.Request) (llm.Result, error) {
+		title := "Slow title"
+		if strings.Contains(request.UserPrompt, fastBody) {
+			title = "Fast title"
+			<-slowEmbedding
+		}
+		data, err := json.Marshal(map[string]string{"title": title, "summary": "A summary."})
+		return llm.Result{Text: string(data)}, err
+	})
+	h := handlers.New(handlers.Options{
+		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{},
+		LLMRunner: runner, TitleSearch: &titleSearch{embedder: embedder, index: rankedIndex(t)},
+	})
+	err := h.Summarize(context.Background(), &command.SummarizeCmd{
+		Concurrency: 2,
+		OnSummarized: func(id, _ string) {
+			if id == fastID {
+				close(fastWritten)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("a worker's write should not wait on another worker's embedding call: %v", err)
+	}
+	if n := slowEmbeds.Load(); n != 1 {
+		t.Errorf("the body should be embedded once, ahead of the search, got %d", n)
 	}
 }

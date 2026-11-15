@@ -125,11 +125,15 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 
 	for _, entry := range planned {
 		g.Go(func() error {
+			search, err := embedSimilarTitles(ctx, finder, entry)
+			if err != nil {
+				return err
+			}
 			// Search and render under read lock — other workers may be
 			// writing their own entries' summaries and titles concurrently,
 			// and those feed this prompt and the search's candidates.
 			graphMu.RLock()
-			titles, searchErr := similarTitles(ctx, finder, entry)
+			titles, searchErr := similarTitles(ctx, finder, entry.ID, search)
 			var description *llmops.Description
 			var renderErr error
 			if searchErr == nil {

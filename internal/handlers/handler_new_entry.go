@@ -284,7 +284,11 @@ func (h *Handler) describeNew(ctx context.Context, entry *model.Entry, graph *mo
 	if err != nil {
 		return llmops.DescriptionResult{}, err
 	}
-	titles, err := similarTitles(ctx, finder, entry)
+	search, err := embedSimilarTitles(ctx, finder, entry)
+	if err != nil {
+		return llmops.DescriptionResult{}, err
+	}
+	titles, err := similarTitles(ctx, finder, entry.ID, search)
 	if err != nil {
 		return llmops.DescriptionResult{}, err
 	}

@@ -45,6 +45,9 @@ type SearchQuery struct {
 	// Phrase is the --query value: a free-form phrase used for vector
 	// search. Empty disables vector mode.
 	Phrase string
+	// PhraseVector is Phrase's embedding when the caller embedded it ahead
+	// (SearchFinder.EmbedPhrase); empty embeds Phrase during the search.
+	PhraseVector []float32
 
 	// Filter is the type/layer/kind filter (model.GraphFilter), the same
 	// filter shape the view pipeline composes.

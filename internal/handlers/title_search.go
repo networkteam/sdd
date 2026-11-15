@@ -65,9 +65,11 @@ func (h *Handler) openTitleSearch(ctx context.Context, graph *model.Graph) (*fin
 	}), nil
 }
 
-// similarTitles returns the titles of the titled entries nearest entry's body,
-// none from a nil finder.
-func similarTitles(ctx context.Context, finder *finders.SearchFinder, entry *model.Entry) ([]string, error) {
+// embedSimilarTitles embeds the search for the titled entries nearest entry's
+// body: nil from a nil finder or for an entry without a body. It reads no
+// graph and only entry fields no summarize worker writes, so it runs outside
+// the graph lock.
+func embedSimilarTitles(ctx context.Context, finder *finders.SearchFinder, entry *model.Entry) (*query.SearchQuery, error) {
 	if finder == nil {
 		return nil, nil
 	}
@@ -75,9 +77,22 @@ func similarTitles(ctx context.Context, finder *finders.SearchFinder, entry *mod
 	if !ok {
 		return nil, nil
 	}
-	result, err := finder.Search(ctx, q)
+	q, err := finder.EmbedPhrase(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("searching titles similar to %s: %w", entry.ID, err)
+	}
+	return &q, nil
+}
+
+// similarTitles runs an embedded search against the finder's graph, returning
+// the titles it finds; none for a nil search.
+func similarTitles(ctx context.Context, finder *finders.SearchFinder, id string, q *query.SearchQuery) ([]string, error) {
+	if q == nil {
+		return nil, nil
+	}
+	result, err := finder.Search(ctx, *q)
+	if err != nil {
+		return nil, fmt.Errorf("searching titles similar to %s: %w", id, err)
 	}
 	return result.Titles(), nil
 }
