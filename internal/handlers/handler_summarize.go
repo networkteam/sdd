@@ -46,6 +46,9 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 
 	// Explicit-text path: single entry, no LLM call.
 	if cmd.ExplicitText != nil || cmd.ExplicitTitle != nil {
+		if cmd.Only != (model.DescriptionFields{}) {
+			return fmt.Errorf("--only cannot be combined with --text or --title")
+		}
 		if len(cmd.EntryIDs) != 1 {
 			return fmt.Errorf("--text and --title require exactly one entry ID (no --all, no multi-entry batches)")
 		}
@@ -102,9 +105,10 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 	// entry; named entries always regenerate. Decided before any worker
 	// writes, so the planned count is known up front.
 	regenerate := !isAll || cmd.Force
+	fields := cmd.Only.OrAll()
 	var planned []*model.Entry
 	for _, entry := range entries {
-		if !regenerate && !entry.Unfilled() {
+		if !regenerate && !entry.Unfilled(fields) {
 			if cmd.OnSkipped != nil {
 				cmd.OnSkipped(entry.ID)
 			}
@@ -134,11 +138,25 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			// writing their own entries' summaries and titles concurrently,
 			// and those feed this prompt and the search's candidates.
 			graphMu.RLock()
+			writeTitle := fields.Title && (regenerate || entry.Title == "")
+			writeSummary := fields.Summary && (regenerate || entry.Summary == "")
+			// A field outside fields is kept: the call is chosen as if only
+			// the written field were missing.
+			subject, subjectRegenerate := entry, regenerate
+			if fields != model.AllDescriptionFields {
+				missing := *entry
+				if fields.Title {
+					missing.Title = ""
+				} else {
+					missing.Summary = ""
+				}
+				subject, subjectRegenerate = &missing, false
+			}
 			titles, searchErr := similarTitles(ctx, finder, entry.ID, search)
 			var description *llmops.Description
 			var renderErr error
 			if searchErr == nil {
-				description, renderErr = llmops.NewDescription(entry, graph, h.language, regenerate, titles)
+				description, renderErr = llmops.NewDescription(subject, graph, h.language, subjectRegenerate, titles)
 			}
 			graphMu.RUnlock()
 			if searchErr != nil {
@@ -147,7 +165,6 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			if renderErr != nil {
 				return fmt.Errorf("rendering summary for %s: %w", entry.ID, renderErr)
 			}
-			titleOnly := description.TitleOnly()
 
 			// LLM calls without the graph lock; the injected runner bounds them.
 			result, err := description.Run(ctx, h.llmRunner)
@@ -171,10 +188,10 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			// Apply the answer under write lock, then format and write file
 			// under read lock so FormatFrontmatter sees a consistent entry.
 			graphMu.Lock()
-			if regenerate || entry.Title == "" {
+			if writeTitle {
 				entry.Title = result.Title
 			}
-			if !titleOnly {
+			if writeSummary {
 				entry.Summary = result.Summary
 			}
 			graphMu.Unlock()
@@ -198,9 +215,9 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			pathsMu.Unlock()
 
 			switch {
-			case titleOnly && cmd.OnTitled != nil:
+			case !writeSummary && cmd.OnTitled != nil:
 				cmd.OnTitled(entry.ID, result.Title)
-			case !titleOnly && cmd.OnSummarized != nil:
+			case writeSummary && cmd.OnSummarized != nil:
 				cmd.OnSummarized(entry.ID, result.Summary)
 			}
 			return nil

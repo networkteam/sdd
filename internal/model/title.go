@@ -99,25 +99,63 @@ func RepeatedTitle(entries []*Entry, title, id string) (string, bool) {
 	return "", false
 }
 
-// Unfilled reports whether `sdd summarize --all` makes a call for the entry:
-// it lacks a summary or a title and has a file to write.
-func (e *Entry) Unfilled() bool {
-	return !e.Embedded && (e.Summary == "" || e.Title == "")
+// DescriptionFields names the fields of an entry's description a summarize
+// run writes (`sdd summarize --only`).
+type DescriptionFields struct {
+	Title, Summary bool
 }
 
-// TitleBackfill counts the model calls `sdd summarize --all` makes: an entry
-// lacking a summary gets one paired call, which writes its title too unless it
-// holds one; an entry holding a summary but no title gets a title-only call.
-// Embedded entries have no file to write and are not counted.
-func TitleBackfill(entries []*Entry) (summaryAndTitle, summaryOnly, titleOnly int) {
+// AllDescriptionFields is a summarize run's default: title and summary.
+var AllDescriptionFields = DescriptionFields{Title: true, Summary: true}
+
+// OrAll reads the zero value as AllDescriptionFields.
+func (f DescriptionFields) OrAll() DescriptionFields {
+	if f == (DescriptionFields{}) {
+		return AllDescriptionFields
+	}
+	return f
+}
+
+// ParseDescriptionFields reads an --only value: title, summary or both,
+// comma-separated.
+func ParseDescriptionFields(value string) (DescriptionFields, error) {
+	var fields DescriptionFields
+	for _, name := range strings.Split(value, ",") {
+		switch strings.TrimSpace(name) {
+		case "title":
+			fields.Title = true
+		case "summary":
+			fields.Summary = true
+		default:
+			return DescriptionFields{}, fmt.Errorf("--only takes title, summary or title,summary, got %q", value)
+		}
+	}
+	return fields, nil
+}
+
+// Unfilled reports whether `sdd summarize --all` makes a call for the entry:
+// it lacks one of the fields and has a file to write.
+func (e *Entry) Unfilled(fields DescriptionFields) bool {
+	return !e.Embedded && (fields.Title && e.Title == "" || fields.Summary && e.Summary == "")
+}
+
+// TitleBackfill counts the model calls `sdd summarize --all` makes, by the
+// fields each writes: an entry lacking both gets both, a field it holds is
+// kept, and a field outside fields is never written. Embedded entries have no
+// file to write and are not counted.
+func TitleBackfill(entries []*Entry, fields DescriptionFields) (summaryAndTitle, summaryOnly, titleOnly int) {
 	for _, e := range entries {
+		if !e.Unfilled(fields) {
+			continue
+		}
+		writesTitle := fields.Title && e.Title == ""
+		writesSummary := fields.Summary && e.Summary == ""
 		switch {
-		case !e.Unfilled():
-		case e.Summary == "" && e.Title == "":
+		case writesTitle && writesSummary:
 			summaryAndTitle++
-		case e.Summary == "":
+		case writesSummary:
 			summaryOnly++
-		case e.Title == "":
+		default:
 			titleOnly++
 		}
 	}

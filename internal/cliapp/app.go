@@ -1081,7 +1081,7 @@ func summarizeCmd() *cli.Command {
 			},
 			&cli.BoolFlag{
 				Name:  "force",
-				Usage: "With --all, regenerate summary and title of every entry rather than only what is missing",
+				Usage: "With --all, regenerate summary and title (or the --only fields) of every entry rather than only what is missing",
 			},
 			&cli.StringFlag{
 				Name:  "provider",
@@ -1099,6 +1099,10 @@ func summarizeCmd() *cli.Command {
 				Name:  "timeout",
 				Usage: "Timeout per summary generation (e.g. 60s, 1m)",
 				Value: 60 * time.Second,
+			},
+			&cli.StringFlag{
+				Name:  "only",
+				Usage: "Write only these fields: title, summary or title,summary (default); the other keeps what is stored. Limits what --all fills and what --force regenerates; not with --text or --title",
 			},
 			&cli.StringFlag{
 				Name:  "text",
@@ -1147,8 +1151,18 @@ func summarizeCmd() *cli.Command {
 				explicitTitle = &value
 			}
 
+			var only model.DescriptionFields
+			if cmd.IsSet("only") {
+				var err error
+				only, err = model.ParseDescriptionFields(cmd.String("only"))
+				if err != nil {
+					return err
+				}
+			}
+
 			sumCmd := &command.SummarizeCmd{
 				EntryIDs:      ids,
+				Only:          only,
 				Force:         cmd.Bool("force"),
 				Model:         cmd.String("model"),
 				Concurrency:   int(cmd.Int("concurrency")),
@@ -1161,7 +1175,7 @@ func summarizeCmd() *cli.Command {
 					fmt.Fprintf(cmd.ErrWriter, "  titled %s\n", id)
 				},
 				OnSkipped: func(id string) {
-					fmt.Fprintf(cmd.ErrWriter, "  skipped %s (already has a summary and a title)\n", id)
+					fmt.Fprintf(cmd.ErrWriter, "  skipped %s (nothing missing)\n", id)
 				},
 			}
 

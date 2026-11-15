@@ -262,21 +262,27 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	if h.committer != nil {
 		msg := fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72))
 		if err := h.committer.Commit(msg, commitPaths...); err != nil {
-			return errors.Join(fmt.Errorf("git commit: %w", err), summaryFailure(id, describeErr))
+			return errors.Join(fmt.Errorf("git commit: %w", err), summaryFailure(entry, describeErr))
 		}
 	}
-	return summaryFailure(id, describeErr)
+	return summaryFailure(entry, describeErr)
 }
 
 // summaryFailure names the written entry whose summary or title generation
-// failed and the fill that adds what is missing; a named `sdd summarize <id>`
-// would regenerate a supplied summary or title too. Nil when generation
-// succeeded.
-func summaryFailure(id string, err error) error {
+// failed, what it lacks and the command that fills it while keeping what the
+// caller supplied. Nil when generation succeeded.
+func summaryFailure(entry *model.Entry, err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("entry %s is written without a generated summary or title (run sdd summarize --all to fill what is missing): summarizing: %w", id, err)
+	missing, only := "summary or title", ""
+	switch {
+	case entry.Summary != "":
+		missing, only = "title", " --only=title"
+	case entry.Title != "":
+		missing, only = "summary", " --only=summary"
+	}
+	return fmt.Errorf("entry %s is written without a generated %s (run sdd summarize %s%s to fill it): summarizing: %w", entry.ID, missing, entry.ID, only, err)
 }
 
 // describeNew writes the new entry's description, its title kept apart from

@@ -1,5 +1,7 @@
 package command
 
+import "github.com/networkteam/sdd/internal/model"
+
 // SummarizeCmd captures intent to generate or regenerate entry summaries and
 // titles, which one LLM call writes together.
 type SummarizeCmd struct {
@@ -10,6 +12,10 @@ type SummarizeCmd struct {
 	// with a summary but no title gets a title and keeps its summary. Named
 	// entries always regenerate both, so Force has no effect on them.
 	Force bool
+	// Only limits the fields the run writes; the zero value writes both. A
+	// field outside it keeps what the entry stores, on named entries, --all
+	// and --all --force alike.
+	Only model.DescriptionFields
 	// Model is the LLM model to use for summary generation.
 	Model string
 	// Concurrency bounds the worker pool for batch summarize. Zero falls

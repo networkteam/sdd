@@ -211,6 +211,84 @@ func TestSummarize_ExplicitCommitFailureNamesTheUncommittedFile(t *testing.T) {
 	}
 }
 
+func TestSummarize_NamedOnlyKeepsTheOtherField(t *testing.T) {
+	cases := []struct {
+		name                   string
+		only                   model.DescriptionFields
+		purpose                llm.Purpose
+		wantTitle, wantSummary string
+	}{
+		{name: "title", only: model.DescriptionFields{Title: true}, purpose: llm.PurposeTitle, wantTitle: storedTitle, wantSummary: "Kept summary."},
+		{name: "summary", only: model.DescriptionFields{Summary: true}, purpose: llm.PurposeSummarize, wantTitle: "Kept title", wantSummary: "GENERATED"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			graphDir := t.TempDir()
+			writeTitledEntry(t, graphDir)
+			runner := &stubRunner{text: "GENERATED"}
+			h := handlers.New(handlers.Options{GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{}, LLMRunner: runner})
+			if err := h.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{titledEntry}, Only: tc.only}); err != nil {
+				t.Fatalf("Summarize: %v", err)
+			}
+			if runner.callCount() != 1 || runner.purposeCount(tc.purpose) != 1 {
+				t.Errorf("one call of the expected purpose should run, got %v", runner.byUse)
+			}
+			entry, err := model.ParseEntry(titledEntry+".md", readEntryFile(t, graphDir, titledEntry))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if entry.Title != tc.wantTitle || entry.Summary != tc.wantSummary {
+				t.Errorf("only the named field should be regenerated, got title %q summary %q", entry.Title, entry.Summary)
+			}
+		})
+	}
+}
+
+func TestSummarize_AllOnlyFillsTheNamedField(t *testing.T) {
+	const titledUnsummarized = "20260101-120003-s-prc-ddd"
+	type fields struct{ title, summary string }
+	cases := []struct {
+		name  string
+		force bool
+		only  model.DescriptionFields
+		want  map[string]fields
+	}{
+		{name: "titles", only: model.DescriptionFields{Title: true}, want: map[string]fields{
+			summarizedEntry: {storedTitle, "Existing summary."}, emptyEntry: {storedTitle, ""},
+			titledUnsummarized: {"Hand title", ""}, titledEntry: {"Kept title", "Kept summary."},
+		}},
+		{name: "summaries", only: model.DescriptionFields{Summary: true}, want: map[string]fields{
+			summarizedEntry: {"", "Existing summary."}, emptyEntry: {"", "GENERATED"},
+			titledUnsummarized: {"Hand title", "GENERATED"}, titledEntry: {"Kept title", "Kept summary."},
+		}},
+		{name: "forced titles", force: true, only: model.DescriptionFields{Title: true}, want: map[string]fields{
+			summarizedEntry: {storedTitle, "Existing summary."}, emptyEntry: {storedTitle, ""},
+			titledUnsummarized: {storedTitle, ""}, titledEntry: {storedTitle, "Kept summary."},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			graphDir := t.TempDir()
+			writeSummarizePair(t, graphDir)
+			writeTitledEntry(t, graphDir)
+			writeEntryFile(t, graphDir, titledUnsummarized, "---\ntype: signal\nlayer: process\nkind: gap\ntitle: Hand title\n---\n\nTitled by hand.\n")
+			h := handlers.New(handlers.Options{GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{}, LLMRunner: &stubRunner{text: "GENERATED"}})
+			if err := h.Summarize(context.Background(), &command.SummarizeCmd{Force: tc.force, Only: tc.only, Concurrency: 1}); err != nil {
+				t.Fatalf("Summarize: %v", err)
+			}
+			for id, want := range tc.want {
+				entry, err := model.ParseEntry(id+".md", readEntryFile(t, graphDir, id))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if entry.Title != want.title || entry.Summary != want.summary {
+					t.Errorf("%s should get only the named field, got title %q summary %q", id, entry.Title, entry.Summary)
+				}
+			}
+		})
+	}
+}
+
 func TestSummarize_All_KeepsAStoredTitle(t *testing.T) {
 	graphDir := t.TempDir()
 	writeEntryFile(t, graphDir, emptyEntry, "---\ntype: signal\nlayer: process\nkind: gap\ntitle: Hand title\n---\n\nNeeds a summary.\n")

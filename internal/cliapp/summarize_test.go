@@ -64,7 +64,7 @@ func TestSummarizeCostLine(t *testing.T) {
 			if result.err != nil {
 				t.Fatalf("sdd summarize: %v\n%s", result.err, result.stderr)
 			}
-			costLine := "Filling: 1 entries get a title beside their stored summary, 0 entries get a summary beside their stored title, 0 entries get a summary and a title -> 1 model calls."
+			costLine := "Filling: 1 entries get a title, 0 entries get a summary, 0 entries get a summary and a title -> 1 model calls."
 			if strings.Contains(result.stderr, costLine) != tc.wantCostLine {
 				t.Errorf("only a fill should state its cost before it runs:\n%s", result.stderr)
 			}
@@ -91,12 +91,46 @@ func TestSummarizeCostLineCountsAStoredTitle(t *testing.T) {
 	if result.err != nil {
 		t.Fatalf("summarize --all: %v\n%s", result.err, result.stderr)
 	}
-	costLine := "Filling: 0 entries get a title beside their stored summary, 1 entries get a summary beside their stored title, 0 entries get a summary and a title -> 1 model calls."
+	costLine := "Filling: 0 entries get a title, 1 entries get a summary, 0 entries get a summary and a title -> 1 model calls."
 	if !strings.Contains(result.stderr, costLine) {
 		t.Errorf("the cost line should count a titled entry as getting its summary alone:\n%s", result.stderr)
 	}
 	if entry := f.read(t, appEntryRel); !strings.Contains(entry, "title: Hand title") || !strings.Contains(entry, "summary: A generated summary.") {
 		t.Errorf("the fill should add the summary beside the stored title:\n%s", entry)
+	}
+}
+
+func TestSummarizeOnlyRefusals(t *testing.T) {
+	f := newAppFixture(t)
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "unknown value", args: []string{"summarize", "--only", "body", appEntryID}, want: "--only takes title, summary or title,summary"},
+		{name: "with --title", args: []string{"summarize", "--only", "summary", "--title", "A title", appEntryID}, want: "--only cannot be combined with --text or --title"},
+		{name: "with --text", args: []string{"summarize", "--only", "title", "--text", "A summary.", appEntryID}, want: "--only cannot be combined with --text or --title"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if result := f.run(t, tc.args...); result.err == nil || !strings.Contains(result.err.Error(), tc.want) {
+				t.Errorf("the --only value should be refused naming why, got %v", result.err)
+			}
+		})
+	}
+}
+
+func TestSummarizeAllOnlyTitleCostLine(t *testing.T) {
+	f := newFillFixture(t)
+	result := f.run(t, "summarize", "--all", "--only", "title")
+	if result.err != nil {
+		t.Fatalf("summarize --all --only title: %v\n%s", result.err, result.stderr)
+	}
+	if !strings.Contains(result.stderr, "Filling: 1 entries get a title, 0 entries get a summary, 0 entries get a summary and a title -> 1 model calls.") {
+		t.Errorf("the cost line should count the titles the fill writes:\n%s", result.stderr)
+	}
+	if entry := f.read(t, appEntryRel); !strings.Contains(entry, "title: Filled title") || !strings.Contains(entry, "summary: "+appSummary) {
+		t.Errorf("the fill should add the title beside the stored summary:\n%s", entry)
 	}
 }
 

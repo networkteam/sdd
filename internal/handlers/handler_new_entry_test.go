@@ -169,7 +169,7 @@ func TestNewEntry_SummaryFailure_IsLoudAndDurable(t *testing.T) {
 			if err == nil {
 				t.Fatal("the summary failure should propagate")
 			}
-			want := "entry " + reportedID + " is written without a generated summary or title (run sdd summarize --all to fill what is missing): summarizing: "
+			want := "entry " + reportedID + " is written without a generated summary or title (run sdd summarize " + reportedID + " to fill it): summarizing: "
 			if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "provider unreachable") {
 				t.Errorf("the error should name the entry, the summarize call and the cause, got %v", err)
 			}
@@ -254,13 +254,16 @@ func TestNewEntry_DryRun_SavesStdinOnAnEarlyRefusal(t *testing.T) {
 	}
 }
 
-// The failure's hint fills what is missing and keeps what the caller supplied.
+// The failure's hint names the command that fills what is missing and keeps
+// what the caller supplied.
 func TestNewEntry_SummaryFailureHint_KeepsTheSuppliedField(t *testing.T) {
 	cases := []struct {
-		name, summary, title string
+		name, summary, title, missing, flag string
+		only                                model.DescriptionFields
 	}{
-		{name: "a supplied summary", summary: "A supplied summary."},
-		{name: "a supplied title", title: "Supplied title"},
+		{name: "a supplied summary", summary: "A supplied summary.", missing: "title", flag: " --only=title", only: model.DescriptionFields{Title: true}},
+		{name: "a supplied title", title: "Supplied title", missing: "summary", flag: " --only=summary", only: model.DescriptionFields{Summary: true}},
+		{name: "neither supplied", missing: "summary or title"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -279,14 +282,15 @@ func TestNewEntry_SummaryFailureHint_KeepsTheSuppliedField(t *testing.T) {
 				Summary: tc.summary, Title: tc.title, SkipPreflight: true,
 				OnNewEntry: func(newID, _ string) { id = newID },
 			})
-			if err == nil || !strings.Contains(err.Error(), "(run sdd summarize --all to fill what is missing)") {
-				t.Fatalf("the failure should point at the fill, got %v", err)
+			want := "entry " + id + " is written without a generated " + tc.missing + " (run sdd summarize " + id + tc.flag + " to fill it): summarizing: "
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("the failure should name what is missing and the command that fills it, got %v", err)
 			}
 
 			fill := handlers.New(handlers.Options{
 				GraphDir: tmp, Reader: &graphReader{}, Committer: &recordingCommitter{}, LLMRunner: &stubRunner{text: "GENERATED"},
 			})
-			if err := fill.Summarize(context.Background(), &command.SummarizeCmd{}); err != nil {
+			if err := fill.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{id}, Only: tc.only}); err != nil {
 				t.Fatalf("Summarize: %v", err)
 			}
 			entry := readWrittenEntry(t, tmp, id)

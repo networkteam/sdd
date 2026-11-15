@@ -143,8 +143,50 @@ func TestTitleBackfill(t *testing.T) {
 		{Embedded: true, Summary: "S."},
 		{Embedded: true},
 	}
-	summaryAndTitle, summaryOnly, titleOnly := model.TitleBackfill(entries)
-	if summaryAndTitle != 1 || summaryOnly != 1 || titleOnly != 1 {
-		t.Errorf("every entry lacking a summary owes a paired call that keeps a stored title, and only the summarized untitled one a title call, got %d paired, %d summary-only, %d title-only", summaryAndTitle, summaryOnly, titleOnly)
+	cases := []struct {
+		name                                     string
+		fields                                   model.DescriptionFields
+		wantBoth, wantSummaryOnly, wantTitleOnly int
+	}{
+		{name: "both fields", fields: model.AllDescriptionFields, wantBoth: 1, wantSummaryOnly: 1, wantTitleOnly: 1},
+		{name: "titles only", fields: model.DescriptionFields{Title: true}, wantTitleOnly: 2},
+		{name: "summaries only", fields: model.DescriptionFields{Summary: true}, wantSummaryOnly: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			both, summaryOnly, titleOnly := model.TitleBackfill(entries, tc.fields)
+			if both != tc.wantBoth || summaryOnly != tc.wantSummaryOnly || titleOnly != tc.wantTitleOnly {
+				t.Errorf("each entry should be counted by the fields it gets, got %d both, %d summary-only, %d title-only", both, summaryOnly, titleOnly)
+			}
+		})
+	}
+}
+
+func TestParseDescriptionFields(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    model.DescriptionFields
+		refused bool
+	}{
+		{in: "title", want: model.DescriptionFields{Title: true}},
+		{in: "summary", want: model.DescriptionFields{Summary: true}},
+		{in: "title,summary", want: model.AllDescriptionFields},
+		{in: "summary, title", want: model.AllDescriptionFields},
+		{in: "body", refused: true},
+		{in: "", refused: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := model.ParseDescriptionFields(tc.in)
+			if tc.refused {
+				if err == nil || !strings.Contains(err.Error(), "title, summary or title,summary") {
+					t.Errorf("an unknown value should be refused naming the allowed ones, got %v", err)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Errorf("the value should name its fields, got %+v, %v", got, err)
+			}
+		})
 	}
 }
