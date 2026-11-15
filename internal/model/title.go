@@ -87,7 +87,7 @@ var ErrEmptyTitle = errors.New("the title is empty once whitespace, quotes and t
 
 // CheckTitle refuses a title every writer must refuse before storing it.
 func CheckTitle(title string) error {
-	if strings.ContainsAny(title, "\r\n\u0085\u2028\u2029") {
+	if strings.ContainsAny(title, "\r\n\v\f\u0085\u2028\u2029") {
 		return fmt.Errorf("%w: %q", ErrMultiLineTitle, title)
 	}
 	return nil

@@ -133,6 +133,8 @@ func TestCheckTitle(t *testing.T) {
 		{title: "Daemon\u2028removal", refused: true},
 		{title: "Daemon\u2029removal", refused: true},
 		{title: "Daemon\u0085removal", refused: true},
+		{title: "Daemon\vremoval", refused: true},
+		{title: "Daemon\fremoval", refused: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.title, func(t *testing.T) {
