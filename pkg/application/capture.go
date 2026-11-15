@@ -171,11 +171,15 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 			return result, err
 		}
 		document.Attachments = append([]string(nil), entry.Attachments...)
+		message, err := captureCommitMessage(draft.EntryID, document)
+		if err != nil {
+			return result, err
+		}
 		batch := MutationBatch{
 			ID:          draft.Publication.String(),
 			Changes:     []DocumentChange{{LogicalPath: logicalPath, Document: &document, CanonicalBytes: canonical}},
 			Attachments: attachments,
-			Message:     entry.CaptureCommitMessage(),
+			Message:     message,
 		}
 		acquired, err = runtime.acquire(ctx, draft.Target)
 		if err != nil {
@@ -231,19 +235,28 @@ func entryPublicationBatch(key PublicationKey, publication EntryPublication) (Mu
 	if err != nil {
 		return MutationBatch{}, err
 	}
-	parts, err := model.ParseID(id)
+	message, err := captureCommitMessage(id, publication.Document)
 	if err != nil {
 		return MutationBatch{}, err
 	}
-	// Built from the published document, so a publication replayed after a
-	// failed commit is committed under the same subject as a fresh one.
-	captured := model.Entry{Type: model.TypeFromAbbrev[parts.TypeCode], Layer: model.LayerFromAbbrev[parts.LayerCode], Content: publication.Document.Body}
-	captured.Title, _ = publication.Document.Frontmatter["title"].(string)
-	batch := MutationBatch{ID: key.String(), Message: captured.CaptureCommitMessage(), Changes: []DocumentChange{{LogicalPath: publication.Document.LogicalPath, Document: &publication.Document}}}
+	batch := MutationBatch{ID: key.String(), Message: message, Changes: []DocumentChange{{LogicalPath: publication.Document.LogicalPath, Document: &publication.Document}}}
 	for _, name := range publication.Document.Attachments {
 		batch.Attachments = append(batch.Attachments, AttachmentMaterialization{SourceName: name, LogicalPath: path.Join(attachmentDir, name)})
 	}
 	return batch, nil
+}
+
+// captureCommitMessage is the subject the capture of the document commits
+// under, built from the document alone, so a publication replayed after a
+// failed commit is committed under the same subject as a fresh one.
+func captureCommitMessage(id string, document EntryDocument) (string, error) {
+	parts, err := model.ParseID(id)
+	if err != nil {
+		return "", err
+	}
+	captured := model.Entry{Type: model.TypeFromAbbrev[parts.TypeCode], Layer: model.LayerFromAbbrev[parts.LayerCode], Content: document.Body}
+	captured.Title, _ = document.Frontmatter["title"].(string)
+	return captured.CaptureCommitMessage(), nil
 }
 
 func (a *Application) prepareCaptureEntry(ctx context.Context, identity RequestIdentity, principal Principal, runtime *ProjectRuntime, target *Snapshot, draft EntryDraft) (*model.Entry, *Snapshot, []AttachmentMaterialization, error) {

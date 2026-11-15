@@ -152,7 +152,7 @@ func captureBatch(t *testing.T, key sdd.PublicationKey, id, summary string) sdd.
 	if err != nil {
 		t.Fatal(err)
 	}
-	return sdd.MutationBatch{ID: key.String(), Message: "sdd: capture " + id, Changes: []sdd.DocumentChange{{LogicalPath: filename, CanonicalBytes: canonical, Document: &document}}}
+	return sdd.MutationBatch{ID: key.String(), Message: "sdd: signal tactical An entry published through its recorded invocation.", Changes: []sdd.DocumentChange{{LogicalPath: filename, CanonicalBytes: canonical, Document: &document}}}
 }
 
 type blobSources map[string]string
