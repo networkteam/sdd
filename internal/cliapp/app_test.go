@@ -119,6 +119,30 @@ func TestCLIWriteHandlerUsesErrorStream(t *testing.T) {
 	}
 }
 
+func TestNewBuildsTheEmbedderOnlyForATitleCall(t *testing.T) {
+	cases := []struct {
+		name      string
+		args      []string
+		wantFails bool
+	}{
+		{name: "a supplied summary and title", args: []string{"--summary", "A supplied summary.", "--title", "Supplied title"}},
+		{name: "a dry run", args: []string{"--dry-run"}},
+		{name: "a title call", args: []string{"--summary", "A supplied summary."}, wantFails: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFillFixture(t)
+			f.write(t, ".sdd/config.yaml", f.read(t, ".sdd/config.yaml")+"embedding:\n  provider: ollama\n")
+			args := append([]string{"new", "--confidence", "high", "--skip-preflight"}, tc.args...)
+			result := f.run(t, append(args, "s", "tac", "A signal beside a broken embedding config.")...)
+			failed := result.err != nil && strings.Contains(result.err.Error(), "embedding.model is required")
+			if failed != tc.wantFails || (!tc.wantFails && result.err != nil) {
+				t.Errorf("only a title call should read the embedding config, got %v\n%s", result.err, result.stderr)
+			}
+		})
+	}
+}
+
 func TestCLIServeUsesSuppliedStreams(t *testing.T) {
 	f := newAppFixture(t)
 	f.serve(t, func(client *mcp.ClientSession) {

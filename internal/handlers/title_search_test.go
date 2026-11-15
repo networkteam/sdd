@@ -54,15 +54,20 @@ func rankedIndex(t *testing.T) *index.Index {
 	return idx
 }
 
-// indexOpener hands out its index, none when it holds none.
-type indexOpener struct {
-	index  *index.Index
-	opened int
+// titleSearch hands out its embedder and index, none when it holds none.
+type titleSearch struct {
+	embedder embed.Embedder
+	index    *index.Index
+	opened   int
 }
 
-func (o *indexOpener) OpenSearchIndex(context.Context) (*index.Index, error) {
+func (o *titleSearch) OpenTitleSearch(context.Context) (embed.Embedder, *index.Index, error) {
 	o.opened++
-	return o.index, nil
+	return o.embedder, o.index, nil
+}
+
+func searchWith(embedder *queryEmbedder, idx *index.Index) *titleSearch {
+	return &titleSearch{embedder: embedder.embedder(), index: idx}
 }
 
 // queryEmbedder records the texts it embeds, or fails with err.
@@ -153,13 +158,13 @@ func writeTitleGraph(t *testing.T, graphDir string) {
 
 // summarizeDescribed regenerates the described entry and returns the graph
 // directory it lives in.
-func summarizeDescribed(t *testing.T, runner llm.Runner, embedder embed.Embedder, opener handlers.SearchIndexOpener) (string, error) {
+func summarizeDescribed(t *testing.T, runner llm.Runner, search *titleSearch) (string, error) {
 	t.Helper()
 	graphDir := t.TempDir()
 	writeTitleGraph(t, graphDir)
 	h := handlers.New(handlers.Options{
 		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{},
-		LLMRunner: runner, Embedder: embedder, SearchIndex: opener,
+		LLMRunner: runner, TitleSearch: search,
 	})
 	return graphDir, h.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{describedEntry}})
 }
@@ -167,8 +172,8 @@ func summarizeDescribed(t *testing.T, runner llm.Runner, embedder embed.Embedder
 func TestSummarize_ShowsTheTitlesOfTheFiveNearestTitledEntries(t *testing.T) {
 	runner := &promptRunner{titles: []string{"Fresh title"}}
 	embedder := &queryEmbedder{}
-	opener := &indexOpener{index: rankedIndex(t)}
-	if _, err := summarizeDescribed(t, runner, embedder.embedder(), opener); err != nil {
+	search := searchWith(embedder, rankedIndex(t))
+	if _, err := summarizeDescribed(t, runner, search); err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
 	if !slices.Equal(embedder.texts, []string{describedBody}) {
@@ -180,14 +185,14 @@ func TestSummarize_ShowsTheTitlesOfTheFiveNearestTitledEntries(t *testing.T) {
 	if got := listedTitles(runner.requests[0].UserPrompt); !slices.Equal(got, nearestTitles) {
 		t.Errorf("the prompt should list the five nearest titled entries other than the entry, got %q", got)
 	}
-	if opener.opened != 1 {
-		t.Errorf("the index should be opened once per run, opened %d", opener.opened)
+	if search.opened != 1 {
+		t.Errorf("the search should be opened once per run, opened %d", search.opened)
 	}
 }
 
 func TestSummarize_RerunsARepeatedTitleOnce(t *testing.T) {
 	runner := &promptRunner{titles: []string{"neighbour title 3", "Distinct title"}}
-	graphDir, err := summarizeDescribed(t, runner, (&queryEmbedder{}).embedder(), &indexOpener{index: rankedIndex(t)})
+	graphDir, err := summarizeDescribed(t, runner, searchWith(&queryEmbedder{}, rankedIndex(t)))
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -206,29 +211,27 @@ func TestSummarize_RerunsARepeatedTitleOnce(t *testing.T) {
 
 func TestTitleCalls_WithoutEmbedderOrIndex_ShowNoSimilarTitles(t *testing.T) {
 	cases := []struct {
-		name       string
-		embedder   *queryEmbedder
-		opener     *indexOpener
-		wantOpened int
+		name     string
+		embedder *queryEmbedder
+		search   *titleSearch
 	}{
-		{name: "no embedder", opener: &indexOpener{index: rankedIndex(t)}},
-		{name: "no index", embedder: &queryEmbedder{}, opener: &indexOpener{}, wantOpened: 1},
+		{name: "no embedder", search: &titleSearch{index: rankedIndex(t)}},
+		{name: "no index", embedder: &queryEmbedder{}, search: &titleSearch{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var embedder embed.Embedder
 			if tc.embedder != nil {
-				embedder = tc.embedder.embedder()
+				tc.search.embedder = tc.embedder.embedder()
 			}
 			runner := &promptRunner{titles: []string{"Fresh title"}}
-			if _, err := summarizeDescribed(t, runner, embedder, tc.opener); err != nil {
+			if _, err := summarizeDescribed(t, runner, tc.search); err != nil {
 				t.Fatalf("Summarize: %v", err)
 			}
 			if len(runner.requests) != 1 || strings.Contains(runner.requests[0].Combined(), "most similar entries") {
 				t.Errorf("the title call should run without a similar-titles section")
 			}
-			if tc.opener.opened != tc.wantOpened {
-				t.Errorf("the index should be opened only beside an embedder, opened %d", tc.opener.opened)
+			if tc.search.opened != 1 {
+				t.Errorf("the search should be opened once per run, opened %d", tc.search.opened)
 			}
 			if tc.embedder != nil && len(tc.embedder.texts) != 0 {
 				t.Errorf("nothing should be embedded without an index, got %q", tc.embedder.texts)
@@ -240,7 +243,7 @@ func TestTitleCalls_WithoutEmbedderOrIndex_ShowNoSimilarTitles(t *testing.T) {
 func TestSummarize_FailsWhenTheSimilarSearchFails(t *testing.T) {
 	runner := &promptRunner{titles: []string{"Fresh title"}}
 	embedder := &queryEmbedder{err: errors.New("embedding provider down")}
-	_, err := summarizeDescribed(t, runner, embedder.embedder(), &indexOpener{index: rankedIndex(t)})
+	_, err := summarizeDescribed(t, runner, searchWith(embedder, rankedIndex(t)))
 	if err == nil || !strings.Contains(err.Error(), "embedding provider down") {
 		t.Fatalf("a failed search should fail the summary, got %v", err)
 	}
@@ -252,16 +255,16 @@ func TestSummarize_FailsWhenTheSimilarSearchFails(t *testing.T) {
 func TestSummarize_OpensNoIndexWithNothingToDescribe(t *testing.T) {
 	graphDir := t.TempDir()
 	writeTitledEntry(t, graphDir)
-	opener := &indexOpener{index: rankedIndex(t)}
+	search := searchWith(&queryEmbedder{}, rankedIndex(t))
 	h := handlers.New(handlers.Options{
 		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{},
-		LLMRunner: &promptRunner{titles: []string{"Fresh title"}}, Embedder: (&queryEmbedder{}).embedder(), SearchIndex: opener,
+		LLMRunner: &promptRunner{titles: []string{"Fresh title"}}, TitleSearch: search,
 	})
 	if err := h.Summarize(context.Background(), &command.SummarizeCmd{}); err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
-	if opener.opened != 0 {
-		t.Errorf("a run with nothing to describe should not open the index, opened %d", opener.opened)
+	if search.opened != 0 {
+		t.Errorf("a run with nothing to describe should not open the search, opened %d", search.opened)
 	}
 }
 
@@ -277,7 +280,7 @@ func TestSummarize_LeavesTheLinkedEntriesOutOfTheSimilarTitles(t *testing.T) {
 	runner := &promptRunner{titles: []string{"Fresh title"}}
 	h := handlers.New(handlers.Options{
 		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{},
-		LLMRunner: runner, Embedder: (&queryEmbedder{}).embedder(), SearchIndex: &indexOpener{index: rankedIndex(t)},
+		LLMRunner: runner, TitleSearch: searchWith(&queryEmbedder{}, rankedIndex(t)),
 	})
 	if err := h.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{describedEntry}}); err != nil {
 		t.Fatalf("Summarize: %v", err)
@@ -312,7 +315,7 @@ func newEntryBesideNeighbours(t *testing.T, embedder *queryEmbedder, runner llm.
 	h := handlers.New(handlers.Options{
 		GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{graph: model.NewGraph(neighbourEntries())},
 		Committer: &recordingCommitter{}, LLMRunner: runner, Stderr: &bytes.Buffer{},
-		Embedder: embedder.embedder(), SearchIndex: &indexOpener{index: rankedIndex(t)},
+		TitleSearch: searchWith(embedder, rankedIndex(t)),
 	})
 	var id string
 	err := h.NewEntry(context.Background(), &command.NewEntryCmd{

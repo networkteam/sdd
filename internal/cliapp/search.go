@@ -177,19 +177,24 @@ func newEmbedder(cfg model.EmbeddingConfig) (handlers.IndexEmbedder, error) {
 }
 
 // withTitleSearch gives the handler's title calls the configured embedder over
-// the repo's search index; without an embedding provider opts stay as given.
-func withTitleSearch(cmd *cli.Command, opts handlers.Options) (handlers.Options, error) {
-	emb, err := buildEmbedder(cmd)
-	if err != nil || emb.Embedder == nil {
-		return opts, err
-	}
-	dir, err := resolveIndexStore(emb)
-	if err != nil {
-		return opts, err
-	}
-	opts.Embedder = emb.Embedder
-	opts.SearchIndex = handlers.SearchIndexDir(dir)
-	return opts, nil
+// the repo's search index; without an embedding provider they search nothing.
+func withTitleSearch(cmd *cli.Command, opts handlers.Options) handlers.Options {
+	opts.TitleSearch = handlers.TitleSearchFunc(func(ctx context.Context) (embed.Embedder, *index.Index, error) {
+		emb, err := buildEmbedder(cmd)
+		if err != nil || emb.Embedder == nil {
+			return nil, nil, err
+		}
+		dir, err := resolveIndexStore(emb)
+		if err != nil {
+			return nil, nil, err
+		}
+		store, err := handlers.SearchIndexDir(dir).OpenSearchIndex(ctx)
+		if err != nil || store == nil {
+			return nil, nil, err
+		}
+		return emb.Embedder, store, nil
+	})
+	return opts
 }
 
 func indexCmd() *cli.Command {

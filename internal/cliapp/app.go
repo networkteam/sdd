@@ -862,7 +862,7 @@ func newCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			opts, err := withTitleSearch(cmd, handlers.Options{
+			opts := withTitleSearch(cmd, handlers.Options{
 				Stderr:   cmd.ErrWriter,
 				GraphDir: dir,
 				SDDDir:   sddDir,
@@ -877,9 +877,6 @@ func newCmd() *cli.Command {
 				Repos:     mgr,
 				Language:  configLanguage(cfg),
 			})
-			if err != nil {
-				return err
-			}
 			return handlers.New(opts).NewEntry(ctx, ncmd)
 		}),
 	}
@@ -1180,7 +1177,7 @@ func summarizeCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			opts, err := withTitleSearch(cmd, handlers.Options{
+			opts := withTitleSearch(cmd, handlers.Options{
 				Stderr:   cmd.ErrWriter,
 				GraphDir: dir,
 				Reader: finders.New(finders.Options{
@@ -1193,9 +1190,6 @@ func summarizeCmd() *cli.Command {
 				Changes:   git.CLI{},
 				Language:  configLanguage(cfg),
 			})
-			if err != nil {
-				return err
-			}
 			handler := handlers.New(opts)
 			if len(ids) > 0 {
 				return handler.Summarize(ctx, sumCmd)

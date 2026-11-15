@@ -11,12 +11,22 @@ import (
 	"github.com/networkteam/sdd/internal/index"
 	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 )
 
-// SearchIndexOpener opens a read view of the search index for one command. A
-// nil index with a nil error means no index is built.
-type SearchIndexOpener interface {
-	OpenSearchIndex(ctx context.Context) (*index.Index, error)
+// TitleSearchOpener opens the embedder and the search index a title call's
+// similar titles are searched with. Only a title call opens it, so a command
+// making none never reads the embedding config. A nil embedder or index means
+// none is configured or built.
+type TitleSearchOpener interface {
+	OpenTitleSearch(ctx context.Context) (embed.Embedder, *index.Index, error)
+}
+
+// TitleSearchFunc adapts a function to TitleSearchOpener.
+type TitleSearchFunc func(ctx context.Context) (embed.Embedder, *index.Index, error)
+
+func (f TitleSearchFunc) OpenTitleSearch(ctx context.Context) (embed.Embedder, *index.Index, error) {
+	return f(ctx)
 }
 
 // SearchIndexDir opens the search index stored in the directory it names.
@@ -40,17 +50,17 @@ func (d SearchIndexDir) OpenSearchIndex(context.Context) (*index.Index, error) {
 // openTitleSearch opens the vector search a title call's similar titles come
 // from. It returns a nil finder without an embedder or a built index.
 func (h *Handler) openTitleSearch(ctx context.Context, graph *model.Graph) (*finders.SearchFinder, error) {
-	if h.embedder == nil || h.index == nil {
+	if h.titleSearch == nil {
 		return nil, nil
 	}
-	store, err := h.index.OpenSearchIndex(ctx)
-	if err != nil || store == nil {
+	embedder, store, err := h.titleSearch.OpenTitleSearch(ctx)
+	if err != nil || embedder == nil || store == nil {
 		return nil, err
 	}
 	return finders.NewSearchFinder(finders.SearchFinderOptions{
 		Graph:      graph,
 		GraphDir:   h.graphDir,
-		Embedder:   h.embedder,
+		Embedder:   embedder,
 		IndexStore: store,
 	}), nil
 }
