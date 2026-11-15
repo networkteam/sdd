@@ -171,9 +171,12 @@ func (h *Handler) Summarize(ctx context.Context, cmd *command.SummarizeCmd) erro
 			if err != nil {
 				return fmt.Errorf("summarizing %s: %w", entry.ID, err)
 			}
-			graphMu.RLock()
-			retitle, err := description.Retitle(result)
-			graphMu.RUnlock()
+			var retitle *llmops.Description
+			if writeTitle {
+				graphMu.RLock()
+				retitle, err = description.Retitle(result)
+				graphMu.RUnlock()
+			}
 			if err != nil {
 				return fmt.Errorf("rendering title for %s: %w", entry.ID, err)
 			}

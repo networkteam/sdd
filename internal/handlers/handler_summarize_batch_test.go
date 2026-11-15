@@ -244,6 +244,25 @@ func TestSummarize_NamedOnlyKeepsTheOtherField(t *testing.T) {
 	}
 }
 
+// A title the run discards is never re-run, even when it repeats another
+// entry's title.
+func TestSummarize_OnlySummaryRunsNoTitleRerun(t *testing.T) {
+	graphDir := t.TempDir()
+	writeEntryFile(t, graphDir, emptyEntry, "---\ntype: signal\nlayer: process\nkind: gap\n---\n\nNeeds a summary.\n")
+	writeEntryFile(t, graphDir, titledEntry, "---\ntype: signal\nlayer: process\nkind: gap\ntitle: "+storedTitle+"\nsummary: Kept summary.\n---\n\nHolds the repeated title.\n")
+	runner := &stubRunner{text: "GENERATED"}
+	h := handlers.New(handlers.Options{GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{}, LLMRunner: runner})
+	if err := h.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{emptyEntry}, Only: model.DescriptionFields{Summary: true}}); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if runner.callCount() != 1 {
+		t.Errorf("only the summary call should run, got %v", runner.byUse)
+	}
+	if text := readEntryFile(t, graphDir, emptyEntry); strings.Contains(text, "title:") || !strings.Contains(text, "summary: GENERATED") {
+		t.Errorf("the entry should gain the summary alone:\n%s", text)
+	}
+}
+
 func TestSummarize_AllOnlyFillsTheNamedField(t *testing.T) {
 	const titledUnsummarized = "20260101-120003-s-prc-ddd"
 	type fields struct{ title, summary string }
