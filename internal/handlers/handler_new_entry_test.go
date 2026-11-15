@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -168,7 +169,7 @@ func TestNewEntry_SummaryFailure_IsLoudAndDurable(t *testing.T) {
 			if err == nil {
 				t.Fatal("the summary failure should propagate")
 			}
-			want := "entry " + reportedID + " is written without a generated summary or title (run sdd summarize " + reportedID + "): summarizing: "
+			want := "entry " + reportedID + " is written without a generated summary or title (run sdd summarize --all to fill what is missing): summarizing: "
 			if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "provider unreachable") {
 				t.Errorf("the error should name the entry, the summarize call and the cause, got %v", err)
 			}
@@ -181,6 +182,50 @@ func TestNewEntry_SummaryFailure_IsLoudAndDurable(t *testing.T) {
 			entry := readWrittenEntry(t, tmp, reportedID)
 			if entry.Summary != "" || entry.Title != "" {
 				t.Errorf("the entry should be written without a summary or title, got title %q summary %q", entry.Title, entry.Summary)
+			}
+		})
+	}
+}
+
+// The failure's hint fills what is missing and keeps what the caller supplied.
+func TestNewEntry_SummaryFailureHint_KeepsTheSuppliedField(t *testing.T) {
+	cases := []struct {
+		name, summary, title string
+	}{
+		{name: "a supplied summary", summary: "A supplied summary."},
+		{name: "a supplied title", title: "Supplied title"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			h := handlers.New(handlers.Options{
+				GraphDir: tmp, SDDDir: sddDir, Reader: &graphReader{}, Committer: &recordingCommitter{},
+				LLMRunner: failingRunner{}, Stderr: &bytes.Buffer{},
+			})
+			var id string
+			err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerTactical, Description: "the hint keeps what was supplied",
+				Summary: tc.summary, Title: tc.title, SkipPreflight: true,
+				OnNewEntry: func(newID, _ string) { id = newID },
+			})
+			if err == nil || !strings.Contains(err.Error(), "(run sdd summarize --all to fill what is missing)") {
+				t.Fatalf("the failure should point at the fill, got %v", err)
+			}
+
+			fill := handlers.New(handlers.Options{
+				GraphDir: tmp, Reader: &graphReader{}, Committer: &recordingCommitter{}, LLMRunner: &stubRunner{text: "GENERATED"},
+			})
+			if err := fill.Summarize(context.Background(), &command.SummarizeCmd{}); err != nil {
+				t.Fatalf("Summarize: %v", err)
+			}
+			entry := readWrittenEntry(t, tmp, id)
+			wantSummary, wantTitle := cmp.Or(tc.summary, "GENERATED"), cmp.Or(tc.title, storedTitle)
+			if entry.Summary != wantSummary || entry.Title != wantTitle {
+				t.Errorf("the hinted fill should keep the supplied field and fill the other, got title %q summary %q", entry.Title, entry.Summary)
 			}
 		})
 	}

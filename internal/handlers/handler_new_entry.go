@@ -263,12 +263,14 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 }
 
 // summaryFailure names the written entry whose summary or title generation
-// failed, so the caller can fill it in later; nil when generation succeeded.
+// failed and the fill that adds what is missing; a named `sdd summarize <id>`
+// would regenerate a supplied summary or title too. Nil when generation
+// succeeded.
 func summaryFailure(id string, err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("entry %s is written without a generated summary or title (run sdd summarize %s): summarizing: %w", id, id, err)
+	return fmt.Errorf("entry %s is written without a generated summary or title (run sdd summarize --all to fill what is missing): summarizing: %w", id, err)
 }
 
 // describeNew writes the new entry's description, its title kept apart from
