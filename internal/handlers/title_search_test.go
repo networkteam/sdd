@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/networkteam/sdd/internal/chunking"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/index"
@@ -425,5 +426,93 @@ func TestSummarize_EmbedsOutsideTheGraphLock(t *testing.T) {
 	}
 	if n := slowEmbeds.Load(); n != 1 {
 		t.Errorf("the body should be embedded once, ahead of the search, got %d", n)
+	}
+}
+
+// savedIndex writes the titled neighbours to an index on disk, each version
+// recorded at its graph state so its hits stay fresh, and opens it as the CLI
+// does.
+func savedIndex(t *testing.T, graphDir string) *index.Index {
+	t.Helper()
+	ctx := context.Background()
+	graph, err := (&graphReader{}).CurrentGraph(graphDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	err = index.WriteStore(ctx, dir, func(idx *index.Index) error {
+		manifest, err := index.LoadManifest(dir)
+		if err != nil {
+			return err
+		}
+		for i, id := range nearestIDs[2:] {
+			hash, err := chunking.EntryStateHash(ctx, graph.ByID[id], chunking.DiskAttachmentReader{GraphDir: graphDir})
+			if err != nil {
+				return err
+			}
+			row := index.Row{
+				EntryID: id, EntryHash: hash, ChunkID: index.SummaryChunkID(id), Text: id, Body: id, IsSummary: true,
+				ModelFingerprint: "fake/v1/4", Embedding: []float32{1, 0.1 * float32(i+2), 0, 0},
+			}
+			if err := idx.UpsertEntry(ctx, id, nil, []index.Row{row}); err != nil {
+				return err
+			}
+			manifest.AddVersion(id, index.EntryVersion{Hash: hash, Fingerprint: "fake/v1/4", ChunkIDs: []string{row.ChunkID}})
+		}
+		return manifest.Save(dir)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := index.OpenBuilt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return saved
+}
+
+// Every worker of a default parallel fill embeds before any searches, so all
+// of them query the saved index's read view together.
+func TestSummarize_ParallelFillsShareASavedIndex(t *testing.T) {
+	graphDir := t.TempDir()
+	for _, e := range neighbourEntries() {
+		writeEntryFile(t, graphDir, e.ID, model.FormatFrontmatter(e)+"\n"+e.Content+"\n")
+	}
+	for i := range model.DefaultLLMConcurrency - 1 {
+		id := fmt.Sprintf("20260401-10000%d-s-tac-fl%d", i, i)
+		writeEntryFile(t, graphDir, id, fmt.Sprintf("---\ntype: signal\nlayer: tactical\nkind: gap\n---\n\nFill %d.\n", i))
+	}
+	var planned, arrived atomic.Int32
+	searching := make(chan struct{})
+	embedder := embed.EmbedderFunc{Space: "fake/v1/4", Run: func(_ context.Context, req embed.Request) (embed.Result, error) {
+		if arrived.Add(1) == planned.Load() {
+			close(searching)
+		}
+		select {
+		case <-searching:
+		case <-time.After(2 * time.Second):
+			return embed.Result{}, errors.New("the fills should embed together")
+		}
+		return embed.Result{Vectors: [][]float32{{1, 0, 0, 0}}}, nil
+	}}
+	runner := &promptRunner{titles: []string{"Fill title 1", "Fill title 2", "Fill title 3", "Fill title 4"}}
+	h := handlers.New(handlers.Options{
+		GraphDir: graphDir, Reader: &graphReader{}, Committer: &recordingCommitter{},
+		LLMRunner: runner, TitleSearch: &titleSearch{embedder: embedder, index: savedIndex(t, graphDir)},
+	})
+	err := h.Summarize(context.Background(), &command.SummarizeCmd{OnPlanned: func(n int) { planned.Store(int32(n)) }})
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if n := planned.Load(); n != model.DefaultLLMConcurrency {
+		t.Fatalf("the run should fill one entry per worker, planned %d", n)
+	}
+	if len(runner.requests) != model.DefaultLLMConcurrency {
+		t.Fatalf("each fill should cost one call, got %d", len(runner.requests))
+	}
+	for _, request := range runner.requests {
+		if got := listedTitles(request.UserPrompt); !slices.Equal(got, nearestTitles) {
+			t.Errorf("each fill should list the saved index's five nearest titles, got %q", got)
+		}
 	}
 }

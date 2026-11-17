@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	chromem "github.com/philippgille/chromem-go"
 )
@@ -86,12 +87,13 @@ type Hit struct {
 
 // Index wraps a chromem-go persistent DB and a single collection.
 type Index struct {
-	db         *chromem.DB
-	coll       *chromem.Collection
-	published  *chromem.Collection
-	manifest   *Manifest
-	indexDir   string // root of the index storage tree (passed to Open)
-	chromemDir string // sub-directory chromem-go writes its gob files into
+	db          *chromem.DB
+	coll        *chromem.Collection
+	publishedMu sync.Mutex
+	published   *chromem.Collection
+	manifest    *Manifest
+	indexDir    string // root of the index storage tree (passed to Open)
+	chromemDir  string // sub-directory chromem-go writes its gob files into
 	// dirty records whether a mutation touched the collection during this
 	// session, so WriteStore bumps the store generation only for writes that
 	// actually changed content — a no-op lazy-fill never invalidates readers'
@@ -312,7 +314,8 @@ func (i *Index) RemoveFiles(paths []string) error {
 
 // Query returns the top-N matches for the given query embedding. The
 // nResults parameter is clamped to the collection's current count to
-// avoid chromem-go's "n_results larger than collection" behavior.
+// avoid chromem-go's "n_results larger than collection" behavior. Queries may
+// run concurrently with each other, not with a mutation.
 func (i *Index) Query(ctx context.Context, embedding []float32, nResults int) ([]Hit, error) {
 	if len(embedding) == 0 {
 		return nil, errors.New("query embedding is empty")
