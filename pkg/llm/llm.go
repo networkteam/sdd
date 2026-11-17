@@ -22,8 +22,11 @@ import (
 type Purpose string
 
 const (
-	PurposePreflight    Purpose = "preflight"
-	PurposeSummarize    Purpose = "summarize"
+	PurposePreflight Purpose = "preflight"
+	PurposeSummarize Purpose = "summarize"
+	// PurposeTitle writes only the title of an entry that keeps its stored
+	// summary.
+	PurposeTitle        Purpose = "title"
 	PurposeWritingGuide Purpose = "writing-guide"
 )
 

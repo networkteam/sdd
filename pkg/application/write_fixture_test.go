@@ -6,6 +6,7 @@ import (
 
 	sdd "github.com/networkteam/sdd/pkg/application"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
+	"github.com/networkteam/sdd/pkg/llm/embed"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
 
@@ -24,6 +25,8 @@ type writeFixtureOptions struct {
 	SourceConfig *sdd.ProjectConfig
 	Dependency   *sdd.ProjectRuntime
 	Dependencies []sdd.RepoID
+	Embedder     embed.Embedder
+	SearchIndex  sdd.SearchIndexStore
 }
 
 func newWriteFixture(t *testing.T, options ...writeFixtureOptions) *writeFixture {
@@ -46,15 +49,20 @@ func newWriteFixture(t *testing.T, options ...writeFixtureOptions) *writeFixture
 		if request.Purpose == pkgllm.PurposePreflight {
 			return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
 		}
-		return pkgllm.Result{Text: "A captured entry for the project record.", Identity: identity}, nil
+		return pkgllm.Result{Text: `{"title": "Test title", "summary": "A captured entry for the project record."}`, Identity: identity}, nil
 	}))
 	var finalizers []sdd.MutationFinalizer
 	var graph sdd.GraphStore = baseGraph
 	var dependency *sdd.ProjectRuntime
 	var dependencies []sdd.RepoID
+	var embedder embed.Embedder
+	var searchIndex sdd.SearchIndexStore
 	for _, option := range options {
 		if option.Runner != nil {
 			runner = option.Runner
+		}
+		if option.Embedder != nil {
+			embedder, searchIndex = option.Embedder, option.SearchIndex
 		}
 		finalizers = append(finalizers, option.Finalizers...)
 		dependencies = append(dependencies, option.Dependencies...)
@@ -80,6 +88,7 @@ func newWriteFixture(t *testing.T, options ...writeFixtureOptions) *writeFixture
 	runtime, err := sdd.NewProjectRuntime(sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "example"}, DefaultBranch: "main", Graph: graph,
 		LLM: runner, Finalizers: finalizers, Dependencies: dependencies,
+		Embedder: embedder, SearchIndex: searchIndex,
 	})
 	if err != nil {
 		t.Fatal(err)

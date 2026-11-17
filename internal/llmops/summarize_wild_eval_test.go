@@ -176,10 +176,11 @@ func TestSummarizeWildSweep(t *testing.T) {
 	axisFails := map[string]int{}
 	mechFails, judgeFails, infraFails := 0, 0, 0
 	for _, entry := range sample {
-		req, err := llmops.RenderSummaryPrompt(entry, graph, "")
+		description, err := llmops.NewDescription(entry, graph, "", true, nil)
 		if err != nil {
 			t.Fatalf("rendering source for %s: %v", entry.ID, err)
 		}
+		req := description.Request
 
 		var problems []string
 		if mech := checkSummaryMechanics(entry.ID, entry.Summary); len(mech) > 0 {

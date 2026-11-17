@@ -110,6 +110,36 @@ func TestValidateValue(t *testing.T) {
 	}
 }
 
+func TestValidateValueTitle(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   any
+		want    string
+		wantErr string
+	}{
+		{name: "stored as given, normalized at the write", value: `“daemon removal”.`, want: `“daemon removal”.`},
+		{name: "empty is left unset", value: "", want: ""},
+		{name: "punctuation only", value: "...", wantErr: "empty"},
+		{name: "quotes only", value: `""`, wantErr: "empty"},
+		{name: "two lines", value: "Daemon\nremoval", wantErr: "more than one line"},
+		{name: "not a string", value: 42, wantErr: "expected title"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := (VarType{Base: TypeTitle}).ValidateValue(tt.value)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("an unusable title should be refused, got %v, %v", got, err)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Errorf("a usable title should be stored as given, got %v, %v", got, err)
+			}
+		})
+	}
+}
+
 func TestValidateValueNormalizesFactIndex(t *testing.T) {
 	value, err := (VarType{Base: TypeFactIndex}).ValidateValue(map[string]any{"title": "View grammar", "topic": "cli/view"})
 	if err != nil {

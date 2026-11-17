@@ -1,6 +1,12 @@
 package query
 
-import "github.com/networkteam/sdd/internal/model"
+import (
+	"slices"
+	"strings"
+
+	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/internal/textsplitter"
+)
 
 // SearchMode is derived from the SearchQuery's input shape: text-only,
 // vector-only, or hybrid (when both --term and --query are supplied).
@@ -39,6 +45,9 @@ type SearchQuery struct {
 	// Phrase is the --query value: a free-form phrase used for vector
 	// search. Empty disables vector mode.
 	Phrase string
+	// PhraseVector is Phrase's embedding when the caller embedded it ahead
+	// (SearchFinder.EmbedPhrase); empty embeds Phrase during the search.
+	PhraseVector []float32
 
 	// Filter is the type/layer/kind filter (model.GraphFilter), the same
 	// filter shape the view pipeline composes.
@@ -69,6 +78,44 @@ type SearchQuery struct {
 	// into per-repo search members; these fields carry the caller's intent.
 	Repos    []model.RepoID
 	AllRepos bool
+
+	// Titled keeps only entries that carry a title; Exclude drops entries
+	// by full ID.
+	Titled  bool
+	Exclude []string
+}
+
+// SimilarTitles is the vector query for the titled entries whose content lies
+// nearest entry's body. The entry itself and the entries it refs, closes and
+// supersedes are left out: the title prompt lists those apart, under a rule of
+// their own. The body is cut to the runes one indexed chunk holds, so the query
+// fits the embedder's input as every indexed text does. False for an entry with
+// no body to search by.
+func SimilarTitles(entry *model.Entry) (SearchQuery, bool) {
+	if strings.TrimSpace(entry.Content) == "" {
+		return SearchQuery{}, false
+	}
+	phrase := entry.Content
+	if runes := []rune(phrase); len(runes) > textsplitter.DefaultChunkSize {
+		phrase = string(runes[:textsplitter.DefaultChunkSize])
+	}
+	exclude := append([]string{entry.ID}, model.RefIDs(entry.Refs)...)
+	exclude = append(append(exclude, entry.Closes...), entry.Supersedes...)
+	return SearchQuery{
+		SyncMode: SearchSyncNone,
+		Phrase:   phrase,
+		Titled:   true,
+		Exclude:  exclude,
+		Limit:    model.SimilarTitleCount,
+	}, true
+}
+
+// Admits reports whether an entry passes the Titled and Exclude gates.
+func (q SearchQuery) Admits(e *model.Entry) bool {
+	if q.Titled && e.Title == "" {
+		return false
+	}
+	return !slices.Contains(q.Exclude, e.ID)
 }
 
 // Mode resolves the SearchQuery's input shape to a SearchMode.
@@ -108,6 +155,15 @@ func (q SearchQuery) EffectiveMaxCitations() int {
 type SearchResult struct {
 	Mode    SearchMode
 	Entries []SearchEntry
+}
+
+// Titles lists the titles of the result's entries in rank order.
+func (r *SearchResult) Titles() []string {
+	titles := make([]string, 0, len(r.Entries))
+	for _, e := range r.Entries {
+		titles = append(titles, e.Entry.Title)
+	}
+	return titles
 }
 
 // SearchEntry pairs a graph entry with its score and one-or-more

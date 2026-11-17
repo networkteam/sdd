@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/model"
 )
 
@@ -94,5 +95,27 @@ func TestEmbedProgressEmptyEntries(t *testing.T) {
 				t.Fatalf("progress = %+v, want note %q and %d completed entries", progress, tc.want, done)
 			}
 		})
+	}
+}
+
+func TestFillProgressCountsFilledEntries(t *testing.T) {
+	fill := &command.SummarizeCmd{OnSkipped: func(string) {}}
+	reporter := newFillProgress(fill)
+	if fill.OnSkipped != nil {
+		t.Error("a skipped entry should print no line under the bar")
+	}
+	fill.OnPlanned(3)
+	fill.OnTitled("20260101-120000-s-prc-aaa", "A title")
+	fill.OnSummarized("20260101-120001-s-prc-bbb", "A summary.")
+
+	snap, ok := reporter.Recv()
+	if !ok {
+		t.Fatal("reporter closed unexpectedly")
+	}
+	if snap.Phase != model.PhaseSummarizing || snap.Total != 3 || snap.Done != 2 {
+		t.Errorf("each filled entry should advance a summarizing bar over the planned total, got %+v", snap)
+	}
+	if snap.Note != "20260101-120001-s-prc-bbb" {
+		t.Errorf("the note should name the entry last filled, got %q", snap.Note)
 	}
 }

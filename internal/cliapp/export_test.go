@@ -18,6 +18,7 @@ type exportEntry struct {
 	StatusBy string   `json:"status_by"`
 	ClosedBy []string `json:"closed_by"`
 	Closes   []string `json:"closes"`
+	Title    string   `json:"title"`
 	Summary  string   `json:"summary"`
 	Body     string   `json:"body"`
 	Heat     float64  `json:"heat"`
@@ -328,5 +329,27 @@ func TestCLIExportDependencySelection(t *testing.T) {
 	}
 	if bad := f.run(t, "export", "--dependencies", "all", "--hops", "2"); bad.err == nil {
 		t.Error("--hops with --dependencies all was accepted")
+	}
+}
+
+func TestCLIExportCarriesTheTitle(t *testing.T) {
+	f := newAppFixture(t)
+	f.write(t, "decisions/2026/09/14-020000-s-tac-cli.md", "---\ntype: signal\nkind: gap\nlayer: tactical\nconfidence: high\nparticipants: [Local Author]\ntitle: Configured graph reads\nsummary: "+appSummary+"\n---\n\n"+appBody+"\n")
+	result := f.run(t, "export", "--format", "json")
+	if result.err != nil {
+		t.Fatalf("export: %v\n%s", result.err, result.stderr)
+	}
+	var doc exportDoc
+	if err := json.Unmarshal([]byte(result.stdout), &doc); err != nil {
+		t.Fatalf("export emitted invalid JSON: %v", err)
+	}
+	var title string
+	for _, e := range doc.Repos[0].Entries {
+		if e.ID == appEntryID {
+			title = e.Title
+		}
+	}
+	if title != "Configured graph reads" {
+		t.Errorf("the export should carry the entry's title, got %q", title)
 	}
 }

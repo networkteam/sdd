@@ -2,13 +2,12 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/sync/errgroup"
-
-	"github.com/networkteam/slogutils"
 
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/llmops"
@@ -25,10 +24,6 @@ import (
 // Returns only errors. On dry-run success, returns nil without invoking
 // the callback (no entry was created).
 func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retErr error) {
-	if err := cmd.Validate(); err != nil {
-		return fmt.Errorf("invalid command: %w", err)
-	}
-
 	stdinAtt := cmd.StdinAttachment()
 	stdinSaved := false
 
@@ -55,6 +50,17 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	// this safe to compose with explicit calls later in the flow.
 	if cmd.DryRun {
 		defer reportSavedStdin("dry-run")
+	}
+
+	if err := cmd.Validate(); err != nil {
+		return fmt.Errorf("invalid command: %w", err)
+	}
+	var title string
+	if cmd.Title != nil {
+		var err error
+		if title, err = model.ParseTitle(*cmd.Title); err != nil {
+			return fmt.Errorf("--title: %w", err)
+		}
 	}
 
 	// Build the entry in-memory.
@@ -134,17 +140,24 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		})
 	}
 
-	var sumResult *llmops.SummarizeResult
+	var described *llmops.DescriptionResult
+	var describeErr error
 
-	// A caller-supplied summary is taken verbatim — no LLM call at all.
-	if !cmd.DryRun && h.llmRunner != nil && cmd.Summary == "" {
+	// A caller-supplied summary is taken verbatim; only a missing title still
+	// costs a call.
+	if !cmd.DryRun && h.llmRunner != nil && (cmd.Summary == "" || title == "") {
+		supplied := *entry
+		supplied.Summary = cmd.Summary
+		supplied.Title = title
 		g.Go(func() error {
-			result, err := llmops.Summarize(gctx, h.llmRunner, entry, graph, h.language)
+			result, err := h.describeNew(gctx, &supplied, graph)
 			if err != nil {
-				slogutils.FromContext(gctx).Warn("summary generation failed", "err", err)
-				return nil // non-fatal: entry is valid without a summary
+				// Not a group error: the entry is still written, then the
+				// failure surfaces like a failed commit.
+				describeErr = err
+				return nil
 			}
-			sumResult = result
+			described = &result
 			return nil
 		})
 	}
@@ -179,12 +192,17 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 		return nil
 	}
 
-	// Apply the caller-supplied summary, or the one from the concurrent
-	// generation goroutine.
-	if cmd.Summary != "" {
-		entry.Summary = cmd.Summary
-	} else if sumResult != nil {
-		entry.Summary = sumResult.Summary
+	// Apply the caller-supplied summary and title, or the ones from the
+	// concurrent generation goroutine.
+	entry.Summary = cmd.Summary
+	entry.Title = title
+	if described != nil {
+		if entry.Summary == "" {
+			entry.Summary = described.Summary
+		}
+		if entry.Title == "" {
+			entry.Title = described.Title
+		}
 	}
 
 	// Write entry file.
@@ -242,10 +260,46 @@ func (h *Handler) NewEntry(ctx context.Context, cmd *command.NewEntryCmd) (retEr
 	// Commit. A failure is surfaced, not swallowed — the entry stays on disk but
 	// the error propagates (durable but loud). See d-tac-zhp.
 	if h.committer != nil {
-		msg := fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72))
+		msg := entry.CaptureCommitMessage()
 		if err := h.committer.Commit(msg, commitPaths...); err != nil {
-			return fmt.Errorf("git commit: %w", err)
+			return errors.Join(model.IncompleteWrite(fmt.Errorf("git commit: %w", err)), summaryFailure(entry, describeErr))
 		}
 	}
-	return nil
+	return summaryFailure(entry, describeErr)
+}
+
+// summaryFailure names the written entry whose summary or title generation
+// failed, what it lacks and the command that fills it while keeping what the
+// caller supplied. Nil when generation succeeded.
+func summaryFailure(entry *model.Entry, err error) error {
+	if err == nil {
+		return nil
+	}
+	missing, only := "summary or title", ""
+	switch {
+	case entry.Summary != "":
+		missing, only = "title", " --only=title"
+	case entry.Title != "":
+		missing, only = "summary", " --only=summary"
+	}
+	return model.IncompleteWrite(fmt.Errorf("entry %s is written without a generated %s (run sdd summarize %s%s to fill it): summarizing: %w", entry.ID, missing, entry.ID, only, err))
+}
+
+// describeNew writes the new entry's description, its title kept apart from
+// those of the entries nearest its body. A failed search fails the
+// description as a failed call does.
+func (h *Handler) describeNew(ctx context.Context, entry *model.Entry, graph *model.Graph) (llmops.DescriptionResult, error) {
+	finder, err := h.openTitleSearch(ctx, graph)
+	if err != nil {
+		return llmops.DescriptionResult{}, err
+	}
+	search, err := embedSimilarTitles(ctx, finder, entry)
+	if err != nil {
+		return llmops.DescriptionResult{}, err
+	}
+	titles, err := similarTitles(ctx, finder, entry.ID, search)
+	if err != nil {
+		return llmops.DescriptionResult{}, err
+	}
+	return llmops.Describe(ctx, h.llmRunner, entry, graph, h.language, false, titles)
 }

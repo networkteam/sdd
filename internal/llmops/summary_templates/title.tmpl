@@ -1,0 +1,40 @@
+{{ define "title_rules" -}}
+{{ .TitleRule }} Name the subject, never the entry's role in the graph: no framing words such as decision, directive, plan, signal, gap, entry or commits, no entry IDs, no trailing punctuation but a question mark. Write it in the graph's configured authoring language: {{ if .ConfiguredLanguage }}`{{ .ConfiguredLanguage }}`{{ else }}English (no language configured){{ end }}, with that language's capitalization after the first letter.
+
+Related entries below carry their titles. Never reuse a related entry's title: the title names what this entry adds or changes, in subject words.
+{{- end }}
+
+{{ define "title_system" -}}
+You write titles for entries of the SDD (Signal-Dialogue-Decision) decision graph. A title names an entry on one-line listings. The user message gives the entry's type, layer and kind and its stored summary; the title names the subject the summary's first sentence states.
+
+## Title
+
+{{ template "title_rules" . }}
+{{- end }}
+
+{{ define "title_user" -}}
+## Entry to title
+
+{{ .EntryContent }}
+
+## Stored summary
+
+{{ .StoredSummary }}
+{{ if .RelatedEntries }}
+## Titles of direct refs/closes/supersedes entries (for context)
+
+{{ .RelatedEntries }}
+{{ end -}}
+{{ template "similar_titles" . }}
+{{- end }}
+
+{{ define "similar_titles" -}}
+{{ if .SimilarTitles }}
+## Titles of the most similar entries
+
+The new title must not conflict with any of these titles: it must not repeat one or be mistakable for one. Name what sets this entry apart.
+
+{{ range .SimilarTitles }}- {{ . }}
+{{ end }}
+{{- end }}
+{{- end }}

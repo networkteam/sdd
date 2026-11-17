@@ -50,12 +50,12 @@ func EntryLineDisplay(w io.Writer, e *model.Entry, g *model.Graph, displayID str
 }
 
 // EntryLineBrief writes the compact entry line the `brief` layout modifier
-// selects: identity qualifiers plus the first summary sentence, with every
+// selects: identity qualifiers plus the listing title, with every
 // attribute segment (confidence, intent, participants, status, score,
 // topics) dropped. Built for injection surfaces where full lines cost
 // context without informing the decision at hand.
 //
-// Format: `<id> <layer> <kind>? <type> <first summary sentence>`
+// Format: `<id> <layer> <kind>? <type> <listing title>`
 func EntryLineBrief(w io.Writer, e *model.Entry, g *model.Graph) {
 	var sb strings.Builder
 	sb.WriteString("  ")
@@ -69,7 +69,7 @@ func EntryLineBrief(w io.Writer, e *model.Entry, g *model.Graph) {
 	sb.WriteString(" ")
 	sb.WriteString(e.TypeLabel())
 	sb.WriteString(" ")
-	sb.WriteString(e.FirstSummarySentence())
+	sb.WriteString(e.ListingTitle())
 	sb.WriteString("\n")
 	fmt.Fprint(w, sb.String())
 }

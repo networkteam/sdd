@@ -18,7 +18,7 @@ This file holds the entry `20261107-123911-d-tac-ims`. The ID reads as date and 
 - type: `s` for a signal, something noticed, or `d` for a decision, something committed to
 - layer: `stg` strategic, `cpt` conceptual, `tac` tactical, `ops` operational, `prc` process
 
-The file starts with YAML frontmatter: type, kind, layer, confidence, references to other entries, participants, topics and the one-line summary. The entry text follows. An entry with attachments has a directory of the same name next to its file. `.sdd/graph/wip/` holds the markers for work in progress.
+The file starts with YAML frontmatter: type, kind, layer, confidence, references to other entries, participants, topics, the title and the one-line summary. The entry text follows. An entry with attachments has a directory of the same name next to its file. `.sdd/graph/wip/` holds the markers for work in progress.
 
 You can read the files in an editor or on your git host. Do not edit them. An entry never changes after it is written; a later entry closes or supersedes it. The file also does not say whether the entry is still open. For that, use `sdd show`.
 
@@ -79,7 +79,7 @@ sdd view --layout='focus,signals'
 sdd view --layout='topic("product/vision"):brief'
 ```
 
-A comma starts another section, so `focus,signals` prints both lists. `brief` shortens each line to the ID, kind and first summary sentence. Quote topic paths, dates and names inside the layout, and wrap the whole layout in single quotes for the shell. `sdd view --help` lists every filter, ranking and output form, with examples.
+A comma starts another section, so `focus,signals` prints both lists. `brief` shortens each line to the ID, kind and title, or the first summary sentence for an entry without a title. Quote topic paths, dates and names inside the layout, and wrap the whole layout in single quotes for the shell. `sdd view --help` lists every filter, ranking and output form, with examples.
 
 A full line reads: ID, layer, kind and type, confidence, participants, status, score, topics, summary.
 
@@ -101,6 +101,8 @@ Search: vector,text
 **Status is derived.** No file records whether an entry is open, active, closed or superseded. sdd works it out from the links: an entry is closed once a later entry closes it, and superseded once a later entry replaces it. That is why `sdd show` reports a status, such as `closed-by 20260708-213621-s-tac-cjr`, that the file does not contain.
 
 **Summaries are pointers.** A model writes the one-line summary when the entry is recorded. It tells you whether an entry is worth reading, and it can miss a condition or a limit the entry states. Read the full entry with `sdd show` before you rely on it.
+
+**Titles name entries.** The same model call writes a title of a few words, which names the entry in brief listings. The title stays apart from the titles of the most similar entries when search by meaning is set up. Entries recorded before titles existed have none; `sdd summarize --all` fills them. It states how many model calls the fill costs before it runs. An entry that already has a summary keeps it and gets its title from a title-only call; one that already has a title keeps it. On a terminal a progress bar counts the filled entries; otherwise each entry gets its own line. A fill stopped with Ctrl-C commits what it wrote and continues on the next run; one killed outright leaves its written files uncommitted until you commit them; a failed commit names the files it left uncommitted and the `git commit` command that commits them. `--only title` or `--only summary` writes that field alone and keeps the other, for named entries, `--all` and `--force` alike. `sdd summarize <id> --title <title>` sets one title by hand.
 
 **References carry the reasoning.** Follow upstream to see what an entry rests on, and downstream to see what came of it.
 

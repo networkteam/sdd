@@ -248,10 +248,11 @@ func checkSummaryMechanics(entryID, summary string) []string {
 func TestSummarizeJudgeCalibration(t *testing.T) {
 	tc := summarizeCases()[0]
 	graph := model.NewGraph(append([]*model.Entry{tc.entry}, tc.related...))
-	req, err := llmops.RenderSummaryPrompt(tc.entry, graph, "")
+	description, err := llmops.NewDescription(tc.entry, graph, "", true, nil)
 	if err != nil {
 		t.Fatalf("rendering source material: %v", err)
 	}
+	req := description.Request
 
 	badSummaries := []struct {
 		name    string
@@ -294,9 +295,9 @@ func TestSummarizeEval(t *testing.T) {
 
 			ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 			defer cancel()
-			result, err := llmops.Summarize(ctx, candidate, tc.entry, graph, "")
+			result, err := llmops.Describe(ctx, candidate, tc.entry, graph, "", true, nil)
 			if err != nil {
-				t.Fatalf("Summarize failed: %v", err)
+				t.Fatalf("Describe failed: %v", err)
 			}
 			t.Logf("summary: %s", result.Summary)
 
@@ -305,10 +306,11 @@ func TestSummarizeEval(t *testing.T) {
 			}
 
 			// The judge sees exactly what the candidate saw.
-			req, err := llmops.RenderSummaryPrompt(tc.entry, graph, "")
+			description, err := llmops.NewDescription(tc.entry, graph, "", true, nil)
 			if err != nil {
 				t.Fatalf("rendering source material for judge: %v", err)
 			}
+			req := description.Request
 			verdict, err := judgeSummary(t, judge, req.UserPrompt, result.Summary, tc.wantRelationships)
 			if err != nil {
 				t.Fatalf("judge unavailable: %v", err)

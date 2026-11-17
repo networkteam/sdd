@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -273,6 +274,36 @@ func TestCoordinator_CancelledCtxBecomesSentinelDespiteWrappedError(t *testing.T
 	coord.Interrupt()
 	if err := <-done; !errors.Is(err, ErrUserCancelled) {
 		t.Errorf("Run error = %v, want ErrUserCancelled", err)
+	}
+}
+
+// Written files a failed commit left behind outlast the cancellation: the
+// failure naming them reaches the caller beside the sentinel.
+func TestCoordinator_CancellationKeepsAnIncompleteWrite(t *testing.T) {
+	coord := NewCoordinator(CoordinatorConfig{
+		Policy: Policy{Display: slog.LevelInfo},
+		Stderr: io.Discard,
+	})
+	coord.SetStarter(newFakeStarter())
+
+	commitErr := model.IncompleteWrite(errors.New("git commit: signing timed out"))
+	running := make(chan struct{})
+	work := func(ctx context.Context) error {
+		close(running)
+		<-ctx.Done()
+		return errors.Join(fmt.Errorf("summarizing: %w", ctx.Err()), commitErr)
+	}
+	done := make(chan error, 1)
+	go func() { done <- coord.Run(context.Background(), work) }()
+
+	<-running
+	coord.Interrupt()
+	err := <-done
+	if !errors.Is(err, ErrUserCancelled) || !errors.Is(err, model.ErrIncompleteWrite) {
+		t.Fatalf("the cancellation should keep the uncommitted write, got %v", err)
+	}
+	if got := Incomplete(err); got == nil || got.Error() != commitErr.Error() {
+		t.Errorf("only the uncommitted write should be left to report, got %v", got)
 	}
 }
 

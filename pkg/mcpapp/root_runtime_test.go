@@ -61,7 +61,7 @@ func TestPublicMCPApplicationRunsStatefulWorkflowOnRootRuntime(t *testing.T) {
 			if request.Purpose == pkgllm.PurposePreflight {
 				return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
 			}
-			return pkgllm.Result{Text: "Root runtime generated summary.", Identity: identity}, nil
+			return pkgllm.Result{Text: `{"title": "Test title", "summary": "Root runtime generated summary."}`, Identity: identity}, nil
 		}),
 	})
 	if err != nil {

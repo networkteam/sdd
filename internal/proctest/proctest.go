@@ -51,6 +51,7 @@ type LLMScript struct {
 	calls             map[llm.Purpose]int
 	PreflightFindings []PreflightFinding
 	GuideFindings     []GuideFinding
+	Title             string
 	Summary           string
 }
 
@@ -72,7 +73,9 @@ func (s *LLMScript) Run(_ context.Context, request llm.Request) (llm.Result, err
 	s.calls[request.Purpose]++
 	switch request.Purpose {
 	case llm.PurposeSummarize:
-		return llm.Result{Text: s.Summary, Identity: scriptIdentity}, nil
+		return marshalAnswer(map[string]string{"title": s.Title, "summary": s.Summary})
+	case llm.PurposeTitle:
+		return marshalAnswer(map[string]string{"title": s.Title})
 	case llm.PurposePreflight:
 		return marshalFindings(s.PreflightFindings)
 	case llm.PurposeWritingGuide:
@@ -80,6 +83,11 @@ func (s *LLMScript) Run(_ context.Context, request llm.Request) (llm.Result, err
 	default:
 		return llm.Result{}, fmt.Errorf("proctest: unscripted LLM purpose %q", request.Purpose)
 	}
+}
+
+func marshalAnswer(answer map[string]string) (llm.Result, error) {
+	output, err := json.Marshal(answer)
+	return llm.Result{Text: string(output), Identity: scriptIdentity}, err
 }
 
 func marshalFindings[F any](findings []F) (llm.Result, error) {
@@ -301,7 +309,7 @@ func NewWorld(t *testing.T, opts ...Option) *World {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := &LLMScript{Summary: "A generated summary."}
+	script := &LLMScript{Title: "generated title", Summary: "A generated summary."}
 	options := sdd.ProjectRuntimeOptions{
 		Project: sdd.ProjectRef{ID: "proctest"}, DefaultBranch: "main",
 		Graph: graph, LLM: script, Finalizers: cfg.finalizers,
