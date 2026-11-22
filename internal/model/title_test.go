@@ -58,13 +58,21 @@ func TestCaptureCommitMessage(t *testing.T) {
 		entry model.Entry
 		want  string
 	}{
-		{name: "the title names a titled entry", entry: model.Entry{Type: model.TypeSignal, Layer: model.LayerTactical, Title: "Daemon project removal", Content: "The daemon project goes."}, want: "sdd: signal tactical Daemon project removal"},
-		{name: "an untitled entry falls back to its opening content", entry: model.Entry{Type: model.TypeSignal, Layer: model.LayerTactical, Content: "The daemon project goes."}, want: "sdd: signal tactical The daemon project goes."},
+		{
+			name:  "the title names a titled entry and the body its ID",
+			entry: model.Entry{ID: "20260914-020000-s-tac-cap", Type: model.TypeSignal, Layer: model.LayerTactical, Title: "Daemon project removal", Content: "The daemon project goes."},
+			want:  "sdd: signal tactical Daemon project removal\n\nEntry: 20260914-020000-s-tac-cap",
+		},
+		{
+			name:  "an untitled entry falls back to its opening content",
+			entry: model.Entry{ID: "20260914-020001-s-tac-cap", Type: model.TypeSignal, Layer: model.LayerTactical, Content: "The daemon project goes."},
+			want:  "sdd: signal tactical The daemon project goes.\n\nEntry: 20260914-020001-s-tac-cap",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.entry.CaptureCommitMessage(); got != tc.want {
-				t.Errorf("the capture commit should name the entry, got %q", got)
+				t.Errorf("the capture commit should name the entry in its subject and its ID in the body, got %q", got)
 			}
 		})
 	}

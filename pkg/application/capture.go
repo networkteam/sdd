@@ -246,15 +246,15 @@ func entryPublicationBatch(key PublicationKey, publication EntryPublication) (Mu
 	return batch, nil
 }
 
-// captureCommitMessage is the subject the capture of the document commits
+// captureCommitMessage is the message the capture of the document commits
 // under, built from the document alone, so a publication replayed after a
-// failed commit is committed under the same subject as a fresh one.
+// failed commit is committed under the same message as a fresh one.
 func captureCommitMessage(id string, document EntryDocument) (string, error) {
 	parts, err := model.ParseID(id)
 	if err != nil {
 		return "", err
 	}
-	captured := model.Entry{Type: model.TypeFromAbbrev[parts.TypeCode], Layer: model.LayerFromAbbrev[parts.LayerCode], Content: document.Body}
+	captured := model.Entry{ID: id, Type: model.TypeFromAbbrev[parts.TypeCode], Layer: model.LayerFromAbbrev[parts.LayerCode], Content: document.Body}
 	captured.Title, _ = document.Frontmatter["title"].(string)
 	return captured.CaptureCommitMessage(), nil
 }

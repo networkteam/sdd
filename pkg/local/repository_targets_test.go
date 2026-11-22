@@ -53,6 +53,9 @@ func TestRepositoryTargetPublishesCaptureThroughOneCommit(t *testing.T) {
 	if subject := repo.git("log", "-1", "--format=%s"); subject != "sdd: signal tactical Rendered title 1" {
 		t.Errorf("a capture committed on retry should name the published title, got %q", subject)
 	}
+	if !strings.Contains(message, "\nEntry: "+entryID+"\n") {
+		t.Errorf("a capture committed on retry should name its entry ID, got %q", message)
+	}
 	relPath, err := model.IDToRelPath(entryID)
 	if err != nil {
 		t.Fatal(err)
@@ -88,8 +91,9 @@ func TestRepositoryTargetCommitNamesTheCapture(t *testing.T) {
 	if _, err := application.CreateEntry(t.Context(), identity, "example", binding, draft); err != nil {
 		t.Fatal(err)
 	}
-	if subject := repo.git("log", "-1", "--format=%s"); subject != "sdd: decision process Capture commit subjects" {
-		t.Errorf("the capture commit should name type, layer and title of the entry, got %q", subject)
+	want := "sdd: decision process Capture commit subjects\n\nEntry: " + draft.EntryID + "\nSDD-Mutation: " + draft.Publication.String()
+	if message := repo.git("log", "-1", "--format=%B"); message != want {
+		t.Errorf("the capture commit should name type, layer and title in its subject and the entry ID before the mutation trailer, got %q", message)
 	}
 }
 

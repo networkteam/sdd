@@ -57,13 +57,42 @@ func (f *fakeReader) DeclaredDependencies(context.Context, model.RepoID) ([]mode
 // recordingCommitter captures commit calls so tests can assert whether a
 // commit was attempted. Set err to make Commit fail (the fail-loud path).
 type recordingCommitter struct {
-	calls int
-	err   error
+	calls   int
+	err     error
+	message string
 }
 
 func (r *recordingCommitter) Commit(message string, paths ...string) error {
 	r.calls++
+	r.message = message
 	return r.err
+}
+
+// The capture commit names the entry's title in its subject and its ID in the
+// body, so `git log --grep` finds it by entry.
+func TestNewEntry_CommitMessageNamesTitleAndID(t *testing.T) {
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	committer := &recordingCommitter{}
+	var id string
+	h := handlers.New(handlers.Options{GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: committer, Stderr: &bytes.Buffer{}})
+	title := "Entry ID in the commit"
+
+	err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+		Type: model.TypeSignal, Layer: model.LayerTactical, Description: "A capture commit names its entry.",
+		Summary: "The capture commit names its entry.", Title: &title, SkipPreflight: true,
+		OnNewEntry: func(newID, _ string) { id = newID },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := "sdd: signal tactical Entry ID in the commit\n\nEntry: " + id; committer.message != want {
+		t.Errorf("commit message = %q, want %q", committer.message, want)
+	}
 }
 
 // TestNewEntry_CommitFailure_IsLoudAndDurable is the regression test for
