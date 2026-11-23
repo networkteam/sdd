@@ -55,7 +55,7 @@ sdd search --query "how imports handle variants"   # by meaning
 sdd search --term importer --query "variants"      # both
 ```
 
-- `--term` is a regular expression, matched without regard to case. Repeat it to require every term. It works without any setup.
+- `--term` is a regular expression, matched without regard to case against an entry's title, summary, body and Markdown attachments. Repeat it to require every term. It works without any setup.
 - `--query` searches by meaning and needs an embedding provider, set up as the [configuration reference](/sdd/reference/configuration/#embedding) describes. In a project that already has entries, run `sdd index` once. After that, each search adds new entries to the index.
 - With both, sdd merges the keyword and the meaning ranking into one list.
 

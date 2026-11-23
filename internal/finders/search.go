@@ -95,7 +95,7 @@ func (f *SearchFinder) Search(ctx context.Context, q query.SearchQuery) (*query.
 }
 
 // textSearch runs a multi-term AND grep over each entry's searchable
-// text (summary + body + attachments). Entries are kept only if every
+// text (title + summary + body + attachments). Entries are kept only if every
 // term's regex matches at least once. The score is the total match count
 // across all terms; ties broken by earliest-match position.
 //
@@ -451,13 +451,17 @@ func compileTerms(terms []string) ([]*regexp.Regexp, error) {
 	return out, nil
 }
 
-// searchableText concatenates the entry's summary, body, and (markdown)
-// attachments into one string for grep matching. Returns the combined
-// text and the body alone (the body is reserved for breadcrumb-aware
-// citation in a future iteration; today's text-mode citation uses only
-// the snippet).
+// searchableText concatenates the entry's title, summary, body, and
+// (markdown) attachments into one string for grep matching. Returns the
+// combined text and the body alone (the body is reserved for
+// breadcrumb-aware citation in a future iteration; today's text-mode
+// citation uses only the snippet).
 func searchableText(graphDir string, e *model.Entry) (combined, body string) {
 	var b strings.Builder
+	if e.Title != "" {
+		b.WriteString(e.Title)
+		b.WriteByte('\n')
+	}
 	if e.Summary != "" {
 		b.WriteString(e.Summary)
 		b.WriteByte('\n')
