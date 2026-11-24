@@ -638,6 +638,16 @@ func ParseID(id string) (IDParts, error) {
 	}, nil
 }
 
+// ShortID is id without its timestamp prefix, {type}-{layer}-{suffix}; an
+// ID that does not parse is returned unchanged.
+func ShortID(id string) string {
+	p, err := ParseID(id)
+	if err != nil {
+		return id
+	}
+	return p.TypeCode + "-" + p.LayerCode + "-" + p.Suffix
+}
+
 // IDToRelPath converts an entry ID to its relative file path in the hierarchical layout.
 // ID format: YYYYMMDD-HHmmss-type-layer-suffix
 // Path format: YYYY/MM/DD-HHmmss-type-layer-suffix.md

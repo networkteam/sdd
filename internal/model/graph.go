@@ -51,13 +51,7 @@ func (g *Graph) nodeKeyFor(e *Entry) string {
 // qualifyID prefixes a member-graph entry ID for display outside its graph;
 // embedded entries and local-graph entries stay bare.
 func (g *Graph) qualifyID(id string) string {
-	if g.repoID == "" {
-		return id
-	}
-	if e, ok := g.ByID[id]; ok && e.Embedded {
-		return id
-	}
-	return CrossRepoID(g.repoID, id)
+	return g.qualifyIn(g.repoID, id)
 }
 
 // LoadIssue records one entry the I/O loader could not parse: the entry ID or
@@ -310,6 +304,9 @@ type GraphFilter struct {
 	Layer    Layer
 	Kind     Kind
 	OpenOnly bool // when true, exclude closed/superseded signals and decisions
+	// Statuses, when set, keeps only entries whose derived status kind is one
+	// of them.
+	Statuses []StatusKind
 }
 
 // Filter returns entries matching the given filter criteria. Zero-value
@@ -332,6 +329,9 @@ func (g *Graph) Filter(f GraphFilter) []*Entry {
 			continue
 		}
 		if f.Kind != "" && e.Kind != f.Kind {
+			continue
+		}
+		if len(f.Statuses) > 0 && !slices.Contains(f.Statuses, g.DerivedStatus(e).Kind) {
 			continue
 		}
 		if f.OpenOnly {

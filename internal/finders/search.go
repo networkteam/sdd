@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -103,7 +102,7 @@ func (f *SearchFinder) Search(ctx context.Context, q query.SearchQuery) (*query.
 // alternation as one --term value (e.g. --term "(X|Y)"). This finder
 // does not implement a separate OR flag.
 func (f *SearchFinder) textSearch(q query.SearchQuery) (*query.SearchResult, error) {
-	regexes, err := compileTerms(q.Terms)
+	regexes, err := model.CompileSearchTerms(q.Terms)
 	if err != nil {
 		return nil, err
 	}
@@ -413,27 +412,6 @@ func (v *versionFreshness) fresh(ctx context.Context, entry *model.Entry, hit in
 		v.current[entry.ID] = h
 	}
 	return version == cur, nil
-}
-
-// compileTerms compiles each --term into a case-insensitive regex.
-// Empty terms are rejected so a stray --term "" doesn't degrade to
-// match-all.
-func compileTerms(terms []string) ([]*regexp.Regexp, error) {
-	out := make([]*regexp.Regexp, 0, len(terms))
-	for _, t := range terms {
-		t = strings.TrimSpace(t)
-		if t == "" {
-			continue
-		}
-		// Wrap with case-insensitivity so token lookups are forgiving.
-		// Users opt-out by including (?-i) in the regex itself.
-		re, err := regexp.Compile("(?i)" + t)
-		if err != nil {
-			return nil, fmt.Errorf("compiling --term %q: %w", t, err)
-		}
-		out = append(out, re)
-	}
-	return out, nil
 }
 
 // searchableText concatenates the entry's summary, body, and (markdown)

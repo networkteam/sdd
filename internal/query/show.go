@@ -13,6 +13,9 @@ type ShowQuery struct {
 	// Budget bounds each direction's expansion on the serve path; the zero
 	// value is unbounded — explicit pulls arrive complete (d-tac-rzi).
 	Budget model.ShowTreeBudget
+	// OmitMissing leaves IDs that name no entry out of the result and lists
+	// them in ShowResult.Missing instead of failing with EntryNotFoundError.
+	OmitMissing bool
 }
 
 // Default expansion depths applied by the CLI when the flags are omitted.
@@ -49,4 +52,7 @@ type ShowGroup struct {
 type ShowResult struct {
 	Graph  *model.Graph // needed to render derived attributes like status
 	Groups []ShowGroup
+	// Missing are the requested IDs (as given) that name no entry, with
+	// ShowQuery.OmitMissing.
+	Missing []string
 }
