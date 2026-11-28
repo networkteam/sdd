@@ -135,8 +135,8 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 		t.Fatalf("Info = %+v, %v", info, err)
 	}
 	show, err := application.Show(t.Context(), identity, "example", sdd.ShowRequest{IDs: []string{"20260713-030000-s-tac-api"}, UpDepth: 1, DownDepth: 1})
-	if err != nil || !strings.Contains(show.Entries, "protocol-neutral runtime") {
-		t.Fatalf("Show = %q, %v", show.Entries, err)
+	if err != nil || !strings.Contains(showText(show), "protocol-neutral runtime") {
+		t.Fatalf("Show = %q, %v", showText(show), err)
 	}
 	view, err := application.View(t.Context(), identity, "example", sdd.ViewRequest{Layout: "kind(gap):as-list"})
 	if err != nil || !strings.Contains(view.Sections, "s-tac-api") {
@@ -147,12 +147,12 @@ func TestApplicationResolvesCurrentAccessAndOwnsReads(t *testing.T) {
 		t.Fatalf("WIP View = %q, %v", wipView.Sections, err)
 	}
 	text, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Terms: []string{"protocol-neutral"}, Limit: 5, MaxCitations: 1})
-	if err != nil || !strings.Contains(text.Results, "s-tac-api") {
-		t.Fatalf("text Search = %q, %v", text.Results, err)
+	if err != nil || !strings.Contains(searchText(text), "s-tac-api") {
+		t.Fatalf("text Search = %q, %v", searchText(text), err)
 	}
 	vector, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Phrase: "application runtime", Limit: 5, MaxCitations: 1})
-	if err != nil || !strings.Contains(vector.Results, "s-tac-api") {
-		t.Fatalf("vector Search = %q, %v", vector.Results, err)
+	if err != nil || !strings.Contains(searchText(vector), "s-tac-api") {
+		t.Fatalf("vector Search = %q, %v", searchText(vector), err)
 	}
 	procedures, err := application.Procedures(t.Context(), identity, "example", sdd.ProcedureListRequest{})
 	if err != nil || !strings.Contains(procedures.Procedures, "capture") {

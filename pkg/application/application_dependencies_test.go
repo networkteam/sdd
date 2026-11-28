@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	sdd "github.com/networkteam/sdd/pkg/application"
+	"github.com/networkteam/sdd/pkg/application/types"
 	pkgllm "github.com/networkteam/sdd/pkg/llm"
 	localadapter "github.com/networkteam/sdd/pkg/local"
 )
@@ -134,8 +135,8 @@ func TestApplicationLoadsDependencyPartiallyWithUnreadableEntry(t *testing.T) {
 	}
 	identity := sdd.RequestIdentity{Subject: "christopher"}
 	show, err := application.Show(t.Context(), identity, "base", sdd.ShowRequest{IDs: []string{"example.org/dep:20260713-040000-s-tac-dep"}})
-	if err != nil || !strings.Contains(show.Entries, "authorized dependency body") {
-		t.Fatalf("cross-project Show over a partially-loaded dependency = %q, %v", show.Entries, err)
+	if err != nil || !strings.Contains(showText(show), "authorized dependency body") {
+		t.Fatalf("cross-project Show over a partially-loaded dependency = %q, %v", showText(show), err)
 	}
 }
 
@@ -210,11 +211,20 @@ func TestUnreadableClosureMemberFailsOnlyReadsSelectingIt(t *testing.T) {
 		return application.Search(t.Context(), alice, "base", sdd.SearchRequest{SyncMode: sdd.SearchSyncNone, Terms: []string{"zebrafinch"}, Repos: repos, AllRepos: all})
 	}
 
-	if result, err := search([]sdd.RepoID{"dep.example/a"}, false); err != nil || !strings.Contains(result.Results, "20260713-040000-s-tac-dep") {
-		t.Errorf("search naming a = %q, %v", result.Results, err)
+	if result, err := search([]sdd.RepoID{"dep.example/a"}, false); err != nil || !strings.Contains(searchText(result), "20260713-040000-s-tac-dep") {
+		t.Errorf("search naming a = %q, %v", searchText(result), err)
 	}
-	if result, err := search([]sdd.RepoID{"dep.example/c"}, false); err != nil || !strings.Contains(result.Results, "20260712-040000-s-tac-dpe") {
-		t.Errorf("search naming c = %q, %v", result.Results, err)
+	if result, err := search([]sdd.RepoID{"dep.example/a"}, false); err != nil || !hasHit(result.Hits, "dep.example/a:20260713-040000-s-tac-dep") {
+		t.Errorf("structured hits naming a = %+v, %v", result.Hits, err)
+	}
+	if list, err := application.ListEntries(t.Context(), alice, "base", sdd.ListEntriesRequest{Repos: []sdd.RepoID{"dep.example/a"}}); err != nil || list.Total != 1 || list.Entries[0].DisplayID != "dep.example/a:20260713-040000-s-tac-dep" {
+		t.Errorf("listing naming a = %+v, %v", list, err)
+	}
+	if _, err := application.ListEntries(t.Context(), alice, "base", sdd.ListEntriesRequest{Repos: []sdd.RepoID{"dep.example/b"}}); err == nil {
+		t.Error("listing naming b succeeded")
+	}
+	if result, err := search([]sdd.RepoID{"dep.example/c"}, false); err != nil || !strings.Contains(searchText(result), "20260712-040000-s-tac-dpe") {
+		t.Errorf("search naming c = %q, %v", searchText(result), err)
 	}
 	workflow, _, err := application.OpenWorkflow(t.Context(), alice, "base", sdd.WorkflowOpenRequest{ClientName: "alice-mcp"})
 	if err != nil {
@@ -276,8 +286,8 @@ func TestApplicationResolvesAuthorizedDependenciesWithoutLeakingDenials(t *testi
 	identity := sdd.RequestIdentity{Subject: "christopher"}
 	qualified := "example.org/dep:20260713-040000-s-tac-dep"
 	show, err := application.Show(t.Context(), identity, "base", sdd.ShowRequest{IDs: []string{qualified}})
-	if err != nil || !strings.Contains(show.Entries, "authorized dependency body") {
-		t.Fatalf("cross-project Show = %q, %v", show.Entries, err)
+	if err != nil || !strings.Contains(showText(show), "authorized dependency body") {
+		t.Fatalf("cross-project Show = %q, %v", showText(show), err)
 	}
 	page, err := application.ReadAttachment(t.Context(), identity, "base", sdd.ReadAttachmentRequest{EntryID: qualified, Filename: "evidence.md", MaxBytes: 64})
 	if err != nil || string(page.Page.Content) != "foreign attachment" || page.Project.ID != "base" {
@@ -290,4 +300,13 @@ func TestApplicationResolvesAuthorizedDependenciesWithoutLeakingDenials(t *testi
 	if denied == nil || unknown == nil || !strings.HasPrefix(denied.Error(), "entry not found:") || !strings.HasPrefix(unknown.Error(), "entry not found:") {
 		t.Fatalf("denied and unknown dependencies leaked different results: denied=%v unknown=%v", denied, unknown)
 	}
+}
+
+func hasHit(hits []types.SearchHit, displayID string) bool {
+	for _, hit := range hits {
+		if hit.Entry.DisplayID == displayID {
+			return true
+		}
+	}
+	return false
 }

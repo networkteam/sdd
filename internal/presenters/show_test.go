@@ -25,7 +25,7 @@ func renderShow(t *testing.T, g *model.Graph, ids []string, opts ...showOpt) str
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	presenters.RenderShow(&buf, result, cfg.render)
+	presenters.RenderShow(&buf, result.Structured(), cfg.render)
 	return buf.String()
 }
 
@@ -329,7 +329,7 @@ func TestRenderShowStyled_ColorDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	presenters.RenderShowStyled(&buf, result, presenters.ShowOptions{Width: 80})
+	presenters.RenderShowStyled(&buf, result.Structured(), presenters.ShowOptions{Width: 80})
 	out := buf.String()
 
 	for _, want := range []string{

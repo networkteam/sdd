@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -275,7 +276,7 @@ func (a *Application) Show(ctx context.Context, identity RequestIdentity, projec
 	if len(request.IDs) == 0 {
 		return ShowResult{}, fmt.Errorf("sdd: at least one entry ID is required")
 	}
-	selected, err := acquireSnapshotForReadBranch(ctx, runtime, request.Branch)
+	selected, err := acquireRevision(ctx, runtime, request.Branch, request.Revision)
 	if err != nil {
 		return ShowResult{}, withSessionBindingTargetError(request.Branch, request.BranchFromSession, err)
 	}
@@ -294,13 +295,15 @@ func showFromSnapshot(runtime *ProjectRuntime, snapshot *Snapshot, request ShowR
 	if up < 0 || down < 0 {
 		return ShowResult{}, fmt.Errorf("sdd: show depths cannot be negative")
 	}
-	showResult, err := snapshot.finder.Show(query.ShowQuery{IDs: request.IDs, UpDepth: up, DownDepth: down, Budget: request.Budget})
+	showResult, err := snapshot.finder.Show(query.ShowQuery{IDs: request.IDs, UpDepth: up, DownDepth: down, Budget: request.Budget, OmitMissing: request.OmitMissing})
+	var notFound *model.EntryNotFoundError
+	if errors.As(err, &notFound) {
+		return ShowResult{}, &ApplicationError{Code: ErrorEntryNotFound, Message: notFound.Error(), EntryID: notFound.ID, Cause: err}
+	}
 	if err != nil {
 		return ShowResult{}, err
 	}
-	var rendered bytes.Buffer
-	presenters.RenderShow(&rendered, showResult, presenters.ShowOptions{})
-	show := ShowResult{Project: runtime.options.Project, Entries: strings.TrimRight(rendered.String(), "\n")}
+	show := ShowResult{Project: runtime.options.Project, Entries: showResult.Structured(), Revision: snapshot.Revision(), Missing: showResult.Missing}
 	for _, group := range showResult.Groups {
 		if group.Primary != nil {
 			if group.PrimaryID != "" {
@@ -339,10 +342,11 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 	if err != nil {
 		return SearchResult{}, err
 	}
+	includeSuperseded := request.IncludeSuperseded || slices.Contains(filter.Statuses, model.StatusSupersededBy)
 	q := query.SearchQuery{
 		SyncMode: request.SyncMode,
 		Terms:    request.Terms, Phrase: request.Phrase, Filter: filter,
-		IncludeSuperseded: request.IncludeSuperseded, Limit: request.Limit, MaxCitationsPerEntry: request.MaxCitations,
+		IncludeSuperseded: includeSuperseded, Limit: request.Limit, MaxCitationsPerEntry: request.MaxCitations,
 	}
 	members := []*searchTargetMember{{runtime: runtime, selected: selected}}
 	target := SearchTarget{state: &searchTargetState{members: members, mode: request.SyncMode}}
@@ -372,22 +376,21 @@ func (a *Application) Search(ctx context.Context, identity RequestIdentity, proj
 	if limit := q.EffectiveLimit(); len(searchResult.Entries) > limit {
 		searchResult.Entries = searchResult.Entries[:limit]
 	}
-	var rendered bytes.Buffer
-	presenters.RenderSearch(&rendered, searchResult, snapshot.graph)
-	search := SearchResult{Project: runtime.options.Project, Results: strings.TrimRight(rendered.String(), "\n"), Coverage: coverage}
+	search := SearchResult{Project: runtime.options.Project, Coverage: coverage, Revision: snapshot.Revision()}
 	for _, member := range coverage {
 		if !member.Complete {
 			search.Notice = "Search indexing is incomplete for the selected snapshots. Available matches are shown; retry later."
-			if search.Results != "" {
-				search.Results += "\n\n"
-			}
-			search.Results += search.Notice
 			break
 		}
+	}
+	graphs := make(map[RepoID]*model.Graph, len(target.state.members))
+	for _, member := range target.state.members {
+		graphs[member.repoID] = member.selected.snapshot.graph
 	}
 	for _, entry := range searchResult.Entries {
 		if entry.Entry != nil {
 			search.EntryIDs = append(search.EntryIDs, entry.DisplayID())
+			search.Hits = append(search.Hits, entry.Structured(graphs[entry.RepoID]))
 		}
 	}
 	return search, nil
@@ -759,7 +762,24 @@ func publicGraphFilter(request SearchRequest) (model.GraphFilter, error) {
 		}
 		filter.Kind = k
 	}
+	statuses, err := parseStatusFilter(request.Statuses)
+	if err != nil {
+		return model.GraphFilter{}, err
+	}
+	filter.Statuses = statuses
 	return filter, nil
+}
+
+func parseStatusFilter(labels []types.StatusKind) ([]model.StatusKind, error) {
+	var out []model.StatusKind
+	for _, label := range labels {
+		k, ok := model.ParseStatusLabel(label)
+		if !ok {
+			return nil, &ApplicationError{Code: ErrorInvalidArgument, Message: fmt.Sprintf("sdd: unknown status %q", label)}
+		}
+		out = append(out, k)
+	}
+	return out, nil
 }
 
 // oneLineError compacts a (possibly multi-line, joined) spec error into one

@@ -251,7 +251,7 @@ func executeSection(g *model.Graph, wipMarkers []*model.WIPMarker, section model
 		entries = filterByKinds(entries, kinds)
 	}
 	for _, names := range spec.participantFilters {
-		entries = filterByParticipants(entries, names)
+		entries = model.FilterByParticipants(entries, names)
 	}
 	for _, intents := range spec.intentFilters {
 		entries = filterByIntents(entries, intents)
@@ -962,28 +962,6 @@ func filterByKinds(entries []*model.Entry, kinds []model.Kind) []*model.Entry {
 	for _, e := range entries {
 		if _, ok := set[e.Kind]; ok {
 			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// filterByParticipants keeps entries listing at least one of names in their
-// participants (disjunction within a single participant() call). Matching is
-// exact against the canonical strings stored on the entry — the participants
-// field carries canonicals only (d-cpt-979), so a canonical identifies an
-// author unambiguously without alias resolution.
-func filterByParticipants(entries []*model.Entry, names []string) []*model.Entry {
-	want := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		want[n] = struct{}{}
-	}
-	var out []*model.Entry
-	for _, e := range entries {
-		for _, p := range e.Participants {
-			if _, ok := want[p]; ok {
-				out = append(out, e)
-				break
-			}
 		}
 	}
 	return out

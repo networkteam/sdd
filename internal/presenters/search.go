@@ -3,15 +3,16 @@ package presenters
 import (
 	"fmt"
 	"io"
+	"math"
 	"strings"
 
-	"github.com/networkteam/sdd/internal/model"
-	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
-// RenderSearch writes one section per ranked entry: a header line in the
-// shared EntryLine shape, then one citation line per entry-citation
-// (capped by SearchQuery.MaxCitationsPerEntry on the finder side).
+// RenderSearch writes one section per ranked hit: a header line in the
+// shared EntryLine shape under the hit's display ID, then one citation line
+// per entry-citation (capped by SearchQuery.MaxCitationsPerEntry on the
+// finder side).
 //
 // Render format (single-citation case):
 //
@@ -33,33 +34,27 @@ import (
 // match counts and hybrid RRF scores live on different scales than
 // cosine — but ALL citations within a single result set share whatever
 // scale the active mode uses).
-func RenderSearch(w io.Writer, result *query.SearchResult, g *model.Graph) {
-	if result == nil {
-		return
-	}
-	if len(result.Entries) == 0 {
+func RenderSearch(w io.Writer, hits []types.SearchHit) {
+	if len(hits) == 0 {
 		fmt.Fprintln(w, "  (no matches)")
 		return
 	}
 
-	maxScore := globalMaxCitationScore(result)
-	for _, se := range result.Entries {
-		if se.RepoID != "" {
-			// Cross-graph hit: repo-prefixed ID, status derived in the
-			// owning member graph (fall back to g if it went missing
-			// between search and render).
-			owner, _ := g.MemberGraph(se.RepoID)
-			if owner == nil {
-				owner = g
-			}
-			EntryLineDisplay(w, se.Entry, owner, se.DisplayID())
-		} else {
-			EntryLine(w, se.Entry, g)
-		}
-		for _, c := range se.Citations {
+	maxScore := globalMaxCitationScore(hits)
+	for _, hit := range hits {
+		entryLineCore(w, &hit.Entry, math.NaN(), hit.Entry.DisplayID)
+		for _, c := range hit.Citations {
 			renderCitation(w, c, maxScore)
 		}
 	}
+}
+
+// SearchText is the search output as the MCP surface serves it, trailing
+// newlines trimmed.
+func SearchText(hits []types.SearchHit) string {
+	var b strings.Builder
+	RenderSearch(&b, hits)
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // FormatSearchCapability renders the capability suffix shown in
@@ -78,10 +73,10 @@ func FormatSearchCapability(vectorAvailable bool) string {
 // relative percentage at render time. Returns 0 when the result is
 // empty (the caller short-circuits this case before calling, but the
 // guard keeps the helper total).
-func globalMaxCitationScore(result *query.SearchResult) float32 {
+func globalMaxCitationScore(hits []types.SearchHit) float32 {
 	var max float32
-	for _, se := range result.Entries {
-		for _, c := range se.Citations {
+	for _, hit := range hits {
+		for _, c := range hit.Citations {
 			if c.Score > max {
 				max = c.Score
 			}
@@ -90,7 +85,7 @@ func globalMaxCitationScore(result *query.SearchResult) float32 {
 	return max
 }
 
-func renderCitation(w io.Writer, c query.Citation, maxScore float32) {
+func renderCitation(w io.Writer, c types.SearchCitation, maxScore float32) {
 	var b strings.Builder
 	b.WriteString("    ↳ ")
 	b.WriteString(formatRelativeScore(c.Score, maxScore))

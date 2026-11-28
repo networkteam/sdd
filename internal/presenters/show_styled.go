@@ -12,8 +12,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/networkteam/sdd/internal/mdcompose"
-	"github.com/networkteam/sdd/internal/model"
-	"github.com/networkteam/sdd/internal/query"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // defaultBodyWidth is the glamour wrap width used when no terminal width is
@@ -29,36 +28,36 @@ const defaultBodyWidth = 80
 // The colorprofile writer downsamples ANSI to the destination's capability and
 // strips it for a non-terminal writer (d-cpt-mvb), so a plain io.Writer — a
 // test buffer or a pipe — receives clean, color-free structured text.
-func RenderShowStyled(dst io.Writer, result *query.ShowResult, opts ShowOptions) {
+func RenderShowStyled(dst io.Writer, entries []types.ShownEntry, opts ShowOptions) {
 	w := colorprofile.NewWriter(dst, os.Environ())
-	for i, g := range result.Groups {
+	for i, shown := range entries {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		renderShowGroupStyled(w, g, opts)
+		renderShownStyled(w, shown, opts)
 	}
 }
 
-func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
+func renderShownStyled(w io.Writer, g types.ShownEntry, opts ShowOptions) {
 	// Envelope: the same YAML the plain renderer emits, lightly syntax-
 	// highlighted (keys vs values vs punctuation) so it reads as structured
 	// metadata above the rendered body.
 	var env strings.Builder
-	writeEnvelope(&env, g, opts)
+	writeEnvelope(&env, g.Entry, opts)
 	fmt.Fprintln(w, styleEnvelopeYAML(env.String()))
 	fmt.Fprintln(w)
 
 	// Body under a top-level heading, demoted beneath it (d-cpt-5wv);
 	// glamour-rendered (raw fallback on any render error).
 	fmt.Fprintln(w, clrHeading.Render("# body"))
-	fmt.Fprint(w, renderStyledBody(mdcompose.DemoteTo(g.Primary.Content, bodyHeadingLevel), opts.Width))
+	fmt.Fprint(w, renderStyledBody(mdcompose.DemoteTo(g.Entry.Body, bodyHeadingLevel), opts.Width))
 
 	if len(g.Upstream) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, clrHeading.Render("# upstream"))
 		fmt.Fprintln(w)
 		for _, item := range g.Upstream {
-			renderTreeItemStyled(w, item, primaryDisplayID(g))
+			renderTreeItemStyled(w, item, g.Entry.DisplayID)
 		}
 	}
 	if len(g.Downstream) > 0 {
@@ -66,7 +65,7 @@ func renderShowGroupStyled(w io.Writer, g query.ShowGroup, opts ShowOptions) {
 		fmt.Fprintln(w, clrHeading.Render("# downstream"))
 		fmt.Fprintln(w)
 		for _, item := range g.Downstream {
-			renderTreeItemStyled(w, item, primaryDisplayID(g))
+			renderTreeItemStyled(w, item, g.Entry.DisplayID)
 		}
 	}
 }
@@ -206,10 +205,10 @@ func renderStyledBody(content string, width int) string {
 // grey. A closed/superseded node is rendered whole in the receded grey with no
 // colour accents, so the live entries stand out. The node shape is otherwise
 // identical to the plain renderer.
-func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string) {
+func renderTreeItemStyled(w io.Writer, item types.ShowTreeItem, primaryID string) {
 	guide := clrFaint.Render(strings.Repeat("│ ", item.Depth-1))
 	subGuide := clrFaint.Render(strings.Repeat("│ ", item.Depth))
-	live := isLiveStatus(item.Status)
+	live := isLive(item.Entry)
 
 	verb := treeVerb(item)
 	qual := treeQualifier(item)
@@ -221,7 +220,7 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 	if live {
 		line.WriteString(clrRefKind.Render(verb))
 		line.WriteString(" ")
-		line.WriteString(clrID.Render(item.NodeID()))
+		line.WriteString(clrID.Render(item.TargetID))
 		if q := styledQualifier(item); q != "" {
 			line.WriteString(" " + q)
 		}
@@ -230,7 +229,7 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 		}
 	} else {
 		// Closed/superseded: recede the whole node, no colour accents.
-		text := verb + " " + item.NodeID()
+		text := verb + " " + item.TargetID
 		if qual != "" {
 			text += " " + qual
 		}
@@ -265,12 +264,12 @@ func renderTreeItemStyled(w io.Writer, item model.ShowTreeItem, primaryID string
 // comma stay in the body grey. Returns "" when there is nothing to qualify.
 // Live nodes never carry an id in the status (active/open/done only), so the
 // words are safe to bold wholesale.
-func styledQualifier(item model.ShowTreeItem) string {
+func styledQualifier(item types.ShowTreeItem) string {
 	if repo := unresolvedRepo(item); repo != "" {
 		return clrFaint.Render("[unresolved: repo " + string(repo) + "]")
 	}
 	kind := entryKindLabel(item.Entry)
-	status := formatStatusTrailValue(item.Status, item.SupersedePath)
+	status := statusValue(item.Entry.Status)
 	switch {
 	case kind != "" && status != "":
 		return clrBody.Render("(") + clrQual.Render(kind) + clrBody.Render(", ") + clrQual.Render(status) + clrBody.Render(")")
@@ -283,12 +282,16 @@ func styledQualifier(item model.ShowTreeItem) string {
 	}
 }
 
-// isLiveStatus reports whether a node is still in play — an active decision, an
-// open signal, or a terminal done — versus closed/superseded/cascade-retired,
-// which the styled tree dims so live entries draw the eye.
-func isLiveStatus(s model.Status) bool {
-	switch s.Kind {
-	case model.StatusClosedBy, model.StatusSupersededBy, model.StatusCascadeClosedBy, model.StatusCascadeOrphan:
+// isLive reports whether a node is still in play — an active decision, an
+// open signal, a terminal done, or an unresolved node — versus
+// closed/superseded/cascade-retired, which the styled tree dims so live
+// entries draw the eye.
+func isLive(e *types.GraphEntry) bool {
+	if e == nil {
+		return true
+	}
+	switch e.Status.Kind {
+	case types.StatusClosedBy, types.StatusSupersededBy, types.StatusCascadeClosedBy, types.StatusCascadeOrphan:
 		return false
 	default:
 		return true

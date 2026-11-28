@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/networkteam/sdd/internal/basefacts"
+	"github.com/networkteam/sdd/internal/presenters"
 	"github.com/networkteam/sdd/internal/query"
 	"github.com/networkteam/sdd/internal/serveview"
 	"github.com/networkteam/sdd/internal/textpatch"
@@ -891,7 +892,13 @@ func (s *toolSet) search(ctx context.Context, req *mcp.CallToolRequest, args Sea
 	if err := s.logRootRead(ctx, req, ss, "search", nil, result.EntryIDs); err != nil {
 		return nil, SearchResult{}, err
 	}
-	out := result.Results
+	out := presenters.SearchText(result.Hits)
+	if result.Notice != "" {
+		if out != "" {
+			out += "\n\n"
+		}
+		out += result.Notice
+	}
 	if strings.TrimSpace(out) == "" {
 		out = "(no entries matched — try another phrasing, or proceed if the topic is genuinely new)"
 	}
@@ -1089,7 +1096,7 @@ func (s *toolSet) show(ctx context.Context, req *mcp.CallToolRequest, args ShowA
 	if err := s.logRootRead(ctx, req, ss, "show", result.FullIDs, result.SummaryIDs); err != nil {
 		return nil, ShowResult{}, err
 	}
-	return nil, ShowResult{Entries: result.Entries}, nil
+	return nil, ShowResult{Entries: presenters.ShowText(result.Entries)}, nil
 
 }
 

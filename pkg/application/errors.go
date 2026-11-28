@@ -27,6 +27,13 @@ const (
 	// ErrorOperationPending refuses a transition while a recorded operation is
 	// unfinished; only its retry or cancellation is accepted (d-tac-t6u).
 	ErrorOperationPending ErrorCode = "operation_pending"
+	// ErrorRevisionUnavailable refuses a read whose requested revision cannot
+	// be acquired; ApplicationError.Revision names it. Cancellation and
+	// failures with their own code keep them.
+	ErrorRevisionUnavailable ErrorCode = "revision_unavailable"
+	// ErrorEntryNotFound refuses a read naming an ID that matches no entry;
+	// ApplicationError.EntryID names it.
+	ErrorEntryNotFound ErrorCode = "entry_not_found"
 )
 
 type ApplicationError struct {
@@ -35,6 +42,7 @@ type ApplicationError struct {
 	Project  ProjectRef
 	Action   *ProjectAction
 	Revision string
+	EntryID  string
 	Version  uint32
 	Cause    error
 	// Ended carries the act that ended the session on an ErrorSessionEnded, so

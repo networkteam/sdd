@@ -3,6 +3,7 @@ package finders
 import (
 	"fmt"
 
+	"github.com/networkteam/sdd/internal/model"
 	"github.com/networkteam/sdd/internal/query"
 )
 
@@ -34,10 +35,15 @@ func (gf *GraphFinder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 	}
 
 	groups := make([]query.ShowGroup, 0, len(resolved))
-	for _, id := range resolved {
+	var missing []string
+	for i, id := range resolved {
 		tree := gf.graph.BuildShowTreeBounded(id, q.UpDepth, q.DownDepth, q.Budget, rendered, primaries)
 		if tree == nil {
-			return nil, fmt.Errorf("entry not found: %s", id)
+			if q.OmitMissing {
+				missing = append(missing, q.IDs[i])
+				continue
+			}
+			return nil, &model.EntryNotFoundError{ID: id}
 		}
 
 		groups = append(groups, query.ShowGroup{
@@ -53,5 +59,5 @@ func (gf *GraphFinder) Show(q query.ShowQuery) (*query.ShowResult, error) {
 		})
 	}
 
-	return &query.ShowResult{Graph: gf.graph, Groups: groups}, nil
+	return &query.ShowResult{Graph: gf.graph, Groups: groups, Missing: missing}, nil
 }

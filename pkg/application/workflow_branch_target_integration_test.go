@@ -337,15 +337,15 @@ This reference exists only on the bound work branch.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(currentRead.Results, anchorID) {
-		t.Fatalf("unbound read did not use runtime graph: %q", currentRead.Results)
+	if !strings.Contains(searchText(currentRead), anchorID) {
+		t.Fatalf("unbound read did not use runtime graph: %q", searchText(currentRead))
 	}
 	defaultRead, err := application.Search(t.Context(), identity, "example", sdd.SearchRequest{SyncMode: sdd.SearchSyncAll, Terms: []string{"default-target-only"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(defaultRead.Results, anchorID) {
-		t.Fatalf("unbound read leaked configured default target: %q", defaultRead.Results)
+	if strings.Contains(searchText(defaultRead), anchorID) {
+		t.Fatalf("unbound read leaked configured default target: %q", searchText(defaultRead))
 	}
 
 	bound, _, err := application.OpenWorkflow(t.Context(), identity, "example", sdd.WorkflowOpenRequest{ClientName: "bound-capture"})

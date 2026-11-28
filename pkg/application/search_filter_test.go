@@ -36,8 +36,8 @@ func TestSearchFilterNormalizesTypeLayerAndKindAbbreviations(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Search: %v", err)
 			}
-			if !strings.Contains(res.Results, "s-tac-aaa") {
-				t.Fatalf("filtered search returned no matching signal: %q", res.Results)
+			if !strings.Contains(searchText(res), "s-tac-aaa") {
+				t.Fatalf("filtered search returned no matching signal: %q", searchText(res))
 			}
 		})
 	}
@@ -52,11 +52,11 @@ func TestSearchFilterTextModeFiltersByTypeAbbreviation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("text Search: %v", err)
 	}
-	if !strings.Contains(res.Results, "s-tac-aaa") {
-		t.Fatalf("text-mode type filter returned no matching signal: %q", res.Results)
+	if !strings.Contains(searchText(res), "s-tac-aaa") {
+		t.Fatalf("text-mode type filter returned no matching signal: %q", searchText(res))
 	}
-	if strings.Contains(res.Results, "s-tac-bbb") {
-		t.Errorf("text-mode search leaked the non-matching beta entry: %q", res.Results)
+	if strings.Contains(searchText(res), "s-tac-bbb") {
+		t.Errorf("text-mode search leaked the non-matching beta entry: %q", searchText(res))
 	}
 }
 

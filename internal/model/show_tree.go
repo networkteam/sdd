@@ -44,6 +44,15 @@ func (it ShowTreeItem) NodeID() string {
 	return ""
 }
 
+// EntryNotFoundError reports an ID that names no entry of the graph.
+type EntryNotFoundError struct {
+	ID string
+}
+
+func (e *EntryNotFoundError) Error() string {
+	return "entry not found: " + e.ID
+}
+
 // TruncatedRef describes a child entry hidden at the depth boundary.
 type TruncatedRef struct {
 	ID        string

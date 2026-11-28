@@ -185,8 +185,8 @@ func exportEntryJSONFrom(x query.ExportEntry) exportEntryJSON {
 		Canonical: e.Canonical, Aliases: e.Aliases, Class: e.Class, Actor: e.Actor, Override: e.Override,
 		FocusActors: e.FocusActors, FocusWhen: focusWhenJSONFrom(e.FocusWhen), Preflight: e.Preflight,
 	}
-	if p, err := model.ParseID(e.ID); err == nil {
-		ej.ShortID = p.TypeCode + "-" + p.LayerCode + "-" + p.Suffix
+	if _, err := model.ParseID(e.ID); err == nil {
+		ej.ShortID = model.ShortID(e.ID)
 	}
 	for _, t := range x.Topics {
 		ej.Topics = append(ej.Topics, t.String())
