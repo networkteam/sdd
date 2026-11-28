@@ -23,7 +23,7 @@ func TestCreateEntryRetryKeepsIdentityAndSkipsPreparationAfterPublication(t *tes
 		if summaryCalls != 2 {
 			return llm.Result{}, errors.New("summary provider unavailable")
 		}
-		return llm.Result{Text: "The actual published summary."}, nil
+		return llm.Result{Text: `{"title": "Test title", "summary": "The actual published summary."}`}, nil
 	})})
 	draft := f.identifiedDraft(sdd.EntryDraft{Kind: "gap", Layer: "tactical", Confidence: "high", Body: "A publication reuses the identity recorded by its invocation."})
 	if result, err := f.app.CreateEntry(t.Context(), f.identity, "example", f.binding, draft); err == nil || result.EntryID != draft.EntryID {
@@ -53,7 +53,7 @@ func TestCreateEntryRetryCompletesRequiredFinalizerWithoutAnotherSummary(t *test
 		Finalizers: []sdd.MutationFinalizer{finalizer},
 		Runner: llm.RunnerFunc(func(context.Context, llm.Request) (llm.Result, error) {
 			summaries++
-			return llm.Result{Text: "A durable publication still requires composition completion."}, nil
+			return llm.Result{Text: `{"title": "Test title", "summary": "A durable publication still requires composition completion."}`}, nil
 		}),
 	})
 	draft := f.identifiedDraft(sdd.EntryDraft{Kind: "gap", Layer: "tactical", Confidence: "high", Body: "Required completion belongs before the operation's successful outcome."})
@@ -97,7 +97,7 @@ func TestCaptureUsesAcquiredLanguageAndDependencies(t *testing.T) {
 			if request.Purpose == llm.PurposePreflight {
 				return llm.Result{Text: `{"findings":[]}`}, nil
 			}
-			return llm.Result{Text: "Eine Beobachtung mit dem Kontext des ausgewählten Graphen."}, nil
+			return llm.Result{Text: `{"title": "Test title", "summary": "Eine Beobachtung mit dem Kontext des ausgewählten Graphen."}`}, nil
 		}),
 	})
 	draft := f.identifiedDraft(sdd.EntryDraft{

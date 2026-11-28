@@ -2,6 +2,7 @@ package presenters_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/bradleyjkemp/cupaloy/v2"
@@ -437,4 +438,14 @@ Do the work.
 	}
 	g := model.NewGraph([]*model.Entry{e})
 	cupaloy.SnapshotT(t, renderShow(t, g, []string{e.ID}))
+}
+
+func TestRenderShow_CarriesTheTitle(t *testing.T) {
+	e := entry("20260410-100000-s-tac-ttl", withContent("Graph commits follow the graph's repository."))
+	e.Title = "Graph commit placement"
+	g := model.NewGraph([]*model.Entry{e})
+
+	if out := renderShow(t, g, []string{e.ID}); !strings.Contains(out, "title: Graph commit placement") {
+		t.Errorf("show should carry the entry's title, got:\n%s", out)
+	}
 }

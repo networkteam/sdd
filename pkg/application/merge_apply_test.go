@@ -28,7 +28,7 @@ func TestInterleavedCapturesBothLand(t *testing.T) {
 				<-release
 				return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
 			}
-			return pkgllm.Result{Text: "Interleaved capture summary.", Identity: identity}, nil
+			return pkgllm.Result{Text: `{"title": "Test title", "summary": "Interleaved capture summary."}`, Identity: identity}, nil
 		}),
 	})
 	bindings := make([]sdd.SessionBinding, captures)

@@ -27,11 +27,15 @@ func main() {
 		if errors.As(err, &exit) && exit.ExitCode() == 0 {
 			return
 		}
+		logger := slog.New(slogutils.NewCLIHandler(os.Stderr, nil))
 		if errors.Is(err, cliout.ErrUserCancelled) || errors.Is(err, context.Canceled) {
 			fmt.Fprintln(os.Stderr, "cancelled.")
+			if incomplete := cliout.Incomplete(err); incomplete != nil {
+				logger.Error(incomplete.Error())
+				os.Exit(1)
+			}
 			os.Exit(130)
 		}
-		logger := slog.New(slogutils.NewCLIHandler(os.Stderr, nil))
 		logger.Error(err.Error())
 		if exit != nil {
 			os.Exit(exit.ExitCode())

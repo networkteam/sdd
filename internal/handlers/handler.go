@@ -78,18 +78,19 @@ type Puller interface {
 // Each public method corresponds to one command and lives in its own file
 // (handler_new_entry.go, etc.).
 type Handler struct {
-	graphDir  string
-	sddDir    string // path to .sdd/ directory; required for commands that write tmp files
-	reader    Reader
-	llmRunner llm.Runner
-	committer Committer
-	brancher  Brancher
-	mover     Mover
-	puller    Puller
-	repos     *repos.Manager
-	stderr    io.Writer
-	now       func() time.Time
-	language  string
+	graphDir    string
+	sddDir      string // path to .sdd/ directory; required for commands that write tmp files
+	reader      Reader
+	llmRunner   llm.Runner
+	titleSearch TitleSearchOpener
+	committer   Committer
+	brancher    Brancher
+	mover       Mover
+	puller      Puller
+	repos       *repos.Manager
+	stderr      io.Writer
+	now         func() time.Time
+	language    string
 }
 
 // Options configures a new Handler. Zero-valued fields get sensible defaults.
@@ -112,23 +113,27 @@ type Options struct {
 	// (config `language`, empty = English default). Summaries are written
 	// in it regardless of the source material's language.
 	Language string
+	// TitleSearch shows a title call the titles of the entries nearest the
+	// entry's body; nil leaves them out.
+	TitleSearch TitleSearchOpener
 }
 
 // New constructs a Handler with the given options.
 func New(opts Options) *Handler {
 	h := &Handler{
-		graphDir:  opts.GraphDir,
-		sddDir:    opts.SDDDir,
-		reader:    opts.Reader,
-		llmRunner: opts.LLMRunner,
-		committer: opts.Committer,
-		brancher:  opts.Brancher,
-		mover:     opts.Mover,
-		puller:    opts.Puller,
-		repos:     opts.Repos,
-		stderr:    opts.Stderr,
-		now:       opts.Now,
-		language:  opts.Language,
+		graphDir:    opts.GraphDir,
+		sddDir:      opts.SDDDir,
+		reader:      opts.Reader,
+		llmRunner:   opts.LLMRunner,
+		titleSearch: opts.TitleSearch,
+		committer:   opts.Committer,
+		brancher:    opts.Brancher,
+		mover:       opts.Mover,
+		puller:      opts.Puller,
+		repos:       opts.Repos,
+		stderr:      opts.Stderr,
+		now:         opts.Now,
+		language:    opts.Language,
 	}
 	if h.stderr == nil {
 		h.stderr = os.Stderr

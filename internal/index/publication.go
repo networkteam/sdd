@@ -83,6 +83,8 @@ func (i *Index) publishedCollection(ctx context.Context) (*chromem.Collection, e
 	if i.indexDir == "" {
 		return i.coll, nil
 	}
+	i.publishedMu.Lock()
+	defer i.publishedMu.Unlock()
 	if i.published != nil {
 		return i.published, nil
 	}

@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/networkteam/sdd/internal/cliout"
 	"github.com/networkteam/sdd/internal/command"
 	"github.com/networkteam/sdd/internal/handlers"
 	"github.com/networkteam/sdd/internal/model"
@@ -55,13 +57,42 @@ func (f *fakeReader) DeclaredDependencies(context.Context, model.RepoID) ([]mode
 // recordingCommitter captures commit calls so tests can assert whether a
 // commit was attempted. Set err to make Commit fail (the fail-loud path).
 type recordingCommitter struct {
-	calls int
-	err   error
+	calls   int
+	err     error
+	message string
 }
 
 func (r *recordingCommitter) Commit(message string, paths ...string) error {
 	r.calls++
+	r.message = message
 	return r.err
+}
+
+// The capture commit names the entry's title in its subject and its ID in the
+// body, so `git log --grep` finds it by entry.
+func TestNewEntry_CommitMessageNamesTitleAndID(t *testing.T) {
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	committer := &recordingCommitter{}
+	var id string
+	h := handlers.New(handlers.Options{GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: committer, Stderr: &bytes.Buffer{}})
+	title := "Entry ID in the commit"
+
+	err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+		Type: model.TypeSignal, Layer: model.LayerTactical, Description: "A capture commit names its entry.",
+		Summary: "The capture commit names its entry.", Title: &title, SkipPreflight: true,
+		OnNewEntry: func(newID, _ string) { id = newID },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := "sdd: signal tactical Entry ID in the commit\n\nEntry: " + id; committer.message != want {
+		t.Errorf("commit message = %q, want %q", committer.message, want)
+	}
 }
 
 // TestNewEntry_CommitFailure_IsLoudAndDurable is the regression test for
@@ -115,6 +146,240 @@ func TestNewEntry_CommitFailure_IsLoudAndDurable(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(tmp, relPath)); statErr != nil {
 		t.Errorf("entry file should remain on disk after a commit failure: %v", statErr)
+	}
+}
+
+// failingRunner fails every LLM call, as an unreachable provider does.
+type failingRunner struct{}
+
+func (failingRunner) Run(_ context.Context, _ llm.Request) (llm.Result, error) {
+	return llm.Result{}, errors.New("provider unreachable")
+}
+
+// A failed summary generation surfaces like a failed commit: the entry is
+// written and committed without a summary, and the error names it.
+func TestNewEntry_SummaryFailure_IsLoudAndDurable(t *testing.T) {
+	cases := []struct {
+		name      string
+		commitErr error
+	}{
+		{name: "commit succeeds"},
+		{name: "commit fails", commitErr: errors.New("signing timed out")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+
+			committer := &recordingCommitter{err: tc.commitErr}
+			var reportedID string
+
+			h := handlers.New(handlers.Options{
+				GraphDir:  tmp,
+				SDDDir:    sddDir,
+				Reader:    &fakeReader{},
+				Committer: committer,
+				LLMRunner: failingRunner{},
+				Stderr:    &bytes.Buffer{},
+			})
+
+			err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+				Type:          model.TypeSignal,
+				Layer:         model.LayerTactical,
+				Description:   "summary fails loud",
+				SkipPreflight: true,
+				OnNewEntry:    func(id, _ string) { reportedID = id },
+			})
+			if reportedID == "" {
+				t.Fatal("OnNewEntry should fire so the durable entry is still reported")
+			}
+			if err == nil {
+				t.Fatal("the summary failure should propagate")
+			}
+			want := "entry " + reportedID + " is written without a generated summary or title (run sdd summarize " + reportedID + " to fill it): summarizing: "
+			if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "provider unreachable") {
+				t.Errorf("the error should name the entry, the summarize call and the cause, got %v", err)
+			}
+			if tc.commitErr != nil && !strings.Contains(err.Error(), "git commit: signing timed out") {
+				t.Errorf("a failed commit should be joined with the summary failure, got %v", err)
+			}
+			if committer.calls != 1 {
+				t.Errorf("the written entry should still be committed, got %d commits", committer.calls)
+			}
+			entry := readWrittenEntry(t, tmp, reportedID)
+			if entry.Summary != "" || entry.Title != "" {
+				t.Errorf("the entry should be written without a summary or title, got title %q summary %q", entry.Title, entry.Summary)
+			}
+		})
+	}
+}
+
+func TestNewEntry_UnusableTitleIsRefused(t *testing.T) {
+	cases := []struct {
+		name, title, want string
+	}{
+		{name: "two lines", title: "Supplied\ntitle", want: "more than one line"},
+		{name: "nothing left once normalized", title: " … ", want: "--title: the title is empty"},
+		{name: "empty", title: "", want: "--title: the title is empty"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			h := handlers.New(handlers.Options{
+				GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: &recordingCommitter{},
+				LLMRunner: &trippingRunner{t: t}, Stderr: &bytes.Buffer{},
+			})
+			var id string
+			err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerTactical, Description: "an unusable title",
+				Summary: "A supplied summary.", Title: new(tc.title), SkipPreflight: true,
+				OnNewEntry: func(newID, _ string) { id = newID },
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("an unusable title should be refused, got %v", err)
+			}
+			if id != "" {
+				t.Errorf("no entry should be written, got %s", id)
+			}
+		})
+	}
+}
+
+// A dry run keeps piped stdin even when the command is refused before any
+// graph work.
+func TestNewEntry_DryRun_SavesStdinOnAnEarlyRefusal(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  command.NewEntryCmd
+	}{
+		{name: "invalid command", cmd: command.NewEntryCmd{Type: model.TypeSignal}},
+		{name: "unusable title", cmd: command.NewEntryCmd{Type: model.TypeSignal, Layer: model.LayerTactical, Title: new("Supplied\ntitle")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			stderr := &bytes.Buffer{}
+			h := handlers.New(handlers.Options{GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Stderr: stderr})
+			cmd := tc.cmd
+			cmd.Description = "a refused dry run"
+			cmd.Attachments = []command.Attachment{{Source: "-", Target: "plan.md", Data: []byte("piped plan")}}
+			cmd.SkipPreflight, cmd.DryRun = true, true
+			if err := h.NewEntry(context.Background(), &cmd); err == nil {
+				t.Fatal("the command should be refused")
+			}
+			if !strings.Contains(stderr.String(), "stdin attachment saved (dry-run)") {
+				t.Errorf("the piped attachment should be saved for the retry:\n%s", stderr.String())
+			}
+		})
+	}
+}
+
+// cancellingSummaryRunner cancels the run during the summary call, as Ctrl-C
+// does, and fails the call with the cancellation.
+type cancellingSummaryRunner struct{ cancel context.CancelFunc }
+
+func (r cancellingSummaryRunner) Run(ctx context.Context, _ llm.Request) (llm.Result, error) {
+	r.cancel()
+	<-ctx.Done()
+	return llm.Result{}, ctx.Err()
+}
+
+// A cancellation after the entry is written keeps what the caller must still
+// do: the hint that fills the description and any failed commit.
+func TestNewEntry_CancelledSummaryKeepsTheHint(t *testing.T) {
+	cases := []struct {
+		name      string
+		commitErr error
+		want      []string
+	}{
+		{name: "commit succeeds", want: []string{"is written without a generated summary or title (run sdd summarize "}},
+		{name: "commit fails", commitErr: errors.New("signing timed out"), want: []string{"is written without a generated summary or title", "git commit: signing timed out"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			h := handlers.New(handlers.Options{
+				GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: &recordingCommitter{err: tc.commitErr},
+				LLMRunner: cancellingSummaryRunner{cancel: cancel}, Stderr: &bytes.Buffer{},
+			})
+			err := h.NewEntry(ctx, &command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerTactical, Description: "cancelled during the summary call", SkipPreflight: true,
+			})
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("the run should fail with the cancellation, got %v", err)
+			}
+			kept := cliout.Incomplete(err)
+			for _, want := range tc.want {
+				if kept == nil || !strings.Contains(kept.Error(), want) {
+					t.Errorf("the cancellation should keep what is left to do, got %v", kept)
+				}
+			}
+		})
+	}
+}
+
+// The failure's hint names the command that fills what is missing and keeps
+// what the caller supplied.
+func TestNewEntry_SummaryFailureHint_KeepsTheSuppliedField(t *testing.T) {
+	cases := []struct {
+		name, summary, title, missing, flag string
+		only                                model.DescriptionFields
+	}{
+		{name: "a supplied summary", summary: "A supplied summary.", missing: "title", flag: " --only=title", only: model.DescriptionFields{Title: true}},
+		{name: "a supplied title", title: "Supplied title", missing: "summary", flag: " --only=summary", only: model.DescriptionFields{Summary: true}},
+		{name: "neither supplied", missing: "summary or title"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			sddDir := filepath.Join(tmp, ".sdd")
+			if err := os.MkdirAll(sddDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			h := handlers.New(handlers.Options{
+				GraphDir: tmp, SDDDir: sddDir, Reader: &graphReader{}, Committer: &recordingCommitter{},
+				LLMRunner: failingRunner{}, Stderr: &bytes.Buffer{},
+			})
+			var id string
+			err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+				Type: model.TypeSignal, Layer: model.LayerTactical, Description: "the hint keeps what was supplied",
+				Summary: tc.summary, Title: optionalTitle(tc.title), SkipPreflight: true,
+				OnNewEntry: func(newID, _ string) { id = newID },
+			})
+			want := "entry " + id + " is written without a generated " + tc.missing + " (run sdd summarize " + id + tc.flag + " to fill it): summarizing: "
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("the failure should name what is missing and the command that fills it, got %v", err)
+			}
+
+			fill := handlers.New(handlers.Options{
+				GraphDir: tmp, Reader: &graphReader{}, Committer: &recordingCommitter{}, LLMRunner: &stubRunner{text: "GENERATED"},
+			})
+			if err := fill.Summarize(context.Background(), &command.SummarizeCmd{EntryIDs: []string{id}, Only: tc.only}); err != nil {
+				t.Fatalf("Summarize: %v", err)
+			}
+			entry := readWrittenEntry(t, tmp, id)
+			wantSummary, wantTitle := cmp.Or(tc.summary, "GENERATED"), cmp.Or(tc.title, storedTitle)
+			if entry.Summary != wantSummary || entry.Title != wantTitle {
+				t.Errorf("the hinted fill should keep the supplied field and fill the other, got title %q summary %q", entry.Title, entry.Summary)
+			}
+		})
 	}
 }
 
@@ -677,19 +942,19 @@ func assertKindAndNoKindSpecificFields(t *testing.T, e *model.Entry, want model.
 }
 
 // trippingRunner fails the test if the handler makes any LLM call. Used to
-// prove a caller-supplied summary skips generation entirely rather than
-// racing it.
+// prove a caller-supplied summary and title skip generation entirely rather
+// than racing it.
 type trippingRunner struct {
 	t *testing.T
 }
 
 func (r *trippingRunner) Run(_ context.Context, _ llm.Request) (llm.Result, error) {
-	r.t.Error("LLM runner invoked despite a caller-supplied summary")
+	r.t.Error("LLM runner invoked despite a caller-supplied summary and title")
 	return llm.Result{}, errors.New("must not be called")
 }
 
-// TestNewEntry_ExplicitSummary_SkipsLLM: a caller-supplied Summary stores
-// verbatim in the written entry and the LLM runner is never consulted.
+// TestNewEntry_ExplicitSummary_SkipsLLM: a caller-supplied Summary and Title
+// store in the written entry and the LLM runner is never consulted.
 func TestNewEntry_ExplicitSummary_SkipsLLM(t *testing.T) {
 	tmp := t.TempDir()
 	sddDir := filepath.Join(tmp, ".sdd")
@@ -714,6 +979,7 @@ func TestNewEntry_ExplicitSummary_SkipsLLM(t *testing.T) {
 		Layer:         model.LayerTactical,
 		Description:   "exercising the explicit summary path",
 		Summary:       custom,
+		Title:         new("custom title"),
 		SkipPreflight: true,
 		OnNewEntry: func(id, summary string) {
 			reportedID = id
@@ -743,5 +1009,103 @@ func TestNewEntry_ExplicitSummary_SkipsLLM(t *testing.T) {
 	}
 	if entry.Summary != custom {
 		t.Errorf("stored summary = %q, want %q", entry.Summary, custom)
+	}
+}
+
+// optionalTitle is a supplied --title, nil when empty.
+func optionalTitle(title string) *string {
+	if title == "" {
+		return nil
+	}
+	return &title
+}
+
+// newTitledEntry runs NewEntry with the given summary and title against
+// runner and returns the written entry.
+func newTitledEntry(t *testing.T, runner llm.Runner, summary, title string) *model.Entry {
+	t.Helper()
+	tmp := t.TempDir()
+	sddDir := filepath.Join(tmp, ".sdd")
+	if err := os.MkdirAll(sddDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	h := handlers.New(handlers.Options{
+		GraphDir: tmp, SDDDir: sddDir, Reader: &fakeReader{}, Committer: &recordingCommitter{},
+		LLMRunner: runner, Stderr: &bytes.Buffer{},
+	})
+	var id string
+	err := h.NewEntry(context.Background(), &command.NewEntryCmd{
+		Type: model.TypeSignal, Layer: model.LayerTactical, Description: "exercising title generation",
+		Summary: summary, Title: optionalTitle(title), SkipPreflight: true,
+		OnNewEntry: func(newID, _ string) { id = newID },
+	})
+	if err != nil {
+		t.Fatalf("NewEntry: %v", err)
+	}
+	relPath, err := model.IDToRelPath(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, relPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := model.ParseEntry(id+".md", string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entry
+}
+
+func TestNewEntry_GeneratedTitle(t *testing.T) {
+	cases := []struct {
+		name         string
+		summary      string
+		title        string
+		wantPurpose  llm.Purpose
+		wantTitle    string
+		wantSummary  string
+		otherPurpose llm.Purpose
+	}{
+		{name: "a supplied summary costs only a title call", summary: "A supplied summary.", wantPurpose: llm.PurposeTitle, wantTitle: storedTitle, wantSummary: "A supplied summary.", otherPurpose: llm.PurposeSummarize},
+		{name: "a generated summary brings its title", wantPurpose: llm.PurposeSummarize, wantTitle: storedTitle, wantSummary: "GENERATED", otherPurpose: llm.PurposeTitle},
+		{name: "a supplied title beside a generated summary is kept", title: "Supplied title", wantPurpose: llm.PurposeSummarize, wantTitle: "Supplied title", wantSummary: "GENERATED", otherPurpose: llm.PurposeTitle},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &stubRunner{text: "GENERATED"}
+			entry := newTitledEntry(t, runner, tc.summary, tc.title)
+			if runner.purposeCount(tc.wantPurpose) != 1 || runner.purposeCount(tc.otherPurpose) != 0 {
+				t.Errorf("one call of the expected purpose should run, got %v", runner.byUse)
+			}
+			if entry.Title != tc.wantTitle || entry.Summary != tc.wantSummary {
+				t.Errorf("the entry should carry the expected title beside the expected summary, got title %q summary %q", entry.Title, entry.Summary)
+			}
+		})
+	}
+}
+
+func TestNewEntry_NormalizesTheSuppliedTitle(t *testing.T) {
+	cases := []struct {
+		name      string
+		title     string
+		wantTitle string
+	}{
+		{name: "quotes and trailing punctuation removed", title: `Supplied "title".`, wantTitle: "Supplied title"},
+		{name: "a question mark kept", title: "Should the daemon go?", wantTitle: "Should the daemon go?"},
+		{name: "a leading code span kept", title: "`sdd` info JSON output", wantTitle: "`sdd` info JSON output"},
+		{name: "a long title stored whole", title: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance", wantTitle: "Title " + strings.Repeat("words ", 20) + "beyond the length guidance"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &stubRunner{text: "GENERATED"}
+			entry := newTitledEntry(t, runner, "A supplied summary.", tc.title)
+			if runner.callCount() != 0 {
+				t.Errorf("a usable supplied title should cost no call, got %d calls", runner.callCount())
+			}
+			if entry.Title != tc.wantTitle {
+				t.Errorf("the stored title should be the normalized one, got %q", entry.Title)
+			}
+		})
 	}
 }

@@ -1,6 +1,8 @@
 package cliapp_test
 
 import (
+	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -116,6 +118,58 @@ func TestCLIWriteHandlerUsesErrorStream(t *testing.T) {
 	assertContainsOutput(t, "stderr", result.stderr, "warning: pre-flight validation skipped")
 	if result.stdout != "" {
 		t.Errorf("dry run emitted a result: %s", result.stdout)
+	}
+}
+
+func TestNewRefusesABlankTitle(t *testing.T) {
+	for _, title := range []string{"", "   "} {
+		t.Run(fmt.Sprintf("%q", title), func(t *testing.T) {
+			f := newFillFixture(t)
+			result := f.run(t, "new", "--confidence", "high", "--skip-preflight", "--summary", "A supplied summary.", "--title", title, "s", "tac", "A signal with a blank title.")
+			if result.err == nil || !strings.Contains(result.err.Error(), "--title: the title is empty") {
+				t.Fatalf("a blank --title should be refused, got %v\n%s", result.err, result.stderr)
+			}
+			if result.stdout != "" {
+				t.Errorf("no entry should be written, got %s", result.stdout)
+			}
+		})
+	}
+}
+
+func TestNewDryRunKeepsPipedStdinOnAnEmptyTitle(t *testing.T) {
+	f := newFillFixture(t)
+	var stdout, stderr bytes.Buffer
+	command := f.command(strings.NewReader("piped notes"), &stdout, &stderr)
+	err := command.Run(t.Context(), []string{"sdd", "new", "--confidence", "high", "--skip-preflight", "--dry-run", "--attach", "-:notes.md", "--title", "", "s", "tac", "A dry run with an empty title."})
+	if err == nil || !strings.Contains(err.Error(), "--title: the title is empty") {
+		t.Fatalf("an empty --title should be refused, got %v", err)
+	}
+	if !strings.Contains(stderr.String(), "stdin attachment saved (dry-run)") {
+		t.Errorf("the piped attachment should be saved for the retry:\n%s", stderr.String())
+	}
+}
+
+func TestNewBuildsTheEmbedderOnlyForATitleCall(t *testing.T) {
+	cases := []struct {
+		name      string
+		args      []string
+		wantFails bool
+	}{
+		{name: "a supplied summary and title", args: []string{"--summary", "A supplied summary.", "--title", "Supplied title"}},
+		{name: "a dry run", args: []string{"--dry-run"}},
+		{name: "a title call", args: []string{"--summary", "A supplied summary."}, wantFails: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFillFixture(t)
+			f.write(t, ".sdd/config.yaml", f.read(t, ".sdd/config.yaml")+"embedding:\n  provider: ollama\n")
+			args := append([]string{"new", "--confidence", "high", "--skip-preflight"}, tc.args...)
+			result := f.run(t, append(args, "s", "tac", "A signal beside a broken embedding config.")...)
+			failed := result.err != nil && strings.Contains(result.err.Error(), "embedding.model is required")
+			if failed != tc.wantFails || (!tc.wantFails && result.err != nil) {
+				t.Errorf("only a title call should read the embedding config, got %v\n%s", result.err, result.stderr)
+			}
+		})
 	}
 }
 

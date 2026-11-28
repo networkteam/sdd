@@ -152,11 +152,15 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 		if draft.SkipPreflight {
 			entry.Preflight = "skipped"
 		}
-		summary, err := llmops.Summarize(ctx, effective.options.LLM, entry, snapshot.graph, effective.options.Language)
+		titles, err := effective.similarTitles(ctx, snapshot, readRuntime.options.Graph, entry)
 		if err != nil {
 			return result, fmt.Errorf("generating summary: %w", err)
 		}
-		entry.Summary = summary.Summary
+		described, err := llmops.Describe(ctx, effective.options.LLM, entry, snapshot.graph, effective.options.Language, false, titles)
+		if err != nil {
+			return result, fmt.Errorf("generating summary: %w", err)
+		}
+		entry.Summary, entry.Title = described.Summary, described.Title
 		logicalPath, err := model.IDToRelPath(draft.EntryID)
 		if err != nil {
 			return result, err
@@ -167,11 +171,15 @@ func (a *Application) CreateEntry(ctx context.Context, identity RequestIdentity,
 			return result, err
 		}
 		document.Attachments = append([]string(nil), entry.Attachments...)
+		message, err := captureCommitMessage(draft.EntryID, document)
+		if err != nil {
+			return result, err
+		}
 		batch := MutationBatch{
 			ID:          draft.Publication.String(),
 			Changes:     []DocumentChange{{LogicalPath: logicalPath, Document: &document, CanonicalBytes: canonical}},
 			Attachments: attachments,
-			Message:     fmt.Sprintf("sdd: %s %s %s", entry.TypeLabel(), entry.LayerLabel(), entry.ShortContent(72)),
+			Message:     message,
 		}
 		acquired, err = runtime.acquire(ctx, draft.Target)
 		if err != nil {
@@ -227,11 +235,28 @@ func entryPublicationBatch(key PublicationKey, publication EntryPublication) (Mu
 	if err != nil {
 		return MutationBatch{}, err
 	}
-	batch := MutationBatch{ID: key.String(), Message: "sdd: capture " + id, Changes: []DocumentChange{{LogicalPath: publication.Document.LogicalPath, Document: &publication.Document}}}
+	message, err := captureCommitMessage(id, publication.Document)
+	if err != nil {
+		return MutationBatch{}, err
+	}
+	batch := MutationBatch{ID: key.String(), Message: message, Changes: []DocumentChange{{LogicalPath: publication.Document.LogicalPath, Document: &publication.Document}}}
 	for _, name := range publication.Document.Attachments {
 		batch.Attachments = append(batch.Attachments, AttachmentMaterialization{SourceName: name, LogicalPath: path.Join(attachmentDir, name)})
 	}
 	return batch, nil
+}
+
+// captureCommitMessage is the message the capture of the document commits
+// under, built from the document alone, so a publication replayed after a
+// failed commit is committed under the same message as a fresh one.
+func captureCommitMessage(id string, document EntryDocument) (string, error) {
+	parts, err := model.ParseID(id)
+	if err != nil {
+		return "", err
+	}
+	captured := model.Entry{ID: id, Type: model.TypeFromAbbrev[parts.TypeCode], Layer: model.LayerFromAbbrev[parts.LayerCode], Content: document.Body}
+	captured.Title, _ = document.Frontmatter["title"].(string)
+	return captured.CaptureCommitMessage(), nil
 }
 
 func (a *Application) prepareCaptureEntry(ctx context.Context, identity RequestIdentity, principal Principal, runtime *ProjectRuntime, target *Snapshot, draft EntryDraft) (*model.Entry, *Snapshot, []AttachmentMaterialization, error) {

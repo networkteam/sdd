@@ -28,6 +28,17 @@ func (GitFinalizer) Name() string { return "git" }
 
 func mutationTrailer(batchID string) string { return "SDD-Mutation: " + batchID }
 
+var trailerBlock = regexp.MustCompile(`\n\n(?:[A-Za-z0-9-]+: [^\n]+\n?)+$`)
+
+// withTrailer appends trailer to message, as the last line of the trailer
+// block message ends in when it has one, so git reads both as trailers.
+func withTrailer(message, trailer string) string {
+	if trailerBlock.MatchString(message) {
+		return strings.TrimRight(message, "\n") + "\n" + trailer
+	}
+	return message + "\n\n" + trailer
+}
+
 func (f GitFinalizer) Finalize(ctx context.Context, mutation app.AppliedMutation) error {
 	lock, err := lockGraph(filepath.Join(f.Checkout, f.GraphDir))
 	if err != nil {
@@ -92,7 +103,7 @@ func (f GitFinalizer) Finalize(ctx context.Context, mutation app.AppliedMutation
 	if message == "" {
 		message = "sdd: apply " + mutation.BatchID
 	}
-	commitArgs := append([]string{"-C", f.Checkout, "commit", "-m", message + "\n\n" + trailer, "--"}, paths...)
+	commitArgs := append([]string{"-C", f.Checkout, "commit", "-m", withTrailer(message, trailer), "--"}, paths...)
 	if out, err := exec.CommandContext(ctx, "git", commitArgs...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git finalizer commit: %s (%w)", strings.TrimSpace(string(out)), err)
 	}

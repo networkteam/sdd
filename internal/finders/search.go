@@ -95,7 +95,7 @@ func (f *SearchFinder) Search(ctx context.Context, q query.SearchQuery) (*query.
 }
 
 // textSearch runs a multi-term AND grep over each entry's searchable
-// text (summary + body + attachments). Entries are kept only if every
+// text (title + summary + body + attachments). Entries are kept only if every
 // term's regex matches at least once. The score is the total match count
 // across all terms; ties broken by earliest-match position.
 //
@@ -236,20 +236,34 @@ func (f *SearchFinder) hybridSearch(ctx context.Context, q query.SearchQuery) (*
 	return out, nil
 }
 
+// EmbedPhrase returns q carrying its phrase's embedding, unchanged when it
+// carries one. It reads no graph, so a caller can embed outside a lock it
+// then searches under.
+func (f *SearchFinder) EmbedPhrase(ctx context.Context, q query.SearchQuery) (query.SearchQuery, error) {
+	if q.PhraseVector != nil {
+		return q, nil
+	}
+	if q.Phrase == "" {
+		return q, errors.New("vector search requires a non-empty --query phrase")
+	}
+	embedded, err := f.embedder.Embed(ctx, embed.Request{Purpose: embed.PurposeQuery, Texts: []string{q.Phrase}})
+	if err != nil {
+		return q, fmt.Errorf("embedding query phrase: %w", err)
+	}
+	if len(embedded.Vectors) != 1 {
+		return q, fmt.Errorf("embedder returned %d vectors for 1 input", len(embedded.Vectors))
+	}
+	q.PhraseVector = embedded.Vectors[0]
+	return q, nil
+}
+
 // runVector is the shared core for vector and hybrid: produces ranked
 // SearchEntry values from the index. Oversamples by a factor of 4×limit
 // at the chunk level so post-hoc filtering still leaves enough seeds.
 func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]query.SearchEntry, error) {
-	if q.Phrase == "" {
-		return nil, errors.New("vector search requires a non-empty --query phrase")
-	}
-	embedded, err := f.embedder.Embed(ctx, embed.Request{Purpose: embed.PurposeQuery, Texts: []string{q.Phrase}})
+	q, err := f.EmbedPhrase(ctx, q)
 	if err != nil {
-		return nil, fmt.Errorf("embedding query phrase: %w", err)
-	}
-	embeddings := embedded.Vectors
-	if len(embeddings) != 1 {
-		return nil, fmt.Errorf("embedder returned %d vectors for 1 input", len(embeddings))
+		return nil, err
 	}
 
 	limit := q.EffectiveLimit()
@@ -266,7 +280,7 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 	if chunkLimit < 50 {
 		chunkLimit = 50
 	}
-	indexHits, err := f.indexStore.Query(ctx, embeddings[0], chunkLimit)
+	indexHits, err := f.indexStore.Query(ctx, q.PhraseVector, chunkLimit)
 	if err != nil {
 		return nil, fmt.Errorf("vector query: %w", err)
 	}
@@ -340,17 +354,18 @@ func (f *SearchFinder) runVector(ctx context.Context, q query.SearchQuery) ([]qu
 	return out, nil
 }
 
-// candidates applies the graph filter and the IncludeSuperseded gate.
+// candidates applies the graph filter, the Titled and Exclude gates and the
+// IncludeSuperseded gate.
 // Superseded entries are excluded by default — they pollute clusters with
 // historical near-duplicates per the design.md rationale.
 func (f *SearchFinder) candidates(q query.SearchQuery) []*model.Entry {
 	filtered := f.graph.Filter(q.Filter)
-	if q.IncludeSuperseded {
-		return filtered
-	}
 	out := make([]*model.Entry, 0, len(filtered))
 	for _, e := range filtered {
-		if f.graph.DerivedStatus(e).Kind == model.StatusSupersededBy {
+		if !q.Admits(e) {
+			continue
+		}
+		if !q.IncludeSuperseded && f.graph.DerivedStatus(e).Kind == model.StatusSupersededBy {
 			continue
 		}
 		out = append(out, e)
@@ -436,13 +451,17 @@ func compileTerms(terms []string) ([]*regexp.Regexp, error) {
 	return out, nil
 }
 
-// searchableText concatenates the entry's summary, body, and (markdown)
-// attachments into one string for grep matching. Returns the combined
-// text and the body alone (the body is reserved for breadcrumb-aware
-// citation in a future iteration; today's text-mode citation uses only
-// the snippet).
+// searchableText concatenates the entry's title, summary, body, and
+// (markdown) attachments into one string for grep matching. Returns the
+// combined text and the body alone (the body is reserved for
+// breadcrumb-aware citation in a future iteration; today's text-mode
+// citation uses only the snippet).
 func searchableText(graphDir string, e *model.Entry) (combined, body string) {
 	var b strings.Builder
+	if e.Title != "" {
+		b.WriteString(e.Title)
+		b.WriteByte('\n')
+	}
 	if e.Summary != "" {
 		b.WriteString(e.Summary)
 		b.WriteByte('\n')

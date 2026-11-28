@@ -91,7 +91,7 @@ func TestCreateEntryResolvesConcreteDefaultWithoutCWDAndReleasesAroundLLM(t *tes
 			if request.Purpose == pkgllm.PurposePreflight {
 				return pkgllm.Result{Text: `{"findings":[]}`, Identity: identity}, nil
 			}
-			return pkgllm.Result{Text: "Concrete target resolution is independent of cwd.", Identity: identity}, nil
+			return pkgllm.Result{Text: `{"title": "Test title", "summary": "Concrete target resolution is independent of cwd."}`, Identity: identity}, nil
 		}),
 	})
 	if err != nil {

@@ -9,8 +9,15 @@ package model
 type Phase string
 
 const (
-	PhaseConnecting Phase = "connecting" // establishing a connection / first cache clone
-	PhaseCloning    Phase = "cloning"    // a git clone is running
-	PhaseSyncing    Phase = "syncing"    // a cache pull / freshen is running
-	PhaseIndexing   Phase = "indexing"   // embedding / index fill is running
+	PhaseConnecting  Phase = "connecting"  // establishing a connection / first cache clone
+	PhaseCloning     Phase = "cloning"     // a git clone is running
+	PhaseSyncing     Phase = "syncing"     // a cache pull / freshen is running
+	PhaseIndexing    Phase = "indexing"    // embedding / index fill is running
+	PhaseSummarizing Phase = "summarizing" // summary and title generation is running
 )
+
+// Counted reports whether the phase works through a known number of units, so
+// the footer shows a determinate bar for it rather than the spinner alone.
+func (p Phase) Counted() bool {
+	return p == PhaseIndexing || p == PhaseSummarizing
+}
