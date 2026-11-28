@@ -1,17 +1,19 @@
 package model
 
+import "github.com/networkteam/sdd/pkg/application/types"
+
 // StatusKind is the lifecycle state of an entry derived from graph relationships.
 type StatusKind string
 
 const (
-	StatusNone            StatusKind = ""               // done signals — terminal facts with no lifecycle state
-	StatusActive          StatusKind = "active"         // decision (directive, plan, contract) not closed or superseded
-	StatusSettled         StatusKind = "settled"        // directive born terminal via intent: settled — no closing edge
-	StatusOpen            StatusKind = "open"           // signal not closed or superseded
-	StatusClosedBy        StatusKind = "closed-by"      // closed by another entry (By carries the full ID)
-	StatusSupersededBy    StatusKind = "superseded-by"  // superseded by another entry
-	StatusCascadeClosedBy StatusKind = "cascade-closed" // role cascade: actor chain head is closed (By = head actor ID)
-	StatusCascadeOrphan   StatusKind = "cascade-orphan" // role references a canonical with no matching chain
+	StatusNone            StatusKind = ""                                      // done signals — terminal facts with no lifecycle state
+	StatusActive                     = StatusKind(types.StatusActive)          // decision (directive, plan, contract) not closed or superseded
+	StatusSettled                    = StatusKind(types.StatusSettled)         // directive born terminal via intent: settled — no closing edge
+	StatusOpen                       = StatusKind(types.StatusOpen)            // signal not closed or superseded
+	StatusClosedBy                   = StatusKind(types.StatusClosedBy)        // closed by another entry (By carries the full ID)
+	StatusSupersededBy               = StatusKind(types.StatusSupersededBy)    // superseded by another entry
+	StatusCascadeClosedBy            = StatusKind(types.StatusCascadeClosedBy) // role cascade: actor chain head is closed (By = head actor ID)
+	StatusCascadeOrphan              = StatusKind(types.StatusCascadeOrphan)   // role references a canonical with no matching chain
 )
 
 // Status is the computed lifecycle status for an entry. By is populated only

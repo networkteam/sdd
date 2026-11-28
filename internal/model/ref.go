@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // RefKind classifies the semantic relationship a reference describes — why the
@@ -18,15 +20,15 @@ import (
 type RefKind string
 
 const (
-	RefKindGroundedIn RefKind = "grounded-in" // founded on / reasons from the target — basis, premise, or empirical proof (absorbs legacy evidence)
-	RefKindBuildsOn   RefKind = "builds-on"   // continues / extends a closed prior line of work
-	RefKindRefines    RefKind = "refines"     // sharpens, narrows, or clarifies an active target in place — the augmenting-directive pattern (d-prc-9ti)
-	RefKindAddresses  RefKind = "addresses"   // acts on / realizes the target — responds to a signal or fulfils a decision's commitment
-	RefKindSurfaces   RefKind = "surfaces"    // forward class: created or discovered the target during this work
-	RefKindSurfacedBy RefKind = "surfaced-by" // backward class: inverse of surfaces — this entry was raised/produced by the target's work
-	RefKindDependsOn  RefKind = "depends-on"  // functional prerequisite — source needs target first
-	RefKindRequiredBy RefKind = "required-by" // forward class: inverse of depends-on — target needs source first
-	RefKindRelated    RefKind = "related"     // parallel sibling / contextual neighbor — the floor, never a default
+	RefKindGroundedIn = RefKind(types.RefKindGroundedIn) // founded on / reasons from the target — basis, premise, or empirical proof (absorbs legacy evidence)
+	RefKindBuildsOn   = RefKind(types.RefKindBuildsOn)   // continues / extends a closed prior line of work
+	RefKindRefines    = RefKind(types.RefKindRefines)    // sharpens, narrows, or clarifies an active target in place — the augmenting-directive pattern (d-prc-9ti)
+	RefKindAddresses  = RefKind(types.RefKindAddresses)  // acts on / realizes the target — responds to a signal or fulfils a decision's commitment
+	RefKindSurfaces   = RefKind(types.RefKindSurfaces)   // forward class: created or discovered the target during this work
+	RefKindSurfacedBy = RefKind(types.RefKindSurfacedBy) // backward class: inverse of surfaces — this entry was raised/produced by the target's work
+	RefKindDependsOn  = RefKind(types.RefKindDependsOn)  // functional prerequisite — source needs target first
+	RefKindRequiredBy = RefKind(types.RefKindRequiredBy) // forward class: inverse of depends-on — target needs source first
+	RefKindRelated    = RefKind(types.RefKindRelated)    // parallel sibling / contextual neighbor — the floor, never a default
 
 	// Legacy alias kinds — never authored anew. Resolved to their canonical
 	// kind at parse time (refKindAliases) so nothing above the parser sees them,
@@ -35,7 +37,7 @@ const (
 	RefKindGrounds  RefKind = "grounds"  // → grounded-in (renamed)
 	RefKindEvidence RefKind = "evidence" // → grounded-in (merged; empirical hardness reads from the target's kind)
 
-	RefKindUnknown RefKind = "unknown" // legacy bare-string fallback — read-only, not authored
+	RefKindUnknown = RefKind(types.RefKindUnknown) // legacy bare-string fallback — read-only, not authored
 )
 
 // refKinds is the set of kind values valid in memory after parsing. Legacy

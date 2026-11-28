@@ -52,7 +52,7 @@ func TestRenderSearch_RelativePercentages(t *testing.T) {
 
 	g := model.NewGraph([]*model.Entry{a, b})
 	var buf bytes.Buffer
-	RenderSearch(&buf, res, g)
+	RenderSearch(&buf, res.Structured(g))
 
 	out := buf.String()
 	// Top citation in the result set must show 100%.
@@ -72,7 +72,7 @@ func TestRenderSearch_RelativePercentages(t *testing.T) {
 func TestRenderSearch_EmptyResult(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	RenderSearch(&buf, &query.SearchResult{}, model.NewGraph(nil))
+	RenderSearch(&buf, nil)
 	if !strings.Contains(buf.String(), "(no matches)") {
 		t.Errorf("expected (no matches) marker; got %q", buf.String())
 	}
@@ -94,7 +94,7 @@ func TestRenderSearch_AllCitationsRendered(t *testing.T) {
 	}
 	g := model.NewGraph([]*model.Entry{a})
 	var buf bytes.Buffer
-	RenderSearch(&buf, res, g)
+	RenderSearch(&buf, res.Structured(g))
 
 	// Three citation lines for one entry — verify each appears with its
 	// own breadcrumb/snippet.

@@ -72,14 +72,17 @@ type ShowRequest struct {
 	Budget types.ShowTreeBudget
 }
 
+// ShowResult carries the shown entries as data; surfaces render text from
+// them (presenters.RenderShow).
 type ShowResult struct {
-	Project    ProjectRef
-	Entries    string
+	Project ProjectRef
+	Entries []types.ShownEntry
+	// FullIDs and SummaryIDs name the entries read in full and as summaries,
+	// for read logging.
 	FullIDs    []string
 	SummaryIDs []string
 	// Revision is the local snapshot's revision the result was read from.
 	Revision string
-	Groups   []types.ShowGroup
 	// Missing are the requested IDs, as given, that name no entry
 	// (ShowRequest.OmitMissing).
 	Missing []string
@@ -98,25 +101,25 @@ type SearchRequest struct {
 	Layer             string
 	Kind              string
 	IncludeSuperseded bool
-	// Statuses keeps only entries with one of these derived statuses
-	// (structured labels, see types.GraphEntry.Status) before ranking and
-	// limit. Naming superseded-by includes superseded entries.
-	Statuses     []string
+	// Statuses keeps only entries with one of these derived statuses before
+	// ranking and limit. Naming superseded-by includes superseded entries.
+	Statuses     []types.StatusKind
 	Limit        int
 	MaxCitations int
 	Repos        []RepoID
 	AllRepos     bool
 }
 
+// SearchResult carries the ranked hits as data; surfaces render text from
+// them (presenters.RenderSearch). Notice is set when indexing was incomplete.
 type SearchResult struct {
 	Coverage []SearchCoverage
 	Notice   string
 	Project  ProjectRef
-	Results  string
+	Hits     []types.SearchHit
 	EntryIDs []string
 	// Revision is the local snapshot's revision the search ran against.
 	Revision string
-	Hits     []types.SearchHit
 }
 
 // ChangesRequest compares two revisions of the local graph on Branch. To
@@ -151,10 +154,10 @@ type ListEntriesRequest struct {
 	IDs           []string
 	Branch        string
 	Revision      string
-	Types         []string
-	Kinds         []string
-	Layers        []string
-	Statuses      []string
+	Types         []types.EntryType
+	Kinds         []types.Kind
+	Layers        []types.Layer
+	Statuses      []types.StatusKind
 	Participants  []string
 	CreatedAfter  time.Time
 	CreatedBefore time.Time

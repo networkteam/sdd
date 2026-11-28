@@ -90,37 +90,37 @@ func TestShowReturnsStructuredGroupsAtExactRevision(t *testing.T) {
 	if (*queries)[0].ExactRevision != "r2" || result.Revision != "r2" {
 		t.Fatalf("queried %+v, result revision %q", *queries, result.Revision)
 	}
-	if len(result.Groups) != 1 {
-		t.Fatalf("groups = %d", len(result.Groups))
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries = %d", len(result.Entries))
 	}
-	group := result.Groups[0]
-	primary := group.Primary
-	if primary.ID != revGap || primary.ShortID != "s-tac-gap" || primary.Status != "closed-by" || primary.StatusBy != revDone || primary.Body != "Body of Gap alpha" || primary.Kind != "gap" {
-		t.Errorf("primary = %+v", primary)
+	shown := result.Entries[0]
+	entry := shown.Entry
+	if entry.ID != revGap || entry.ShortID != "s-tac-gap" || entry.Status.Kind != types.StatusClosedBy || entry.Status.By != revDone || entry.Body != "Body of Gap alpha" || entry.Kind != types.KindGap {
+		t.Errorf("entry = %+v", entry)
 	}
-	if len(group.Downstream) != 2 || group.DownstreamTotal != 3 || len(group.DownstreamTruncated) != 1 {
-		t.Fatalf("downstream = %+v total %d truncated %+v", group.Downstream, group.DownstreamTotal, group.DownstreamTruncated)
+	if len(shown.Downstream) != 2 || shown.DownstreamTotal != 3 || len(shown.DownstreamTruncated) != 1 {
+		t.Fatalf("downstream = %+v total %d truncated %+v", shown.Downstream, shown.DownstreamTotal, shown.DownstreamTruncated)
 	}
-	first := group.Downstream[0]
-	if first.TargetID != revPlan || first.Entry == nil || first.Entry.Status != "active" || first.Entry.Body != "" || first.RefKind != "addresses" || first.LinkKind != "addresses" || first.RefDesc != "why" || !reflect.DeepEqual(first.Relations, []string{"refd-by"}) {
+	first := shown.Downstream[0]
+	if first.TargetID != revPlan || first.Entry == nil || first.Entry.Status.Kind != types.StatusActive || first.Entry.Body != "" || first.Entry.Lead != "Plan beta regenerated" || first.RefKind != types.RefKindAddresses || first.LinkKind != types.LinkKind(types.RefKindAddresses) || first.RefDesc != "why" || !reflect.DeepEqual(first.Relations, []types.Relation{types.RelationRefdBy}) {
 		t.Errorf("first downstream = %+v entry %+v", first, first.Entry)
 	}
-	if related := group.Downstream[1]; related.LinkKind != "related" {
+	if related := shown.Downstream[1]; related.LinkKind != types.LinkKind(types.RefKindRelated) {
 		t.Errorf("related downstream = %+v", related)
 	}
-	if closing := group.DownstreamTruncated[0]; closing.ID != revDone || closing.RefKind != "" || closing.LinkKind != "closes" {
+	if closing := shown.DownstreamTruncated[0]; closing.ID != revDone || closing.RefKind != "" || closing.LinkKind != types.LinkCloses {
 		t.Errorf("closing downstream = %+v", closing)
 	}
-	if group.UpstreamTotal != 0 {
-		t.Errorf("upstream total = %d", group.UpstreamTotal)
+	if shown.UpstreamTotal != 0 {
+		t.Errorf("upstream total = %d", shown.UpstreamTotal)
 	}
 
 	past, err := app.Show(t.Context(), reader, "base", sdd.ShowRequest{IDs: []string{revGap}, Revision: "r1", DownDepth: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := past.Groups[0]; got.Primary.Status != "open" || got.DownstreamTotal != 1 || past.Revision != "r1" {
-		t.Errorf("r1 group = %+v", got)
+	if got := past.Entries[0]; got.Entry.Status.Kind != types.StatusOpen || got.DownstreamTotal != 1 || past.Revision != "r1" {
+		t.Errorf("r1 entry = %+v", got)
 	}
 }
 
@@ -136,8 +136,8 @@ func TestShowUnknownIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Groups) != 1 || result.Groups[0].Primary.ID != revGap || !reflect.DeepEqual(result.Missing, []string{"s-tac-nop"}) {
-		t.Errorf("omitted = %+v missing %v", result.Groups, result.Missing)
+	if len(result.Entries) != 1 || result.Entries[0].Entry.ID != revGap || !reflect.DeepEqual(result.Missing, []string{"s-tac-nop"}) {
+		t.Errorf("omitted = %+v missing %v", result.Entries, result.Missing)
 	}
 }
 
@@ -200,7 +200,7 @@ func TestExactRevisionReadsReportUnknownRevisionUnavailable(t *testing.T) {
 func TestListEntriesFiltersPagesAndFacets(t *testing.T) {
 	app, queries := revisionApp(t)
 	result, err := app.ListEntries(t.Context(), reader, "base", sdd.ListEntriesRequest{
-		Revision: "r2", Types: []string{"s"}, NewestFirst: true, Offset: 1, Limit: 1,
+		Revision: "r2", Types: []types.EntryType{types.TypeSignal}, NewestFirst: true, Offset: 1, Limit: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -211,12 +211,12 @@ func TestListEntriesFiltersPagesAndFacets(t *testing.T) {
 	if len(result.Entries) != 1 || result.Entries[0].ID != revFact || result.Entries[0].Body == "" {
 		t.Errorf("page = %+v", result.Entries)
 	}
-	wantStatuses := map[string]int{"closed-by": 1, "open": 1, types.StatusNoneLabel: 1}
-	if !reflect.DeepEqual(result.Facets.Statuses, wantStatuses) || result.Facets.Types["signal"] != 3 || result.Facets.Layers["conceptual"] != 1 {
+	wantStatuses := map[types.StatusKind]int{types.StatusClosedBy: 1, types.StatusOpen: 1, types.StatusNone: 1}
+	if !reflect.DeepEqual(result.Facets.Statuses, wantStatuses) || result.Facets.Types[types.TypeSignal] != 3 || result.Facets.Layers[types.LayerConceptual] != 1 {
 		t.Errorf("facets = %+v", result.Facets)
 	}
 
-	result, err = app.ListEntries(t.Context(), reader, "base", sdd.ListEntriesRequest{Statuses: []string{"open", "active"}, Terms: []string{"alpha"}})
+	result, err = app.ListEntries(t.Context(), reader, "base", sdd.ListEntriesRequest{Statuses: []types.StatusKind{types.StatusOpen, types.StatusActive}, Terms: []string{"alpha"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestListEntriesFiltersPagesAndFacets(t *testing.T) {
 		"selected": {ids: []string{revDone, revGap, "unknown"}, want: []string{revGap, revDone}},
 		"empty":    {ids: []string{}},
 	} {
-		result, err = app.ListEntries(t.Context(), reader, "base", sdd.ListEntriesRequest{IDs: tc.ids, Statuses: []string{"closed-by", "none"}})
+		result, err = app.ListEntries(t.Context(), reader, "base", sdd.ListEntriesRequest{IDs: tc.ids, Statuses: []types.StatusKind{types.StatusClosedBy, types.StatusNone}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,9 +245,9 @@ func TestListEntriesFiltersPagesAndFacets(t *testing.T) {
 	}
 
 	for name, request := range map[string]sdd.ListEntriesRequest{
-		"unknown status":  {Statuses: []string{"bogus"}},
-		"unknown type":    {Types: []string{"x"}},
-		"unknown layer":   {Layers: []string{"x"}},
+		"unknown status":  {Statuses: []types.StatusKind{"bogus"}},
+		"unknown type":    {Types: []types.EntryType{"x"}},
+		"unknown layer":   {Layers: []types.Layer{"x"}},
 		"negative offset": {Offset: -1},
 		"negative limit":  {Limit: -1},
 		"invalid term":    {Terms: []string{"("}},
@@ -275,11 +275,11 @@ func TestSearchReturnsStructuredHitsFilteredByStatus(t *testing.T) {
 		}
 	}
 
-	result, err = app.Search(t.Context(), reader, "base", sdd.SearchRequest{SyncMode: sdd.SearchSyncNone, Terms: []string{"alpha"}, Statuses: []string{"closed-by"}, Limit: 1})
+	result, err = app.Search(t.Context(), reader, "base", sdd.SearchRequest{SyncMode: sdd.SearchSyncNone, Terms: []string{"alpha"}, Statuses: []types.StatusKind{types.StatusClosedBy}, Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Hits) != 1 || result.Hits[0].Entry.ID != revGap || result.Hits[0].Entry.Status != "closed-by" {
+	if len(result.Hits) != 1 || result.Hits[0].Entry.ID != revGap || result.Hits[0].Entry.Status.Kind != types.StatusClosedBy {
 		t.Errorf("closed-by hits = %+v", result.Hits)
 	}
 }
@@ -300,11 +300,11 @@ func TestSearchStatusFilterSupersededByIncludesSupersededEntries(t *testing.T) {
 	if len(result.Hits) != 1 || result.Hits[0].Entry.ID != "20260102-100000-d-tac-new" {
 		t.Errorf("default hits = %+v", result.Hits)
 	}
-	result, err = app.Search(t.Context(), reader, "base", sdd.SearchRequest{SyncMode: sdd.SearchSyncNone, Terms: []string{"alpha"}, Statuses: []string{"superseded-by"}})
+	result, err = app.Search(t.Context(), reader, "base", sdd.SearchRequest{SyncMode: sdd.SearchSyncNone, Terms: []string{"alpha"}, Statuses: []types.StatusKind{types.StatusSupersededBy}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Hits) != 1 || result.Hits[0].Entry.ID != "20260101-100000-d-tac-old" || result.Hits[0].Entry.Status != "superseded-by" {
+	if len(result.Hits) != 1 || result.Hits[0].Entry.ID != "20260101-100000-d-tac-old" || result.Hits[0].Entry.Status.Kind != types.StatusSupersededBy {
 		t.Errorf("superseded-by hits = %+v", result.Hits)
 	}
 }

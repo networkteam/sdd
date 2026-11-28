@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // TopicPath is a hierarchical topic label expressed as path components.
@@ -62,6 +64,11 @@ func validateTopicComponent(c string) error {
 // String returns the "/"-joined I/O form. Original casing preserved.
 func (t TopicPath) String() string {
 	return strings.Join(t.Components, "/")
+}
+
+// Structured returns t's exported form.
+func (t TopicPath) Structured() types.TopicPath {
+	return append(types.TopicPath(nil), t.Components...)
 }
 
 // IsZero reports whether t is the zero value (no components).

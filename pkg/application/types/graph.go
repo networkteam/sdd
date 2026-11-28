@@ -2,11 +2,6 @@ package types
 
 import "time"
 
-// StatusNoneLabel names the derived status of an entry without lifecycle
-// state (a done signal) on the structured surface, where an empty value
-// would be indistinguishable from an absent field.
-const StatusNoneLabel = "none"
-
 // GraphEntry is one graph entry with its graph-derived attributes, the
 // structured form the application's reads return (d-cpt-kv4).
 type GraphEntry struct {
@@ -19,49 +14,71 @@ type GraphEntry struct {
 	// repo-prefixed like DisplayID.
 	ShortID string
 	// RepoID is empty for local and embedded entries.
-	RepoID RepoID
-	Type   string
-	Kind   string
-	Layer  string
-	// Status is the derived lifecycle status (StatusNoneLabel for entries
-	// without one). StatusBy is the live closing or superseding head for the
-	// compound states, as a display ID; SupersedePath the origin→head trail
-	// when superseded.
-	Status        string
-	StatusBy      string
-	SupersedePath []string
-	Created       time.Time
-	Participants  []string
-	// Topics are the effective topic labels, including annotation membership.
-	Topics     []string
-	Confidence string
-	Intent     string
+	RepoID       RepoID
+	Type         EntryType
+	Kind         Kind
+	Layer        Layer
+	Status       Status
+	Created      time.Time
+	Participants []string
+	// Topics are the effective topics, including annotation membership.
+	Topics     []TopicPath
+	Confidence Confidence
+	Intent     Intent
 	Summary    string
+	// Lead is the summary's first sentence, else the body's; set also when
+	// Body is left out.
+	Lead string
 	// Body is empty when the entry was loaded summary-only (show tree nodes).
 	Body        string
 	Refs        []EntryRef
 	Closes      []string
 	Supersedes  []string
 	Attachments []string
+	// Canonical and Aliases are set on actor entries, Canonical and Class on
+	// procedures, Actor on roles.
+	Canonical string
+	Aliases   []string
+	Class     ProcedureClass
+	Actor     string
+	// Index is set on facts enrolled in the fact index.
+	Index *FactIndex
+	// Procedure is set on procedure entries.
+	Procedure *ProcedureSpec
+}
+
+// FactIndex is a fact's index enrollment.
+type FactIndex struct {
+	Title string
+	Topic TopicPath
+}
+
+// ProcedureSpec is a procedure's machine part, each field the YAML text of
+// that frontmatter key as stored (empty when absent).
+type ProcedureSpec struct {
+	Params  string
+	State   string
+	Steps   string
+	Framing string
 }
 
 // EntryRef is one stored reference of an entry.
 type EntryRef struct {
 	ID   string
-	Kind string
+	Kind RefKind
 	Desc string
 }
 
-// ShowGroup is one shown primary with its reference neighbourhood.
-type ShowGroup struct {
-	Primary    GraphEntry
+// ShownEntry is one requested entry with its reference neighbourhood.
+type ShownEntry struct {
+	Entry      GraphEntry
 	Upstream   []ShowTreeItem
 	Downstream []ShowTreeItem
-	// UpstreamTruncated and DownstreamTruncated are the primary's direct refs
+	// UpstreamTruncated and DownstreamTruncated are the entry's direct refs
 	// a budget kept out of the direction.
 	UpstreamTruncated   []TruncatedRef
 	DownstreamTruncated []TruncatedRef
-	// UpstreamTotal and DownstreamTotal count the primary's direct refs per
+	// UpstreamTotal and DownstreamTotal count the entry's direct refs per
 	// direction: depth-1 items plus the direction's truncated refs.
 	UpstreamTotal   int
 	DownstreamTotal int
@@ -72,19 +89,19 @@ type ShowTreeItem struct {
 	Depth int
 	// Relations names the edges from the parent, e.g. refs, closes,
 	// supersedes upstream or refd-by, closed-by, superseded-by downstream.
-	Relations []string
-	RefKind   string
+	Relations []Relation
+	RefKind   RefKind
 	RefDesc   string
 	// LinkKind names the link as the citing entry sets it: RefKind, else
 	// closes or supersedes for those relations, else refs (see model.LinkKind).
-	LinkKind string
+	LinkKind LinkKind
 	// TargetID is the node's display ID.
 	TargetID string
 	// Entry is nil for an unresolved cross-repo target; at depth ≥ 1 it
 	// carries no Body.
 	Entry *GraphEntry
 	// ShownAbove and ShownBelow mark a node already shown earlier or a later
-	// primary; its children are not repeated.
+	// requested entry; its children are not repeated.
 	ShownAbove bool
 	ShownBelow bool
 	// Truncated are this node's children hidden at a frontier;
@@ -96,20 +113,20 @@ type ShowTreeItem struct {
 // TruncatedRef names a child hidden at a show tree frontier.
 type TruncatedRef struct {
 	ID        string
-	Relations []string
-	Kind      string
-	RefKind   string
+	Relations []Relation
+	Kind      Kind
+	RefKind   RefKind
 	RefDesc   string
 	// LinkKind names the link as ShowTreeItem.LinkKind does.
-	LinkKind string
+	LinkKind LinkKind
 }
 
 // EntryFacets counts a filtered entry set per attribute value.
 type EntryFacets struct {
-	Types    map[string]int
-	Kinds    map[string]int
-	Layers   map[string]int
-	Statuses map[string]int
+	Types    map[EntryType]int
+	Kinds    map[Kind]int
+	Layers   map[Layer]int
+	Statuses map[StatusKind]int
 }
 
 // AddedEntry is an entry present in a later revision but not an earlier one,

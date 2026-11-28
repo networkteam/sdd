@@ -1,6 +1,9 @@
 package query
 
-import "github.com/networkteam/sdd/internal/model"
+import (
+	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/application/types"
+)
 
 // ShowQuery captures intent to render a set of entries with their reference
 // chains. Upstream and downstream each expand to their own depth; a depth of 0
@@ -55,4 +58,29 @@ type ShowResult struct {
 	// Missing are the requested IDs (as given) that name no entry, with
 	// ShowQuery.OmitMissing.
 	Missing []string
+}
+
+// Structured maps the result to its exported form, each entry derived in its
+// owning graph.
+func (r *ShowResult) Structured() []types.ShownEntry {
+	out := make([]types.ShownEntry, 0, len(r.Groups))
+	for _, group := range r.Groups {
+		if group.Primary == nil {
+			continue
+		}
+		owner := r.Graph
+		if _, o, ok := r.Graph.ResolveAcross(group.PrimaryID); ok {
+			owner = o
+		}
+		out = append(out, types.ShownEntry{
+			Entry:               owner.StructuredEntry(group.Primary, "", false),
+			Upstream:            r.Graph.StructuredTreeItems(group.Upstream),
+			Downstream:          r.Graph.StructuredTreeItems(group.Downstream),
+			UpstreamTruncated:   model.StructuredTruncatedRefs(group.UpstreamTruncated),
+			DownstreamTruncated: model.StructuredTruncatedRefs(group.DownstreamTruncated),
+			UpstreamTotal:       model.DirectRefCount(group.Upstream, group.UpstreamTruncated),
+			DownstreamTotal:     model.DirectRefCount(group.Downstream, group.DownstreamTruncated),
+		})
+	}
+	return out
 }

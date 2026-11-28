@@ -14,18 +14,18 @@ import (
 type EntryType string
 
 const (
-	TypeSignal   EntryType = "signal"
-	TypeDecision EntryType = "decision"
+	TypeSignal   = EntryType(types.TypeSignal)
+	TypeDecision = EntryType(types.TypeDecision)
 )
 
 type Layer string
 
 const (
-	LayerStrategic   Layer = "strategic"
-	LayerConceptual  Layer = "conceptual"
-	LayerTactical    Layer = "tactical"
-	LayerOperational Layer = "operational"
-	LayerProcess     Layer = "process"
+	LayerStrategic   = Layer(types.LayerStrategic)
+	LayerConceptual  = Layer(types.LayerConceptual)
+	LayerTactical    = Layer(types.LayerTactical)
+	LayerOperational = Layer(types.LayerOperational)
+	LayerProcess     = Layer(types.LayerProcess)
 )
 
 // TypeAbbrev maps full type names to abbreviations used in IDs.
@@ -69,23 +69,23 @@ type Kind string
 
 const (
 	// Signal kinds.
-	KindGap        Kind = "gap"
-	KindFact       Kind = "fact"
-	KindQuestion   Kind = "question"
-	KindInsight    Kind = "insight"
-	KindDone       Kind = "done"
-	KindActor      Kind = "actor"
-	KindAnnotation Kind = "annotation"
+	KindGap        = Kind(types.KindGap)
+	KindFact       = Kind(types.KindFact)
+	KindQuestion   = Kind(types.KindQuestion)
+	KindInsight    = Kind(types.KindInsight)
+	KindDone       = Kind(types.KindDone)
+	KindActor      = Kind(types.KindActor)
+	KindAnnotation = Kind(types.KindAnnotation)
 
 	// Decision kinds.
-	KindDirective  Kind = "directive"
-	KindActivity   Kind = "activity"
-	KindPlan       Kind = "plan"
-	KindContract   Kind = "contract"
-	KindAspiration Kind = "aspiration"
-	KindRole       Kind = "role"
-	KindFocus      Kind = "focus"
-	KindProcedure  Kind = "procedure"
+	KindDirective  = Kind(types.KindDirective)
+	KindActivity   = Kind(types.KindActivity)
+	KindPlan       = Kind(types.KindPlan)
+	KindContract   = Kind(types.KindContract)
+	KindAspiration = Kind(types.KindAspiration)
+	KindRole       = Kind(types.KindRole)
+	KindFocus      = Kind(types.KindFocus)
+	KindProcedure  = Kind(types.KindProcedure)
 )
 
 // signalKindOrder is the canonical enumeration of kinds valid on type: signal
@@ -197,9 +197,9 @@ func DefaultKindForType(t EntryType) Kind {
 type Intent string
 
 const (
-	IntentPending Intent = "pending"
-	IntentGuiding Intent = "guiding"
-	IntentSettled Intent = "settled"
+	IntentPending = Intent(types.IntentPending)
+	IntentGuiding = Intent(types.IntentGuiding)
+	IntentSettled = Intent(types.IntentSettled)
 )
 
 var validIntents = map[Intent]bool{
@@ -342,9 +342,9 @@ func (e *Entry) IsProcedure() bool {
 type ProcedureClass string
 
 const (
-	ProcedureClassMove  ProcedureClass = "move"
-	ProcedureClassShell ProcedureClass = "shell"
-	ProcedureClassTask  ProcedureClass = "task"
+	ProcedureClassMove  = ProcedureClass(types.ProcedureClassMove)
+	ProcedureClassShell = ProcedureClass(types.ProcedureClassShell)
+	ProcedureClassTask  = ProcedureClass(types.ProcedureClassTask)
 )
 
 // procedureClassOrder is the canonical enumeration; the descriptions beside
@@ -388,9 +388,14 @@ func (e *Entry) IsTaskProcedure() bool {
 // serve-side enumerations. A sentence ends at the first ". " or line
 // break, whichever comes first.
 func (e *Entry) FirstSummarySentence() string {
-	src := e.Summary
+	return FirstSentence(e.Summary, e.Content)
+}
+
+// FirstSentence is FirstSummarySentence over a summary and body given as text.
+func FirstSentence(summary, body string) string {
+	src := summary
 	if src == "" {
-		src = e.Content
+		src = body
 	}
 	src = strings.TrimSpace(src)
 	if i := strings.IndexByte(src, '\n'); i >= 0 {
@@ -880,7 +885,12 @@ func (e *Entry) LayerLabel() string {
 // ShortContent returns content truncated to maxLen, preferring sentence boundaries.
 // Accumulates complete sentences up to the limit. If no sentence fits, accumulates words.
 func (e *Entry) ShortContent(maxLen int) string {
-	line := e.Content
+	return ShortText(e.Content, maxLen)
+}
+
+// ShortText is ShortContent over a body given as text.
+func ShortText(body string, maxLen int) string {
+	line := body
 	if idx := strings.Index(line, "\n"); idx >= 0 {
 		line = line[:idx]
 	}

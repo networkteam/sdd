@@ -107,10 +107,10 @@ func TestListEntriesFiltersSortsAndFacets(t *testing.T) {
 		t.Errorf("newest first = %v, want %v", listedIDs(list.Entries), want)
 	}
 	wantFacets := types.EntryFacets{
-		Types:    map[string]int{"signal": 3},
-		Kinds:    map[string]int{"gap": 1, "fact": 1, "done": 1},
-		Layers:   map[string]int{"tactical": 3},
-		Statuses: map[string]int{"closed-by": 1, "open": 1, types.StatusNoneLabel: 1},
+		Types:    map[types.EntryType]int{types.TypeSignal: 3},
+		Kinds:    map[types.Kind]int{types.KindGap: 1, types.KindFact: 1, types.KindDone: 1},
+		Layers:   map[types.Layer]int{types.LayerTactical: 3},
+		Statuses: map[types.StatusKind]int{types.StatusClosedBy: 1, types.StatusOpen: 1, types.StatusNone: 1},
 	}
 	if !reflect.DeepEqual(list.Facets, wantFacets) {
 		t.Errorf("facets = %+v, want %+v", list.Facets, wantFacets)
@@ -122,8 +122,8 @@ func TestListEntriesFiltersSortsAndFacets(t *testing.T) {
 		t.Errorf("page past end = %v", page)
 	}
 
-	open, _ := model.ParseStatusLabel("open")
-	none, _ := model.ParseStatusLabel(types.StatusNoneLabel)
+	open, _ := model.ParseStatusLabel(types.StatusOpen)
+	none, _ := model.ParseStatusLabel(types.StatusNone)
 	terms, err := model.CompileSearchTerms([]string{"BODY OF"})
 	if err != nil {
 		t.Fatal(err)
@@ -143,11 +143,35 @@ func TestStructuredEntryCarriesDerivedStatus(t *testing.T) {
 	if got.DisplayID != "dep:20260101-100000-s-tac-gap" || got.RepoID != "dep" {
 		t.Errorf("display = %q repo = %q", got.DisplayID, got.RepoID)
 	}
-	if got.Status != "closed-by" || got.StatusBy != "dep:20260104-100000-s-tac-don" {
-		t.Errorf("status = %q by %q", got.Status, got.StatusBy)
+	if got.Status.Kind != types.StatusClosedBy || got.Status.By != "dep:20260104-100000-s-tac-don" {
+		t.Errorf("status = %+v", got.Status)
 	}
 	if got.Body != "" || got.Summary == "" {
 		t.Errorf("summary-only mapping carried body %q / summary %q", got.Body, got.Summary)
+	}
+}
+
+func TestStructuredEntryCarriesEnvelopeFields(t *testing.T) {
+	actor := readEntry(t, "20260101-100000-s-prc-act", model.KindActor, func(e *model.Entry) {
+		e.Canonical, e.Aliases, e.Summary, e.Content = "Ada", []string{"ada"}, "", "Ada writes code. She reviews."
+	})
+	role := readEntry(t, "20260102-100000-d-prc-rol", model.KindRole, func(e *model.Entry) { e.Actor = "Ada" })
+	proc, err := model.ParseEntry("20260103-100000-d-prc-prc.md", "---\ntype: decision\nlayer: prc\nkind: procedure\ncanonical: move\nclass: move\nsteps:\n    - id: work\n---\n\nBody.\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := model.NewGraph([]*model.Entry{actor, role, proc})
+
+	got := g.StructuredEntry(actor, "", true)
+	if got.Canonical != "Ada" || !reflect.DeepEqual(got.Aliases, []string{"ada"}) || got.Lead != "Ada writes code." || got.Body != "" {
+		t.Errorf("actor = %+v", got)
+	}
+	if got := g.StructuredEntry(role, "", false); got.Actor != "Ada" {
+		t.Errorf("role actor = %q", got.Actor)
+	}
+	got = g.StructuredEntry(proc, "", false)
+	if got.Canonical != "move" || got.Class != "move" || got.Procedure == nil || got.Procedure.Steps != "- id: work\n" || got.Procedure.Params != "" {
+		t.Errorf("procedure = %+v spec %+v", got, got.Procedure)
 	}
 }
 
@@ -222,7 +246,7 @@ func TestLinkKind(t *testing.T) {
 	tests := map[string]struct {
 		refKind   model.RefKind
 		relations []string
-		want      string
+		want      types.LinkKind
 	}{
 		"stored kind":           {refKind: model.RefKindAddresses, relations: []string{"refs"}, want: "addresses"},
 		"stored kind and close": {refKind: model.RefKindAddresses, relations: []string{"refs", "closes"}, want: "addresses"},

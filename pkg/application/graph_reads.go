@@ -104,16 +104,16 @@ func acquireRevision(ctx context.Context, runtime *ProjectRuntime, branch, revis
 func listFilter(request ListEntriesRequest) (model.EntryListFilter, error) {
 	filter := model.EntryListFilter{IDs: request.IDs, IncludeEmbedded: request.IncludeEmbedded, Participants: request.Participants, CreatedAfter: request.CreatedAfter, CreatedBefore: request.CreatedBefore}
 	for _, value := range request.Types {
-		t, ok := model.ParseTypeFilter(value)
-		if !ok {
-			return filter, &ApplicationError{Code: ErrorInvalidArgument, Message: fmt.Sprintf("sdd: unknown type %q (want s, d, signal, or decision)", value)}
+		t := model.EntryType(value)
+		if t != model.TypeSignal && t != model.TypeDecision {
+			return filter, &ApplicationError{Code: ErrorInvalidArgument, Message: fmt.Sprintf("sdd: unknown type %q", value)}
 		}
 		filter.Types = append(filter.Types, t)
 	}
 	for _, value := range request.Layers {
-		l, ok := model.ParseLayerFilter(value)
-		if !ok {
-			return filter, &ApplicationError{Code: ErrorInvalidArgument, Message: fmt.Sprintf("sdd: unknown layer %q (want stg, cpt, tac, ops, prc, or the full name)", value)}
+		l := model.Layer(value)
+		if _, ok := model.LayerAbbrev[l]; !ok {
+			return filter, &ApplicationError{Code: ErrorInvalidArgument, Message: fmt.Sprintf("sdd: unknown layer %q", value)}
 		}
 		filter.Layers = append(filter.Layers, l)
 	}

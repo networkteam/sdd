@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 // EntryLine writes a single entry summary line — used by status, list, and
@@ -33,20 +34,15 @@ import (
 // is empty. Score is per-rendering, computed by a rank algorithm; emitted
 // only via EntryLineWithScore (slice 3 — d-tac-uww).
 func EntryLine(w io.Writer, e *model.Entry, g *model.Graph) {
-	entryLineCore(w, e, g, math.NaN(), "")
+	t := g.StructuredEntry(e, "", false)
+	entryLineCore(w, &t, math.NaN(), e.ID)
 }
 
 // EntryLineWithScore is EntryLine plus a `{score: X.XXX}` segment after
 // status. Used by the as-list renderer when the section was ranked.
 func EntryLineWithScore(w io.Writer, e *model.Entry, g *model.Graph, score float64) {
-	entryLineCore(w, e, g, score, "")
-}
-
-// EntryLineDisplay is EntryLine with an explicit display identity — used
-// for cross-graph hits, whose IDs render repo-prefixed and whose status
-// derives in the owning member graph passed as g.
-func EntryLineDisplay(w io.Writer, e *model.Entry, g *model.Graph, displayID string) {
-	entryLineCore(w, e, g, math.NaN(), displayID)
+	t := g.StructuredEntry(e, "", false)
+	entryLineCore(w, &t, score, e.ID)
 }
 
 // EntryLineBrief writes the compact entry line the `brief` layout modifier
@@ -57,65 +53,64 @@ func EntryLineDisplay(w io.Writer, e *model.Entry, g *model.Graph, displayID str
 //
 // Format: `<id> <layer> <kind>? <type> <first summary sentence>`
 func EntryLineBrief(w io.Writer, e *model.Entry, g *model.Graph) {
+	t := g.StructuredEntry(e, "", true)
 	var sb strings.Builder
 	sb.WriteString("  ")
 	sb.WriteString(e.ID)
 	sb.WriteString(" ")
-	sb.WriteString(e.LayerLabel())
-	if e.Kind != "" {
+	sb.WriteString(string(t.Layer))
+	if t.Kind != "" {
 		sb.WriteString(" ")
-		sb.WriteString(string(e.Kind))
+		sb.WriteString(string(t.Kind))
 	}
 	sb.WriteString(" ")
-	sb.WriteString(e.TypeLabel())
+	sb.WriteString(string(t.Type))
 	sb.WriteString(" ")
-	sb.WriteString(e.FirstSummarySentence())
+	sb.WriteString(t.Lead)
 	sb.WriteString("\n")
 	fmt.Fprint(w, sb.String())
 }
 
-func entryLineCore(w io.Writer, e *model.Entry, g *model.Graph, score float64, displayID string) {
-	if displayID == "" {
-		displayID = e.ID
-	}
+// entryLineCore writes e's EntryLine under displayID.
+func entryLineCore(w io.Writer, e *types.GraphEntry, score float64, displayID string) {
 	var sb strings.Builder
 	sb.WriteString("  ")
 	sb.WriteString(displayID)
 	sb.WriteString(" ")
-	sb.WriteString(e.LayerLabel())
+	sb.WriteString(string(e.Layer))
 	if e.Kind != "" {
 		sb.WriteString(" ")
 		sb.WriteString(string(e.Kind))
 	}
 	sb.WriteString(" ")
-	sb.WriteString(e.TypeLabel())
+	sb.WriteString(string(e.Type))
 	if e.Confidence != "" {
 		sb.WriteString(" ")
-		sb.WriteString(FormatConfidence(e.Confidence))
+		sb.WriteString(FormatConfidence(string(e.Confidence)))
 	}
-	if in := FormatIntent(e.Intent); in != "" {
+	if in := FormatIntent(model.Intent(e.Intent)); in != "" {
 		sb.WriteString(" ")
 		sb.WriteString(in)
 	}
 	sb.WriteString(" (")
 	sb.WriteString(strings.Join(e.Participants, ", "))
 	sb.WriteString(")")
-	if s := FormatStatus(g.DerivedStatus(e)); s != "" {
+	if v := statusTrailValue(e.Status.Kind, e.Status.By, nil); v != "" {
 		sb.WriteString(" ")
-		sb.WriteString(s)
+		sb.WriteString("{status: " + v + "}")
 	}
 	if !math.IsNaN(score) {
 		sb.WriteString(" ")
 		sb.WriteString(FormatScore(score))
 	}
-	if topics := FormatTopics(g.EffectiveTopics(e)); topics != "" {
+	if len(e.Topics) > 0 {
 		sb.WriteString(" ")
-		sb.WriteString(topics)
+		sb.WriteString(formatTopicLabels(topicLabels(e.Topics)))
 	}
 	sb.WriteString(" ")
 	desc := e.Summary
 	if desc == "" {
-		desc = e.ShortContent(200)
+		desc = model.ShortText(e.Body, 200)
 	}
 	sb.WriteString(desc)
 	sb.WriteString("\n")
@@ -142,7 +137,11 @@ func FormatTopics(paths []model.TopicPath) string {
 	for _, p := range paths {
 		parts = append(parts, p.String())
 	}
-	return "<" + strings.Join(parts, ", ") + ">"
+	return formatTopicLabels(parts)
+}
+
+func formatTopicLabels(labels []string) string {
+	return "<" + strings.Join(labels, ", ") + ">"
 }
 
 // FormatConfidence renders a stored confidence attribute in square-bracket notation.
@@ -202,16 +201,20 @@ func FormatStatusTrail(s model.Status, supersedePath []string) string {
 // element is the origin and is dropped); other compound states render
 // `<kind> <head-id>`.
 func formatStatusTrailValue(s model.Status, supersedePath []string) string {
-	if s.Kind == model.StatusNone {
+	return statusTrailValue(s.Kind.Label(), s.By, supersedePath)
+}
+
+func statusTrailValue(kind types.StatusKind, by string, supersedePath []string) string {
+	if kind == types.StatusNone || kind == "" {
 		return ""
 	}
-	if s.Kind == model.StatusSupersededBy && len(supersedePath) > 1 {
+	if kind == types.StatusSupersededBy && len(supersedePath) > 1 {
 		return "superseded-by " + strings.Join(supersedePath[1:], " → ")
 	}
-	if s.By != "" {
-		return string(s.Kind) + " " + s.By
+	if by != "" {
+		return string(kind) + " " + by
 	}
-	return string(s.Kind)
+	return string(kind)
 }
 
 // LayerOrder returns the display order for layers (strategic → process).

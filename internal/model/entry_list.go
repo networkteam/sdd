@@ -53,7 +53,7 @@ type EntryList struct {
 // from the first member. A non-nil empty IDs filter lists nothing.
 func ListEntries(members []ListMember, f EntryListFilter, newestFirst bool) EntryList {
 	list := EntryList{Facets: types.EntryFacets{
-		Types: map[string]int{}, Kinds: map[string]int{}, Layers: map[string]int{}, Statuses: map[string]int{},
+		Types: map[types.EntryType]int{}, Kinds: map[types.Kind]int{}, Layers: map[types.Layer]int{}, Statuses: map[types.StatusKind]int{},
 	}}
 	var ids map[string]struct{}
 	if f.IDs != nil {
@@ -81,9 +81,9 @@ func ListEntries(members []ListMember, f EntryListFilter, newestFirst bool) Entr
 				continue
 			}
 			list.Entries = append(list.Entries, ListedEntry{Entry: e, Owner: m.Graph, Repo: m.Repo})
-			list.Facets.Types[e.TypeLabel()]++
-			list.Facets.Kinds[string(e.Kind)]++
-			list.Facets.Layers[e.LayerLabel()]++
+			list.Facets.Types[types.EntryType(e.TypeLabel())]++
+			list.Facets.Kinds[types.Kind(e.Kind)]++
+			list.Facets.Layers[types.Layer(e.LayerLabel())]++
 			list.Facets.Statuses[status.Kind.Label()]++
 		}
 	}

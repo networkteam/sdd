@@ -1,6 +1,9 @@
 package query
 
-import "github.com/networkteam/sdd/internal/model"
+import (
+	"github.com/networkteam/sdd/internal/model"
+	"github.com/networkteam/sdd/pkg/application/types"
+)
 
 // SearchMode is derived from the SearchQuery's input shape: text-only,
 // vector-only, or hybrid (when both --term and --query are supplied).
@@ -162,4 +165,33 @@ type Citation struct {
 	IsSummary            bool
 	IsAttachment         bool
 	Score                float32
+}
+
+// Structured maps the hit to its exported form, derived in owner, the graph
+// the entry belongs to.
+func (e SearchEntry) Structured(owner *model.Graph) types.SearchHit {
+	hit := types.SearchHit{Entry: owner.StructuredEntry(e.Entry, e.RepoID, false), Score: e.Score}
+	for _, c := range e.Citations {
+		hit.Citations = append(hit.Citations, types.SearchCitation{
+			Breadcrumb: c.Breadcrumb, Snippet: c.Snippet, SourceAttachmentPath: c.SourceAttachmentPath,
+			IsSummary: c.IsSummary, IsAttachment: c.IsAttachment, Score: c.Score,
+		})
+	}
+	return hit
+}
+
+// Structured maps the ranked entries to hits, each cross-graph hit derived
+// in g's member graph for its repo (g itself if that member is missing).
+func (r *SearchResult) Structured(g *model.Graph) []types.SearchHit {
+	hits := make([]types.SearchHit, len(r.Entries))
+	for i, e := range r.Entries {
+		owner := g
+		if e.RepoID != "" {
+			if member, _ := g.MemberGraph(e.RepoID); member != nil {
+				owner = member
+			}
+		}
+		hits[i] = e.Structured(owner)
+	}
+	return hits
 }

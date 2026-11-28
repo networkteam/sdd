@@ -3,22 +3,24 @@ package model
 import (
 	"path"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/networkteam/sdd/pkg/application/types"
 )
 
 var statusKindOrder = []StatusKind{StatusNone, StatusActive, StatusSettled, StatusOpen, StatusClosedBy, StatusSupersededBy, StatusCascadeClosedBy, StatusCascadeOrphan}
 
-// Label is the status kind's name on the structured surface:
-// types.StatusNoneLabel for StatusNone, the kind itself otherwise.
-func (k StatusKind) Label() string {
+// Label is the status kind on the structured surface, where StatusNone has
+// its own name.
+func (k StatusKind) Label() types.StatusKind {
 	if k == StatusNone {
-		return types.StatusNoneLabel
+		return types.StatusNone
 	}
-	return string(k)
+	return types.StatusKind(k)
 }
 
-// ParseStatusLabel resolves a structured-surface status name to its kind.
-func ParseStatusLabel(s string) (StatusKind, bool) {
+// ParseStatusLabel resolves a structured-surface status kind.
+func ParseStatusLabel(s types.StatusKind) (StatusKind, bool) {
 	for _, k := range statusKindOrder {
 		if k.Label() == s {
 			return k, true
@@ -75,35 +77,46 @@ func (g *Graph) StructuredEntry(e *Entry, repo RepoID, summaryOnly bool) types.G
 		DisplayID:    g.qualifyIn(repo, e.ID),
 		ShortID:      ShortID(e.ID),
 		RepoID:       repo,
-		Type:         e.TypeLabel(),
-		Kind:         string(e.Kind),
-		Layer:        e.LayerLabel(),
-		Status:       status.Kind.Label(),
+		Type:         types.EntryType(e.TypeLabel()),
+		Kind:         types.Kind(e.Kind),
+		Layer:        types.Layer(e.LayerLabel()),
+		Status:       types.Status{Kind: status.Kind.Label()},
 		Created:      e.Time,
 		Participants: append([]string(nil), e.Participants...),
-		Confidence:   e.Confidence,
-		Intent:       string(e.Intent),
+		Confidence:   types.Confidence(e.Confidence),
+		Intent:       types.Intent(e.Intent),
 		Summary:      e.Summary,
+		Lead:         e.FirstSummarySentence(),
 		Closes:       append([]string(nil), e.Closes...),
 		Supersedes:   append([]string(nil), e.Supersedes...),
+		Canonical:    e.Canonical,
+		Aliases:      append([]string(nil), e.Aliases...),
+		Class:        types.ProcedureClass(e.Class),
+		Actor:        e.Actor,
+	}
+	if e.Index != nil {
+		out.Index = &types.FactIndex{Title: e.Index.Title, Topic: e.Index.Topic.Structured()}
+	}
+	if spec := e.ProcedureSpec; spec != nil {
+		out.Procedure = &types.ProcedureSpec{Params: yamlText(spec.Params), State: yamlText(spec.State), Steps: yamlText(spec.Steps), Framing: yamlText(spec.Framing)}
 	}
 	if repo != "" {
 		out.ShortID = CrossRepoID(repo, out.ShortID)
 	}
 	if status.By != "" {
-		out.StatusBy = g.qualifyIn(repo, status.By)
+		out.Status.By = g.qualifyIn(repo, status.By)
 	}
 	for _, id := range trail {
-		out.SupersedePath = append(out.SupersedePath, g.qualifyIn(repo, id))
+		out.Status.SupersedePath = append(out.Status.SupersedePath, g.qualifyIn(repo, id))
 	}
 	if !summaryOnly {
 		out.Body = e.Content
 	}
 	for _, t := range g.EffectiveTopics(e) {
-		out.Topics = append(out.Topics, t.String())
+		out.Topics = append(out.Topics, t.Structured())
 	}
 	for _, r := range e.Refs {
-		out.Refs = append(out.Refs, types.EntryRef{ID: r.ID, Kind: string(r.Kind), Desc: r.Desc})
+		out.Refs = append(out.Refs, types.EntryRef{ID: r.ID, Kind: types.RefKind(r.Kind), Desc: r.Desc})
 	}
 	for _, a := range e.Attachments {
 		out.Attachments = append(out.Attachments, path.Base(a))
@@ -118,8 +131,8 @@ func (g *Graph) StructuredTreeItems(items []ShowTreeItem) []types.ShowTreeItem {
 	for _, item := range items {
 		mapped := types.ShowTreeItem{
 			Depth:           item.Depth,
-			Relations:       append([]string(nil), item.Relations...),
-			RefKind:         string(item.RefKind),
+			Relations:       structuredRelations(item.Relations),
+			RefKind:         types.RefKind(item.RefKind),
 			RefDesc:         item.RefDesc,
 			LinkKind:        LinkKind(item.RefKind, item.Relations),
 			TargetID:        item.NodeID(),
@@ -148,7 +161,7 @@ func StructuredTruncatedRefs(refs []TruncatedRef) []types.TruncatedRef {
 	}
 	out := make([]types.TruncatedRef, len(refs))
 	for i, r := range refs {
-		out[i] = types.TruncatedRef{ID: r.ID, Relations: append([]string(nil), r.Relations...), Kind: string(r.Kind), RefKind: string(r.RefKind), RefDesc: r.RefDesc, LinkKind: LinkKind(r.RefKind, r.Relations)}
+		out[i] = types.TruncatedRef{ID: r.ID, Relations: structuredRelations(r.Relations), Kind: types.Kind(r.Kind), RefKind: types.RefKind(r.RefKind), RefDesc: r.RefDesc, LinkKind: LinkKind(r.RefKind, r.Relations)}
 	}
 	return out
 }
@@ -157,19 +170,27 @@ func StructuredTruncatedRefs(refs []TruncatedRef) []types.TruncatedRef {
 // (legacy aliases are resolved at parse time), else closes or supersedes for
 // those relations in either direction, else refs — also for a legacy ref
 // without a kind.
-func LinkKind(refKind RefKind, relations []string) string {
+func LinkKind(refKind RefKind, relations []string) types.LinkKind {
 	if refKind != "" && refKind != RefKindUnknown {
-		return string(refKind)
+		return types.LinkKind(refKind)
 	}
 	for _, relation := range relations {
-		switch relation {
-		case "closes", "closed-by":
-			return "closes"
-		case "supersedes", "superseded-by":
-			return "supersedes"
+		switch types.Relation(relation) {
+		case types.RelationCloses, types.RelationClosedBy:
+			return types.LinkCloses
+		case types.RelationSupersedes, types.RelationSupersededBy:
+			return types.LinkSupersedes
 		}
 	}
-	return "refs"
+	return types.LinkRefs
+}
+
+func structuredRelations(relations []string) []types.Relation {
+	out := make([]types.Relation, len(relations))
+	for i, r := range relations {
+		out[i] = types.Relation(r)
+	}
+	return out
 }
 
 // DirectRefCount counts a show direction's direct refs: its depth-1 items
@@ -182,4 +203,14 @@ func DirectRefCount(items []ShowTreeItem, truncated []TruncatedRef) int {
 		}
 	}
 	return n
+}
+
+// yamlText encodes a stored frontmatter value back to YAML; a decoded node
+// always encodes, so the error is unreachable.
+func yamlText(node yaml.Node) string {
+	if node.Kind == 0 {
+		return ""
+	}
+	out, _ := yaml.Marshal(&node)
+	return string(out)
 }

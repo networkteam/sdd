@@ -568,7 +568,7 @@ func searchCmd() *cli.Command {
 				return err
 			}
 
-			presenters.RenderSearch(cmd.Writer, res, g)
+			presenters.RenderSearch(cmd.Writer, res.Structured(g))
 			return nil
 		},
 	}
